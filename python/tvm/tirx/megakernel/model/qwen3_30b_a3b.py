@@ -19,9 +19,9 @@ from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
 
-from tvm.tirx.megakernel.wrapper import MegaKernelWrapper
-from tvm.tirx.megakernel.dynamic_scheduler import DynamicTileScheduler
-from tvm.tirx.megakernel.support import get_max_num_tokens_padded
+from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
+from tvm.tirx.megakernel.utils.support import get_max_num_tokens_padded
 
 NUM_HIDDEN_LAYERS = 48
 

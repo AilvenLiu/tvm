@@ -1,6 +1,9 @@
 import tvm.script.tir as T
+import tvm.script.tirx as Tx
 
-from .common import *
+from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class RopeTile(Tile):
@@ -70,11 +73,7 @@ class RopeTile(Tile):
                         # load qk
                         for kv in T.unroll(self.vec_size):
                             self.qk_vec[kv] = qkv[batch_idx, head_idx, stx + kv]
-                        for kv in T.unroll(self.vec_size // 2):
-                            half22float2(
-                                T.address_of(self.qk_vec32[kv * 2]),
-                                T.address_of(self.qk_vec[kv * 2]),
-                            )
+                        Tx.cast(self.qk_vec32[:], self.qk_vec[:], vec_len=self.vec_size)
 
                         # shuffle qk value
                         if ty % 2 == 0 and (
@@ -104,11 +103,7 @@ class RopeTile(Tile):
                                 )
 
                         # store qk
-                        for kv in T.unroll(self.vec_size // 2):
-                            float22half2(
-                                T.address_of(self.qk_vec[kv * 2]),
-                                T.address_of(self.qk_vec32[kv * 2]),
-                            )
+                        Tx.cast(self.qk_vec[:], self.qk_vec32[:], vec_len=self.vec_size)
                         for kv in T.unroll(self.vec_size):
                             qkv[batch_idx, head_idx, stx + kv] = self.qk_vec[kv]
 

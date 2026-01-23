@@ -57,7 +57,9 @@ from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.op import ret
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirx.transform.common import seek_kernel_replace_point, BufferReplacer
-from tvm.tirx.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, any_sync, pack_into_32bit, map_job_type_to_profile_event_type
+from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, map_job_type_to_profile_event_type
+from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase, SmemManager
+from tvm.tirx.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.tirx.operator import KernelReplacePoint
 from tvm.tir.exec_scope import ExecScope
 from tvm.tirx.bench.utils import CudaProfiler
@@ -1143,17 +1145,18 @@ class _Rewriter(PyExprMutator):
                         scope_resolve_table = {
                             "shared.persistent": "shared.dyn",
                             "local.persistent": "local",
+                            "tmem.persistent": "tmem",
                         }
+                        # TODO: Need to handle these more robustly
                         if old_buffers[0].scope() == "shared.persistent":
                             new_buffer = smem_manager.alloc(old_buffers[0].shape, old_buffers[0].dtype, scope=scope_resolve_table[old_buffers[0].scope()], align=old_buffers[0].data_alignment, layout=old_buffers[0].layout, name=buffer_name, method="persistent")
-                            self.buffers.append(new_buffer)
-                            for old_buffer in old_buffers:
-                                buffer_replace_map[old_buffer] = new_buffer
+                        elif old_buffers[0].scope() == "tmem.persistent":
+                            new_buffer = T.decl_buffer(old_buffers[0].shape, old_buffers[0].dtype, scope=scope_resolve_table[old_buffers[0].scope()], align=old_buffers[0].data_alignment, layout=old_buffers[0].layout, allocated_addr=int(old_buffers[0].allocated_addr[0]), name=buffer_name)
                         else:
                             new_buffer = T.alloc_buffer(old_buffers[0].shape, old_buffers[0].dtype, scope=scope_resolve_table[old_buffers[0].scope()], align=old_buffers[0].data_alignment, layout=old_buffers[0].layout, name=buffer_name)
-                            self.buffers.append(new_buffer)
-                            for old_buffer in old_buffers:
-                                buffer_replace_map[old_buffer] = new_buffer
+                        self.buffers.append(new_buffer)
+                        for old_buffer in old_buffers:
+                            buffer_replace_map[old_buffer] = new_buffer
                 for persistent_var_info in persistent_var_infos.values():
                     replacer = BufferReplacer(
                         buffer_map=buffer_replace_map,

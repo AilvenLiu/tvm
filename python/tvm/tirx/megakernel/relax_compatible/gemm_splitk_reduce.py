@@ -1,7 +1,7 @@
 from tvm.script import tir as T, tirx as Tx
 
-from tvm.tirx.megakernel.common import ceildiv
-from tvm.tirx.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.kernels import SplitKReduceTile
 
 class FuseSplitKReduceTile(SplitKReduceTile):
 

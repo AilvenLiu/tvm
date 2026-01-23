@@ -128,6 +128,7 @@ class TIRxOpScheduler : public StmtExprMutator {
         for (const auto& stmt : host_init_stmts_) {
           res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
         }
+        host_init_stmts_.clear();
       }
       std::swap(is_first_block, is_first_block_);
       return res;
@@ -148,6 +149,7 @@ class TIRxOpScheduler : public StmtExprMutator {
         for (const auto& stmt : host_init_stmts_) {
           res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
         }
+        host_init_stmts_.clear();
       }
       std::swap(is_first_thread_attr, is_first_thread_attr_);
       return res;

@@ -2,18 +2,19 @@ import argparse
 import operator
 import numpy as np
 import pytest
+from typing import Type, Literal
 
 import tvm
 import tvm.testing
 from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.common import *
-from tvm.tirx.megakernel.gemm import GemmTile
-from tvm.tirx.megakernel.gemm_splitk_reduce import SplitKReduceTile
-from tvm.tirx.megakernel.static_scheduler import JobType, StaticTileScheduler
-from tvm.tirx.megakernel import static_scheduler
-from tvm.tirx.megakernel.wrapper import MegaKernelWrapper
+
+from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SemaphoreBase
+from tvm.tirx.megakernel.utils.utils import ceildiv, get_source, f_init_const, pack_into_32bit
+from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, ProfileEventType, event_type_names
+from tvm.tirx.megakernel.utils import static_scheduler
+from tvm.tirx.megakernel.kernels import GemmTile, SplitKReduceTile
 
 
 class GemmConfigSearcher(MegaKernelWrapper):
@@ -32,72 +33,64 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self.blk_n = blk_n
         self.split_k = split_k
         self.use_tma_reduce = use_tma_reduce
-        if use_tma_reduce:
-            assert split_k > 1
+        assert not use_tma_reduce or split_k > 1
 
     def _set_tiles(self):
         self.gemm_tile = self._add_tile(
             GemmTile(
-                self.n,
-                self.k,
-                "float16",
-                "float16",
-                self.split_k,
-                self.m,
-                self.m,
+                self.n, self.k, "float16", "float16", self.split_k, self.m, self.m,
                 "float32" if self.split_k > 1 or self.use_tma_reduce else "float16",
-                self.use_tma_reduce,
-                blk_n=self.blk_n,
-                low_batch=False,
-                prefetch_on=False,
-                profiler_on=self.profiler_on,
+                use_tma_reduce=self.use_tma_reduce,
+                low_batch=False, prefetch_on=False, profiler_on=self.profiler_on
             ),
             ProfileEventType.GEMM_O_PROJ,
             predicate=True,
         )
         self.reduce_tile = self._add_tile(
-            SplitKReduceTile(
-                self.batch_size,
-                self.n,
-                "float16",
-                self.split_k,
-            ),
+            SplitKReduceTile(self.batch_size, self.n, "float16", self.split_k),
             ProfileEventType.GEMM_O_REDUCE,
             predicate=self.split_k > 1 and not self.use_tma_reduce,
         )
 
     def set_tiles(self):
-        self.tile_attr = {}
-        self.class_list = set()
+        self.reset()
         self._set_tiles()
-
-    def set_events(self, Semaphore: Type[static_scheduler.Semaphore], etensor):
-        self.evt = Semaphore(
-            self.split_k * (self.reduce_tile.N_TILE // self.gemm_tile.BLK_N),
-            etensor,
-            decrement=False,
+        
+    def _set_events(self, Semaphore: Type[SemaphoreBase], etensor_workspace_global):
+        self.evt = self.add_etensor(
+            Semaphore,
+            etensor_workspace_global,
+            shape=[self.n // self.reduce_tile.N_TILE],
+            f_init=f_init_const(self.split_k * (self.reduce_tile.N_TILE // self.gemm_tile.BLK_N))
         )
+        
+    def set_events(self, Semaphore: Type[static_scheduler.Semaphore], etensor_workspace_global):
+        self._set_events(Semaphore, etensor_workspace_global)
+        self.set_events_complete(False, Semaphore, etensor_workspace_global)
 
     @T.macro
-    def task_impl_gemm(self):
+    def task_impl_gemm(self, A, B, partial, output, output32):
         with T.cta():
-            self.run_tile(
-                self.gemm_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
+            if self.use_tma_reduce:
+                self.run_tile(
+                    self.gemm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
+                    A, B, output32, self.profiler,
+                )
+            elif self.split_k == 1:
+                self.run_tile(
+                    self.gemm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
+                    A, B, output, self.profiler,
+                )
+            else:
+                self.run_tile(
+                    self.gemm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
+                    A, B, partial, self.profiler,
+                )            
             if self.split_k > 1 and not self.use_tma_reduce:
                 self.tile_scheduler.notify(
                     self.evt,
-                    1,
-                    lambda notify_idx: (
-                        -1,
-                        self.tile_scheduler.n_idx * self.gemm_tile.BLK_N // self.reduce_tile.N_TILE,
-                    ),
-                    scope="warpgroup",
-                    scope_id=0,
+                    lambda notify_idx: (1, -1, self.tile_scheduler.n_idx * self.gemm_tile.BLK_N // self.reduce_tile.N_TILE),
+                    scope="warpgroup", scope_id=0,
                 )
 
     @T.macro
@@ -105,12 +98,8 @@ class GemmConfigSearcher(MegaKernelWrapper):
         with T.cta():
             self.tile_scheduler.wait(self.evt, self.tile_scheduler.n_idx, wait_level="warp")
             self.run_tile(
-                self.reduce_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                partial_global,
-                output_global,
+                self.reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
+                partial_global, output_global,
             )
 
     # fmt: off
@@ -122,25 +111,14 @@ class GemmConfigSearcher(MegaKernelWrapper):
         partial_global,
         output_global,
         output32_global,
-        etensor,
+        etensor_workspace,
         profiler_buffer,
         exec_queue,
         Semaphore: Type[static_scheduler.Semaphore],
         Scheduler: Type[static_scheduler.StaticTileScheduler],
     ):
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-
         # initialize tile
         self.set_tiles()
-        if self.use_tma_reduce:
-            self.gemm_tile.set_tensor_map(A_tensor_map, B_tensor_map, D_tensor_map, A_global, B_global, output32_global)
-        elif self.split_k == 1:
-            self.gemm_tile.set_tensor_map(A_tensor_map, B_tensor_map, D_tensor_map, A_global, B_global, output_global)
-        else:
-            self.gemm_tile.set_tensor_map(A_tensor_map, B_tensor_map, D_tensor_map, A_global, B_global, partial_global)
-
         self.host_init_all()
 
         with T.kernel():
@@ -153,31 +131,37 @@ class GemmConfigSearcher(MegaKernelWrapper):
             self.init_profiler(profiler_buffer)
             with T.cta():
                 buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
-                self.device_init_all(smem_manager)
-                self.class_init_all(smem_manager)
+                
+                self.set_smem_manager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
+                self.device_init_all(self.smem_manager)
+                self.class_init_all(self.smem_manager)
 
                 # initialize event tensors
-                self.set_events(Semaphore, etensor)
+                self.set_events(Semaphore, etensor_workspace)
 
                 # initialize tile scheduler and smem_manager
-                self.init_tile_scheduler(True, smem_manager, exec_queue, None, None, None)
-                smem_manager.init()
-
+                self.init_tile_scheduler(False, Scheduler, "gemm", exec_queue, self.smem_manager)
+                self.smem_manager.init()
+                
                 while self.tile_scheduler.valid():
+                    
                     if self.tile_scheduler.task_type == 0:
-                        self.task_impl_gemm()
+                        self.task_impl_gemm(A_global, B_global, partial_global, output_global, output32_global)
                     elif self.tile_scheduler.task_type == 1:
                         self.task_reduce(partial_global, output_global)
+                    elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
+                        self.task_impl_init_etensor(False)
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
+                        self.task_impl_wait_etensor_init_complete(False)
                     else:
-                        trap_when_assert_failed(False)
-                    smem_manager.exit_tile_runtime()
+                        T.cuda.trap_when_assert_failed(False)
+                    self.smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
                 if self.profiler_on:
                     self.profiler.finalize(lane_id == 0)
                 self.class_finalize_all()
 
-    def _get_func_static(self):
+    def get_func_static(self, unfused=False):
         # fmt: off
         @T.prim_func(tirx=True)
         def main(
@@ -187,7 +171,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
             partial_ptr: T.handle,
             output_ptr: T.handle,
             output32_ptr: T.handle,
-            etensor_ptr: T.handle,
+            etensor_workspace_ptr: T.handle,
             exec_queue_ptr: T.handle,
             profiler_buffer: T.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
@@ -201,40 +185,20 @@ class GemmConfigSearcher(MegaKernelWrapper):
             partial_global = T.match_buffer(partial_ptr, [self.split_k, self.batch_size, self.n], "float32", scope="global")
             output_global = T.match_buffer(output_ptr, [self.batch_size, self.n], "float16", scope="global")
             output32_global = T.match_buffer(output32_ptr, [self.batch_size, self.n], "float32", scope="global")
-            etensor = T.match_buffer(etensor_ptr, [self.n // SplitKReduceTile.N_UNIT], "int32", scope="global")
+            
+            etensor_workspace_size = T.int32()
+            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
             
             # exec queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "uint32", scope="global")
+            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")
             
             # main
             self.fused_body(
-                A_global, B_global, partial_global, output_global, output32_global, etensor, profiler_buffer, exec_queue,
+                A_global, B_global, partial_global, output_global, output32_global, etensor_workspace_global, profiler_buffer, exec_queue,
                 static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
             )
    
         return main
-
-    def get_func(self, scheduler: Literal["static"]):
-        if scheduler == "static":
-            return self._get_func_static()
-        else:
-            raise ValueError(f"Unsupported scheduler: {scheduler}")
-
-    def get_module(self, scheduler: Literal["static"]):
-
-        @I.ir_module(tirx=True)
-        class Module:
-
-            @T.prim_func(tirx=True)
-            def main():
-                pass
-
-        module: tvm.IRModule = Module
-        if scheduler == "static":
-            module.update_func(module.get_global_var("main"), self._get_func_static())
-        else:
-            raise ValueError(f"Unsupported scheduler: {scheduler}")
-        return module
 
 
 arg_dict = {}
@@ -250,9 +214,9 @@ def prepare_data(mk: GemmConfigSearcher, repeat=100):
     arg_dict["B"] = torch.randn((mk.n, mk.k), dtype=torch.float16)
     arg_dict["partial"] = torch.zeros((mk.split_k, mk.batch_size, mk.n), dtype=torch.float32)
     arg_dict["output"] = torch.zeros((mk.batch_size, mk.n), dtype=torch.float16)
+    arg_dict[f"etensor_workspace"] = torch.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=torch.int32)
     for i in range(repeat):
         arg_dict[f"output32_{i}"] = torch.zeros((mk.batch_size, mk.n), dtype=torch.float32)
-        arg_dict[f"etensor_{i}"] = torch.zeros((mk.n // mk.reduce_tile.N_TILE), dtype=torch.int32)
 
     return arg_dict
 
@@ -271,12 +235,16 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             tvm_arg_dict[key] = tvm.runtime.tensor(value.numpy(), device=DEV)
         target = tvm.target.Target("cuda")
         exec_queue = np.zeros(
-            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.uint32
+            (KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS), dtype=np.int32
         )
         central_queue = []
+        for i in range(2):
+            central_queue.append((i, 0, 0, JobType.INIT_ETENSOR.value))
         for n_idx in range(mk.n // mk.blk_n):
             for k_idx in range(mk.split_k):
                 central_queue.append((0, n_idx, k_idx, 0))
+        for i in range(KernelConfig.SM_NUMBER):
+            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
         if mk.split_k > 1 and not mk.use_tma_reduce:
             m_split = min(batch_size, KernelConfig.SM_NUMBER // (mk.n // SplitKReduceTile.N_UNIT))
             m_tile = ceildiv(batch_size, m_split)
@@ -314,7 +282,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                     tvm_arg_dict["partial"],
                     tvm_arg_dict["output"],
                     tvm_arg_dict[f"output32_{iter}"],
-                    tvm_arg_dict[f"etensor_{iter}"],
+                    tvm_arg_dict[f"etensor_workspace"],
                     tvm_arg_dict["exec_queue"],
                     tvm_arg_dict[f"profiler_buffer"],
                 )

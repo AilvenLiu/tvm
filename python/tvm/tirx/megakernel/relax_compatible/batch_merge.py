@@ -1,12 +1,9 @@
 from tvm.script import tir as T, tirx as Tx
 
-from tvm.tirx.megakernel.common import (
-    KernelConfig,
-    ceildiv,
-    SmemManager,
-)
-
-from tvm.tirx.megakernel.batch_merge import BatchMergeTile
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.kernels import BatchMergeTile
 
 class FuseBatchMergeTile(BatchMergeTile):
 

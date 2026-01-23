@@ -2,7 +2,9 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
-from .common import KernelConfig, Tile, SmemManager, is_power_of_two, find_power_of_two
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import is_power_of_two, find_power_of_two
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
 class TopkSoftmaxTile(Tile):

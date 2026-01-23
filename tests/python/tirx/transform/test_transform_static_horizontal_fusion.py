@@ -19,16 +19,10 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm import relax
-from tvm.tirx.megakernel.common import (
-    JobType,
-    SemaphoreBase,
-    TileSchedulerBase,
-    SmemManager,
-    KernelConfig,
-    unpack_from_32bit,
-)
-import tvm.tirx.megakernel.static_scheduler as static_scheduler
-import tvm.tirx.megakernel.dynamic_scheduler as dynamic_scheduler
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.base import SmemManager
+import tvm.tirx.megakernel.utils.static_scheduler as static_scheduler
+import tvm.tirx.megakernel.utils.dynamic_scheduler as dynamic_scheduler
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T

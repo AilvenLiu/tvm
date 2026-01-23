@@ -4,8 +4,9 @@ from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
 
-from .common import F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2, find_power_of_two
-
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv, exp2, find_power_of_two
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 class DecodeTile(Tile):
 

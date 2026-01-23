@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import List
 import pytest
-pytest.skip("Skipping pytest for tests/python/tirx/kernels/cuda/megakernel/test_model.py.", allow_module_level=True)
+# pytest.skip("Skipping pytest for tests/python/tir+/kernels/cuda/megakernel/test_model.py.", allow_module_level=True)
 
 import numpy as np
 import torch
@@ -35,7 +35,7 @@ from tvm.script import tir as T
 from tvm.tirx.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
-from tvm.tirx.megakernel.model_config import (
+from tvm.tirx.megakernel.utils.config import (
     llama3_1b_config,
     qwen3_30b_a3b_config,
     qwen3_32b_config,

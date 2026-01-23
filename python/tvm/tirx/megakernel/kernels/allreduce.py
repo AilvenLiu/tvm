@@ -1,6 +1,6 @@
 from tvm.script import tir as T
 
-from .common import Tile, KernelConfig
+from tvm.tirx.megakernel.utils.base import Tile, KernelConfig
 
 
 ld_reduce_8xfp16 = """

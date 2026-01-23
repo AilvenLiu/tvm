@@ -261,6 +261,7 @@ def copy_tma_impl(
         mbar = op_call.config.get("mbar", None)
         if mbar is None:
             raise ValueError("mbar is not set in config")
+    use_tma_reduce = op_call.config.get("use_tma_reduce", None)
 
     # ---------------------------------------------------------------------
     # Device‑side TIR implementation
@@ -284,13 +285,23 @@ def copy_tma_impl(
                     cache_hint=op_call.config.get("cache_hint", ""),
                 )
             else:
-                T.ptx.cp_async.bulk.tensor.s2g(
-                    rank,
-                    s_buf.ptr_to(s_st),
-                    tensor_map,
-                    *reversed(g_st),
-                    cache_hint=op_call.config.get("cache_hint", ""),
-                )
+                if use_tma_reduce is None:
+                    T.ptx.cp_async.bulk.tensor.s2g(
+                        rank,
+                        s_buf.ptr_to(s_st),
+                        tensor_map,
+                        *reversed(g_st),
+                        cache_hint=op_call.config.get("cache_hint", ""),
+                    )
+                else:
+                    T.ptx.cp_async.bulk.tensor.s2g_reduce(
+                        rank,
+                        s_buf.ptr_to(s_st),
+                        tensor_map,
+                        *reversed(g_st),
+                        cache_hint=op_call.config.get("cache_hint", ""),
+                        red_op=use_tma_reduce,
+                    )
         else:
             for lvs in T.grid(*[it[1] for it in iters_global]):
                 if direction == "g2s":
@@ -309,13 +320,23 @@ def copy_tma_impl(
                 else:
                     g_coord = T.meta_var(make_global_coord(lvs))
                     s_coord = T.meta_var(make_shared_coord(lvs))
-                    T.ptx.cp_async.bulk.tensor.s2g(
-                        rank,
-                        s_buf.ptr_to(s_coord),
-                        tensor_map,
-                        *reversed(g_coord),
-                        cache_hint=op_call.config.get("cache_hint", ""),
-                    )
+                    if use_tma_reduce is None:
+                        T.ptx.cp_async.bulk.tensor.s2g(
+                            rank,
+                            s_buf.ptr_to(s_coord),
+                            tensor_map,
+                            *reversed(g_coord),
+                            cache_hint=op_call.config.get("cache_hint", ""),
+                        )
+                    else:
+                        T.ptx.cp_async.bulk.tensor.s2g_reduce(
+                            rank,
+                            s_buf.ptr_to(s_coord),
+                            tensor_map,
+                            *reversed(g_coord),
+                            cache_hint=op_call.config.get("cache_hint", ""),
+                            red_op=use_tma_reduce,
+                        )
 
     # fmt: on
     # ---------------------------------------------------------------------

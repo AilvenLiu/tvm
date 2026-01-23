@@ -1,69 +1,30 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Dynamic tile scheduler for megakernel."""
 from typing import Literal
 import numpy as np
 
 from tvm.script import tir as T
-from tvm.tir.op import ceildiv
 from tvm.tirx.bench.utils import CudaProfiler
 
-from .common import (
-    Barriers, JobType, ProfileEventType, KernelConfig,
-    pack_into_32bit, unpack_from_32bit, any_sync, SemaphoreBase, TileSchedulerBase, gt, atomic_add_int32, is_const_minus_one
-)
-
-while_ld_global_acquire = f"""
-__forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* task_info) {{
-  asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
-  while (*task_info == -1) {{
-    __nanosleep(800);
-    asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
-  }}
-}}
-"""
-
-sts = """
-__forceinline__ __device__ void sts(int32_t v, void* dst_addr) {
-    asm volatile("st.shared.b32 [%0], %1;"
-                 :
-                 : "l"(dst_addr), "r"(v)
-                 : "memory");
-}
-"""
-
-def stg_remote(v, dst_addr, pe):
-    func = """
-__forceinline__ __device__ void stg_remote(int32_t v, void* dst_addr, int32_t pe) {
-    if (pe >= 0) {
-        void* ptr = nvshmem_ptr(dst_addr, pe);
-        asm volatile("st.global.release.sys.b32 [%0], %1;"
-                     :
-                     : "l"(ptr), "r"(v)
-                     : "memory");
-    } else {
-        asm volatile("st.global.release.gpu.b32 [%0], %1;"
-                     :
-                     : "l"(dst_addr), "r"(v)
-                     : "memory");
-    }
-}
-"""
-    return T.cuda.func_call("stg_remote", v, dst_addr, pe, source_code=func)
-
-def stg_local(v, dst_addr, pe):
-    func = """
-    __forceinline__ __device__ void stg_local(int32_t v, void* dst_addr, int32_t pe) {
-        asm volatile("st.global.release.gpu.b32 [%0], %1;"
-                    :
-                    : "l"(dst_addr), "r"(v)
-                    : "memory");
-    }
-    """
-    return T.cuda.func_call("stg_local", v, dst_addr, pe, source_code=func)
-
-def stg(v, dst_addr, pe):
-    if is_const_minus_one(pe):
-        return stg_local(v, dst_addr, pe)
-    else:
-        return stg_remote(v, dst_addr, pe)
+from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase, Barriers
+from tvm.tirx.megakernel.utils.utils import atomic_add_int32, unpack_from_32bit, any_sync, gt, stg, sts, pack_into_32bit, while_ld_global_acquire
+from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, ProfileEventType
 
 # notes: The following applies to decrement=False. The logic for True is similar.
 #        For semaphore with expected count = expected_cnt, we set it actual count = expected_cnt * (base + 1).
@@ -125,7 +86,7 @@ class Semaphore(SemaphoreBase):
         if self.state[0] <= 0:
             while 1:
                 T.ptx.ld_global_acquire(self.state[0], self.sem.ptr_to(coord))
-                if T.cuda.func_call("gt", self.state[0], 0, source_code=gt, return_type="bool"):
+                if gt(self.state[0], 0):
                     self.state[0] = atomic_add_int32(self.sem.ptr_to(coord), -number, rank, release=release)
                     break
                 sleep_time = T.meta_var(800 if pre_notify else 40)
@@ -224,38 +185,17 @@ class MPMCQueue:
     def dequeue(
         self,
         fetched_task_info,
-        has_prefetched,
-    ):
-        if not has_prefetched:
-            self.head_r = T.cuda.atomic_add(
-                self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1
-            )
-            self.masked_pos = self.head_r & self.mask
-            T.cuda.func_call(
-                "while_ld_global_acquire",
-                self.tasks.access_ptr("r", offset=self.tasks.elem_offset_of([self.masked_pos])),
-                T.address_of(fetched_task_info),
-                source_code=while_ld_global_acquire,
-            )
-        # FIXME: enable this when we consider capacity issue
-        # self.tasks[self.masked_pos, 0] = -1
-
-    @T.macro
-    def prefetch(
-        self,
-        shared_ptr,
     ):
         self.head_r = T.cuda.atomic_add(
             self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1
         )
         self.masked_pos = self.head_r & self.mask
-        T.cuda.func_call(
-            "while_ld_global_acquire",
+        while_ld_global_acquire(
             self.tasks.access_ptr("r", offset=self.tasks.elem_offset_of([self.masked_pos])),
-            shared_ptr,
-            source_code=while_ld_global_acquire,
+            T.address_of(fetched_task_info),
         )
-
+        # FIXME: enable this when we consider capacity issue
+        # self.tasks[self.masked_pos, 0] = -1
 
 class DynamicTileScheduler(TileSchedulerBase):
 
@@ -289,7 +229,6 @@ class DynamicTileScheduler(TileSchedulerBase):
         self.m_idx = T.local_cell(dtype="int32", name="m_idx")
         self.n_idx = T.local_cell(dtype="int32", name="n_idx")
         self.k_idx = T.local_cell(dtype="int32", name="k_idx")
-        self.has_prefetched = T.local_cell(dtype="bool", name="has_prefetched")
         self.idx = T.local_cell(dtype="int32", name="idx")
         self.dequeue_phase = T.local_cell(dtype="int32", name="dequeue_phase")
         self.p2c_dequeue_barrier = SchedulerBarrier(self.smem_manager, is_p2c=True)
@@ -299,13 +238,8 @@ class DynamicTileScheduler(TileSchedulerBase):
 
     @T.macro
     def _dequeue_and_store_packed(self):
-        self.queue.dequeue(self.task_info, self.has_prefetched)
-        T.cuda.func_call(
-            "sts",
-            self.task_info,
-            self.packed_value.ptr_to([0]),
-            source_code=sts,
-        )
+        self.queue.dequeue(self.task_info)
+        sts(self.task_info, self.packed_value.ptr_to([0]))
 
     @T.macro
     def _fetch_from_queue(self):
@@ -314,16 +248,9 @@ class DynamicTileScheduler(TileSchedulerBase):
             # fetch from GEMM queue
             if warp_id == self.scheduler_warp:
                 if T.ptx.elect_sync():
-                    if self.has_prefetched:
-                        pass # TODO: will fix
-                        # T.ptx.cp_async.wait_group(0)
-                        # if self.packed_value[0] < 0:
-                        #     self._dequeue_and_store_packed()
-                    else:
-                        self.c2p_dequeue_barrier.wait(0, self.dequeue_phase)
-                        self._dequeue_and_store_packed()
+                    self.c2p_dequeue_barrier.wait(0, self.dequeue_phase)
+                    self._dequeue_and_store_packed()
                     self.p2c_dequeue_barrier.arrive()
-                self.has_prefetched = 0
             self.p2c_dequeue_barrier.wait(0, self.dequeue_phase)
             unpack_from_32bit(self.packed_value[0], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
             self.c2p_dequeue_barrier.arrive()
@@ -334,7 +261,6 @@ class DynamicTileScheduler(TileSchedulerBase):
         self._alloc()
         self.queue.init()
         self.dequeue_phase = 0
-        self.has_prefetched = 0
         with T.thread()[0:1]:
             self.p2c_dequeue_barrier.init(1)
             self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
@@ -509,16 +435,6 @@ class DynamicTileScheduler(TileSchedulerBase):
 
     def valid(self):
         return self.task_type != JobType.END.value
-
-    @T.macro
-    def prefetch(self):
-        with T.cta():
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            if warp_id == self.scheduler_warp:
-                if T.ptx.elect_sync():
-                    self.c2p_dequeue_barrier.wait(0, self.dequeue_phase)
-                    self.has_prefetched = 1
-                    self.queue.prefetch(self.packed_value.ptr_to([0]))
 
 
 class MPMCQueueHost:

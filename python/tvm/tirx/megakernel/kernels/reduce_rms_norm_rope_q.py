@@ -1,21 +1,13 @@
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
-from .common import (
-    F16_BYTES,
-    KernelConfig,
-    Tile,
-    ceildiv,
-    find_power_of_two,
-    float22half2,
-    half22float2,
-    rsqrt,
-    SmemManager,
-)
+from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 # TODO: pipeline
-class SplitKReduceRMSnormRopeAppendKTile(Tile):
+class SplitKReduceRMSnormRopeQTile(Tile):
 
     # weight_tvm: [num_heads]
     # qk_tvm: [batch_size, num_heads, head_dim]
@@ -23,19 +15,19 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
     loop_inner = 1
     min_bdy = 1
 
-    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor, page_size, h_tile=1, use_rms_norm=True):
+    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor, h_tile=1, use_rms_norm=True):
         super().__init__()
         self.rms_norm_eps = rms_norm_eps
         self.qo_heads = qo_heads
         self.kv_heads = kv_heads
         self.head_dim = head_dim
-        self.split_k_factor = split_k_factor
-        self.page_size = page_size
         self.h_tile = h_tile
         self.use_rms_norm = use_rms_norm
+        self.split_k_factor = split_k_factor
         self.vec_size = max(16 // F16_BYTES, self.head_dim // 32)
         self.bdx = self.head_dim // self.vec_size
         self.bdy = KernelConfig.NUM_THREADS // self.bdx
+
         self.batch_size = batch_size
         self.m_split = ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads)
         self.m_tile = ceildiv(self.batch_size, self.m_split)
@@ -44,21 +36,21 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
 
     def _alloc_local(self):
         self.idx = T.alloc_local([1], "int32", name="idx")
+        self.pos = T.alloc_local([1], "int32", name="pos")
         self.mask = T.alloc_local([1], "uint32", name="mask")
-        self.rope_pos_reg = T.alloc_local([1], "int32", name="rope_pos_reg")
-        self.append_pos_reg = T.alloc_local([1], "int32", name="append_pos_reg")
         self.weight_vec = T.alloc_local([self.vec_size], "float16", name="weight_vec")
         self.weight_vec_f32 = T.alloc_local([self.vec_size], "float32", name="weight_vec_f32")
         self.sum_sq = T.alloc_local([1], "float32", name="sum_sq")
         self.rms_norm = T.alloc_local([1], "float32", name="rms_norm")
         self.cos = T.alloc_local([self.vec_size], "float32", name="cos")
         self.sin = T.alloc_local([self.vec_size], "float32", name="sin")
-        self.k_vec = T.alloc_local([self.vec_size], "float16", name="k_vec")
-        self.k_vec32 = T.alloc_local([self.vec_size], "float32", name="k_vec32")
-        self.k_vec32_other = T.alloc_local([self.vec_size], "float32", name="k_vec32_other")
+        self.q_vec = T.alloc_local([self.vec_size], "float16", name="q_vec")
+        self.q_vec32 = T.alloc_local([self.vec_size], "float32", name="q_vec32")
+        self.q_vec32_other = T.alloc_local([self.vec_size], "float32", name="q_vec32_other")
+
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx, partial, k_weight, rope_pos, cos_sin_cache, append_pos, kv_cache):
+    def run(self, m_idx, n_idx, k_idx, partial, qkv, q_weight, rope_pos, cos_sin_cache):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tx = T.meta_var(tid % self.bdx)
@@ -73,18 +65,17 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                 cache_stx = T.meta_var(st % half_dim)
                 handle_num = T.meta_var(T.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
                 self.idx[0] = ty
-
                 while self.idx[0] < handle_num:
-                    self.rope_pos_reg[0] = rope_pos[batch_idx]
+                    self.pos[0] = rope_pos[batch_idx]
                     self.sum_sq[0] = 0.0
                     # reduce
-                    qkv_stx = T.meta_var((self.qo_heads + head_idx) * self.head_dim + tx * self.vec_size)
+                    qkv_stx = T.meta_var(head_idx * self.head_dim + tx * self.vec_size)
                     for kv in T.unroll(self.vec_size):
-                        self.k_vec32[kv] = 0.0
+                        self.q_vec32[kv] = 0.0
                     for kt in T.serial(self.split_k_factor):
-                        Tx.copy(self.k_vec32_other[:], partial[kt, batch_idx, qkv_stx:qkv_stx + self.vec_size])
+                        Tx.copy(self.q_vec32_other[:], partial[kt, batch_idx, qkv_stx:qkv_stx + self.vec_size])
                         for kv in T.unroll(self.vec_size):
-                            self.k_vec32[kv] += self.k_vec32_other[kv]
+                            self.q_vec32[kv] += self.q_vec32_other[kv]
                     remain = handle_num - self.idx[0] // group_in_warp * group_in_warp
                     if remain >= group_in_warp:
                         self.mask[0] = 0xFFFFFFFF
@@ -93,7 +84,7 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                     if self.use_rms_norm:
                         # sum square
                         for kv in T.unroll(self.vec_size):
-                            self.sum_sq[0] += self.k_vec32[kv] * self.k_vec32[kv]
+                            self.sum_sq[0] += self.q_vec32[kv] * self.q_vec32[kv]
                         # warp reduce sum
                         for kr in T.unroll(find_power_of_two(self.bdx // 2) + 1):
                             self.sum_sq[0] = self.sum_sq[0] + T.tvm_warp_shuffle_xor(
@@ -102,29 +93,26 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                         # rms norm
                         self.rms_norm[0] = rsqrt(self.sum_sq[0] / self.head_dim + self.rms_norm_eps)
                         # handle the weight
-                        Tx.copy(self.weight_vec[:], k_weight[st:st + self.vec_size])
+                        Tx.copy(self.weight_vec[:], q_weight[st:st + self.vec_size])
                         Tx.cast(self.weight_vec_f32[:], self.weight_vec[:])
                         for kv in T.unroll(self.vec_size):
-                            self.k_vec32[kv] = self.k_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
+                            self.q_vec32[kv] = self.q_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
                     # load cache
-                    Tx.copy(self.cos[:], cos_sin_cache[self.rope_pos_reg[0], cache_stx:cache_stx + self.vec_size])
-                    Tx.copy(self.sin[:], cos_sin_cache[self.rope_pos_reg[0], half_dim + cache_stx:half_dim + cache_stx + self.vec_size])
+                    Tx.copy(self.cos[:], cos_sin_cache[self.pos[0], cache_stx:cache_stx + self.vec_size])
+                    Tx.copy(self.sin[:], cos_sin_cache[self.pos[0], half_dim + cache_stx:half_dim + cache_stx + self.vec_size])
                     # shuffle q value
                     for kv in T.serial(self.vec_size):
-                        self.k_vec32_other[kv] = T.tvm_warp_shuffle_xor(
-                            self.mask[0], self.k_vec32[kv], self.bdx // 2, 32, 32
+                        self.q_vec32_other[kv] = T.tvm_warp_shuffle_xor(
+                            self.mask[0], self.q_vec32[kv], self.bdx // 2, 32, 32
                         )
                     # compute rope
                     if st < half_dim:
                         for kv in T.unroll(self.vec_size):
-                            self.k_vec32[kv] = self.k_vec32[kv] * self.cos[kv] - self.k_vec32_other[kv] * self.sin[kv]
+                            self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] - self.q_vec32_other[kv] * self.sin[kv]
                     else:
                         for kv in T.unroll(self.vec_size):
-                            self.k_vec32[kv] = self.k_vec32[kv] * self.cos[kv] + self.k_vec32_other[kv] * self.sin[kv]
-                    # append
-                    Tx.cast(self.k_vec[:], self.k_vec32[:])
-                    self.append_pos_reg[0] = T.cuda.ldg(T.address_of(append_pos[batch_idx]), "int32")
-                    page_id = T.meta_var(self.append_pos_reg[0] // self.page_size)
-                    offset = T.meta_var(self.append_pos_reg[0] % self.page_size)
-                    Tx.copy(kv_cache[page_id, 0, head_idx, offset, st:st + self.vec_size], self.k_vec[:])
+                            self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] + self.q_vec32_other[kv] * self.sin[kv]
+                    # store q
+                    Tx.cast(self.q_vec[:], self.q_vec32[:])
+                    Tx.copy(qkv[batch_idx, head_idx, st:st + self.vec_size], self.q_vec[:])
                     self.idx[0] += self.bdy

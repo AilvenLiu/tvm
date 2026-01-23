@@ -1,11 +1,9 @@
 from tvm.script import tir as T, tirx as Tx
 
-from tvm.tirx.megakernel.common import (
-    KernelConfig,
-    SmemManager,
-)
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.base import SmemManager
 
-from tvm.tirx.megakernel.add_rmsnorm import AddRMSNormTile, RMSNormTile
+from tvm.tirx.megakernel.kernels import AddRMSNormTile, RMSNormTile
 
 class FuseAddRMSNormTile(AddRMSNormTile):
 

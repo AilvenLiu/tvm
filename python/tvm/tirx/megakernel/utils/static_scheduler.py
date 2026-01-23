@@ -1,8 +1,28 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Static tile scheduler for megakernel."""
 from typing import Literal
 import tvm
 from tvm.script import tir as T
 
-from .common import JobType, KernelConfig, any_sync, unpack_from_32bit, TileSchedulerBase, SemaphoreBase, gt, atomic_add_int32
+from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase
+from tvm.tirx.megakernel.utils.utils import atomic_add_int32, unpack_from_32bit, any_sync, gt
+from tvm.tirx.megakernel.utils.config import KernelConfig, JobType
 
 class Semaphore(SemaphoreBase):
     def __init__(self, buffer):
@@ -11,7 +31,6 @@ class Semaphore(SemaphoreBase):
 
     @T.macro
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
-        state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
         if level == "cta":
             with T.thread():
                 while 1:
@@ -53,7 +72,7 @@ class Semaphore(SemaphoreBase):
                 T.ptx.ld_global_acquire(
                     self.state[0], self.sem.ptr_to(coord)
                 )
-                if T.cuda.func_call("gt", self.state[0], 0, source_code=gt, return_type="bool"):
+                if gt(self.state[0], 0):
                     atomic_add_int32(
                         self.sem.ptr_to(coord),
                         -(self.base + 1),

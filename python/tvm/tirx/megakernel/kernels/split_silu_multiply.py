@@ -1,9 +1,9 @@
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
-from .common import SmemManager, Tile, KernelConfig, F16_BYTES, silu
-
-# from .dynamic_scheduler import DynamicTileScheduler
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import silu
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class SiluMultiplyTile(Tile):
@@ -76,7 +76,7 @@ class SiluMultiplyTile(Tile):
                     for kv in T.vectorized(self.VEC_SIZE):
                         self.vec2[kv] = self.buf[pipe_idx, 1, tid, kv]
                     for kv in T.unroll(self.VEC_SIZE):
-                        self.vec1[kv] = self.vec1[kv] * T.sigmoid(self.vec1[kv]) * self.vec2[kv]
+                        self.vec1[kv] = silu(self.vec1[kv]) * self.vec2[kv]
                     token_idx_write = T.meta_var((self.idx - (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS) // self.TILE_SIZE)
                     offset_imme_write = T.meta_var(m_idx * self.TILE_SIZE + (self.idx - (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS) % self.TILE_SIZE)
                     for kv in T.vectorized(self.VEC_SIZE):
@@ -140,7 +140,7 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                     for kv in T.vectorized(self.VEC_SIZE):
                         self.vec2[kv] = self.buf[pipe_idx, 1, tid, kv]
                     for kv in T.unroll(self.VEC_SIZE):
-                        self.vec1[kv] = self.vec1[kv] * T.sigmoid(self.vec1[kv]) * self.vec2[kv]
+                        self.vec1[kv] = silu(self.vec1[kv]) * self.vec2[kv]
                     token_idx_write = T.meta_var(m_idx * self.BLK_M + (self.idx - (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS) // self.TILE_SIZE)
                     offset_imme_write = T.meta_var(n_idx * self.TILE_SIZE + (self.idx - (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS) % self.TILE_SIZE)
                     if sorted_token_ids[token_idx_write] < self.numel:

@@ -1,8 +1,10 @@
 from tvm.script import tir as T, tirx as Tx
 
-from tvm.tirx.megakernel.reduce_rms_norm_rope_q import SplitKReduceRMSnormRopeQTile
-from tvm.tirx.megakernel.reduce_rms_norm_rope_append_k import SplitKReduceRMSnormRopeAppendKTile
-from tvm.tirx.megakernel.reduce_append_v import SplitKReduceAppendVTile
+from tvm.tirx.megakernel.kernels import (
+    SplitKReduceRMSnormRopeQTile, 
+    SplitKReduceRMSnormRopeAppendKTile,
+    SplitKReduceAppendVTile,
+)
 
 
 class FuseSplitKReduceRMSnormRopeQTile(SplitKReduceRMSnormRopeQTile):

@@ -3,7 +3,9 @@ from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import CudaProfiler
 
-from .common import KernelConfig, ProfileEventType, SmemManager, Tile, ceildiv
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
 
 def upcast_size(dtype):
     return 128 // tvm.DataType(dtype).bits

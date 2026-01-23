@@ -1,122 +1,38 @@
-from enum import Enum
-from typing import List, Literal, Optional, Tuple, Type, Union
-import numpy as np
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Base abstract classes for megakernel."""
+import functools
+from typing import Dict, List, Literal, Optional, Tuple, Type
 
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
+from tvm.script import ir as I
 from tvm.tir.expr import Var
 from tvm.tir import PrimExpr
+from tvm.tirx.bench.utils import CudaProfiler
 
-def ceildiv(a, b):
-    if isinstance(a, PrimExpr) or isinstance(b, PrimExpr):
-        return T.truncdiv(a + b - 1, b)
-    return (a + b - 1) // b
-
-
-class JobType(Enum):
-    V_REDUCE_APPEND = 0
-    K_REDUCE_RMS_ROPE_APPEND = 1
-    Q_REDUCE_RMS_ROPE = 2
-    BATCH_ATTENTION = 3
-    BATCH_ATTENTION_MERGE = 4
-    GATE_UP_PROJ_REDUCE = 5
-    DOWN_PROJ_ALLREDUCE = 6
-    O_ALLREDUCE = 7
-    ATTN_ADD_RMS_NORM = 8
-    GEMM_O_REDUCE = 9
-    GEMM_O_PROJ = 10
-    GEMM_QKV_PROJ = 11
-    MLP_ADD_RMS_NORM = 12
-    DOWN_PROJ_REDUCE = 13
-    GEMM_DOWN_PROJ = 14
-    SPLIT_SILU_MULTIPLY = 15
-    GEMM_GATE_UP_PROJ = 16
-    GATE_UP_SILU = 17
-    MOE_GATING = 18
-    MOE_TOPK_SOFTMAX = 19
-    MOE_ALIGN = 20
-    MOE_COUNT_AND_SORT = 21
-    MOE_GROUP_GEMM_GATE_UP = 22
-    MOE_SILU_MULTIPLY = 23
-    MOE_GROUP_GEMM_DOWN = 24
-    MOE_TOPK_REDUCE = 25
-    MOE_GROUP_GEMM_GATE_UP_SILU = 26
-    INIT_ETENSOR = 27
-    WAIT_ETENSOR_INIT = 28
-
-    # end
-    END = 31
-
-
-# task_type: [0:5], m_idx: [5:18], n_idx: [18:28], k_idx: [28:32]
-MAX_TASK_TYPE = 1 << 5
-MAX_M_IDX = 1 << 13
-MAX_N_IDX = 1 << 10
-MAX_K_IDX = 1 << 4
-def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
-    if host:
-        if debug:
-            assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
-        return np.int64([task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)]).astype(np.int32)
-    else:
-        if debug:
-            trap_when_assert_failed(task_type < MAX_TASK_TYPE)
-            trap_when_assert_failed(m_idx < MAX_M_IDX)
-            trap_when_assert_failed(n_idx < MAX_N_IDX)
-            trap_when_assert_failed(k_idx < MAX_K_IDX)
-        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)
-
-unpack_from_32bit_code = """
-__forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* task_type_ptr, int32_t* m_idx_ptr, int32_t* n_idx_ptr, int32_t* k_idx_ptr) {
-    *task_type_ptr = task_info & 0b11111;
-    *m_idx_ptr = (task_info >> 5) & 0b1111111111111;
-    *n_idx_ptr = (task_info >> 18) & 0b1111111111;
-    *k_idx_ptr = (task_info >> 28) & 0b1111;
-}
-"""
-
-
-@T.macro
-def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr):
-    T.cuda.func_call(
-        "unpack_from_32bit",
-        task_info,
-        task_type_ptr,
-        m_idx_ptr,
-        n_idx_ptr,
-        k_idx_ptr,
-        source_code=unpack_from_32bit_code,
-    )
-
-
-class KernelConfig:
-    # global constant
-    M_CLUSTER = 1
-    N_CLUSTER = 1
-    WG_NUMBER = 2
-    WARP_NUMBER = 4
-    NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
-    SM_NUMBER = 148
-    CTA_GROUP = M_CLUSTER
-    MAX_SMEM_SIZE = 232448
-
-
-F16_BYTES = 2
-F32_BYTES = 4
-F128_BYTES = 16
-
-
-def is_power_of_two(n: T.int32):
-    return tvm.tir.all(n > 0, T.bitwise_and(n, n - 1) == 0)
-
-
-def find_power_of_two(n):
-    assert n > 0 and (n & (n - 1)) == 0
-    return n.bit_length() - 1
+from .config import KernelConfig, ProfileEventType
+from .utils import any_sync, f_init_const
 
 
 class Tile:
+    """Abstract base class for megakernel tiles."""
     need_init = True
 
     @classmethod
@@ -146,17 +62,25 @@ class Tile:
 
     def run(self, m_idx, n_idx, k_idx):
         raise NotImplementedError("run is not implemented")
+    
+    def prefetch(self, m_idx, n_idx, k_idx):
+        raise NotImplementedError("prefetch is not implemented")
 
 
 class Barriers:
-
+    """Mbarrier wrapper class"""
     def __init__(self, smem_manager, pipe_depth, is_p2c, persistent=True):
-        self.mbar = smem_manager.alloc((pipe_depth,), "uint64", method="persistent" if persistent else "shared", name="mbarrier")
+        self.smem_manager = smem_manager
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
+        self.persistent = persistent
+        
+    def _alloc(self):
+        self.mbar = self.smem_manager.alloc((self.pipe_depth,), "uint64", method="persistent" if self.persistent else "shared", name="mbarrier")
 
     @T.macro
     def init(self, threads_num_wait):
+        self._alloc()
         if self.pipe_depth == 1:
             with T.thread()[0:1]:
                 T.ptx.mbarrier.init(self.mbar.ptr_to([0]), threads_num_wait)
@@ -170,306 +94,8 @@ class Barriers:
         T.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
 
-@T.macro
-def float22half2(dst, src):
-    T.cuda.func_call(
-        "float22half2",
-        dst,
-        src,
-        source_code=f"""
-__forceinline__ __device__ void float22half2(void* dst, void* src) {{
-    half2* dst_p = (half2*) dst;
-    float2* src_p = (float2*) src;
-    *dst_p = __float22half2_rn(*src_p);
-}}
-    """,
-    )
-
-
-@T.macro
-def half22float2(dst, src):
-    T.cuda.func_call(
-        "half22float2",
-        dst,
-        src,
-        source_code=f"""
-__forceinline__ __device__ void half22float2(void* dst, void* src) {{
-    float2* dst_p = (float2*) dst;
-    half2* src_p = (half2*) src;
-    *dst_p = __half22float2(*src_p);
-}}
-    """,
-    )
-
-
-
-def rsqrt(x):
-    return T.cuda.func_call(
-        "_rsqrt",
-        x,
-        source_code=f"""
-__forceinline__ __device__ float _rsqrt(float x) {{
-  float y;
-  asm volatile("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
-  return y;
-}}
-""",
-        return_type="float32",
-    )
-
-
-def exp2(x):
-    return T.cuda.func_call(
-        "ptx_exp2",
-        x,
-        source_code=f"""
-    __forceinline__ __device__ float ptx_exp2(float x) {{
-  float y;
-  asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
-  return y;
-}}
-""",
-        return_type="float32",
-    )
-
-
-def silu(x):
-    return T.cuda.func_call(
-        "silu",
-        x,
-        source_code=f"""
-    __forceinline__ __device__ float silu(float x) {{
-  return x / (1.0f + __expf(-x));
-}}
-""",
-        return_type="float32",
-    )
-
-def threadfence_block():
-    return T.cuda.func_call(
-        "threadfence_block", source_code="""
-__forceinline__ __device__ void threadfence_block() {
-  __threadfence_block();
-}
-""")
-
-def any_sync(mask, pred):
-    return T.cuda.func_call(
-        "any_sync", mask, pred, source_code=f"""
-__forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
-  return __any_sync(mask, pred);
-}}
-""", return_type="int32"
-    )
-
-def syncthreads_or(pred):
-    return T.cuda.func_call(
-        "syncthreads_or", pred, source_code=f"""
-__forceinline__ __device__ int syncthreads_or(int pred) {{
-  return __syncthreads_or(pred);
-}}
-""", return_type="int32"
-    )
-
-def any_sync(mask, pred):
-    return T.cuda.func_call(
-        "any_sync", mask, pred, source_code=f"""
-__forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
-  return __any_sync(mask, pred);
-}}
-""", return_type="int32"
-    )
-
-@T.macro
-def block_fence():
-    T.cuda.func_call(
-        "block_fence",
-        source_code=f"""
-__forceinline__ __device__ void block_fence() {{
-  __threadfence_block();
-}}
-""")
-
-@T.macro
-def grid_sync():
-    cta_id = T.cluster_id([KernelConfig.SM_NUMBER], parent="kernel")
-    T.cuda.func_call(
-        "grid_sync",
-        source_code=f"""
-__forceinline__ __device__ void grid_sync() {{
-  auto g = cooperative_groups::this_thread_block();
-  g.sync();
-}}
-""")
-
-
-@T.macro
-def trap_when_assert_failed(cond):
-    T.cuda.func_call(
-        "trap_when_assert_fail",
-        cond,
-        source_code=f"""
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
-}}
-    """,
-    )
-
-def get_source(module: "tvm.ir.IRModule"):
-    target = tvm.target.Target("cuda")
-    lib = tvm.compile(module, target, tir_pipeline="tirx")
-    src = lib.mod.imports[0].inspect_source()
-    return src, lib
-
-def get_source_func(func: "tvm.tir.PrimFunc"):
-    target = tvm.target.Target("cuda")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-    src = mod.mod.imports[0].inspect_source()
-    return src, mod
-
-
-class ProfileEventType(Enum):
-    GEMM_GATE_UP_PROJ = 0
-    SPLIT_SILU_MULTIPLY = 1
-    GEMM_DOWN_PROJ = 2
-    DOWN_PROJ_REDUCE = 3
-    MLP_ADD_RMS_NORM = 4
-    FETCH = 5
-    GEMM_QKV_PROJ = 6
-    GEMM_QKV_REDUCE = 7
-    RMSNORM = 8
-    ROPE = 9
-    APPEND_KV = 10
-    BATCH_DECODE_NO_SPLIT = 11
-    BATCH_DECODE_SPLIT = 12
-    DECODE_MERGE = 13
-    GEMM_O_PROJ = 14
-    GEMM_O_REDUCE = 15
-    ATTN_ADD_RMS_NORM = 16
-    Q_RMSNORM_ROPE = 17
-    K_RMSNORM_ROPE_APPEND_KV = 18
-    V_APPEND_KV = 19
-    PUSH = 20
-    O_ALLREDUCE = 21
-    DOWN_PROJ_ALLREDUCE = 22
-    GATE_UP_PROJ_REDUCE = 23
-    BATCH_ATTENTION = 24
-    BATCH_ATTENTION_MERGE = 25
-    PREFETCH = 26
-    TMA = 27
-    MMA = 28
-    ATTN_INIT = 29
-    ATTN_LOAD_Q = 30
-    ATTN_LOOP_BODY = 31
-    ATTN_COMPUTE_QKV = 32
-    ATTN_WRITE_BACK = 33
-    Q_REDUCE_RMSNORM_ROPE = 34
-    K_REDUCE_RMSNORM_ROPE_APPEND = 35
-    V_REDUCE_APPEND = 36
-    GATE_UP_SILU = 37
-    MOE_GATING = 38
-    TOPK_SOFTMAX = 39
-    MOE_ALIGN = 40
-    COUNT_AND_SORT = 41
-    GROUP_GEMM_GATE_UP = 42
-    SILU_MUL = 43
-    GROUP_GEMM_DOWN = 44
-    TOPK_REDUCE = 45
-    EP_DISPATCH_PRECOMPUTE = 46
-    EP_DISPATCH_SEND = 47
-    EP_DISPATCH_RECV = 48
-    EP_COMBINE_SEND = 49
-    EP_COMBINE_RECV = 50
-    GROUP_GEMM_GATE_UP_SILU = 51
-    INIT_ETENSOR = 52
-    WAIT_ETENSOR_INIT = 53
-    END = 54
-
-map_job_type_to_profile_event_type = {
-    JobType.GEMM_GATE_UP_PROJ.value: ProfileEventType.GEMM_GATE_UP_PROJ,
-    JobType.SPLIT_SILU_MULTIPLY.value: ProfileEventType.SPLIT_SILU_MULTIPLY,
-    JobType.GEMM_DOWN_PROJ.value: ProfileEventType.GEMM_DOWN_PROJ,
-    JobType.DOWN_PROJ_REDUCE.value: ProfileEventType.DOWN_PROJ_REDUCE,
-    JobType.MLP_ADD_RMS_NORM.value: ProfileEventType.MLP_ADD_RMS_NORM,
-    JobType.GEMM_QKV_PROJ.value: ProfileEventType.GEMM_QKV_PROJ,
-    JobType.GEMM_O_PROJ.value: ProfileEventType.GEMM_O_PROJ,
-    JobType.GEMM_O_REDUCE.value: ProfileEventType.GEMM_O_REDUCE,
-    JobType.ATTN_ADD_RMS_NORM.value: ProfileEventType.ATTN_ADD_RMS_NORM,
-    JobType.O_ALLREDUCE.value: ProfileEventType.O_ALLREDUCE,
-    JobType.DOWN_PROJ_ALLREDUCE.value: ProfileEventType.DOWN_PROJ_ALLREDUCE,
-    JobType.GATE_UP_PROJ_REDUCE.value: ProfileEventType.GATE_UP_PROJ_REDUCE,
-    JobType.BATCH_ATTENTION.value: ProfileEventType.BATCH_ATTENTION,
-    JobType.BATCH_ATTENTION_MERGE.value: ProfileEventType.BATCH_ATTENTION_MERGE,
-    JobType.Q_REDUCE_RMS_ROPE.value: ProfileEventType.Q_REDUCE_RMSNORM_ROPE,
-    JobType.K_REDUCE_RMS_ROPE_APPEND.value: ProfileEventType.K_REDUCE_RMSNORM_ROPE_APPEND,
-    JobType.V_REDUCE_APPEND.value: ProfileEventType.V_REDUCE_APPEND,
-    JobType.GATE_UP_SILU.value: ProfileEventType.GATE_UP_SILU,
-    JobType.END.value: ProfileEventType.END,
-}
-
-event_type_names = [
-    "GEMM_GATE_UP_PROJ",
-    "SPLIT_SILU_MULTIPLY",
-    "GEMM_DOWN_PROJ",
-    "DOWN_PROJ_REDUCE",
-    "MLP_ADD_RMS_NORM",
-    "FETCH",
-    "GEMM_QKV_PROJ",
-    "GEMM_QKV_REDUCE",
-    "RMSNORM",
-    "ROPE",
-    "APPEND_KV",
-    "BATCH_DECODE_NO_SPLIT",
-    "BATCH_DECODE_SPLIT",
-    "DECODE_MERGE",
-    "GEMM_O_PROJ",
-    "GEMM_O_REDUCE",
-    "ATTN_ADD_RMS_NORM",
-    "Q_RMSNORM_ROPE",
-    "K_RMSNORM_ROPE_APPEND_KV",
-    "V_APPEND_KV",
-    "PUSH",
-    "O_ALLREDUCE",
-    "DOWN_PROJ_ALLREDUCE",
-    "GATE_UP_PROJ_REDUCE",
-    "BATCH_ATTENTION",
-    "BATCH_ATTENTION_MERGE",
-    "PREFETCH",
-    "TMA",
-    "MMA",
-    "ATTN_INIT",
-    "ATTN_LOAD_Q",
-    "ATTN_LOOP_BODY",
-    "ATTN_COMPUTE_QKV",
-    "ATTN_WRITE_BACK",
-    "Q_REDUCE_RMSNORM_ROPE",
-    "K_REDUCE_RMSNORM_ROPE_APPEND",
-    "V_REDUCE_APPEND",
-    "GATE_UP_SILU",
-    "MOE_GATING",
-    "TOPK_SOFTMAX",
-    "MOE_ALIGN",
-    "COUNT_AND_SORT",
-    "GROUP_GEMM_GATE_UP",
-    "SILU_MUL",
-    "GROUP_GEMM_DOWN",
-    "TOPK_REDUCE",
-    "EP_DISPATCH_PRECOMPUTE",
-    "EP_DISPATCH_SEND",
-    "EP_DISPATCH_RECV",
-    "EP_COMBINE_SEND",
-    "EP_COMBINE_RECV",
-    "GROUP_GEMM_GATE_UP_SILU",
-    "INIT_ETENSOR",
-    "WAIT_ETENSOR_INIT",
-]
-
-
 class SmemManager:
+    """Shared memory manager"""
     def __init__(self, smem_max_bytes, chunk_size, ptr: Var, fusion_mode=False):
         self.smem_max_bytes = smem_max_bytes
         self.chunk_size = chunk_size
@@ -742,10 +368,11 @@ class SmemManager:
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
 
-class SemaphoreBase:
-    base = 1 << 16
 
+class SemaphoreBase:
     """Abstract base class for semaphore."""
+    base = 1 << 16
+    
     def __init__(self):
         pass
 
@@ -754,6 +381,7 @@ class SemaphoreBase:
 
     def semaphore_notify(self, *coord, rank=-1):
         raise NotImplementedError
+
 
 class TileSchedulerBase:
     """Abstract base class for tile schedulers."""
@@ -782,94 +410,255 @@ class TileSchedulerBase:
         raise NotImplementedError
 
     @T.macro
-    def pre_notify_and_push(self, evt, notify_num, func_notify, func_trigger, push_level, scope, scope_id):
+    def pre_notify_and_push(self, evt, func_notify, func_trigger_list, push_level, scope, scope_id):
         # for dynamic scheduler
         pass
 
     def valid(self):
         raise NotImplementedError
 
-gt = """
-__forceinline__ __device__ bool gt(int32_t a, int32_t b) {
-    return a > b;
-}
 
-"""
+class InitETensorTile(Tile):
+    
+    VEC_SIZE = 1
+    
+    def __init__(self, etensor_and_f_init_pairs):
+        super().__init__()
+        self.etensor_and_f_init_pairs = etensor_and_f_init_pairs
+        self.total_num_etensors = len(etensor_and_f_init_pairs)
+        
+    def convert_1d_index_to_nd(self, idx, shape):
+        nd_idx = []
+        for i in reversed(range(len(shape))):
+            nd_idx.append(idx % shape[i])
+            idx = idx // shape[i]
+        return list(reversed(nd_idx))
+        
+    # only set etensor_init_complete in static scheduler
+    def run(self, m_idx, n_idx, k_idx):
+        with T.cta():
+            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            if_frames = [T.If(m_idx == i) for i in range(self.total_num_etensors)]
+            then_frames = [T.Then() for i in range(self.total_num_etensors)]
+            else_frames = [T.Else() for i in range(self.total_num_etensors - 1)]
+            idx = T.alloc_local([1], "int32", name="idx")
+            T.buffer_store(idx, tid * self.VEC_SIZE, [0])
+            for i in range(self.total_num_etensors):
+                if_frames[i].__enter__()
+                with then_frames[i]:
+                    etensor, f_init = self.etensor_and_f_init_pairs[i]
+                    if f_init is None:
+                        T.evaluate(0)
+                    else:
+                        nelem = functools.reduce(lambda x, y: x * y, etensor.shape, 1)
+                        etensor_1d = etensor.view(-1).buffer
+                        with T.While(idx[0] < nelem):
+                            with T.vectorized(self.VEC_SIZE) as v:
+                                T.buffer_store(etensor_1d, f_init(*self.convert_1d_index_to_nd(idx[0] + v, etensor.shape)) * (SemaphoreBase.base + 1), idx[0] + v)
+                            T.buffer_store(idx, idx[0] + KernelConfig.NUM_THREADS * self.VEC_SIZE, [0])
+                if i < self.total_num_etensors - 1:
+                    else_frames[i].__enter__()
+            for i in range(self.total_num_etensors - 1, -1, -1):
+                if i < self.total_num_etensors - 1:
+                    else_frames[i].__exit__(None, None, None)
+                if_frames[i].__exit__(None, None, None)
+                
 
+class MegaKernelWrapper:
+    """Base class for megakernel wrappers."""
 
-def atomic_add_int32_remote(addr, value, pe):
-    func = """
-__forceinline__ __device__ int32_t atomic_add_int32_remote(int32_t* addr, int32_t value, int32_t pe) {
-    if (pe >= 0) {
-        int32_t* ptr = (int32_t*)(nvshmem_ptr(addr, pe));
-        int32_t old_value;
-        asm volatile ("atom.release.gpu.global.add.u32 %0, [%1], %2;"
-                        : "=r"(old_value)
-                        : "l"(ptr), "r"(value)
-                        : "memory");
-        return old_value;
-    } else {
-        return atomicAdd(addr, value);
-    }
-}
-"""
-    return T.cuda.func_call(
-        "atomic_add_int32_remote",
-        addr,
-        value,
-        pe,
-        source_code=func,
-        return_type="int32",
-    )
+    ETENSOR_WORKSPACE_SIZE = 1024 * 1024 # 4MB
+    NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
+    PROFILER_BUFFER_SIZE = int(1e7)
+    PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 
-
-def atomic_add_int32_local_release(addr, value):
-    func = """
-__forceinline__ __device__ int32_t atomic_add_int32_release(int32_t* addr, int32_t value) {
-    int32_t old_value;
-    asm volatile ("atom.release.gpu.global.add.s32 %0, [%1], %2;"
-                  : "=r"(old_value)
-                  : "l"(addr), "r"(value)
-                  : "memory");
-    return old_value;
-}
-"""
-    return T.cuda.func_call(
-        "atomic_add_int32_release",
-        addr,
-        value,
-        source_code=func,
-        return_type="int32",
-    )
-
-
-def atomic_add_int32_local(addr, value):
-    func = """
-__forceinline__ __device__ int32_t atomic_add_int32(int32_t* addr, int32_t value) {
-    return atomicAdd(addr, value);
-}
-"""
-    return T.cuda.func_call(
-        "atomic_add_int32",
-        addr,
-        value,
-        source_code=func,
-        return_type="int32",
-    )
-
-
-def is_const_minus_one(value):
-    return (isinstance(value, int) and value == -1) or (
-        isinstance(value, tvm.tir.IntImm) and value.value == -1
-    )
-
-
-def atomic_add_int32(addr, value, pe, release=False):
-    if is_const_minus_one(pe):
-        if release:
-            return atomic_add_int32_local_release(addr, value)
+    def __init__(
+        self,
+        config: Dict = {},
+        tp_size: int = 1,
+        profiler_on: bool = False,
+    ):
+        self.tp_size = tp_size
+        self.config = config
+        self.profiler_on = profiler_on
+        self.tile_attr = {}
+        self.class_list = set()
+        self.etensor_and_f_init_pairs = []
+        self.num_etensors = {}
+        self.etensor_workspace_offset = 0
+        
+    def _init_profiler(self, profiler_buffer):
+        if self.profiler_on:
+            self.profiler = CudaProfiler(
+                profiler_buffer, write_stride=self.PROFILER_WRITE_STRIDE, num_groups=self.NUM_GROUPS
+            )
         else:
-            return atomic_add_int32_local(addr, value)
-    else:
-        print(f"pe is not -1: {pe}, {type(pe)}")
-        return atomic_add_int32_remote(addr, value, pe)
+            self.profiler = None
+
+    def _init_tile_scheduler(self, scheduler_class: Type[TileSchedulerBase], *args):
+        self.tile_scheduler: TileSchedulerBase = scheduler_class(*args)
+
+    def _add_tile(self, tile, profiler_event_type, predicate=True):
+        self.tile_attr[tile] = (profiler_event_type, predicate)
+        self.class_list.add(tile.__class__)
+        return tile
+        
+    @T.macro
+    def init_profiler(self, profiler_buffer):
+        self._init_profiler(profiler_buffer)
+        with T.cta():
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            if self.profiler_on:
+                self.profiler.init(warp_id)
+                
+    def set_smem_manager(self, smem_max_bytes, chunk_size, ptr: Var):
+        self.smem_manager = SmemManager(smem_max_bytes, chunk_size, ptr)
+
+    @T.macro
+    def init_tile_scheduler(self, is_dynamic_sch, scheduler_class, *args):
+        self._init_tile_scheduler(scheduler_class, *args)
+        with T.cta():
+            self.tile_scheduler.init()
+            if is_dynamic_sch:
+                self.tile_scheduler.next_tile()
+
+    @T.macro
+    def run_tile(self, tile: Tile, *args, **kwargs):
+        event_type = T.meta_var(self.tile_attr[tile][0])
+        self.smem_manager.enter_tile_runtime(tile)
+        with T.cta():
+            lane_id = T.thread_id([32], parent="warp")
+            if self.profiler_on:
+                self.profiler.start(event_type, lane_id == 0)
+            tile.run(*args, **kwargs)
+            if self.profiler_on:
+                self.profiler.end(event_type, lane_id == 0)
+
+    @T.macro
+    def run_tile_prefetch(self, tile: Tile, *args):
+        self.smem_manager.enter_tile_runtime(tile)
+        with T.cta():
+            lane_id = T.thread_id([32], parent="warp")
+            if self.profiler_on:
+                self.profiler.start(ProfileEventType.PREFETCH, lane_id == 0)
+            tile.prefetch(*args)
+            if self.profiler_on:
+                self.profiler.end(ProfileEventType.PREFETCH, lane_id == 0)
+
+    def add_etensor(self, sem_class, etensor_workspace, shape, f_init):
+        size = functools.reduce(lambda x, y: x * y, shape, 1)
+        etensor_buffer = T.decl_buffer(shape, "int32", etensor_workspace.data, elem_offset=self.etensor_workspace_offset, name="etensor")
+        self.etensor_workspace_offset += size
+        etensor = sem_class(etensor_buffer)
+        self.etensor_and_f_init_pairs.append((etensor_buffer, f_init))
+        return etensor
+
+    def set_events_complete(self, is_dynamic_sch, Semaphore: Type[SemaphoreBase], etensor_workspace_global):
+        if not is_dynamic_sch:
+            l = len(self.etensor_and_f_init_pairs)
+            self.evt_etensor_init_complete = self.add_etensor(
+                Semaphore, etensor_workspace_global,
+                shape=[1], f_init=f_init_const(l + 1 + KernelConfig.SM_NUMBER)
+            )
+        else:
+            self.evt_etensor_init_complete = None
+        self.init_etensor_tile = self._add_tile(InitETensorTile(self.etensor_and_f_init_pairs), ProfileEventType.INIT_ETENSOR)
+
+
+    @T.macro
+    def task_impl_init_etensor(self, is_dynamic_sch):
+        # TODO: add wait, notify and push
+        self.run_tile(self.init_etensor_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx)
+        if self.evt_etensor_init_complete is not None:
+            if self.tile_scheduler.m_idx < len(self.etensor_and_f_init_pairs):
+                self.tile_scheduler.notify(
+                    self.evt_etensor_init_complete, lambda notify_idx: (1, -1, 0), scope="cta", release=True
+                )
+
+    @T.macro
+    def task_impl_wait_etensor_init_complete(self, is_dynamic_sch):
+        if not is_dynamic_sch:
+            with T.thread():
+                warp_id = T.warp_id(
+                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
+                )
+                lane_id = T.thread_id([32], parent="warp")
+                if self.profiler_on:
+                    self.profiler.start(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
+                state = T.alloc_local([1], "int32")
+                state[0] = -1
+                while 1:
+                    if lane_id == 0:
+                        T.ptx.ld_global_acquire(
+                            state[0],
+                            self.evt_etensor_init_complete.sem.ptr_to([0]),
+                        )
+                    if any_sync(0xFFFFFFFF, state[0] <= KernelConfig.SM_NUMBER * (SemaphoreBase.base + 1) and state[0] > 0):
+                        if lane_id == 0 and warp_id == 0:
+                            T.cuda.atomic_add(self.evt_etensor_init_complete.sem.ptr_to([0]), -(SemaphoreBase.base + 1))
+                        break
+                    T.cuda.nano_sleep(40)
+                if self.profiler_on:
+                    self.profiler.end(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
+
+    def reset(self):
+        self.tile_attr = {}
+        self.class_list = set()
+        self.etensor_and_f_init_pairs = []
+        self.etensor_workspace_offset = 0
+
+    def host_init_all(self):
+        for tile, (_, predicate) in self.tile_attr.items():
+            if predicate:
+                tile.host_init()
+
+    def class_init_all(self, smem_manager: SmemManager):
+        for cls in self.class_list:
+            if cls.need_init:
+                smem_manager.set_tile(cls)
+                cls.class_init(smem_manager)
+
+    def class_finalize_all(self):
+        for cls in self.class_list:
+            if cls.need_init:
+                cls.class_finalize()
+
+    def device_init_all(self, smem_manager: SmemManager):
+        for tile, (_, predicate) in self.tile_attr.items():
+            if predicate:
+                smem_manager.set_tile(tile)
+                tile.init(smem_manager)
+
+    def get_func_static(self, unfused=False):
+        raise NotImplementedError
+
+    def get_func_dynamic(self):
+        raise NotImplementedError
+
+    def get_func(self, scheduler: Literal["static", "dynamic", "unfused"]):
+        if scheduler == "static" or scheduler == "unfused":
+            return self.get_func_static(unfused = scheduler == "unfused")
+        elif scheduler == "dynamic":
+            return self.get_func_dynamic()
+        else:
+            raise ValueError(f"Unsupported scheduler: {scheduler}")
+
+    def get_module(self, scheduler: Literal["static", "dynamic", "unfused"]):
+
+        @I.ir_module(tirx=True)
+        class Module:
+
+            @T.prim_func(tirx=True)
+            def main():
+                pass
+
+        module: tvm.IRModule = Module
+        if scheduler == "static" or scheduler == "unfused":
+            module.update_func(
+                module.get_global_var("main"), self.get_func_static(unfused = scheduler == "unfused")
+            )
+        elif scheduler == "dynamic":
+            module.update_func(module.get_global_var("main"), self.get_func_dynamic())
+        else:
+            raise ValueError(f"Unsupported scheduler: {scheduler}")
+        return module

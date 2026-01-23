@@ -3,8 +3,8 @@ from typing import Literal
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-from tvm.tirx.megakernel.dynamic_scheduler import DynamicTileScheduler
-from tvm.tirx.megakernel.wrapper import MegaKernelWrapper
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
+from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
 
 
 def get_llama3_megakernel_relax_mod(

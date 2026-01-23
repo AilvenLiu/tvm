@@ -5,8 +5,10 @@ import tvm
 from tvm.script import tir as T
 
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.common import SmemManager, ceildiv, KernelConfig, get_source_func
-from tvm.tirx.megakernel.gemm import GemmTile
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.utils import ceildiv, get_source_func
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.kernels import GemmTile
 
 def prepare_data(batch_size, N, K):
     A = torch.randn((batch_size, K), dtype=torch.float16)
@@ -41,11 +43,7 @@ class LMHeadLayer:
 
     @T.macro
     def body(self, A, B, out, blk_m):
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         gemm_tile = T.meta_var(GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m))
-        gemm_tile.set_tensor_map(A_tensor_map, B_tensor_map, D_tensor_map, A, B, out)
         gemm_tile.host_init()
         with T.kernel():
             bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
@@ -61,7 +59,7 @@ class LMHeadLayer:
                 smem_manager.init()
                 while scheduler.valid():
                     smem_manager.enter_tile_runtime(gemm_tile)
-                    gemm_tile.run(0, scheduler.idx[0], 0)
+                    gemm_tile.run(0, scheduler.idx[0], 0, A, B, out)
                     smem_manager.exit_tile_runtime()
                     scheduler.next()
                 gemm_tile.__class__.class_finalize()

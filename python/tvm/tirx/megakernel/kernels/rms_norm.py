@@ -1,16 +1,9 @@
 from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
-from .common import (
-    F16_BYTES,
-    KernelConfig,
-    Tile,
-    ceildiv,
-    find_power_of_two,
-    float22half2,
-    half22float2,
-    rsqrt,
-    SmemManager,
-)
+from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class RMSnormTile(Tile):
@@ -72,11 +65,7 @@ class RMSnormTile(Tile):
                     if batch_idx < self.batch_size and head_idx < self.kv_heads + self.qo_heads:
                         for kv in T.unroll(self.vec_size):
                             self.input_vec[kv] = qkv[batch_idx, head_idx, st + kv]
-                        for kv in T.unroll(self.vec_size // 2):
-                            half22float2(
-                                T.address_of(self.input_vec_f32[kv * 2]),
-                                T.address_of(self.input_vec[kv * 2]),
-                            )
+                        Tx.cast(self.input_vec_f32[:], self.input_vec[:], vec_len=self.vec_size)
                         for kv in T.unroll(self.vec_size):
                             self.sum_sq[0] += self.input_vec_f32[kv] * self.input_vec_f32[kv]
 
@@ -102,20 +91,12 @@ class RMSnormTile(Tile):
                         else:
                             for kv in T.unroll(self.vec_size):
                                 self.weight_vec[kv] = k_weight[st + kv]
-                        for kv in T.unroll(self.vec_size // 2):
-                            half22float2(
-                                T.address_of(self.weight_vec_f32[kv * 2]),
-                                T.address_of(self.weight_vec[kv * 2]),
-                            )
+                        Tx.cast(self.weight_vec_f32[:], self.weight_vec[:], vec_len=self.vec_size)
                         for kv in T.unroll(self.vec_size):
                             self.input_vec_f32[kv] = (
                                 self.input_vec_f32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
                             )
-                        for kv in T.unroll(self.vec_size // 2):
-                            float22half2(
-                                T.address_of(self.input_vec[kv * 2]),
-                                T.address_of(self.input_vec_f32[kv * 2]),
-                            )
+                        Tx.cast(self.input_vec[:], self.input_vec_f32[:], vec_len=self.vec_size)
                         for kv in T.unroll(self.vec_size):
                             qkv[batch_idx, head_idx, st + kv] = self.input_vec[kv]
 

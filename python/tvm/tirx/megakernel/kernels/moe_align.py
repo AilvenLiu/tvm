@@ -1,11 +1,9 @@
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
-from .common import F32_BYTES, F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, float22half2
-
-
-def next_power_of_two(x):
-    return 1 << (x - 1).bit_length()
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv, next_power_of_two
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class MOEAlignTile(Tile):

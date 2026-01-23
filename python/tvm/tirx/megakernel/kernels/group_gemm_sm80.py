@@ -3,7 +3,10 @@ from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
 
-from .common import KernelConfig, ProfileEventType, SmemManager, Tile, ceildiv, F16_BYTES, F32_BYTES
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
+
 
 def int_cell(value):
     buf = T.local_cell("int32")

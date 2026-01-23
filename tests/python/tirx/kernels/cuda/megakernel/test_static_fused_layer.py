@@ -13,18 +13,18 @@ from tvm import relax as rx
 import flashinfer
 import torch
 
-from tvm.tirx.megakernel.relax_compatible.gemm import FuseGemmTile, FuseGateUpSiluTile
-from tvm.tirx.megakernel.relax_compatible.gemm_splitk_reduce import FuseSplitKReduceTile
-from tvm.tirx.megakernel.relax_compatible.reduce_rms_rope_append import FuseSplitKReduceRMSnormRopeQTile, FuseSplitKReduceRMSnormRopeAppendKTile, FuseSplitKReduceAppendVTile
-from tvm.tirx.megakernel.relax_compatible.batch_attn import FuseBatchAttnTile
-from tvm.tirx.megakernel.relax_compatible.batch_merge import FuseBatchMergeTile
-from tvm.tirx.megakernel.relax_compatible.add_rmsnorm import FuseAddRMSNormTile, FuseRMSNormTile
-
-from tvm.tirx.megakernel.common import KernelConfig, ceildiv, JobType, event_type_names
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.support import get_inverse_plan_info
-import tvm.tirx.megakernel.static_scheduler as static_scheduler
-import tvm.tirx.megakernel.dynamic_scheduler as dynamic_scheduler
+
+from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, event_type_names
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.support import get_inverse_plan_info
+from tvm.tirx.megakernel.utils import static_scheduler
+from tvm.tirx.megakernel.utils import dynamic_scheduler
+from tvm.tirx.megakernel.relax_compatible import (
+    FuseRMSNormTile, FuseGemmTile, FuseGateUpSiluTile, 
+    FuseSplitKReduceRMSnormRopeQTile, FuseSplitKReduceRMSnormRopeAppendKTile,
+    FuseSplitKReduceAppendVTile, FuseBatchAttnTile, FuseBatchMergeTile,
+)
 
 class MegaKernel:
 

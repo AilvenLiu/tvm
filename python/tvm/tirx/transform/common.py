@@ -146,11 +146,17 @@ class BufferReplacer(StmtExprMutator):
                 new_workspace[key] = new_buffer
             else:
                 new_workspace[key] = value
+        new_config = {}
+        for key, value in op.config.items():
+            if isinstance(value, PrimExpr):
+                new_config[key] = self.visit_expr(value)
+            else:
+                new_config[key] = value
         args = list()
         for arg in op.args:
             args.append(arg)
         return OpCall(
-            *args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch
+            *args, op=op.op, workspace=new_workspace, config=new_config, dispatch=op.dispatch
         )
 
 

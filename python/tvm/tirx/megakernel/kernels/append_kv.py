@@ -1,7 +1,8 @@
 from tvm.script import tir as T
 
-from .common import KernelConfig, Tile, ceildiv, F16_BYTES, SmemManager
-
+from tvm.tirx.megakernel.utils.base import KernelConfig, Tile
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.config import F16_BYTES
 
 class AppendKVTile(Tile):
 

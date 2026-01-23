@@ -2,6 +2,7 @@ import argparse
 import math
 import tempfile
 import functools
+from typing import Literal, Type, Union
 
 import flashinfer
 import numpy as np
@@ -16,29 +17,24 @@ from tvm.script import tirx as Tx
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
-from tvm.tirx.megakernel.common import *
-from tvm.tirx.megakernel.add_rmsnorm import AddRMSNormTile, RMSNormTile
-from tvm.tirx.megakernel.allreduce import AllreduceTile
-from tvm.tirx.megakernel.batch_attn import BatchAttnTile
-from tvm.tirx.megakernel.batch_merge import BatchMergeTile
-from tvm.tirx.megakernel.dynamic_scheduler import DynamicTileScheduler
-from tvm.tirx.megakernel.gemm import GemmTile
-from tvm.tirx.megakernel.gemm_splitk_reduce import MOETopKReduceTile, SplitKReduceTile
-from tvm.tirx.megakernel.moe_align import MOEAlignTile, CountAndSortExpertTokens
-from tvm.tirx.megakernel.reduce_append_v import SplitKReduceAppendVTile
-from tvm.tirx.megakernel.reduce_rms_norm_rope_append_k import SplitKReduceRMSnormRopeAppendKTile
-from tvm.tirx.megakernel.reduce_rms_norm_rope_q import SplitKReduceRMSnormRopeQTile
-from tvm.tirx.megakernel.split_silu_multiply import SiluMultiplyMOETile
-from tvm.tirx.megakernel.static_scheduler import JobType, StaticTileScheduler
-from tvm.tirx.megakernel.group_gemm_sm100 import GroupGEMMTile
-from tvm.tirx.megakernel.topk_softmax import TopkSoftmaxTile
-from tvm.tirx.megakernel import static_scheduler, dynamic_scheduler
-from tvm.tirx.megakernel.model_config import qwen3_30b_a3b_config
-from tvm.tirx.megakernel.support import (
+
+from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig, qwen3_30b_a3b_config, JobType, event_type_names
+from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SmemManager
+from tvm.tirx.megakernel.utils.utils import get_source, ceildiv
+from tvm.tirx.megakernel.utils import static_scheduler, dynamic_scheduler
+from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
+from tvm.tirx.megakernel.kernels import (
+    AddRMSNormTile, RMSNormTile, AllreduceTile, BatchAttnTile, BatchMergeTile,
+    GemmTile, SplitKReduceTile, SplitKReduceRMSnormRopeQTile,
+    SplitKReduceRMSnormRopeAppendKTile, SplitKReduceAppendVTile
+)
+from tvm.tirx.megakernel.utils.support import (
     generate_exec_queue,
     get_inverse_plan_info,
     get_max_num_tokens_padded,
 )
+
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import (
     invoke_fused_moe_kernel,
 )
@@ -176,6 +172,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
 
     def set_events(
         self,
+        is_dynamic_sch,
         batch_size,
         attn_task_num,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
@@ -197,7 +194,8 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             Semaphore,
             etensor_workspace_global,
         )
-        self.set_events_complete(Semaphore, etensor_workspace_global)
+        self.set_events_complete(is_dynamic_sch, Semaphore, etensor_workspace_global)
+        self.num_etensors[is_dynamic_sch] = len(self.etensor_and_f_init_pairs)
 
     # Override attn_add_rms_norm to trigger MoE instead of MLP
     @T.macro
@@ -247,7 +245,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             self.tile_scheduler.notify(self.evt_attn_mlp, lambda notify_idx: (1, -1, 0), scope="cta")
 
     @T.macro
-    def task_impl_moe_gating(self, is_dynamic_sch):
+    def task_impl_moe_gating(self, A, B, output, is_dynamic_sch):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
@@ -264,6 +262,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.m_idx,
                 self.tile_scheduler.n_idx,
                 self.tile_scheduler.k_idx,
+                A, B, output,
                 self.profiler,
             )
             self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
@@ -271,6 +270,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
     @T.macro
     def task_impl_moe_group_gemm_down(
         self,
+        A, B, output,
         batch_size,
         expert_ids_global,
         topk_weights_flattened,
@@ -301,6 +301,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         self.tile_scheduler.m_idx,
                         self.tile_scheduler.n_idx * down_proj_task_size + i,
                         self.tile_scheduler.k_idx,
+                        A, B, output,
                         expert_ids_global,
                         topk_weights_flattened,
                         sorted_token_ids_global,
@@ -419,88 +420,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             Union[static_scheduler.StaticTileScheduler, dynamic_scheduler.DynamicTileScheduler]
         ],
     ):
-        # Allocate tensor maps for attention
-        A_tensor_map_qkv_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map_qkv_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_qkv_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_o_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map_o_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_o_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-
-        # Allocate tensor maps for MoE
-        A_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_gate_up_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_gate_up_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_gate_up_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map_grp_gate_up: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_gate_up_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_gate_up_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_gate_up_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_down_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_down_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_down_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map_grp_down: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_down_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_down_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_down_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-
+ 
         # Initialize tiles
         self.set_tiles(batch_size, BLK_M, low_batch)
-
-        # Set tensor maps for attention
-        self.qkv_proj_tile.set_tensor_map(
-            A_tensor_map_qkv_proj,
-            B_tensor_map_qkv_proj,
-            D_tensor_map_qkv_proj,
-            hidden_state_global,
-            qkv_proj_weight_global,
-            partial_qkv_global,
-        )
-        self.o_proj_tile.set_tensor_map(
-            A_tensor_map_o_proj,
-            B_tensor_map_o_proj,
-            D_tensor_map_o_proj,
-            o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer,
-            o_proj_weight_global,
-            partial_o_global if self.world_size > 1 else residual_global,
-        )
-
-        # Set tensor maps for MoE
-        self.gate.set_tensor_map(
-            A_tensor_map_gate,
-            B_tensor_map_gate,
-            D_tensor_map_gate,
-            hidden_state_attn_mlp_global,
-            gate_weight_global,
-            gating_output_global,
-        )
-        self.group_gemm_gate_up_silu.set_tensor_map(
-            [
-                A_tensor_map_grp_gate_up_128,
-                A_tensor_map_grp_gate_up_64,
-                A_tensor_map_grp_gate_up_32,
-            ],
-            B_tensor_map_grp_gate_up,
-            [
-                D_tensor_map_grp_gate_up_128,
-                D_tensor_map_grp_gate_up_64,
-                D_tensor_map_grp_gate_up_32,
-            ],
-            reordered_hidden_state_global,
-            grp_gate_up_weight_global,
-            silu_mul_output_global,
-        )
-        self.group_gemm_down.set_tensor_map(
-            [A_tensor_map_grp_down_128, A_tensor_map_grp_down_64, A_tensor_map_grp_down_32],
-            B_tensor_map_grp_down,
-            [D_tensor_map_grp_down_128, D_tensor_map_grp_down_64, D_tensor_map_grp_down_32],
-            silu_mul_output_global,
-            grp_down_weight_global,
-            output_global if self.world_size > 1 else residual_global,
-        )
-
         self.host_init_all()
 
         with T.kernel():
@@ -516,29 +438,29 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
 
             with T.cta():
                 buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
-                self.device_init_all(smem_manager)
-                self.class_init_all(smem_manager)
+                # initialize smem manager
+                self.set_smem_manager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
+
+                # initialize device
+                self.device_init_all(self.smem_manager)
+                self.class_init_all(self.smem_manager)
 
                 # Initialize event tensors
                 attn_task_num = T.meta_var(work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER])
                 self.set_events(
+                    issubclass(Scheduler, DynamicTileScheduler),
                     batch_size,
                     attn_task_num,
                     Semaphore,
                     etensor_workspace_global,
                 )
-
-                # Initialize tile scheduler and smem_manager
-                self.init_tile_scheduler(
-                    issubclass(Scheduler, StaticTileScheduler),
-                    smem_manager,
-                    exec_queue,
-                    exec_task,
-                    exec_head,
-                    exec_tail,
-                )
-                smem_manager.init()
+                
+                # initialize tile scheduler and smem_manager
+                if issubclass(Scheduler, static_scheduler.StaticTileScheduler):
+                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)
+                else:
+                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)
+                self.smem_manager.init()
 
                 topk_ids_flattened = topk_indices_global.view(-1)
                 topk_weights_flattened = topk_weights_global.view(-1)
@@ -548,7 +470,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
 
                     # Attention tasks (inherited from MegaKernelDenseLayer)
                     if self.tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
-                        self.task_impl_gemm_qkv_proj(is_dynamic_sch)
+                        self.task_impl_gemm_qkv_proj(
+                            hidden_state_global,
+                            qkv_proj_weight_global,
+                            partial_qkv_global,
+                            is_dynamic_sch,
+                        )
                     elif self.tile_scheduler.task_type == JobType.Q_REDUCE_RMS_ROPE.value:
                         self.task_impl_q_reduce_rms_rope(
                             batch_size,
@@ -586,7 +513,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         )
                     elif self.tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
                         self.task_impl_batch_attention(
-                            smem_manager,
+                            self.smem_manager,
                             qkv_global,
                             kv_cache_global,
                             q_indptr_global,
@@ -622,7 +549,13 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                        self.task_impl_gemm_o_proj(batch_size, is_dynamic_sch)
+                        self.task_impl_gemm_o_proj(
+                            batch_size,
+                            o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer,
+                            o_proj_weight_global,
+                            partial_o_global if self.world_size > 1 else residual_global,
+                            is_dynamic_sch
+                        )
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                         self.task_impl_gemm_o_reduce(
                             batch_size,
@@ -653,7 +586,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     is_dynamic_sch = T.meta_var(issubclass(Scheduler, DynamicTileScheduler))
                     # MoE tasks (inherited from MegaKernelMOE)
                     if self.tile_scheduler.task_type == JobType.MOE_GATING.value:
-                        self.task_impl_moe_gating(is_dynamic_sch)
+                        self.task_impl_moe_gating(
+                            hidden_state_attn_mlp_global,
+                            gate_weight_global,
+                            gating_output_global,
+                            is_dynamic_sch
+                        )
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
                         self.task_impl_moe_topk_softmax(
                             gating_output_global,
@@ -685,6 +623,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value:
                         self.task_impl_moe_group_gemm_gate_up_silu(
+                            reordered_hidden_state_global,
+                            grp_gate_up_weight_global,
+                            silu_mul_output_global,
                             topk_weights_flattened,
                             sorted_token_ids_global,
                             expert_ids_global,
@@ -696,6 +637,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
                         self.task_impl_moe_group_gemm_down(
+                            silu_mul_output_global,
+                            grp_down_weight_global,
+                            output_global if self.world_size > 1 else residual_global,
                             batch_size,
                             expert_ids_global,
                             topk_weights_flattened,
@@ -714,16 +658,16 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             is_dynamic_sch,
                         )
                     else:
-                        trap_when_assert_failed(False)
+                        T.cuda.trap_when_assert_failed(False)
 
-                    smem_manager.exit_tile_runtime()
+                    self.smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
 
                 if self.profiler_on:
                     self.profiler.finalize(lane_id == 0)
                 self.class_finalize_all()
 
-    def _get_func_dynamic(self):
+    def get_func_dynamic(self):
         """Dynamic scheduler function combining attention and MoE"""
         # fmt: off
         @T.prim_func(tirx=True)
@@ -916,7 +860,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         # fmt: on
         return main
 
-    def _get_func_static(self):
+    def get_func_static(self, unfused=False):
         """Static scheduler function combining attention and MoE"""
         # fmt: off
         @T.prim_func(tirx=True)
@@ -1102,30 +1046,6 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 run(128, True)
         # fmt: on
         return main
-
-    def get_func(self, scheduler: Literal["static", "dynamic"]):
-        if scheduler == "static":
-            return self._get_func_static()
-        elif scheduler == "dynamic":
-            return self._get_func_dynamic()
-        else:
-            raise ValueError(f"Unsupported scheduler: {scheduler}")
-
-    def get_module(self, scheduler: Literal["static", "dynamic"]):
-        @I.ir_module(tirx=True)
-        class Module:
-            @T.prim_func(tirx=True)
-            def main():
-                pass
-
-        module: tvm.IRModule = Module
-        if scheduler == "static":
-            module.update_func(module.get_global_var("main"), self._get_func_static())
-        elif scheduler == "dynamic":
-            module.update_func(module.get_global_var("main"), self._get_func_dynamic())
-        else:
-            raise ValueError(f"Unsupported scheduler: {scheduler}")
-        return module
 
 
 # Module-level helper functions
@@ -1414,13 +1334,13 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 arg_dict["attn_task_num"].item(),
                 mk.config,
                 mk.world_size,
-                mk.num_etensors[scheduler],
+                mk.num_etensors[False],
                 "static",
             )
             tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             # Dynamic scheduler
-            exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, mk.num_etensors[scheduler],  "dynamic")
+            exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, mk.num_etensors[True],  "dynamic")
             for i in range(REPEAT):
                 tvm_arg_dict[f"queue_tasks_{i}"] = tvm.runtime.tensor(exec_queue.tasks, DEV)
                 tvm_arg_dict[f"queue_head_{i}"] = tvm.runtime.tensor(exec_queue.head, DEV)
@@ -1974,7 +1894,7 @@ if __name__ == "__main__":
     if "dynamic" in testing_scheduler:
         print("\nCompiling dynamic scheduler module...")
         mega_dynamic_module = mega_kernel_wrapper.get_module("dynamic")
-        from tvm.tirx.megakernel.common import get_source
+        from tvm.tirx.megakernel.utils.common import get_source
 
         src, lib_dynamic = get_source(mega_dynamic_module)
         print(src)

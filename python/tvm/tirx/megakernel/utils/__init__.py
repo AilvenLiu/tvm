@@ -15,6 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Utility modules for megakernel."""
+from . import base
+from . import config
 from . import utils
-from . import kernels
-# from . import relax_compatible
+from . import support
+from . import static_scheduler
+from . import dynamic_scheduler

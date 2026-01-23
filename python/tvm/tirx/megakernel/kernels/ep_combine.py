@@ -1,9 +1,7 @@
-import math
-import numpy as np
-
-import tvm
 from tvm.script import tir as T
-from .common import KernelConfig, Tile, SmemManager
+
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
 class EPCombineSendTile(Tile):

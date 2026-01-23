@@ -2,9 +2,10 @@ from typing import Any, Dict
 
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.script.ir_builder import IRBuilder
 
-from .common import F32_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv, exp2
+from tvm.tirx.megakernel.utils.config import KernelConfig, F32_BYTES
 
 
 class DecodeMergeTile(Tile):

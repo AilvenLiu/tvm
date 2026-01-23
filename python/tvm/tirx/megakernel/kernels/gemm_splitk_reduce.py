@@ -1,6 +1,9 @@
 from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
-from .common import F32_BYTES, KernelConfig, SmemManager, Tile, ceildiv, float22half2
+from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.config import KernelConfig, F32_BYTES
 
 
 class SplitKReduceTile(Tile):
@@ -46,10 +49,8 @@ class SplitKReduceTile(Tile):
                         self.tmp[kv] = input[kt, thread_m_idx, thread_n_idx + kv]
                     for kv in T.unroll(self.VEC_SIZE):
                         self.vec_32[kv] += self.tmp[kv]
-                for kv in T.unroll(self.VEC_SIZE // 2):
-                    float22half2(
-                        T.address_of(self.vec_16[kv * 2]), T.address_of(self.vec_32[kv * 2])
-                    )
+                with T.thread():
+                    Tx.cast(self.vec_16[:], self.vec_32[:], vec_len=self.VEC_SIZE)
                 for kv in T.vectorized(self.VEC_SIZE):
                     output[thread_m_idx, thread_n_idx + kv] = self.vec_16[kv]
                 self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
@@ -78,10 +79,8 @@ class MOETopKReduceTile(SplitKReduceTile):
                         self.tmp[kv] = input[thread_m_idx, kt, thread_n_idx + kv]
                     for kv in T.unroll(self.VEC_SIZE):
                         self.vec_32[kv] += self.tmp[kv]
-                for kv in T.unroll(self.VEC_SIZE // 2):
-                    float22half2(
-                        T.address_of(self.vec_16[kv * 2]), T.address_of(self.vec_32[kv * 2])
-                    )
+                with T.thread():
+                    Tx.cast(self.vec_16[:], self.vec_32[:], vec_len=self.VEC_SIZE)
                 for kv in T.vectorized(self.VEC_SIZE):
                     output[thread_m_idx, thread_n_idx + kv] = self.vec_16[kv]
                 self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS

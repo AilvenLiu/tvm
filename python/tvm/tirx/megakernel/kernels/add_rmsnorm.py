@@ -1,7 +1,9 @@
 from tvm.script import tir as T
-from tvm.script import tirx as Tx
+from tvm.script import tirx as Tx 
 
-from .common import F16_BYTES, F32_BYTES, KernelConfig, Tile, SmemManager, ceildiv, find_power_of_two, rsqrt
+from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
+from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES, F32_BYTES
 
 
 class AddRMSNormTile(Tile):
