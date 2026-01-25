@@ -9,8 +9,9 @@ from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.common import ProfileEventType, get_source, KernelConfig
-from tvm.tirx.megakernel.topk_softmax import TopkSoftmaxTile
+from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
+from tvm.tirx.megakernel.utils.utils import get_source
+from tvm.tirx.megakernel.kernels.topk_softmax import TopkSoftmaxTile
 
 
 class TopkSoftmaxKernel:

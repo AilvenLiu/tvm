@@ -7,8 +7,9 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.moe_align import MOEAlignTile, CountAndSortExpertTokens
-from tvm.tirx.megakernel.common import SmemManager, KernelConfig
+from tvm.tirx.megakernel.kernels.moe_align import MOEAlignTile, CountAndSortExpertTokens
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 

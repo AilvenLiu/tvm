@@ -9,13 +9,15 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import tir as T
-from tvm.tirx.megakernel.common import ProfileEventType, get_source, KernelConfig, SmemManager
-from tvm.tirx.megakernel.ep_dispatch import (
+from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.utils import get_source
+from tvm.tirx.megakernel.kernels.ep_dispatch import (
     EPDispatchPrecomputeTile,
     EPDispatchSendTile,
     EPDispatchRecvTile,
 )
-from tvm.tirx.megakernel.ep_combine import EPCombineSendTile, EPCombineRecvTile
+from tvm.tirx.megakernel.kernels.ep_combine import EPCombineSendTile, EPCombineRecvTile
 
 
 class EPDispatchKernel:

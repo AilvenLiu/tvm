@@ -9,8 +9,10 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.group_gemm_sm100 import GroupGEMMTile
-from tvm.tirx.megakernel.common import SmemManager, KernelConfig, ceildiv
+from tvm.tirx.megakernel.kernels.group_gemm_sm100 import GroupGEMMTile
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
