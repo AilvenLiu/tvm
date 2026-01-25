@@ -117,19 +117,11 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
         valid_num_tokens = T.match_buffer(valid_num_tokens_ptr, (M // MAX_BLK_M), "int32")
         numel = T.int32()
         routing_weights = T.match_buffer(routing_weights_ptr, (numel), "float32")
-        A_tensor_map_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        C_tensor_map_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        C_tensor_map_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        C_tensor_map_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         group_gemm_tile = T.meta_var(
             GroupGEMMTile(
                 N, K, E, top_k, numel, "float16", "float16", acc_output=acc_output, low_batch=low_batch
             )
         )
-        group_gemm_tile.set_tensor_map([A_tensor_map_128, A_tensor_map_64, A_tensor_map_32], B_tensor_map, [C_tensor_map_128, C_tensor_map_64, C_tensor_map_32], A, B, C)
         group_gemm_tile.host_init()
         with T.kernel():
             cta_cnt = T.meta_var(KernelConfig.SM_NUMBER)  # persistent kernel
@@ -140,7 +132,6 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
             smem_manager.set_tile(group_gemm_tile)
             group_gemm_tile.init(smem_manager)
-            smem_manager.pool_allocator.move_base_to(16384*14) # FIXME: this should be fixed in smem manager
             smem_manager.set_tile(group_gemm_tile.__class__)
             GroupGEMMTile.class_init(smem_manager)
             M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], MAX_BLK_M))
@@ -150,7 +141,7 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             smem_manager.init()
             while tile_scheduler.valid():
                 smem_manager.enter_tile_runtime(group_gemm_tile)
-                group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens,None)
+                group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, A, B, C, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, None)
                 tile_scheduler.next_tile()
             GroupGEMMTile.class_finalize()
     return group_gemm
