@@ -44,10 +44,6 @@ bool ComposeLayoutNode::VerifyWellFormed() const {
   if (!swizzle->VerifyWellFormed() || !tile_layout->VerifyWellFormed()) {
     return false;
   }
-  arith::Analyzer analyzer;
-  if (!analyzer.CanProve(FloorMod(tile_layout->GetSpan(), swizzle->GetSize()) == 0)) {
-    return false;
-  }
   return true;
 }
 
@@ -105,6 +101,15 @@ ffi::Optional<TLayout> ComposeLayoutNode::IsTileOuter(
     const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& outer_shape) const {
   return std::nullopt;
+}
+
+ffi::Optional<TLayout> ComposeLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
+                                                const Region& region) const {
+  // Slice applies to the tile layout then compose with swizzle.
+  auto sliced_opt = tile_layout->Slice(shape, region);
+  if (!sliced_opt.has_value()) return std::nullopt;
+  auto sliced = sliced_opt.value().as<TileLayout>().value();
+  return ComposeLayout(swizzle, sliced);
 }
 
 }  // namespace tir

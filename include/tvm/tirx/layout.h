@@ -76,6 +76,10 @@ class TLayoutNode : public Object {
   virtual TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
                        const ffi::Array<PrimExpr>& inner_shape) const = 0;
 
+  /*! \brief Slice the layout with a given shape and region */
+  virtual ffi::Optional<TLayout> Slice(const ffi::Array<PrimExpr>& shape,
+                                       const Region& region) const = 0;
+
   /*! \brief Direct-sum on the tiling domain (unscaled composition)
    *  Given left layout A (grouped by left_shape) and this layout B (grouped by right_shape),
    *  construct the interleaved-domain direct sum A + B without span scaling.
@@ -121,9 +125,9 @@ class TLayoutNode : public Object {
    *  \param interleaved_shape The interleaved domain S_A \otimes S_B, i.e., [A0, B0, A1, B1, ...]
    *  \param left_shape The shape that groups this (left) layout
    */
-  virtual ffi::Optional<TLayout> IsDirectSumLeft(
-      const TLayout& sum_layout, const ffi::Array<PrimExpr>& interleaved_shape,
-      const ffi::Array<PrimExpr>& left_shape) const = 0;
+  virtual ffi::Optional<TLayout> IsDirectSumLeft(const TLayout& sum_layout,
+                                                 const ffi::Array<PrimExpr>& interleaved_shape,
+                                                 const ffi::Array<PrimExpr>& left_shape) const = 0;
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_FFI_DECLARE_OBJECT_INFO("tirx.TLayout", TLayoutNode, Object);
@@ -349,9 +353,9 @@ class TileLayoutNode : public TLayoutNode {
                                      const ffi::Array<PrimExpr>& tiled_shape,
                                      const ffi::Array<PrimExpr>& outer_shape) const final;
 
-  ffi::Optional<TileLayout> IsDirectSumRight(
-      const TLayout& sum_layout, const ffi::Array<PrimExpr>& interleaved_shape,
-      const ffi::Array<PrimExpr>& right_shape) const final;
+  ffi::Optional<TileLayout> IsDirectSumRight(const TLayout& sum_layout,
+                                             const ffi::Array<PrimExpr>& interleaved_shape,
+                                             const ffi::Array<PrimExpr>& right_shape) const final;
 
   ffi::Optional<TLayout> IsDirectSumLeft(const TLayout& sum_layout,
                                          const ffi::Array<PrimExpr>& interleaved_shape,
@@ -361,7 +365,7 @@ class TileLayoutNode : public TLayoutNode {
   ffi::Array<PrimExpr> GetShardShape() const;
 
   /*! \brief Slice the layout with a given shape and region */
-  ffi::Optional<TileLayout> Slice(Array<PrimExpr> shape, Region region) const;
+  ffi::Optional<TLayout> Slice(const ffi::Array<PrimExpr>& shape, const Region& region) const final;
 
   /*! \brief Is the layout trivial (pure memory, identical mapping) */
   bool IsTrivial() const;
@@ -448,13 +452,16 @@ class SwizzleLayoutNode : public TLayoutNode {
                                      const ffi::Array<PrimExpr>& tiled_shape,
                                      const ffi::Array<PrimExpr>& outer_shape) const final;
 
-  ffi::Optional<TileLayout> IsDirectSumRight(
-      const TLayout& sum_layout, const ffi::Array<PrimExpr>& interleaved_shape,
-      const ffi::Array<PrimExpr>& right_shape) const final;
+  ffi::Optional<TileLayout> IsDirectSumRight(const TLayout& sum_layout,
+                                             const ffi::Array<PrimExpr>& interleaved_shape,
+                                             const ffi::Array<PrimExpr>& right_shape) const final;
 
   ffi::Optional<TLayout> IsDirectSumLeft(const TLayout& sum_layout,
                                          const ffi::Array<PrimExpr>& interleaved_shape,
                                          const ffi::Array<PrimExpr>& left_shape) const final;
+
+  /*! \brief Slice the layout with a given shape and region */
+  ffi::Optional<TLayout> Slice(const ffi::Array<PrimExpr>& shape, const Region& region) const final;
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SwizzleLayout", SwizzleLayoutNode, TLayoutNode);
 
@@ -522,13 +529,16 @@ class ComposeLayoutNode : public TLayoutNode {
                                      const ffi::Array<PrimExpr>& tiled_shape,
                                      const ffi::Array<PrimExpr>& outer_shape) const final;
 
-  ffi::Optional<TileLayout> IsDirectSumRight(
-      const TLayout& sum_layout, const ffi::Array<PrimExpr>& interleaved_shape,
-      const ffi::Array<PrimExpr>& right_shape) const final;
+  ffi::Optional<TileLayout> IsDirectSumRight(const TLayout& sum_layout,
+                                             const ffi::Array<PrimExpr>& interleaved_shape,
+                                             const ffi::Array<PrimExpr>& right_shape) const final;
 
   ffi::Optional<TLayout> IsDirectSumLeft(const TLayout& sum_layout,
                                          const ffi::Array<PrimExpr>& interleaved_shape,
                                          const ffi::Array<PrimExpr>& left_shape) const final;
+
+  /*! \brief Slice the layout with a given shape and region */
+  ffi::Optional<TLayout> Slice(const ffi::Array<PrimExpr>& shape, const Region& region) const final;
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ComposeLayout", ComposeLayoutNode, TLayoutNode);
 };
@@ -544,7 +554,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

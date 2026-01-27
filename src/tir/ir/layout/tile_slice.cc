@@ -51,7 +51,8 @@ ffi::Optional<TileLayout> SlicePerGroup(TileLayout layout, PrimExpr begin, PrimE
   int pivot = m - 1;
   for (; pivot >= 0; --pivot) {
     const PrimExpr& Ek = shard[pivot]->extent;
-    bool peelable = analyzer.CanProveEqual(d0[pivot], 0) && analyzer.CanProveEqual(floormod(rem, Ek), 0);
+    bool peelable =
+        analyzer.CanProveEqual(d0[pivot], 0) && analyzer.CanProveEqual(floormod(rem, Ek), 0);
     if (!peelable) break;
     peeled_rev.push_back(shard[pivot]);
     rem = analyzer.Simplify(floordiv(rem, Ek));
@@ -97,7 +98,8 @@ ffi::Optional<TileLayout> SlicePerGroup(TileLayout layout, PrimExpr begin, PrimE
   return std::nullopt;
 }
 
-ffi::Optional<TileLayout> TileLayoutNode::Slice(Array<PrimExpr> shape, Region region) const {
+ffi::Optional<TLayout> TileLayoutNode::Slice(const Array<PrimExpr>& shape,
+                                             const Region& region) const {
   arith::Analyzer analyzer;
   auto [grouped_layout, seps] = Group(ffi::GetRef<TileLayout>(this), shape);
   std::vector<Iter> new_shard;
@@ -124,10 +126,13 @@ ffi::Optional<TileLayout> TileLayoutNode::Slice(Array<PrimExpr> shape, Region re
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tir.TileLayoutSlice",
-      [](const TileLayout& layout, Array<PrimExpr> shape,
-         Region region) -> ffi::Optional<TileLayout> { return layout->Slice(shape, region); });
+  refl::GlobalDef().def("tir.TileLayoutSlice",
+                        [](const TileLayout& layout, Array<PrimExpr> shape,
+                           Region region) -> ffi::Optional<TileLayout> {
+                          auto result = layout->Slice(shape, region);
+                          if (!result.has_value()) return std::nullopt;
+                          return result.value().as<TileLayout>();
+                        });
 }
 
 }  // namespace tir

@@ -230,6 +230,27 @@ class TLayout(Object):
             self, sum_layout, interleaved_shape, left_shape
         )
 
+    def slice(
+        self, shape: List[PrimExpr], region: List[Tuple[PrimExpr, PrimExpr]]
+    ) -> Optional["TLayout"]:
+        """Slice the layout with a given shape and region.
+
+        Parameters
+        ----------
+        shape : List[PrimExpr]
+            The shape of the layout
+        region : List[Tuple[PrimExpr, PrimExpr]]
+            The region to slice, each element is (begin, end)
+
+        Returns
+        -------
+        Optional[TLayout]
+            The sliced layout, or None if slicing is not possible
+        """
+        assert len(shape) == len(region), "shape and region must have the same length"
+        region = [tvm.ir.Range(r[0], r[1]) for r in region]
+        return _ffi_api.TLayoutSlice(self, shape, region)  # pylint: disable=no-member
+
     def tile_to(self, to_shape: List[PrimExpr], current_shape: List[PrimExpr]) -> "TLayout":
         """Tile the current layout to the given shape.
 

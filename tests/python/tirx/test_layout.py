@@ -1567,8 +1567,8 @@ def test_slice():
         for u in range(r_size):
             r_coord = get_region_coord(u)
             s_coord = get_shape_coord(r_coord, region)
-            a = layout.apply(*s_coord, shape=shape)["m"] + layout.offset.get(Axis.m, 0)
-            b = sliced.apply(*r_coord, shape=r_shape)["m"] + sliced.offset.get(Axis.m, 0)
+            a = layout.apply(*s_coord, shape=shape)["m"]
+            b = sliced.apply(*r_coord, shape=r_shape)["m"]
             assert analyzer.simplify(a == b)
 
     def case1():
@@ -1576,8 +1576,6 @@ def test_slice():
         shape = [64]
         region = [(5, 8)]
         sliced = layout.slice(shape, region).canonicalize()
-        print(f"layout: {layout}")
-        print(f"sliced: {sliced}")
         assert sliced is not None
         verify_slice(layout, shape, region, sliced)
 
@@ -1589,8 +1587,6 @@ def test_slice():
         shape = [16, 16]
         region = [(2, 3), (6, 10)]
         sliced = layout.slice(shape, region).canonicalize()
-        print(f"layout: {layout}")
-        print(f"sliced: {sliced}")
         assert sliced is not None
         verify_slice(layout, shape, region, sliced)
 
@@ -1601,12 +1597,59 @@ def test_slice():
         shape = [16, 24]
         region = [(2, 6), (4, 12)]
         sliced = layout.slice(shape, region).canonicalize()
-        print(f"layout: {layout}")
-        print(f"sliced: {sliced}")
         assert sliced is not None
         verify_slice(layout, shape, region, sliced)
 
     case3()
+
+    def case4():
+        layout = TileLayout(shard=([128, 2, 64], [64, 128 * 64, 1]))
+        shape = [128, 128]
+        region = [(0, 128), (32, 96)]
+        sliced = layout.slice(shape, region).canonicalize()
+        assert sliced is not None
+        verify_slice(layout, shape, region, sliced)
+
+    case4()
+
+    def case_swizzle_slice():
+        # SwizzleLayout slice - delegates to ComposeLayout
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        shape = [512]
+        region = [(64, 128)]
+        sliced = swizzle.slice(shape, region)
+        assert sliced is not None
+        verify_slice(swizzle, shape, region, sliced)
+
+    case_swizzle_slice()
+
+    def case_compose_slice():
+        # ComposeLayout slice
+        compose = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
+        )
+        shape = [512]
+        region = [(64, 128)]
+        sliced = compose.slice(shape, region)
+        assert sliced is not None
+        verify_slice(compose, shape, region, sliced)
+
+    case_compose_slice()
+
+    def case_compose_slice_2d():
+        # ComposeLayout slice with 2D shape
+        compose = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
+        )
+        shape = [8, 64]
+        region = [(2, 4), (0, 64)]
+        sliced = compose.slice(shape, region)
+        assert sliced is not None
+        verify_slice(compose, shape, region, sliced)
+
+    case_compose_slice_2d()
 
 
 if __name__ == "__main__":

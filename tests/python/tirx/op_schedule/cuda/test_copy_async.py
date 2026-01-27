@@ -605,7 +605,12 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
         # This tests box_dim = [min(a, e) for a, e in zip(atom_shape_global, g_ext)]
         (
             (2, 128, 8, 64),  # global_shape: (batch, seq, heads, dim)
-            ((0, 1), (0, 128), (0, 1), (0, 64)),  # global_region: copy 1 batch, 128 seq, 1 head, 64 dim
+            (
+                (0, 1),
+                (0, 128),
+                (0, 1),
+                (0, 64),
+            ),  # global_region: copy 1 batch, 128 seq, 1 head, 64 dim
             (1, 1, 128, 64),  # shared_shape: (pipe_stage, blk_k, blk_m, blk_k)
             ((0, 1), (0, 1), (0, 128), (0, 64)),  # shared_region
             128,  # thread count
@@ -921,14 +926,15 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
         lowered_str = str(lowered)
 
         # Check there's exactly one g2c call in the IR
-        assert lowered_str.count("cp_async.bulk.tensor.g2c") == 1, (
-            "Expected exactly 1 cp_async.bulk.tensor.g2c call in lowered IR"
-        )
+        assert (
+            lowered_str.count("cp_async.bulk.tensor.g2c") == 1
+        ), "Expected exactly 1 cp_async.bulk.tensor.g2c call in lowered IR"
 
         # Verify the loop has only 1 iteration (T.grid(1, 1) means 1x1=1 TMA call)
         # This ensures the fix is working - without fix it would be T.grid(4, 1) or similar
         import re
-        grid_match = re.search(r'T\.grid\((\d+),\s*(\d+)\)', lowered_str)
+
+        grid_match = re.search(r"T\.grid\((\d+),\s*(\d+)\)", lowered_str)
         if grid_match:
             iters_0 = int(grid_match.group(1))
             iters_1 = int(grid_match.group(2))
@@ -952,6 +958,10 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
         B_ref = np.zeros(g_shape, dtype=np_dtype)
         B_ref[*r_gmem] = A_np[*r_gmem]
         np.testing.assert_allclose(B_ref, B.numpy())
+
+
+def test_copy_g2s_tma_multicast():
+    pass
 
 
 if __name__ == "__main__":

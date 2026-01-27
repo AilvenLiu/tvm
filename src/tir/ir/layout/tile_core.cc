@@ -139,6 +139,15 @@ ffi::Map<ffi::String, PrimExpr> TileLayoutNode::Apply(Array<PrimExpr> coord) con
       result[shard[i]->axis->name] = analyzer.Simplify(it->second + coord[i] * shard[i]->stride);
     }
   }
+  // Add offset to the result
+  for (const auto& [axis, off] : offset) {
+    auto it = result.find(axis->name);
+    if (it == result.end()) {
+      result[axis->name] = analyzer.Simplify(off);
+    } else {
+      result[axis->name] = analyzer.Simplify(it->second + off);
+    }
+  }
   return result;
 }
 

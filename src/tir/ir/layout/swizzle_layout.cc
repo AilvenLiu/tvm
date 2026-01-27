@@ -115,5 +115,12 @@ ffi::Optional<TLayout> SwizzleLayoutNode::IsTileOuter(
   return std::nullopt;
 }
 
+ffi::Optional<TLayout> SwizzleLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
+                                                const Region& region) const {
+  // Compose(Swizzle, Identity) -> then slice.
+  auto comp = ComposeLayout(ffi::GetRef<SwizzleLayout>(this), IdentityTileLayout(shape));
+  return comp->Slice(shape, region);
+}
+
 }  // namespace tir
 }  // namespace tvm
