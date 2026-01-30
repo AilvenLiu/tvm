@@ -89,13 +89,18 @@ b_type_pv = tvm.DataType("float16")
 d_type_pv = tvm.DataType("float32")
 
 
-def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_heads, head_dim):
+def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads, num_kv_heads, head_dim):
 
     BATCH_SIZE = batch_size
     SEQ_LEN_Q = seq_len_q
     SEQ_LEN_KV = seq_len_kv
-    NUM_HEADS = num_heads
+    NUM_QO_HEADS = num_qo_heads
+    NUM_KV_HEADS = num_kv_heads
     HEAD_DIM = head_dim
+
+    # GQA parameters
+    GQA_RATIO = NUM_QO_HEADS // NUM_KV_HEADS  # e.g., 4 for num_qo_heads=32, num_kv_heads=8
+    SEQ_Q_PER_TILE = BLK_M // GQA_RATIO       # e.g., 32 sequence positions per tile
 
     NUM_MMA_QK = HEAD_DIM // MMA_K
     NUM_MMA_PV = BLK_N // MMA_K
@@ -702,18 +707,19 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
     @T.prim_func(tirx=True)
     def flash_attention4(
-        Q: T.Buffer((BATCH_SIZE, SEQ_LEN_Q, NUM_HEADS, HEAD_DIM), "float16"),
-        K: T.Buffer((BATCH_SIZE, SEQ_LEN_KV, NUM_HEADS, HEAD_DIM), "float16"),
-        V: T.Buffer((BATCH_SIZE, SEQ_LEN_KV, NUM_HEADS, HEAD_DIM), "float16"),
-        O: T.Buffer((BATCH_SIZE, SEQ_LEN_Q, NUM_HEADS, HEAD_DIM), "float16"),
+        Q: T.Buffer((BATCH_SIZE, SEQ_LEN_Q, NUM_QO_HEADS, HEAD_DIM), "float16"),
+        K: T.Buffer((BATCH_SIZE, SEQ_LEN_KV, NUM_KV_HEADS, HEAD_DIM), "float16"),
+        V: T.Buffer((BATCH_SIZE, SEQ_LEN_KV, NUM_KV_HEADS, HEAD_DIM), "float16"),
+        O: T.Buffer((BATCH_SIZE, SEQ_LEN_Q, NUM_QO_HEADS, HEAD_DIM), "float16"),
         profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
     ):
-        num_q_blocks_total = T.meta_var(ceildiv(SEQ_LEN_Q, BLK_M))
+        # For GQA: each tile processes SEQ_Q_PER_TILE seq positions (not BLK_M)
+        num_q_blocks_total = T.meta_var(ceildiv(SEQ_LEN_Q, SEQ_Q_PER_TILE))
         num_q_blocks_per_cta = T.meta_var(SMEM_PIPE_DEPTH_Q)
         num_q_blocks = T.meta_var(ceildiv(num_q_blocks_total, num_q_blocks_per_cta))
 
         # Persistent kernel: limit CTA count to SM number
-        num_total_tasks = T.meta_var(BATCH_SIZE * NUM_HEADS * num_q_blocks)
+        num_total_tasks = T.meta_var(BATCH_SIZE * NUM_KV_HEADS * num_q_blocks)
         max_ctas = 148
         cta_count = T.min(max_ctas, num_total_tasks)
 
@@ -896,11 +902,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 tmem_offset = 128
 
                 while task_idx[0] < num_total_tasks:
-                    # Decode task index into batch/head/q_block (must be inside loop for persistent kernel)
-                    batch_idx = task_idx[0] // (num_q_blocks * NUM_HEADS)
-                    head_idx = (task_idx[0] % (num_q_blocks * NUM_HEADS)) // num_q_blocks
+                    # Decode task index into batch/kv_head/q_block (must be inside loop for persistent kernel)
+                    batch_idx = task_idx[0] // (num_q_blocks * NUM_KV_HEADS)
+                    kv_head_idx = (task_idx[0] % (num_q_blocks * NUM_KV_HEADS)) // num_q_blocks
                     m_block_idx = task_idx[0] % num_q_blocks
-                    m_start = T.meta_var(m_block_idx * BLK_M * SMEM_PIPE_DEPTH_Q)
+                    # m_start refers to SEQ_Q positions (not BLK_M rows)
+                    m_start = T.meta_var(m_block_idx * SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q)
                     with T.cta():
                         # T.block_attr({"tirx.scope_partition": True})
 
@@ -922,18 +929,20 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                 "cta_group": CTA_GROUP,
                                             }
                                         )
-                                        # TODO: make this a single copy_async using layout
+                                        # GQA: Load each qo_head with 2D TMA copy
+                                        # SMEM layout: row i corresponds to (seq = i // GQA_RATIO, head = i % GQA_RATIO)
                                         profiler.start(ProfileEventType.IssueTMA_Q, lane_id == 0)
+                                        Q_smem_3d = Q_smem.view(SMEM_PIPE_DEPTH_Q, NUM_BLK_K, SEQ_Q_PER_TILE, GQA_RATIO, BLK_K)
                                         for i in T.unroll(NUM_BLK_K):
                                             with T.thread()[T.ptx.elect_sync()]:
                                                 Tx.copy_async(
-                                                    Q_smem[i_q, i, :, :],
+                                                    Q_smem_3d[i_q, i, :, :, :],
                                                     Q[
                                                         batch_idx,
                                                         m_start
-                                                        + i_q * BLK_M : m_start
-                                                        + (i_q + 1) * BLK_M,
-                                                        head_idx,
+                                                        + i_q * SEQ_Q_PER_TILE : m_start
+                                                        + (i_q + 1) * SEQ_Q_PER_TILE,
+                                                        kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO,
                                                         i * BLK_K : (i + 1) * BLK_K,
                                                     ],
                                                     **tma_copy_q,
@@ -962,7 +971,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                     K[
                                                         batch_idx,
                                                         i_kv * BLK_N : (i_kv + 1) * BLK_N,
-                                                        head_idx,
+                                                        kv_head_idx,
                                                         i * BLK_K : (i + 1) * BLK_K,
                                                     ],
                                                     **tma_copy_k,
@@ -993,7 +1002,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                     V[
                                                         batch_idx,
                                                         i_kv * BLK_N : (i_kv + 1) * BLK_N,
-                                                        head_idx,
+                                                        kv_head_idx,
                                                         i * BLK_K : (i + 1) * BLK_K,
                                                     ],
                                                     **tma_copy_v,
@@ -1025,18 +1034,21 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         bar_corr_epi_full.wait(i_q, phase_tmem[0])
                                         if i_q == 0:
                                             profiler.start(ProfileEventType.TMAStore, lane_id == 0)
-                                        m_start_global = m_start + i_q * BLK_M
-                                        # TMA O store
+                                        # GQA: m_start_global refers to SEQ_Q positions
+                                        m_start_global = T.meta_var(m_start + i_q * SEQ_Q_PER_TILE)
+                                        # TMA O store: Store each qo_head with 2D TMA copy
+                                        # SMEM layout: row i corresponds to (seq = i // GQA_RATIO, head = i % GQA_RATIO)
                                         for i in T.unroll(NUM_EPI_TILE):
+                                            O_smem_3d = O_smem.view(TMEM_PIPE_DEPTH, NUM_EPI_TILE, SEQ_Q_PER_TILE, GQA_RATIO, EPI_TILE)
                                             with T.thread()[T.ptx.elect_sync()]:
                                                 Tx.copy_async(
                                                     O[
                                                         batch_idx,
-                                                        m_start_global : m_start_global + BLK_M,
-                                                        head_idx,
+                                                        m_start_global : m_start_global + SEQ_Q_PER_TILE,
+                                                        kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO,
                                                         i * EPI_TILE : (i + 1) * EPI_TILE,
                                                     ],
-                                                    O_smem[i_q, i, :, :],
+                                                    O_smem_3d[i_q, i, :, :, :],
                                                     dispatch="tma",
                                                 )
                                         T.ptx.cp_async.bulk.commit_group()
@@ -1551,30 +1563,34 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
     return flash_attention4
 
 
-def prepare_data(batch_size, seq_len_q, seq_len_kv, num_heads, head_dim):
+def prepare_data(batch_size, seq_len_q, seq_len_kv, num_qo_heads, num_kv_heads, head_dim):
 
     torch.manual_seed(0)
-    Q = torch.randn((batch_size, seq_len_q, num_heads, head_dim), dtype=torch.float16)
-    K = torch.randn((batch_size, seq_len_kv, num_heads, head_dim), dtype=torch.float16)
-    V = torch.randn((batch_size, seq_len_kv, num_heads, head_dim), dtype=torch.float16)
-    O = torch.zeros((batch_size, seq_len_q, num_heads, head_dim), dtype=torch.float16)
+    Q = torch.randn((batch_size, seq_len_q, num_qo_heads, head_dim), dtype=torch.float16)
+    K = torch.randn((batch_size, seq_len_kv, num_kv_heads, head_dim), dtype=torch.float16)
+    V = torch.randn((batch_size, seq_len_kv, num_kv_heads, head_dim), dtype=torch.float16)
+    O = torch.zeros((batch_size, seq_len_q, num_qo_heads, head_dim), dtype=torch.float16)
 
     return Q, K, V, O
 
 
-def test_flash_attention4():
+@pytest.mark.parametrize("seq_len", [8192, 4096, 2048, 1024])
+@pytest.mark.parametrize("num_qo_heads", [32])
+@pytest.mark.parametrize("num_kv_heads", [4, 8, 16, 32])
+def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads):
     BATCH = 1
-    SEQ_Q = 8192
-    SEQ_KV = 8192
-    HEADS = 32
+    SEQ_Q = seq_len
+    SEQ_KV = seq_len
+    NUM_QO_HEADS = num_qo_heads
+    NUM_KV_HEADS = num_kv_heads
     HEAD_DIM = 128
     DEBUG = False
 
     def flops(ms):
         """Calculate FLOPS for Flash Attention: Q@K^T + P@V = 2 * B * H * S_q * S_k * D"""
-        return 4 * BATCH * HEADS * SEQ_Q * SEQ_KV * HEAD_DIM / (ms * 1e-3)
+        return 4 * BATCH * NUM_QO_HEADS * SEQ_Q * SEQ_KV * HEAD_DIM / (ms * 1e-3)
 
-    Q, K, V, _ = prepare_data(BATCH, SEQ_Q, SEQ_KV, HEADS, HEAD_DIM)
+    Q, K, V, _ = prepare_data(BATCH, SEQ_Q, SEQ_KV, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM)
 
     def get_source(func):
         target = tvm.target.Target("cuda")
@@ -1587,7 +1603,7 @@ def test_flash_attention4():
         Q_tir, K_tir, V_tir = Q, K, V
         O_tir = torch.zeros_like(Q)
 
-        prim_func = get_flash_attention4_kernel(BATCH, SEQ_Q, SEQ_KV, HEADS, HEAD_DIM)
+        prim_func = get_flash_attention4_kernel(BATCH, SEQ_Q, SEQ_KV, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM)
         mod = get_source(prim_func)
 
         dev = tvm.cuda(0)
@@ -1604,7 +1620,7 @@ def test_flash_attention4():
         if PROFILER_ON:
             export_to_perfetto_trace(
                 profiler_buffer_tvm.numpy(),
-                f"fa4-{BATCH}-{SEQ_Q}-{SEQ_KV}-{HEADS}-{HEAD_DIM}.perfetto-trace",
+                f"fa4-{BATCH}-{SEQ_Q}-{SEQ_KV}-{NUM_QO_HEADS}-{NUM_KV_HEADS}-{HEAD_DIM}.perfetto-trace",
                 event_type_names,
             )
 
@@ -1675,7 +1691,7 @@ def test_flash_attention4():
         scale_softmax_log2 = scale_softmax * log2_e
         scale_output = 1.0
 
-        problem_size = (BATCH, SEQ_Q, SEQ_KV, HEADS, HEADS, HEAD_DIM)
+        problem_size = (BATCH, SEQ_Q, SEQ_KV, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM)
         cum_seqlen_q = None
         cum_seqlen_k = None
 
@@ -1764,7 +1780,7 @@ def test_flash_attention4():
         fa_fwd = FlashAttentionForwardSm100(
             head_dim=HEAD_DIM,
             head_dim_v=HEAD_DIM,
-            qhead_per_kvhead=1,  # MHA
+            qhead_per_kvhead=NUM_QO_HEADS // NUM_KV_HEADS,  # GQA
             is_causal=False,
             is_local=False,
             pack_gqa=False,
@@ -1837,11 +1853,11 @@ def test_flash_attention4():
         qo_indptr = torch.tensor([0, SEQ_Q], device="cuda:0", dtype=torch.int32)
         kv_indptr = torch.tensor([0, SEQ_KV], device="cuda:0", dtype=torch.int32)
         prefill_wrapper.plan(
-            qo_indptr, kv_indptr, num_qo_heads=HEADS, num_kv_heads=HEADS, head_dim_qk=HEAD_DIM
+            qo_indptr, kv_indptr, num_qo_heads=NUM_QO_HEADS, num_kv_heads=NUM_KV_HEADS, head_dim_qk=HEAD_DIM
         )
-        q_torch = Q.clone().reshape(-1, HEADS, HEAD_DIM).cuda()
-        k_torch = K.clone().reshape(-1, HEADS, HEAD_DIM).cuda()
-        v_torch = V.clone().reshape(-1, HEADS, HEAD_DIM).cuda()
+        q_torch = Q.clone().reshape(-1, NUM_QO_HEADS, HEAD_DIM).cuda()
+        k_torch = K.clone().reshape(-1, NUM_KV_HEADS, HEAD_DIM).cuda()
+        v_torch = V.clone().reshape(-1, NUM_KV_HEADS, HEAD_DIM).cuda()
 
         def run_flashinfer():
             o_torch = prefill_wrapper.run(q_torch, k_torch, v_torch)
@@ -1849,7 +1865,7 @@ def test_flash_attention4():
 
         ms = bench(run_flashinfer, warmup=100, repeat=300, proton_name="flashinfer", debug=DEBUG)
         o_torch = run_flashinfer()
-        return o_torch.cpu().numpy().reshape(BATCH, SEQ_Q, HEADS, HEAD_DIM)
+        return o_torch.cpu().numpy().reshape(BATCH, SEQ_Q, NUM_QO_HEADS, HEAD_DIM)
 
     with ProtonContext("blackwell_fa4", debug=DEBUG):
 
@@ -1941,4 +1957,5 @@ def test_flash_attention4():
 
 
 if __name__ == "__main__":
-    test_flash_attention4()
+    test_flash_attention4(8192, 32, 8)
+    test_flash_attention4(8192, 32, 32)
