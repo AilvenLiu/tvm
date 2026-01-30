@@ -46,6 +46,16 @@ ffi::Optional<TileLayout> SlicePerGroup(TileLayout layout, PrimExpr begin, PrimE
     add_axis_offset(ak, analyzer.Simplify(dk0 * Sk));
   }
 
+  // Special case:
+  // For single shard, the slice is valid as long as
+  // the caller guarantees begin + slice_extent <= extent (which is assumed).
+  // This handles cases where analyzer cannot prove symbolic conditions.
+  if (m == 1) {
+    std::vector<Iter> new_shard;
+    new_shard.push_back(Iter(extent, shard[0]->stride, shard[0]->axis));
+    return TileLayout(new_shard, layout->replica, new_offset);
+  }
+
   PrimExpr rem = extent;
   std::vector<Iter> peeled_rev;
   int pivot = m - 1;
@@ -108,7 +118,7 @@ ffi::Optional<TLayout> TileLayoutNode::Slice(const Array<PrimExpr>& shape,
     std::vector<Iter> shard(grouped_layout->shard.begin() + seps[i],
                             grouped_layout->shard.begin() + seps[i + 1]);
     TileLayout group = TileLayout(shard, {}, {});
-    auto sliced_opt = SlicePerGroup(group, region[i]->min, region[i]->extent);
+    auto sliced_opt = SlicePerGroup(group, region[i]->min, analyzer.Simplify(region[i]->extent));
     if (!sliced_opt.has_value()) return std::nullopt;
     auto sliced = sliced_opt.value();
     new_shard.insert(new_shard.end(), sliced->shard.begin(), sliced->shard.end());

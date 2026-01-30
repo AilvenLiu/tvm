@@ -26,11 +26,40 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
+from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.op_schedule.cuda.copy_async import (
     tma_atom_layout,
     tma_atom_shape,
     tma_shared_layout,
 )
+
+
+class TMACounter(StmtExprVisitor):
+    """Visitor to count total TMA operations including loop iterations.
+
+    This verifies that TMA copy operations are optimized correctly,
+    resulting in minimal TMA instructions instead of multiple iterations.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.loop_extents = []  # Stack of loop extents
+        self.total_tma_ops = 0
+
+    def visit_for_(self, op):
+        extent = op.extent
+        self.loop_extents.append(extent)
+        self.visit_stmt(op.body)
+        self.loop_extents.pop()
+
+    def visit_evaluate_(self, op):
+        if isinstance(op.value, tvm.tir.Call):
+            if op.value.op.name == "tir.ptx_cp_async_bulk_tensor_global_to_cluster":
+                # Multiply all enclosing loop extents
+                iters = 1
+                for ext in self.loop_extents:
+                    iters *= ext
+                self.total_tma_ops += iters
 
 
 @pytest.mark.parametrize(
@@ -925,24 +954,16 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
         lowered = tvm.tir.transform.LowerTIRx()(mod)
         lowered_str = str(lowered)
 
-        # Check there's exactly one g2c call in the IR
-        assert (
-            lowered_str.count("cp_async.bulk.tensor.g2c") == 1
-        ), "Expected exactly 1 cp_async.bulk.tensor.g2c call in lowered IR"
+        # Count total TMA operations including loop iterations using a TIR visitor
+        # This verifies that enlarge_factor is correctly computed based on copy extent,
+        # resulting in a single TMA operation instead of multiple iterations.
+        counter = TMACounter()
+        counter.visit_stmt(lowered["main"].body)
 
-        # Verify the loop has only 1 iteration (T.grid(1, 1) means 1x1=1 TMA call)
-        # This ensures the fix is working - without fix it would be T.grid(4, 1) or similar
-        import re
-
-        grid_match = re.search(r"T\.grid\((\d+),\s*(\d+)\)", lowered_str)
-        if grid_match:
-            iters_0 = int(grid_match.group(1))
-            iters_1 = int(grid_match.group(2))
-            total_iters = iters_0 * iters_1
-            assert total_iters == 1, (
-                f"Expected 1 TMA iteration, got {iters_0}x{iters_1}={total_iters}. "
-                "This indicates enlarge_factor was not computed correctly based on copy extent."
-            )
+        assert counter.total_tma_ops == 1, (
+            f"Expected exactly 1 TMA operation, got {counter.total_tma_ops}. "
+            "This indicates enlarge_factor was not computed correctly based on copy extent."
+        )
 
         # Now compile and verify correctness
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -962,6 +983,224 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
 
 def test_copy_g2s_tma_multicast():
     pass
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("swizzle_len", [3])
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_g2s_tma_symbolic_dimension(dtype, swizzle_len):
+    """Test TMA copy with symbolic dimension in global buffer (like hgemm pattern).
+
+    This tests the pattern:
+        Tx.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], **tma_copy)
+
+    Where M is a symbolic dimension in the global buffer.
+    """
+    # Fixed dimensions
+    K = 256
+    BLK_M = 64
+    BLK_K = 64
+    SMEM_PIPE_DEPTH = 2
+    M_CONCRETE = 128  # Concrete value for testing
+    thread_cnt = 128
+
+    dev = tvm.cuda(0)
+
+    # Shared memory layout with swizzle
+    shared_layout = T.ComposeLayout(
+        T.SwizzleLayout(3, swizzle_len, 3, swizzle_inner=True),
+        T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))),
+    )
+
+    # Compute bytes for mbarrier
+    smem_bytes = SMEM_PIPE_DEPTH * BLK_M * BLK_K * tvm.DataType(dtype).bits // 8
+    copy_bytes = BLK_M * BLK_K * tvm.DataType(dtype).bits // 8
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        M = T.int32()
+        A = T.match_buffer(A_ptr, [M, K], dtype)
+        B = T.match_buffer(B_ptr, [SMEM_PIPE_DEPTH, BLK_M, BLK_K], dtype)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([thread_cnt], parent="cta")
+
+            with T.thread():
+                dyn = T.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = T.decl_buffer(
+                    [SMEM_PIPE_DEPTH, BLK_M, BLK_K], dtype, dyn.data, elem_offset=0, layout=shared_layout
+                )
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = T.meta_var(mbarrier.ptr_to([0]))
+
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                # Copy with pipeline index (like hgemm pattern)
+                for ks in range(SMEM_PIPE_DEPTH):
+                    with T.thread()[0:1]:
+                        Tx.copy_async(
+                            A_smem[ks, :, :],
+                            A[0:BLK_M, ks * BLK_K:(ks + 1) * BLK_K],
+                            dispatch="tma",
+                            mbar=mbar_ptr
+                        )
+                        T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, copy_bytes)
+
+                    T.ptx.mbarrier.try_wait(mbar_ptr, ks % 2)
+
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                # Copy back to global for verification
+                with T.cta():
+                    for ks in range(SMEM_PIPE_DEPTH):
+                        Tx.copy(
+                            B[ks, :, :],
+                            A_smem[ks, :, :]
+                        )
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, (M_CONCRETE, K))
+        B_np = np.zeros((SMEM_PIPE_DEPTH, BLK_M, BLK_K), dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        # Verify: B[ks, :, :] should equal A[0:BLK_M, ks*BLK_K:(ks+1)*BLK_K]
+        B_ref = np.zeros((SMEM_PIPE_DEPTH, BLK_M, BLK_K), dtype=np_dtype)
+        for ks in range(SMEM_PIPE_DEPTH):
+            B_ref[ks, :, :] = A_np[0:BLK_M, ks * BLK_K:(ks + 1) * BLK_K]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("swizzle_len", [3])
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_g2s_tma_3d_with_view(dtype, swizzle_len):
+    """Test 3D TMA copy using buffer view and swizzle layout (like flash attention pattern).
+
+    This tests the pattern from FA4:
+        Q_smem allocated as 4D: (SMEM_PIPE_DEPTH, NUM_BLK_K, BLK_M, BLK_K)
+        Q_smem_3d = Q_smem.view(SMEM_PIPE_DEPTH, NUM_BLK_K, SEQ_TILE, GQA_RATIO, BLK_K)
+        Tx.copy_async(Q_smem_3d[pipe_idx, blk_k_idx, :, :, :],
+                      Q[batch, seq_start:seq_end, head_start:head_end, k_start:k_end], ...)
+
+    Where we copy 3D regions from a 4D global buffer to shared memory.
+    The key insight is that the layout is 3D: (SMEM_PIPE_DEPTH, BLK_M, HEAD_DIM)
+    while the allocation is 4D: (SMEM_PIPE_DEPTH, NUM_BLK_K, BLK_M, BLK_K)
+    where NUM_BLK_K * BLK_K = HEAD_DIM.
+    """
+    dev = tvm.cuda(0)
+    smem_bytes = 2 * 2 * 128 * 64 * tvm.DataType(dtype).bits // 8
+    copy_bytes_per_blk = 32 * 4 * 64 * tvm.DataType(dtype).bits // 8
+
+    # Shared memory layout with swizzle
+    # Layout is 3D: (SMEM_PIPE_DEPTH, BLK_M, HEAD_DIM)
+    # This matches FA4 pattern where Q_layout has 3D TileLayout
+    shared_layout = T.ComposeLayout(
+        T.SwizzleLayout(3, swizzle_len, 3, swizzle_inner=True),
+        T.TileLayout(shard=((2, 128, 128), (128 * 128, 128, 1))),
+    )
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def copy_async(Q_ptr: T.handle, B_ptr: T.handle) -> None:
+        Q = T.match_buffer(Q_ptr, (2, 128, 8, 128), dtype)
+        B = T.match_buffer(B_ptr, (32, 4, 64), dtype)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+
+            with T.thread():
+                dyn = T.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                # Allocate as 4D like FA4: (SMEM_PIPE_DEPTH, NUM_BLK_K, BLK_M, BLK_K)
+                Q_smem = T.decl_buffer(
+                    (2, 2, 128, 64),
+                    dtype, dyn.data, elem_offset=0, layout=shared_layout
+                )
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = T.meta_var(mbarrier.ptr_to([0]))
+
+                # Create 5D view for 3D copy pattern
+                # View reshapes BLK_M -> (SEQ_Q_PER_TILE, GQA_RATIO) for GQA pattern
+                Q_smem_5d = Q_smem.view(2, 2, 32, 4, 64)
+
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                # Copy with pipeline and block loop (like flash attention pattern)
+
+                with T.thread()[0:1]:
+                    # 3D copy: [SEQ_Q_PER_TILE, GQA_RATIO, BLK_K]
+                    Tx.copy_async(
+                        Q_smem_5d[0, 0, :, :, :],
+                        Q[0, 0:32, 0:4, 0:64],
+                        dispatch="tma",
+                        mbar=mbar_ptr
+                    )
+                    T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, copy_bytes_per_blk)
+
+                T.ptx.mbarrier.try_wait(mbar_ptr, 0)
+
+
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                # Copy back to global for verification
+                with T.cta():
+                    Tx.copy(
+                        B[:, :, :],
+                        Q_smem_5d[0, 0, :, :, :]
+                    )
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+
+        # Verify that LowerTIRx generates exactly 1 TMA instruction
+        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        counter = TMACounter()
+        counter.visit_stmt(lowered["main"].body)
+
+        assert counter.total_tma_ops == 1, (
+            f"Expected exactly 1 TMA operation, got {counter.total_tma_ops}. "
+            "This indicates the 3D TMA copy with view is not generating optimal code."
+        )
+
+        # Now compile and verify correctness
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        Q_np = tvm.testing.generate_random_array(dtype, (2, 128, 8, 128))
+        B_np = np.zeros((32, 4, 64), dtype=np_dtype)
+
+        Q = tvm.runtime.tensor(Q_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(Q, B)
+
+        B_ref = np.zeros((32, 4, 64), dtype=np_dtype)
+        B_ref[:, :, :] = Q_np[0, 0:32, 0:4, 0:64]
+        np.testing.assert_allclose(B_ref, B.numpy())
 
 
 if __name__ == "__main__":

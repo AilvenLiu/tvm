@@ -30,6 +30,7 @@ std::pair<TileLayout, std::vector<int64_t>> Group(TileLayout layout,
       shape_idx++;
       seps.push_back(new_shard.size());
     }
+    extent_i = analyzer.Simplify(extent_i);
     if (!is_one(extent_i)) {
       CHECK(shape_idx < shape.size())
           << "layout " << layout << " can not be grouped by shape " << shape;
