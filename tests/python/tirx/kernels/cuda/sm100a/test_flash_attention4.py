@@ -89,6 +89,7 @@ b_type_pv = tvm.DataType("float16")
 d_type_pv = tvm.DataType("float32")
 
 
+# fmt: off
 def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads, num_kv_heads, head_dim):
 
     BATCH_SIZE = batch_size
@@ -271,72 +272,23 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
         # Round down to get integer part (stored as float with integer in lower bits)
         xy_rounded = T.alloc_local([2], "float32")
-        T.cuda.add_packed_f32x2(
-            xy_clamped[0],
-            xy_clamped[1],
-            fp32_round_int,
-            fp32_round_int,
-            T.address_of(xy_rounded[0]),
-            rounding_mode="rm",
-        )
+        T.cuda.add_packed_f32x2(xy_clamped[0], xy_clamped[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded[0]), rounding_mode="rm")
 
         # Subtract to get the rounded-back value (round to nearest even)
         xy_rounded_back = T.alloc_local([2], "float32")
-        sub_packed_f32x2(
-            xy_rounded[0],
-            xy_rounded[1],
-            fp32_round_int,
-            fp32_round_int,
-            T.address_of(xy_rounded_back[0]),
-            rounding_mode="rn",
-        )
+        sub_packed_f32x2(xy_rounded[0], xy_rounded[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded_back[0]), rounding_mode="rn")
 
         # Compute fractional part: xy_frac = xy_clamped - xy_rounded_back
         xy_frac = T.alloc_local([2], "float32")
-        sub_packed_f32x2(
-            xy_clamped[0],
-            xy_clamped[1],
-            xy_rounded_back[0],
-            xy_rounded_back[1],
-            T.address_of(xy_frac[0]),
-            rounding_mode="rn",
-        )
+        sub_packed_f32x2(xy_clamped[0], xy_clamped[1], xy_rounded_back[0], xy_rounded_back[1], T.address_of(xy_frac[0]), rounding_mode="rn")
 
         # Evaluate polynomial using Horner's method: ((poly[3] * x + poly[2]) * x + poly[1]) * x + poly[0]
         xy_frac_ex2 = T.alloc_local([2], "float32")
-        # Start with poly[3]
         xy_frac_ex2[0] = poly_ex2_deg3[3]
         xy_frac_ex2[1] = poly_ex2_deg3[3]
-        # xy_frac_ex2 = xy_frac_ex2 * xy_frac + poly[2]
-        fma_packed_f32x2(
-            xy_frac_ex2[0],
-            xy_frac_ex2[1],
-            xy_frac[0],
-            xy_frac[1],
-            poly_ex2_deg3[2],
-            poly_ex2_deg3[2],
-            T.address_of(xy_frac_ex2[0]),
-        )
-        # xy_frac_ex2 = xy_frac_ex2 * xy_frac + poly[1]
-        fma_packed_f32x2(
-            xy_frac_ex2[0],
-            xy_frac_ex2[1],
-            xy_frac[0],
-            xy_frac[1],
-            poly_ex2_deg3[1],
-            poly_ex2_deg3[1],
-            T.address_of(xy_frac_ex2[0]),
-        )
-        # xy_frac_ex2 = xy_frac_ex2 * xy_frac + poly[0]
-        fma_packed_f32x2(
-            xy_frac_ex2[0],
-            xy_frac_ex2[1],
-            xy_frac[0],
-            xy_frac[1],
-            poly_ex2_deg3[0],
-            poly_ex2_deg3[0],
-            T.address_of(xy_frac_ex2[0]),
-        )
+        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[2], poly_ex2_deg3[2], T.address_of(xy_frac_ex2[0]))
+        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[1], poly_ex2_deg3[1], T.address_of(xy_frac_ex2[0]))
+        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[0], poly_ex2_deg3[0], T.address_of(xy_frac_ex2[0]))
 
         # Combine integer and fractional parts: shift integer left by 23 bits and add to fractional exp2
         out[idx] = combine_int_frac_ex2(xy_rounded[0], xy_frac_ex2[0])
@@ -443,47 +395,16 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
         return T.cuda.func_call(func_name, val, source_code=source_code, return_type="uint32")
 
     def gemm_qk_helper(smem_a_addr, smem_b_addr, acc_tmem_addr):
-        qk_idesc = encode_instr_desc_host(
-            MMA_M, MMA_N, 1, 0, 0, False, False, False, False, False, False
-        )
-        smem_desc_base_a = encode_smem_desc_host(
-            0,
-            ldo=1,
-            sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
-            swizzle=SWIZZLE,
-        )
-        smem_desc_base_b = encode_smem_desc_host(
-            0,
-            ldo=1,
-            sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
-            swizzle=SWIZZLE,
-        )
+        qk_idesc = encode_instr_desc_host(MMA_M, MMA_N, 1, 0, 0, False, False, False, False, False, False)
+        smem_desc_base_a = encode_smem_desc_host(0, ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+        smem_desc_base_b = encode_smem_desc_host(0, ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
         smem_desc_base_b_lo, smem_desc_b_hi = i64_to_i32x2(smem_desc_base_b)
         smem_desc_base_a_lo, smem_desc_a_hi = i64_to_i32x2(smem_desc_base_a)
         smem_desc_start_a_lo = smem_desc_base_a_lo | make_smem_desc_start_addr(smem_a_addr)
         smem_desc_start_b_lo = smem_desc_base_b_lo | make_smem_desc_start_addr(smem_b_addr)
-        offset_a = [
-            (
-                (
-                    ((k // (BLK_K // MMA_K)) * BLK_K * BLK_N + k % (BLK_K // MMA_K) * MMA_K)
-                    * F16_BYTES
-                )
-                >> 4
-            )
-            for k in range(NUM_MMA_QK)
-        ]
+        offset_a = [(((k // (BLK_K // MMA_K)) * BLK_K * BLK_N + k % (BLK_K // MMA_K) * MMA_K) * F16_BYTES) >> 4 for k in range(NUM_MMA_QK)]
         offset_b = offset_a
-        return gemm_qk_ptx(
-            qk_idesc,
-            smem_desc_a_hi,
-            smem_desc_b_hi,
-            offset_a,
-            offset_b,
-            smem_desc_start_a_lo,
-            smem_desc_start_b_lo,
-            False,
-            acc_tmem_addr,
-        )
+        return gemm_qk_ptx(qk_idesc, smem_desc_a_hi, smem_desc_b_hi, offset_a, offset_b, smem_desc_start_a_lo, smem_desc_start_b_lo, False, acc_tmem_addr)
 
     def gemm_qk_ptx(
         idesc,
@@ -551,45 +472,14 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
         )
 
     def gemm_pv_helper(tmem_a, smem_b_addr, accumulate, acc_tmem_addr, mbar_ptr, mbar_phase):
-        #  128, 128, 1, 0, 0, (bool)0, (bool)1, (bool)0, (bool)0, (bool)0, (bool)0
-        pv_idesc = encode_instr_desc_host(
-            MMA_M,
-            MMA_N,
-            1,
-            0,
-            0,
-            False,
-            True,
-            False,
-            False,
-            False,
-            False,
-        )
-        smem_desc_base_b = encode_smem_desc_host(
-            0,
-            ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES,
-            sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
-            swizzle=SWIZZLE,
-        )
+        pv_idesc = encode_instr_desc_host(MMA_M, MMA_N, 1, 0, 0, False, True, False, False, False, False)
+        smem_desc_base_b = encode_smem_desc_host(0, ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
         smem_desc_base_b_lo, smem_desc_b_hi = i64_to_i32x2(smem_desc_base_b)
         smem_desc_start_b_lo = smem_desc_base_b_lo | make_smem_desc_start_addr(smem_b_addr)
         offset_a = [k * MMA_K // 2 for k in range(NUM_MMA_PV)]
         offset_b = [(k * MMA_K * BLK_K * F16_BYTES) >> 4 for k in range(NUM_MMA_PV)]
         offset_b_diff = [MMA_K * BLK_K * F16_BYTES >> 4 for k in range(NUM_MMA_PV - 1)]
-
-        return gemm_pv_ptx(
-            pv_idesc,
-            smem_desc_b_hi,
-            offset_a,
-            offset_b,
-            offset_b_diff,
-            smem_desc_start_b_lo,
-            accumulate,
-            acc_tmem_addr,
-            tmem_a,
-            mbar_ptr,
-            mbar_phase,
-        )
+        return gemm_pv_ptx(pv_idesc, smem_desc_b_hi, offset_a, offset_b, offset_b_diff, smem_desc_start_b_lo, accumulate, acc_tmem_addr, tmem_a, mbar_ptr, mbar_phase)
 
     def gemm_pv_ptx(
         idesc,
@@ -685,25 +575,11 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
             return __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
         }}
     """
-        return T.cuda.func_call(
-            "canonical_warp_idx_sync", source_code=source_code, return_type="int"
-        )
+        return T.cuda.func_call("canonical_warp_idx_sync", source_code=source_code, return_type="int")
 
-    Q_layout = T.ComposeLayout(
-        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        T.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))),
-    )
-    # K/V: 3-stage pipeline
-    K_layout = T.ComposeLayout(
-        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        T.TileLayout(
-            shard=((SMEM_PIPE_DEPTH_KV, BLK_N, HEAD_DIM), (BLK_N * HEAD_DIM, HEAD_DIM, 1))
-        ),
-    )
-    O_layout = T.ComposeLayout(
-        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))),
-    )
+    Q_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))))
+    K_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_KV, BLK_N, HEAD_DIM), (BLK_N * HEAD_DIM, HEAD_DIM, 1))))
+    O_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))))
 
     @T.prim_func(tirx=True)
     def flash_attention4(
@@ -737,33 +613,14 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tx.PoolAllocator(buf.data))
                 # Allocate Q buffer with alignment
-                Q_smem = pool.alloc(
-                    (SMEM_PIPE_DEPTH_Q, NUM_BLK_K, BLK_M, BLK_K),
-                    "float16",
-                    layout=Q_layout,
-                    align=1024,
-                )
-
+                Q_smem = pool.alloc((SMEM_PIPE_DEPTH_Q, NUM_BLK_K, BLK_M, BLK_K), "float16", layout=Q_layout, align=1024)
                 # Allocate K and V buffers (they share the same offset)
-                K_smem = pool.alloc(
-                    (SMEM_PIPE_DEPTH_KV, NUM_BLK_K, BLK_N, BLK_K),
-                    "float16",
-                    layout=K_layout,
-                    align=1024,
-                )
+                K_smem = pool.alloc((SMEM_PIPE_DEPTH_KV, NUM_BLK_K, BLK_N, BLK_K), "float16", layout=K_layout, align=1024)
                 V_smem = K_smem.view(SMEM_PIPE_DEPTH_KV, NUM_BLK_K, BLK_N, BLK_K)
-
                 # Allocate O buffer
-                O_smem = pool.alloc(
-                    (TMEM_PIPE_DEPTH, NUM_EPI_TILE, BLK_M, EPI_TILE),
-                    "float16",
-                    layout=O_layout,
-                    align=1024,
-                )
-                # Allocate sScale buffer
-                sScale_total_size = (
-                    2 * SMEM_PIPE_DEPTH_Q * BLK_M
-                )  # ACC_SCALE/ROW_SUM (shared) + ROW_MAX
+                O_smem = pool.alloc((TMEM_PIPE_DEPTH, NUM_EPI_TILE, BLK_M, EPI_TILE), "float16", layout=O_layout, align=1024)
+                # Allocate sScale buffer (ACC_SCALE/ROW_SUM shared + ROW_MAX)
+                sScale_total_size = 2 * SMEM_PIPE_DEPTH_Q * BLK_M
                 sScale = pool.alloc((sScale_total_size,), "float32", align=1024)
                 tmem_addr = pool.alloc([1], "uint32")
 
@@ -788,9 +645,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 stage_kv = T.alloc_local([1], "int32")
 
                 bar_load_q_full = T.meta_var(BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_Q, True))
-                bar_load_q_empty = T.meta_var(
-                    BarrierWithCommit(pool, SMEM_PIPE_DEPTH_Q, False)  # init_phase = 1
-                )
+                bar_load_q_empty = T.meta_var(BarrierWithCommit(pool, SMEM_PIPE_DEPTH_Q, False))  # init_phase = 1
 
                 bar_load_kv_full = T.meta_var(BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_KV, True))
                 bar_load_kv_empty = T.meta_var(BarrierWithCommit(pool, SMEM_PIPE_DEPTH_KV, False))
@@ -812,36 +667,14 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
                 bar_tmem_dealloc = T.meta_var(BarrierWithArrive(pool, 1, True))
 
-                profiler = T.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                        profiler_enabled=PROFILER_ON,
-                    )
-                )
+                profiler = T.meta_var(CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON))
 
                 if warp_id_in_cta == 0:
-
-                    T.ptx.tcgen05.alloc(
-                        T.address_of(tmem_addr[0]), n_cols=N_COLS_TMEM, cta_group=CTA_GROUP
-                    )
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr[0]), n_cols=N_COLS_TMEM, cta_group=CTA_GROUP)
                     T.cuda.trap_when_assert_failed(tmem_addr[0] == T.uint32(0))
 
-                tmem = T.decl_buffer(
-                    (128, N_COLS_TMEM),
-                    "float32",
-                    scope="tmem",
-                    allocated_addr=0,
-                    layout=TileLayout(([128, N_COLS_TMEM], [(1, "TLane"), (1, "TCol")])),
-                )
-                tmem_as_f16 = T.decl_buffer(
-                    (128, N_COLS_TMEM * 2),
-                    "float16",
-                    scope="tmem",
-                    allocated_addr=0,
-                    layout=TileLayout(([128, N_COLS_TMEM * 2], [(1, "TLane"), (1, "TCol")])),
-                )
+                tmem = T.decl_buffer((128, N_COLS_TMEM), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM], [(1, "TLane"), (1, "TCol")])))
+                tmem_as_f16 = T.decl_buffer((128, N_COLS_TMEM * 2), "float16", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM * 2], [(1, "TLane"), (1, "TCol")])))
 
                 task_idx = T.alloc_local([1], "int32")
                 task_idx[0] = bx  # Start from CTA ID
@@ -922,96 +755,41 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         bar_load_q_empty.wait(i_q, phase_q_load[0])
                                         # stage_q[0] ->  0 -> 1 -> 0 -> 1 -> ...
 
-                                        tma_copy_q = T.meta_var(
-                                            {
-                                                "dispatch": "tma",
-                                                "mbar": bar_load_q_full.mbar.ptr_to([i_q]),
-                                                "cta_group": CTA_GROUP,
-                                            }
-                                        )
+                                        tma_copy_q = T.meta_var({"dispatch": "tma", "mbar": bar_load_q_full.mbar.ptr_to([i_q]), "cta_group": CTA_GROUP})
                                         # GQA: Load each qo_head with 2D TMA copy
                                         # SMEM layout: row i corresponds to (seq = i // GQA_RATIO, head = i % GQA_RATIO)
                                         profiler.start(ProfileEventType.IssueTMA_Q, lane_id == 0)
                                         Q_smem_3d = Q_smem.view(SMEM_PIPE_DEPTH_Q, NUM_BLK_K, SEQ_Q_PER_TILE, GQA_RATIO, BLK_K)
                                         for i in T.unroll(NUM_BLK_K):
                                             with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(
-                                                    Q_smem_3d[i_q, i, :, :, :],
-                                                    Q[
-                                                        batch_idx,
-                                                        m_start
-                                                        + i_q * SEQ_Q_PER_TILE : m_start
-                                                        + (i_q + 1) * SEQ_Q_PER_TILE,
-                                                        kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO,
-                                                        i * BLK_K : (i + 1) * BLK_K,
-                                                    ],
-                                                    **tma_copy_q,
-                                                )
+                                                Tx.copy_async(Q_smem_3d[i_q, i, :, :, :], Q[batch_idx, m_start + i_q * SEQ_Q_PER_TILE : m_start + (i_q + 1) * SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, i * BLK_K : (i + 1) * BLK_K], **tma_copy_q)
                                         if T.ptx.elect_sync():
-                                            bar_load_q_full.arrive(
-                                                i_q, CTA_GROUP * BLK_M * HEAD_DIM * F16_BYTES
-                                            )  # ar(0,x)
+                                            bar_load_q_full.arrive(i_q, CTA_GROUP * BLK_M * HEAD_DIM * F16_BYTES)  # ar(0,x)
                                         profiler.end(ProfileEventType.IssueTMA_Q, lane_id == 0)
 
                                     @T.macro
                                     def load_k(i_kv):
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
-                                        tma_copy_k = T.meta_var(
-                                            {
-                                                "dispatch": "tma",
-                                                "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]),
-                                                "cta_group": CTA_GROUP,
-                                            }
-                                        )
+                                        tma_copy_k = T.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
                                         profiler.start(ProfileEventType.IssueTMA_K, lane_id == 0)
                                         for i in T.unroll(NUM_BLK_K):
                                             with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(
-                                                    K_smem[stage_kv[0], i, :, :],
-                                                    K[
-                                                        batch_idx,
-                                                        i_kv * BLK_N : (i_kv + 1) * BLK_N,
-                                                        kv_head_idx,
-                                                        i * BLK_K : (i + 1) * BLK_K,
-                                                    ],
-                                                    **tma_copy_k,
-                                                )
+                                                Tx.copy_async(K_smem[stage_kv[0], i, :, :], K[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, i * BLK_K : (i + 1) * BLK_K], **tma_copy_k)
                                         if T.ptx.elect_sync():
-                                            bar_load_kv_full.arrive(
-                                                stage_kv[0],
-                                                CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES,
-                                            )
+                                            bar_load_kv_full.arrive(stage_kv[0], CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES)
                                         profiler.end(ProfileEventType.IssueTMA_K, lane_id == 0)
                                         advance_kv_stage()
 
                                     @T.macro
                                     def load_v(i_kv):
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
-                                        tma_copy_v = T.meta_var(
-                                            {
-                                                "dispatch": "tma",
-                                                "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]),
-                                                "cta_group": CTA_GROUP,
-                                            }
-                                        )
+                                        tma_copy_v = T.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
                                         profiler.start(ProfileEventType.IssueTMA_V, lane_id == 0)
                                         for i in T.unroll(NUM_BLK_K):
                                             with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(
-                                                    V_smem[stage_kv[0], i, :, :],
-                                                    V[
-                                                        batch_idx,
-                                                        i_kv * BLK_N : (i_kv + 1) * BLK_N,
-                                                        kv_head_idx,
-                                                        i * BLK_K : (i + 1) * BLK_K,
-                                                    ],
-                                                    **tma_copy_v,
-                                                )
+                                                Tx.copy_async(V_smem[stage_kv[0], i, :, :], V[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, i * BLK_K : (i + 1) * BLK_K], **tma_copy_v)
                                         if T.ptx.elect_sync():
-                                            bar_load_kv_full.arrive(
-                                                stage_kv[0],
-                                                CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES,
-                                            )
+                                            bar_load_kv_full.arrive(stage_kv[0], CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES)
                                         profiler.end(ProfileEventType.IssueTMA_V, lane_id == 0)
                                         advance_kv_stage()
 
@@ -1021,9 +799,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     # Flip phase_q_load after Q stages complete (for persistent kernel)
                                     phase_q_load[0] ^= 1
                                     load_v(0)
-                                    for _i in T.serial(
-                                        num_kv_blocks - 1, annotations={"disable_unroll": True}
-                                    ):
+                                    for _i in T.serial(num_kv_blocks - 1, annotations={"disable_unroll": True}):
                                         i_kv = _i + 1
                                         load_k(i_kv)
                                         load_v(i_kv)
@@ -1041,16 +817,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         for i in T.unroll(NUM_EPI_TILE):
                                             O_smem_3d = O_smem.view(TMEM_PIPE_DEPTH, NUM_EPI_TILE, SEQ_Q_PER_TILE, GQA_RATIO, EPI_TILE)
                                             with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(
-                                                    O[
-                                                        batch_idx,
-                                                        m_start_global : m_start_global + SEQ_Q_PER_TILE,
-                                                        kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO,
-                                                        i * EPI_TILE : (i + 1) * EPI_TILE,
-                                                    ],
-                                                    O_smem_3d[i_q, i, :, :, :],
-                                                    dispatch="tma",
-                                                )
+                                                Tx.copy_async(O[batch_idx, m_start_global : m_start_global + SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, i * EPI_TILE : (i + 1) * EPI_TILE], O_smem_3d[i_q, i, :, :, :], dispatch="tma")
                                         T.ptx.cp_async.bulk.commit_group()
                                     for i_q in T.unroll(SMEM_PIPE_DEPTH_Q):
                                         T.ptx.cp_async.bulk.wait_group(1 - i_q)
@@ -1066,36 +833,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
                                     @T.macro
                                     def gemm_qk(q_stage, stage, tmem_col_s, bar_s_full):
-                                        gemm_qk_helper(
-                                            smem_base_offset
-                                            + Q_smem.elem_offset * F16_BYTES
-                                            + q_stage * BLK_M * HEAD_DIM * F16_BYTES,
-                                            smem_base_offset
-                                            + K_smem.elem_offset * F16_BYTES
-                                            + stage * BLK_N * HEAD_DIM * F16_BYTES,
-                                            tmem_col_s,
-                                        )
+                                        gemm_qk_helper(smem_base_offset + Q_smem.elem_offset * F16_BYTES + q_stage * BLK_M * HEAD_DIM * F16_BYTES, smem_base_offset + K_smem.elem_offset * F16_BYTES + stage * BLK_N * HEAD_DIM * F16_BYTES, tmem_col_s)
                                         bar_s_full.arrive(q_stage)
 
                                     @T.macro
-                                    def gemm_pv(
-                                        i_q,
-                                        stage,
-                                        tmem_col_o,
-                                        tmem_col_p,
-                                        should_accumulate,
-                                        bar_p_full_2,
-                                    ):
-                                        gemm_pv_helper(
-                                            tmem_col_p,
-                                            smem_base_offset
-                                            + V_smem.elem_offset * F16_BYTES
-                                            + stage * BLK_N * HEAD_DIM * F16_BYTES,
-                                            should_accumulate,
-                                            tmem_col_o,
-                                            bar_p_full_2.mbar.ptr_to([i_q]),
-                                            phase_tmem[0],
-                                        )
+                                    def gemm_pv(i_q, stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):
+                                        gemm_pv_helper(tmem_col_p, smem_base_offset + V_smem.elem_offset * F16_BYTES + stage * BLK_N * HEAD_DIM * F16_BYTES, should_accumulate, tmem_col_o, bar_p_full_2.mbar.ptr_to([i_q]), phase_tmem[0])
 
                                     for i_q in T.unroll(SMEM_PIPE_DEPTH_Q):
                                         tmem_col_s = tmem_s_base + i_q * tmem_offset
@@ -1127,14 +870,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                 bar_load_kv_full.wait(stage_v, phase_v)
                                             # wait for o_full to be ready
                                             bar_p_full_o_rescaled.wait(i_q, phase_tmem[0])
-                                            gemm_pv(
-                                                i_q,
-                                                stage_v,
-                                                tmem_col_o,
-                                                tmem_col_p,
-                                                acc,
-                                                bar_p_full_2,
-                                            )
+                                            gemm_pv(i_q, stage_v, tmem_col_o, tmem_col_p, acc, bar_p_full_2)
                                             if i_q == 1:
                                                 # finish twice pv mma
                                                 bar_load_kv_empty.arrive(stage_v)
@@ -1157,14 +893,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                             bar_load_kv_full.wait(stage_kv[0], phase_kv[0])
                                         # wait for o_full to be ready
                                         bar_p_full_o_rescaled.wait(i_q, phase_tmem[0])
-                                        gemm_pv(
-                                            i_q,
-                                            stage_kv[0],
-                                            tmem_col_o,
-                                            tmem_col_p,
-                                            acc,
-                                            bar_p_full_2,
-                                        )
+                                        gemm_pv(i_q, stage_kv[0], tmem_col_o, tmem_col_p, acc, bar_p_full_2)
                                         if i_q == 1:
                                             # finish twice pv mma
                                             bar_load_kv_empty.arrive(stage_kv[0])
@@ -1193,25 +922,11 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                 @T.macro
                                 def softmax_step(i_kv):
                                     s_chunk_buf = T.alloc_local([BLK_N], "float32")
-                                    s_chunk = s_chunk_buf.view(
-                                        128,
-                                        BLK_N,
-                                        layout=TileLayout(
-                                            ([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])
-                                        ),
-                                    )
+                                    s_chunk = s_chunk_buf.view(128, BLK_N, layout=TileLayout(([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])))
 
                                     p_chunk_buf_f32 = T.alloc_local([BLK_N // 2], "float32")
-                                    p_chunk_buf = T.decl_buffer(
-                                        (BLK_N,), dtype="float16", data=p_chunk_buf_f32.data
-                                    )
-                                    p_chunk = p_chunk_buf.view(
-                                        128,
-                                        BLK_N,
-                                        layout=TileLayout(
-                                            ([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])
-                                        ),
-                                    )
+                                    p_chunk_buf = T.decl_buffer((BLK_N,), dtype="float16", data=p_chunk_buf_f32.data)
+                                    p_chunk = p_chunk_buf.view(128, BLK_N, layout=TileLayout(([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])))
 
                                     is_first = T.meta_var(i_kv == 0)
 
@@ -1222,21 +937,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     profiler.start(ProfileEventType.Softmax_MAX, tid_in_wg == 0)
                                     tile_max = T.alloc_local([1], "float32")
                                     for chunk_idx in T.unroll(BLK_N // SOFTMAX_LD_CHUNK):
-                                        Tx.copy_async(
-                                            s_chunk[
-                                                :,
-                                                chunk_idx
-                                                * SOFTMAX_LD_CHUNK : (chunk_idx + 1)
-                                                * SOFTMAX_LD_CHUNK,
-                                            ],
-                                            tmem[
-                                                :,
-                                                tmem_col_s
-                                                + chunk_idx * SOFTMAX_LD_CHUNK : tmem_col_s
-                                                + chunk_idx * SOFTMAX_LD_CHUNK
-                                                + SOFTMAX_LD_CHUNK,
-                                            ],
-                                        )
+                                        Tx.copy_async(s_chunk[:, chunk_idx * SOFTMAX_LD_CHUNK : (chunk_idx + 1) * SOFTMAX_LD_CHUNK], tmem[:, tmem_col_s + chunk_idx * SOFTMAX_LD_CHUNK : tmem_col_s + chunk_idx * SOFTMAX_LD_CHUNK + SOFTMAX_LD_CHUNK])
                                     row_max_old = row_max[0]
                                     with T.thread():
                                         if is_first:
@@ -1276,15 +977,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     bar_softmax_corr_full.arrive(wg_id)
                                     profiler.start(ProfileEventType.Softmax_FMA, tid_in_wg == 0)
                                     for i in T.unroll(BLK_N // 2):
-                                        fma_packed_f32x2(
-                                            s_chunk_buf[2 * i],
-                                            s_chunk_buf[2 * i + 1],
-                                            scale_log2,
-                                            scale_log2,
-                                            -row_max_scaled,
-                                            -row_max_scaled,
-                                            T.address_of(s_chunk_buf[2 * i]),
-                                        )
+                                        fma_packed_f32x2(s_chunk_buf[2 * i], s_chunk_buf[2 * i + 1], scale_log2, scale_log2, -row_max_scaled, -row_max_scaled, T.address_of(s_chunk_buf[2 * i]))
                                     profiler.end(ProfileEventType.Softmax_FMA, tid_in_wg == 0)
                                     if USE_S0_S1_BARRIER:
                                         bar_s0_s1_sequence.wait(wg_id * 4 + warp_id, phase_s0_s1[0])
@@ -1294,58 +987,20 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                             idx = T.meta_var(frag_idx * BLK_N // 4 + 2 * i)
                                             if i * 2 % 16 < 16 - 4 or frag_idx >= 4 - 1:
                                                 s_chunk_buf[idx] = ptx_exp2(s_chunk_buf[idx])
-                                                s_chunk_buf[idx + 1] = ptx_exp2(
-                                                    s_chunk_buf[idx + 1]
-                                                )
+                                                s_chunk_buf[idx + 1] = ptx_exp2(s_chunk_buf[idx + 1])
                                             else:
-                                                ex2_emulation_2(
-                                                    s_chunk_buf,
-                                                    idx,
-                                                    s_chunk_buf[idx],
-                                                    s_chunk_buf[idx + 1],
-                                                )
+                                                ex2_emulation_2(s_chunk_buf, idx, s_chunk_buf[idx], s_chunk_buf[idx + 1])
                                         with T.thread():
-                                            Tx.cast(
-                                                p_chunk_buf[
-                                                    frag_idx
-                                                    * BLK_N
-                                                    // 4 : (frag_idx + 1)
-                                                    * BLK_N
-                                                    // 4
-                                                ],
-                                                s_chunk_buf[
-                                                    frag_idx
-                                                    * BLK_N
-                                                    // 4 : (frag_idx + 1)
-                                                    * BLK_N
-                                                    // 4
-                                                ],
-                                            )
+                                            Tx.cast(p_chunk_buf[frag_idx * BLK_N // 4 : (frag_idx + 1) * BLK_N // 4], s_chunk_buf[frag_idx * BLK_N // 4 : (frag_idx + 1) * BLK_N // 4])
                                     if USE_S0_S1_BARRIER:
                                         bar_s0_s1_sequence.arrive((1 - wg_id) * 4 + warp_id)
                                     profiler.end(ProfileEventType.Softmax_EXP2, tid_in_wg == 0)
                                     profiler.start(ProfileEventType.Softmax_TMEM_ST, tid_in_wg == 0)
                                     for i in T.unroll(3):
-                                        Tx.copy_async(
-                                            tmem_as_f16[
-                                                :,
-                                                tmem_col_p * 2
-                                                + i * BLK_N // 4 : tmem_col_p * 2
-                                                + (i + 1) * BLK_N // 4,
-                                            ],
-                                            p_chunk[:, i * BLK_N // 4 : (i + 1) * BLK_N // 4],
-                                        )
+                                        Tx.copy_async(tmem_as_f16[:, tmem_col_p * 2 + i * BLK_N // 4 : tmem_col_p * 2 + (i + 1) * BLK_N // 4], p_chunk[:, i * BLK_N // 4 : (i + 1) * BLK_N // 4])
                                     T.ptx.tcgen05.wait.st()
                                     bar_p_full_o_rescaled.arrive(wg_id)
-                                    Tx.copy_async(
-                                        tmem_as_f16[
-                                            :,
-                                            tmem_col_p * 2
-                                            + 3 * BLK_N // 4 : tmem_col_p * 2
-                                            + BLK_N,
-                                        ],
-                                        p_chunk[:, 3 * BLK_N // 4 : BLK_N],
-                                    )
+                                    Tx.copy_async(tmem_as_f16[:, tmem_col_p * 2 + 3 * BLK_N // 4 : tmem_col_p * 2 + BLK_N], p_chunk[:, 3 * BLK_N // 4 : BLK_N])
                                     T.ptx.tcgen05.wait.st()
                                     bar_p_full_2.arrive(wg_id)
 
@@ -1382,9 +1037,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                 bar_softmax_corr_full.wait(1, phase_q[0])
                                 phase_q[0] ^= 1
 
-                                for i_kv in T.serial(
-                                    num_kv_blocks - 1, annotations={"disable_unroll": True}
-                                ):
+                                for i_kv in T.serial(num_kv_blocks - 1, annotations={"disable_unroll": True}):
                                     for i_q in T.unroll(2):
                                         bar_softmax_corr_full.wait(i_q, phase_q[0])
                                         profiler.start(ProfileEventType.Correction, tid_in_wg == 0)
@@ -1392,12 +1045,8 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         should_rescale = T.alloc_local([1], "int32")
 
                                         if tid_in_wg < BLK_M:
-                                            acc_scale[0] = sScale[
-                                                ACC_SCALE_BASE + tid_in_wg + i_q * BLK_M
-                                            ]
-                                            should_rescale[0] = T.if_then_else(
-                                                acc_scale[0] < T.float32(1.0), 1, 0
-                                            )
+                                            acc_scale[0] = sScale[ACC_SCALE_BASE + tid_in_wg + i_q * BLK_M]
+                                            should_rescale[0] = T.if_then_else(acc_scale[0] < T.float32(1.0), 1, 0)
                                         else:
                                             should_rescale[0] = 0
 
@@ -1407,52 +1056,16 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                 tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
                                                 RESCALE_TILE = 16
 
-                                                o_row_buf = T.alloc_buffer(
-                                                    (16,), "float32", scope="local"
-                                                )
-                                                o_row_wg = o_row_buf.view(
-                                                    128,
-                                                    16,
-                                                    layout=TileLayout(
-                                                        ([128, 16], [(1, "tid_in_wg"), (1, "m")])
-                                                    ),
-                                                )
+                                                o_row_buf = T.alloc_buffer((16,), "float32", scope="local")
+                                                o_row_wg = o_row_buf.view(128, 16, layout=TileLayout(([128, 16], [(1, "tid_in_wg"), (1, "m")])))
 
-                                                for d_tile in T.unroll(
-                                                    ceildiv(HEAD_DIM, RESCALE_TILE)
-                                                ):
+                                                for d_tile in T.unroll(ceildiv(HEAD_DIM, RESCALE_TILE)):
                                                     d_start = d_tile * RESCALE_TILE
                                                     if d_start < HEAD_DIM:
-
-                                                        Tx.copy_async(
-                                                            o_row_wg,
-                                                            tmem[
-                                                                :,
-                                                                tmem_col_o_stage
-                                                                + d_start : tmem_col_o_stage
-                                                                + d_start
-                                                                + 16,
-                                                            ],
-                                                        )
+                                                        Tx.copy_async(o_row_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + 16])
                                                         for d in T.unroll(8):
-                                                            mul_packed_f32x2(
-                                                                o_row_buf[d * 2],
-                                                                o_row_buf[d * 2 + 1],
-                                                                acc_scale[0],
-                                                                acc_scale[0],
-                                                                o_row_buf.ptr_to([d * 2]),
-                                                            )
-
-                                                        Tx.copy_async(
-                                                            tmem[
-                                                                :,
-                                                                tmem_col_o_stage
-                                                                + d_start : tmem_col_o_stage
-                                                                + d_start
-                                                                + 16,
-                                                            ],
-                                                            o_row_wg[:, 0:16],
-                                                        )
+                                                            mul_packed_f32x2(o_row_buf[d * 2], o_row_buf[d * 2 + 1], acc_scale[0], acc_scale[0], o_row_buf.ptr_to([d * 2]))
+                                                        Tx.copy_async(tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + 16], o_row_wg[:, 0:16])
                                                 T.ptx.tcgen05.wait.st()
 
                                         bar_p_full_o_rescaled.arrive(i_q)
@@ -1475,71 +1088,24 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     bar_corr_epi_empty.wait(i_q, phase_tmem[0])
 
                                     profiler.start(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
-                                    acc_O_mn_row_is_zero_or_nan = tvm.tir.any(
-                                        row_sum == T.float32(0.0), row_sum != row_sum
-                                    )
-                                    norm_scale = ptx_rcp(
-                                        T.if_then_else(
-                                            acc_O_mn_row_is_zero_or_nan, T.float32(1.0), row_sum
-                                        )
-                                    )
-
+                                    acc_O_mn_row_is_zero_or_nan = tvm.tir.any(row_sum == T.float32(0.0), row_sum != row_sum)
+                                    norm_scale = ptx_rcp(T.if_then_else(acc_O_mn_row_is_zero_or_nan, T.float32(1.0), row_sum))
                                     tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
-
-                                    o_row_f32_buf = T.alloc_buffer(
-                                        (TMEM_EPI_LD_SIZE,), "float32", scope="local"
-                                    )
-                                    o_row_f32_wg = o_row_f32_buf.view(
-                                        128,
-                                        TMEM_EPI_LD_SIZE,
-                                        layout=TileLayout(
-                                            (
-                                                [128, TMEM_EPI_LD_SIZE],
-                                                [(1, "tid_in_wg"), (1, "m")],
-                                            )
-                                        ),
-                                    )
+                                    o_row_f32_buf = T.alloc_buffer((TMEM_EPI_LD_SIZE,), "float32", scope="local")
+                                    o_row_f32_wg = o_row_f32_buf.view(128, TMEM_EPI_LD_SIZE, layout=TileLayout(([128, TMEM_EPI_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                                     o_row_f16 = T.alloc_local([TMEM_EPI_LD_SIZE], "float16")
 
                                     for d_tile in T.unroll(ceildiv(HEAD_DIM, TMEM_EPI_LD_SIZE)):
                                         d_start = d_tile * TMEM_EPI_LD_SIZE
                                         if d_start < HEAD_DIM:
-
-                                            Tx.copy(
-                                                o_row_f32_wg,
-                                                tmem[
-                                                    :,
-                                                    tmem_col_o_stage
-                                                    + d_start : tmem_col_o_stage
-                                                    + d_start
-                                                    + TMEM_EPI_LD_SIZE,
-                                                ],
-                                            )
-
+                                            Tx.copy(o_row_f32_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + TMEM_EPI_LD_SIZE])
                                             for d in T.unroll(TMEM_EPI_LD_SIZE // 2):
-                                                mul_packed_f32x2(
-                                                    o_row_f32_buf[d * 2],
-                                                    o_row_f32_buf[d * 2 + 1],
-                                                    norm_scale,
-                                                    norm_scale,
-                                                    o_row_f32_buf.ptr_to([d * 2]),
-                                                )
-
+                                                mul_packed_f32x2(o_row_f32_buf[d * 2], o_row_f32_buf[d * 2 + 1], norm_scale, norm_scale, o_row_f32_buf.ptr_to([d * 2]))
                                             with T.thread():
                                                 Tx.cast(o_row_f16, o_row_f32_buf)
-
                                             for i in T.unroll(TMEM_EPI_LD_SIZE // 8):
                                                 for v in T.vectorized(8):
-                                                    O_smem[
-                                                        i_q,
-                                                        d_tile // (EPI_TILE // TMEM_EPI_LD_SIZE),
-                                                        tid_in_wg,
-                                                        d_tile
-                                                        % (EPI_TILE // TMEM_EPI_LD_SIZE)
-                                                        * TMEM_EPI_LD_SIZE
-                                                        + i * 8
-                                                        + v,
-                                                    ] = o_row_f16[i * 8 + v]
+                                                    O_smem[i_q, d_tile // (EPI_TILE // TMEM_EPI_LD_SIZE), tid_in_wg, d_tile % (EPI_TILE // TMEM_EPI_LD_SIZE) * TMEM_EPI_LD_SIZE + i * 8 + v] = o_row_f16[i * 8 + v]
 
                                         T.ptx.fence.proxy("shared")
                                         profiler.end(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
@@ -1561,6 +1127,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 T.cuda.cta_sync()
 
     return flash_attention4
+# fmt: on
 
 
 def prepare_data(batch_size, seq_len_q, seq_len_kv, num_qo_heads, num_kv_heads, head_dim):

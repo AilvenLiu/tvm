@@ -221,9 +221,7 @@ def sort_strides_partial_order(strides: List, analyzer: Analyzer) -> List[int]:
         for i in remaining[1:]:
             # Check if strides[i] <= strides[min_idx]
             # i.e., strides[min_idx] % strides[i] == 0
-            if analyzer.can_prove_equal(
-                tvm.tir.floormod(strides[min_idx], strides[i]), 0
-            ):
+            if analyzer.can_prove_equal(tvm.tir.floormod(strides[min_idx], strides[i]), 0):
                 min_idx = i
         result.append(min_idx)
         remaining.remove(min_idx)
@@ -231,11 +229,7 @@ def sort_strides_partial_order(strides: List, analyzer: Analyzer) -> List[int]:
     return result
 
 
-def assert_compact_layout(
-    shards: List,
-    total_size,
-    analyzer: Analyzer
-):
+def assert_compact_layout(shards: List, total_size, analyzer: Analyzer):
     """Assert layout is compact: for each shard, stride * extent == next shard's stride."""
     stride_set = [s for s, _ in shards]
 
@@ -285,7 +279,9 @@ def compute_box_dim(grouped_shared: TileLayout) -> tuple:
     box_dim = [grouped_shared.shard[i].extent for i in contiguous_indices]
 
     # Step 3: Remove 1s from box_dim
-    box_dim, contiguous_indices = zip(*[(d, i) for d, i in zip(box_dim, contiguous_indices) if d != 1])
+    box_dim, contiguous_indices = zip(
+        *[(d, i) for d, i in zip(box_dim, contiguous_indices) if d != 1]
+    )
 
     return list(box_dim), list(contiguous_indices), contiguous_extent
 
@@ -298,6 +294,7 @@ def to_tile_layout(layout: TLayout, shape: List[int]) -> TileLayout:
         return TileLayout(shard=(list(shape), TLayout._get_default_strides(list(shape))))
     else:
         return layout
+
 
 def _decide_box_dim(
     s_buf: "Buffer",
@@ -378,8 +375,14 @@ def _decide_box_dim(
                 f"box_dim={box_dim}, atom_shape={atom_shape}"
             )
 
-    return (swizzle_mode, box_dim, contiguous_indices, contiguous_extent,
-            grouped_shared, grouped_global)
+    return (
+        swizzle_mode,
+        box_dim,
+        contiguous_indices,
+        contiguous_extent,
+        grouped_shared,
+        grouped_global,
+    )
 
 
 def _decide_tma_global_strides_and_shape(
@@ -504,8 +507,14 @@ def _decide_tma_global_strides_and_shape(
     tma_rank = len(box_dim)
     tma_global_strides = [s * dtype_bytes for s in tma_g_strides]
 
-    return (tma_g_strides, tma_g_shape, tma_rank, tma_global_strides,
-            g_buf_grouped, g_buf_separators)
+    return (
+        tma_g_strides,
+        tma_g_shape,
+        tma_rank,
+        tma_global_strides,
+        g_buf_grouped,
+        g_buf_separators,
+    )
 
 
 def _build_iteration_space(
@@ -544,11 +553,13 @@ def _build_iteration_space(
     # Step 15: Build iteration space from non-contiguous shards
     iter_info = []
     for idx in non_contiguous_indices:
-        iter_info.append({
-            "extent": grouped_shared.shard[idx].extent,
-            "s_stride": grouped_shared.shard[idx].stride,
-            "g_stride": grouped_global.shard[idx].stride,
-        })
+        iter_info.append(
+            {
+                "extent": grouped_shared.shard[idx].extent,
+                "s_stride": grouped_shared.shard[idx].stride,
+                "g_stride": grouped_global.shard[idx].stride,
+            }
+        )
 
     return iter_info
 
@@ -604,17 +615,17 @@ def copy_tma_impl(
     # =========================================================================
     # PHASE 1: Deciding box_dim
     # =========================================================================
-    (swizzle_mode, box_dim, contiguous_indices, _,
-     grouped_shared, grouped_global) = _decide_box_dim(
-        s_buf, g_buf, g_ext, s_st, s_ext, g_st
+    (swizzle_mode, box_dim, contiguous_indices, _, grouped_shared, grouped_global) = (
+        _decide_box_dim(s_buf, g_buf, g_ext, s_st, s_ext, g_st)
     )
 
     # =========================================================================
     # PHASE 2: Deciding TMA global strides/shape
     # =========================================================================
-    (tma_g_strides, tma_g_shape, tma_rank, tma_global_strides,
-     g_buf_grouped, g_buf_separators) = _decide_tma_global_strides_and_shape(
-        g_buf, grouped_global, contiguous_indices, box_dim, g_st, g_ext, s_buf.dtype
+    (tma_g_strides, tma_g_shape, tma_rank, tma_global_strides, g_buf_grouped, g_buf_separators) = (
+        _decide_tma_global_strides_and_shape(
+            g_buf, grouped_global, contiguous_indices, box_dim, g_st, g_ext, s_buf.dtype
+        )
     )
 
     # =========================================================================
@@ -667,17 +678,13 @@ def copy_tma_impl(
         best_tma_stride = None
         for tma_idx, tma_stride in enumerate(tma_strides):
             # Check shard_stride >= tma_stride via divisibility
-            is_smaller = ana.can_prove_equal(
-                tvm.tir.floormod(shard_stride, tma_stride), 0
-            )
+            is_smaller = ana.can_prove_equal(tvm.tir.floormod(shard_stride, tma_stride), 0)
 
             if is_smaller:
                 if best_tma_stride is None:
                     best_tma_idx = tma_idx
                     best_tma_stride = tma_stride
-                elif ana.can_prove_equal(
-                    tvm.tir.floormod(tma_stride, best_tma_stride), 0
-                ):
+                elif ana.can_prove_equal(tvm.tir.floormod(tma_stride, best_tma_stride), 0):
                     # tma_stride >= best_tma_stride, update
                     best_tma_idx = tma_idx
                     best_tma_stride = tma_stride
@@ -796,7 +803,9 @@ def copy_tma_impl(
     # Use the tensor map shape and strides computed from the layout analysis
     # This works for both SWIZZLE_NONE and swizzled layouts
     # tma_g_shape and tma_g_strides are already computed above
-    tma_g_strides_for_map = tma_global_strides[:-1] if tma_rank > 1 else []  # Exclude innermost stride
+    tma_g_strides_for_map = (
+        tma_global_strides[:-1] if tma_rank > 1 else []
+    )  # Exclude innermost stride
 
     # fmt: off
     @T.prim_func(tirx=True, check_well_formed=False)

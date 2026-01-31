@@ -145,8 +145,8 @@ def tir_ws_kernel(M: int, N: int, K: int):
     B_layout_pipe = tma_shared_layout(
         "uint8", SwizzleMode.SWIZZLE_128B_ATOM, (PIPE_DEPTH, CTA_N, CTA_K // 2)
     )
-    SFA_layout_pipe = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 32, 16])
-    SFB_layout_pipe = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 32, 16])
+    SFA_layout_pipe = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 256])
+    SFB_layout_pipe = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 256])
     D_layout_wb = tma_shared_layout(
         "bfloat16", SwizzleMode.SWIZZLE_128B_ATOM, (WB_PIPE_DEPTH, CTA_M, EPI_TILE)
     )
