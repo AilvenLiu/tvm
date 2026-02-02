@@ -167,7 +167,7 @@ def find_contiguous_region(layout: TileLayout) -> tuple:
         - contiguous_element_count: Total number of elements in the contiguous region
     """
     # Filter to memory-only shards with their original indices
-    indexed_shards = [(i, s) for i, s in enumerate(layout.shard) if s.axis.is_memory()]
+    indexed_shards = [(i, s) for i, s in enumerate(layout.shard) if s.axis.is_memory() and s.extent != 1]
 
     if not indexed_shards:
         return [], 1

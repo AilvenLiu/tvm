@@ -577,9 +577,9 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
     """
         return T.cuda.func_call("canonical_warp_idx_sync", source_code=source_code, return_type="int")
 
-    Q_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))))
-    K_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_KV, BLK_N, HEAD_DIM), (BLK_N * HEAD_DIM, HEAD_DIM, 1))))
-    O_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, HEAD_DIM), (BLK_M * HEAD_DIM, HEAD_DIM, 1))))
+    Q_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, NUM_BLK_K, BLK_K), (BLK_M * HEAD_DIM, BLK_K, BLK_M * BLK_K, 1))))
+    K_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH_KV, BLK_N, NUM_BLK_K, BLK_K), (BLK_N * HEAD_DIM, BLK_K, BLK_N * BLK_K, 1))))
+    O_layout = T.ComposeLayout(T.SwizzleLayout(3, 3, 3, swizzle_inner=True), T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE), (BLK_M * HEAD_DIM, EPI_TILE, BLK_M * EPI_TILE, 1))))
 
     @T.prim_func(tirx=True)
     def flash_attention4(
@@ -613,12 +613,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tx.PoolAllocator(buf.data))
                 # Allocate Q buffer with alignment
-                Q_smem = pool.alloc((SMEM_PIPE_DEPTH_Q, NUM_BLK_K, BLK_M, BLK_K), "float16", layout=Q_layout, align=1024)
+                Q_smem = pool.alloc((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), "float16", layout=Q_layout, align=1024)
                 # Allocate K and V buffers (they share the same offset)
-                K_smem = pool.alloc((SMEM_PIPE_DEPTH_KV, NUM_BLK_K, BLK_N, BLK_K), "float16", layout=K_layout, align=1024)
-                V_smem = K_smem.view(SMEM_PIPE_DEPTH_KV, NUM_BLK_K, BLK_N, BLK_K)
+                K_smem = pool.alloc((SMEM_PIPE_DEPTH_KV, BLK_N, HEAD_DIM), "float16", layout=K_layout, align=1024)
+                V_smem = K_smem.view(SMEM_PIPE_DEPTH_KV, BLK_N, HEAD_DIM)
                 # Allocate O buffer
-                O_smem = pool.alloc((TMEM_PIPE_DEPTH, NUM_EPI_TILE, BLK_M, EPI_TILE), "float16", layout=O_layout, align=1024)
+                O_smem = pool.alloc((TMEM_PIPE_DEPTH, BLK_M, HEAD_DIM), "float16", layout=O_layout, align=1024)
                 # Allocate sScale buffer (ACC_SCALE/ROW_SUM shared + ROW_MAX)
                 sScale_total_size = 2 * SMEM_PIPE_DEPTH_Q * BLK_M
                 sScale = pool.alloc((sScale_total_size,), "float32", align=1024)
@@ -759,11 +759,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         # GQA: Load each qo_head with 2D TMA copy
                                         # SMEM layout: row i corresponds to (seq = i // GQA_RATIO, head = i % GQA_RATIO)
                                         profiler.start(ProfileEventType.IssueTMA_Q, lane_id == 0)
-                                        Q_smem_3d = Q_smem.view(SMEM_PIPE_DEPTH_Q, NUM_BLK_K, SEQ_Q_PER_TILE, GQA_RATIO, BLK_K)
-                                        for i in T.unroll(NUM_BLK_K):
-                                            with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(Q_smem_3d[i_q, i, :, :, :], Q[batch_idx, m_start + i_q * SEQ_Q_PER_TILE : m_start + (i_q + 1) * SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, i * BLK_K : (i + 1) * BLK_K], **tma_copy_q)
-                                        if T.ptx.elect_sync():
+                                        Q_smem_3d = Q_smem.view(SMEM_PIPE_DEPTH_Q, SEQ_Q_PER_TILE, GQA_RATIO, HEAD_DIM)
+                                        with T.thread()[T.ptx.elect_sync()]:
+                                            Tx.copy_async(
+                                                Q_smem_3d[i_q, :, :, :], Q[batch_idx, m_start + i_q * SEQ_Q_PER_TILE : m_start + (i_q + 1) * SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, :],
+                                                **tma_copy_q,
+                                            )
                                             bar_load_q_full.arrive(i_q, CTA_GROUP * BLK_M * HEAD_DIM * F16_BYTES)  # ar(0,x)
                                         profiler.end(ProfileEventType.IssueTMA_Q, lane_id == 0)
 
@@ -772,10 +773,10 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
                                         tma_copy_k = T.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
                                         profiler.start(ProfileEventType.IssueTMA_K, lane_id == 0)
-                                        for i in T.unroll(NUM_BLK_K):
-                                            with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(K_smem[stage_kv[0], i, :, :], K[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, i * BLK_K : (i + 1) * BLK_K], **tma_copy_k)
-                                        if T.ptx.elect_sync():
+                                        with T.thread()[T.ptx.elect_sync()]:
+                                            Tx.copy_async(K_smem[stage_kv[0], :, :], K[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, :],
+                                                **tma_copy_k,
+                                            )
                                             bar_load_kv_full.arrive(stage_kv[0], CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES)
                                         profiler.end(ProfileEventType.IssueTMA_K, lane_id == 0)
                                         advance_kv_stage()
@@ -785,10 +786,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
                                         tma_copy_v = T.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
                                         profiler.start(ProfileEventType.IssueTMA_V, lane_id == 0)
-                                        for i in T.unroll(NUM_BLK_K):
-                                            with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(V_smem[stage_kv[0], i, :, :], V[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, i * BLK_K : (i + 1) * BLK_K], **tma_copy_v)
-                                        if T.ptx.elect_sync():
+                                        with T.thread()[T.ptx.elect_sync()]:
+                                            Tx.copy_async(
+                                                V_smem[stage_kv[0], :, :],
+                                                V[batch_idx, i_kv * BLK_N : (i_kv + 1) * BLK_N, kv_head_idx, :],
+                                                **tma_copy_v,
+                                            )
                                             bar_load_kv_full.arrive(stage_kv[0], CTA_GROUP * BLK_N * HEAD_DIM * F16_BYTES)
                                         profiler.end(ProfileEventType.IssueTMA_V, lane_id == 0)
                                         advance_kv_stage()
@@ -814,10 +817,13 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         m_start_global = T.meta_var(m_start + i_q * SEQ_Q_PER_TILE)
                                         # TMA O store: Store each qo_head with 2D TMA copy
                                         # SMEM layout: row i corresponds to (seq = i // GQA_RATIO, head = i % GQA_RATIO)
-                                        for i in T.unroll(NUM_EPI_TILE):
-                                            O_smem_3d = O_smem.view(TMEM_PIPE_DEPTH, NUM_EPI_TILE, SEQ_Q_PER_TILE, GQA_RATIO, EPI_TILE)
-                                            with T.thread()[T.ptx.elect_sync()]:
-                                                Tx.copy_async(O[batch_idx, m_start_global : m_start_global + SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, i * EPI_TILE : (i + 1) * EPI_TILE], O_smem_3d[i_q, i, :, :, :], dispatch="tma")
+                                        O_smem_3d = O_smem.view(TMEM_PIPE_DEPTH, SEQ_Q_PER_TILE, GQA_RATIO, HEAD_DIM)
+                                        with T.thread()[T.ptx.elect_sync()]:
+                                            Tx.copy_async(
+                                                O[batch_idx, m_start_global : m_start_global + SEQ_Q_PER_TILE, kv_head_idx * GQA_RATIO: (kv_head_idx + 1) * GQA_RATIO, :],
+                                                O_smem_3d[i_q, :, :, :],
+                                                dispatch="tma",
+                                            )
                                         T.ptx.cp_async.bulk.commit_group()
                                     for i_q in T.unroll(SMEM_PIPE_DEPTH_Q):
                                         T.ptx.cp_async.bulk.wait_group(1 - i_q)
@@ -1104,8 +1110,10 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                             with T.thread():
                                                 Tx.cast(o_row_f16, o_row_f32_buf)
                                             for i in T.unroll(TMEM_EPI_LD_SIZE // 8):
+                                                # this is to avoid a bug of arith simplification
+                                                O_smem_vec = O_smem.view(TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE)
                                                 for v in T.vectorized(8):
-                                                    O_smem[i_q, d_tile // (EPI_TILE // TMEM_EPI_LD_SIZE), tid_in_wg, d_tile % (EPI_TILE // TMEM_EPI_LD_SIZE) * TMEM_EPI_LD_SIZE + i * 8 + v] = o_row_f16[i * 8 + v]
+                                                    O_smem_vec[i_q, tid_in_wg, d_tile // (EPI_TILE // TMEM_EPI_LD_SIZE), d_tile % (EPI_TILE // TMEM_EPI_LD_SIZE) * TMEM_EPI_LD_SIZE + i * 8 + v] = o_row_f16[i * 8 + v]
 
                                         T.ptx.fence.proxy("shared")
                                         profiler.end(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
