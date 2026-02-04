@@ -54,8 +54,8 @@ class ScheduleContextRemover : public StmtExprMutator {
   static Stmt Remove(const Stmt& stmt) { return ScheduleContextRemover()(stmt); }
 
  private:
-  Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = ffi::GetRef<Block>(op);
+  Stmt VisitStmt_(const SBlockNode* op) final {
+    SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
     n->annotations.erase("scope_id_extent_map");
     n->annotations.erase("thread_var_map");

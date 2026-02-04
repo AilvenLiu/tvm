@@ -47,14 +47,14 @@ class FuseBatchAttnTile(BatchAttnTile):
                 smem_manager.set_tile(attn_tile)
                 attn_tile.init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.prefetch": True})
+                    T.sblock_attr({"tirx.tile_class.prefetch": True})
                     attn_tile.prefetch(m_idx, n_idx, k_idx, q, kv, q_indptr, kv_indptr, partial_indptr, kv_indices, q_len, kv_len,
                                        q_start, kv_start, kv_end, kv_head_idx, work_indptr, len_kv_chunk, o, partial_o, partial_lse, None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     attn_tile.run(m_idx, n_idx, k_idx, q, kv, q_indptr, kv_indptr, partial_indptr, kv_indices, q_len, kv_len,
                                     q_start, kv_start, kv_end, kv_head_idx, work_indptr, len_kv_chunk, o, partial_o, partial_lse, None)
         return batch_attn_func, num_tiles, tile_size

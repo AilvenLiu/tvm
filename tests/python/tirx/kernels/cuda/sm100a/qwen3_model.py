@@ -534,21 +534,21 @@ def get_qwen3_megakernel_mod():
             T_split = T.match_buffer(var_T_split, (batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)), "float16")
             T_split_1 = T.match_buffer(var_T_split_1, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
             T_split_2 = T.match_buffer(var_T_split_2, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
-            # with T.block("root"):
+            # with T.sblock("root"):
             for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)):
-                with T.block("T_split"):
+                with T.sblock("T_split"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2, v_ax3])
                     T.writes(T_split[v_ax0, v_ax1, v_ax2, v_ax3])
                     T_split[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2, v_ax3]
             for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)):
-                with T.block("T_split_1"):
+                with T.sblock("T_split_1"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3])
                     T.writes(T_split_1[v_ax0, v_ax1, v_ax2, v_ax3])
                     T_split_1[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3]
             for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)):
-                with T.block("T_split_2"):
+                with T.sblock("T_split_2"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3])
                     T.writes(T_split_2[v_ax0, v_ax1, v_ax2, v_ax3])
@@ -562,9 +562,9 @@ def get_qwen3_megakernel_mod():
             rms_norm1 = T.match_buffer(p_rms_norm1, (batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)), "float16")
             rms_norm2 = T.match_buffer(p_rms_norm2, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
             T_concat_intermediate = T.match_buffer(p_output0, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            # with T.block("root"):
+            # with T.sblock("root"):
             for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(80 // TP_SIZE), T.int64(128)):
-                with T.block("T_concat"):
+                with T.sblock("T_concat"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(split_2[v_ax0, v_ax1, v_ax2 - T.int64(72 // TP_SIZE), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64 // TP_SIZE), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
                     T.writes(T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
@@ -576,9 +576,9 @@ def get_qwen3_megakernel_mod():
             batch_size = T.int64()
             lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(151936)), "float16")
             compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(151936)))
-            # with T.block("root"):
+            # with T.sblock("root"):
             for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(151936)):
-                with T.block("compute"):
+                with T.sblock("compute"):
                     v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
                     T.reads(lv4[v_i0, v_i1, v_i2])
                     T.writes(compute[v_i0, v_i1, v_i2])

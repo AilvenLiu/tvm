@@ -30,8 +30,8 @@ from tvm.tir.stmt import (
     BufferStore,
     SeqStmt,
     Evaluate,
-    Block,
-    BlockRealize,
+    SBlock,
+    SBlockRealize,
     IfThenElse,
     DeclBuffer,
 )
@@ -666,8 +666,8 @@ def create_test_statements():
 
     # Block with iteration variables
     iter_var = tir.IterVar(Range(0, 10), x, 0)
-    block = tir.Block([iter_var], [], [], "block", evaluate_stmt)
-    block_realize = tir.BlockRealize([int_imm], tir.IntImm("bool", 1), block)
+    block = tir.SBlock([iter_var], [], [], "block", evaluate_stmt)
+    block_realize = tir.SBlockRealize([int_imm], tir.IntImm("bool", 1), block)
 
     # IfThenElse statement
     if_then_else = tir.IfThenElse(tir.LT(x, int_imm), evaluate_stmt, evaluate_stmt)

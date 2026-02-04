@@ -130,9 +130,9 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 batch_size = T.int64()
                 lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)), "float16")
                 compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)))
-                # with T.block("root"):
+                # with T.sblock("root"):
                 for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)):
-                    with T.block("compute"):
+                    with T.sblock("compute"):
                         v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
                         T.reads(lv4[v_i0, v_i1, v_i2])
                         T.writes(compute[v_i0, v_i1, v_i2])
@@ -144,9 +144,9 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 batch_size = T.int64()
                 res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
                 compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
-                # with T.block("root"):
+                # with T.sblock("root"):
                 for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
-                    with T.block("compute"):
+                    with T.sblock("compute"):
                         v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                         T.reads(res[v_i0, v_i1])
                         T.writes(compute[v_i0, v_i1])
@@ -571,9 +571,9 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 batch_size = T.int64()
                 lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)), "float16")
                 compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)))
-                # with T.block("root"):
+                # with T.sblock("root"):
                 for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)):
-                    with T.block("compute"):
+                    with T.sblock("compute"):
                         v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
                         T.reads(lv4[v_i0, v_i1, v_i2])
                         T.writes(compute[v_i0, v_i1, v_i2])
@@ -585,9 +585,9 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 batch_size = T.int64()
                 res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
                 compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
-                # with T.block("root"):
+                # with T.sblock("root"):
                 for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
-                    with T.block("compute"):
+                    with T.sblock("compute"):
                         v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                         T.reads(res[v_i0, v_i1])
                         T.writes(compute[v_i0, v_i1])

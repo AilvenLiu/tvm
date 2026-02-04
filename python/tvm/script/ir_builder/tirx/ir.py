@@ -465,13 +465,13 @@ def sblock(
     return _ffi_api.Block(name, no_realize, exec_scope, scope_slice_extents, scope_slice_parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def world() -> frame.BlockFrame:
+def world() -> frame.SBlockFrame:
     """The block declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.World()  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -479,7 +479,7 @@ def world() -> frame.BlockFrame:
 def kernel(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "world",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The block declaration statement.
 
     Parameters
@@ -492,8 +492,8 @@ def kernel(
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.Kernel(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -501,13 +501,13 @@ def kernel(
 def cluster(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "world",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The cluster declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.Cluster(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -515,13 +515,13 @@ def cluster(
 def cta(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "kernel",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The block declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.CTA(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -529,13 +529,13 @@ def cta(
 def warpgroup(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The warpgroup declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.WarpGroup(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -543,13 +543,13 @@ def warpgroup(
 def warp(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The block declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.Warp(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -557,13 +557,13 @@ def warp(
 def thread(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.BlockFrame:
+) -> frame.SBlockFrame:
     """The block declaration statement.
 
     Returns
     -------
-    res : frame.BlockFrame
-        The BlockFrame.
+    res : frame.SBlockFrame
+        The SBlockFrame.
     """
     return _ffi_api.Thread(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 

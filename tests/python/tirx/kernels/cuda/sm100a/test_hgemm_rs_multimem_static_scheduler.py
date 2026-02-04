@@ -430,7 +430,7 @@ def test_hgemm_rs():
                 T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
                 # adjust registers count
                 with T.cta():
-                    T.block_attr({"tirx.scope_partition": True})
+                    T.sblock_attr({"tirx.scope_partition": True})
                     with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                         T.ptx.setmaxnreg(False, 56)
                     with T.warpgroup()[0:NUM_CONSUMER]:
@@ -451,7 +451,7 @@ def test_hgemm_rs():
                     if task_smem[task_id, 2] == JobType.GEMM.value:
                         profiler.start(ProfileEventType.GEMM, tid == 0)
                         with T.cta():
-                            T.block_attr({"tirx.scope_partition": True})
+                            T.sblock_attr({"tirx.scope_partition": True})
                             with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                                 if warp_id == 3:
                                     m_idx = task_smem[task_id, 0]

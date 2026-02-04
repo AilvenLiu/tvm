@@ -203,7 +203,7 @@ def test_scope_partition():
             tx = T.thread_id([128], parent="cta")
 
             with T.cta():
-                T.block_attr({"tirx.scope_partition": True})
+                T.sblock_attr({"tirx.scope_partition": True})
                 with T.thread()[0:30]:
                     T.evaluate(tx)
                 with T.thread()[30:128]:
@@ -216,7 +216,7 @@ def test_scope_partition():
             tx = T.thread_id([128], parent="cta")
 
             with T.cta():
-                T.block_attr({"tirx.scope_partition": True})
+                T.sblock_attr({"tirx.scope_partition": True})
                 with T.thread()[0:30]:
                     T.evaluate(tx)
                 with T.thread():
@@ -229,7 +229,7 @@ def test_scope_partition():
             tx = T.thread_id([128], parent="cta")
 
             with T.thread():
-                T.block_attr({"tirx.scope_partition": True})
+                T.sblock_attr({"tirx.scope_partition": True})
                 with T.thread()[0:30]:
                     T.evaluate(tx)
                 T.evaluate(tx)
@@ -241,7 +241,7 @@ def test_scope_partition():
             tx = T.thread_id([128], parent="cta")
 
             with T.thread():
-                T.block_attr({"tirx.scope_partition": True})
+                T.sblock_attr({"tirx.scope_partition": True})
                 with T.thread()[0:30]:
                     T.evaluate(tx)
                 with T.warp()[30:128]:

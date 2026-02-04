@@ -19,7 +19,7 @@ from typing import Dict, Tuple
 
 from tvm import DataTypeCode
 from tvm.ir import PointerType, PrimType
-from tvm.tir import Block, Var
+from tvm.tir import SBlock, Var
 from tvm.tir.buffer import Buffer
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform.function_pass import prim_func_pass
@@ -31,7 +31,7 @@ class EventTensorReplacer(BufferReplacer):
     def __init__(self, buffer_map: Dict[Buffer, Buffer], var_map: Dict[Var, Var]):
         super().__init__(buffer_map, var_map)
 
-    def visit_block_(self, op: Block):
+    def visit_block_(self, op: SBlock):
         changed = False
         new_alloc_buffers = []
         for buffer in op.alloc_buffers:
@@ -45,7 +45,7 @@ class EventTensorReplacer(BufferReplacer):
 
         op = super().visit_block_(op)
         if changed:
-            return Block(
+            return SBlock(
                 op.iter_vars,
                 op.reads,
                 op.writes,

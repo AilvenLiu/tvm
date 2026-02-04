@@ -53,8 +53,8 @@ class StmtFunctor:
             "tir.Prefetch": self.visit_prefetch_,
             "tir.SeqStmt": self.visit_seqstmt_,
             "tir.Evaluate": self.visit_evaluate_,
-            "tir.Block": self.visit_block_,
-            "tir.BlockRealize": self.visit_block_realize_,
+            "tir.SBlock": self.visit_block_,
+            "tir.SBlockRealize": self.visit_block_realize_,
             "tir.OpCall": self.visit_op_call_,
             "tir.AllocBuffer": self.visit_alloc_buffer_,
         }
@@ -708,7 +708,7 @@ class StmtMutator(StmtFunctor):
             and body is op.body
         ):
             return op
-        return tvm.tir.Block(
+        return tvm.tir.SBlock(
             iter_vars,
             reads,
             writes,
@@ -733,10 +733,10 @@ class StmtMutator(StmtFunctor):
         if not iter_values_changed and predicate is op.predicate and block is op.block:
             return op
 
-        if not isinstance(block, tvm.tir.Block):
-            raise TypeError(f"Expected Block, but got {type(block)}")
+        if not isinstance(block, tvm.tir.SBlock):
+            raise TypeError(f"Expected SBlock, but got {type(block)}")
 
-        return tvm.tir.BlockRealize(iter_values, predicate, block)
+        return tvm.tir.SBlockRealize(iter_values, predicate, block)
 
     def visit_op_call_(self, op):
         """Mutator implementation for OpCall."""

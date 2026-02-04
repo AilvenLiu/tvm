@@ -28,10 +28,10 @@ class FuseAddRMSNormTile(AddRMSNormTile):
                 smem_manager.set_tile(add_rmsnorm_tile)
                 add_rmsnorm_tile.init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     add_rmsnorm_tile.run(m_idx, n_idx, k_idx, input, residual, weight, output, out_residual)   
         return add_rmsnorm_func, num_tiles, tile_size
 
@@ -56,10 +56,10 @@ class FuseRMSNormTile(RMSNormTile):
                 smem_manager.set_tile(rmsnorm_tile)
                 rmsnorm_tile.init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     T.cuda.thread_fence()
                     rmsnorm_tile.run(m_idx, n_idx, k_idx, output, input, weight)
         return rmsnorm_func, num_tiles, tile_size

@@ -56,10 +56,10 @@ def test_basic():
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
@@ -79,10 +79,10 @@ def test_basic():
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")
@@ -193,10 +193,10 @@ def test_extra_args():
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
@@ -216,10 +216,10 @@ def test_extra_args():
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")

@@ -164,10 +164,10 @@ def get_fused_split1_silu1_multiply1_kernel(out_dim):
         seq_len = T.int64()
         fastertransformer_gemm_fp16_int514 = T.match_buffer(p_fastertransformer_gemm_fp16_int514, (T.int64(1), seq_len, T.int64(INTERMEDIATE_SIZE * 2)), "float16")
         T_multiply_intermediate_1 = T.match_buffer(p_output0, (T.int64(1), seq_len, T.int64(INTERMEDIATE_SIZE)), "float16")
-        # with T.block("root"):
+        # with T.sblock("root"):
         for ax0_ax1_fused_0 in T.thread_binding(seq_len * T.int64(INTERMEDIATE_SIZE // 1024), thread="blockIdx.x"):
             for ax0_ax1_fused_1 in T.thread_binding(T.int64(1024), thread="threadIdx.x"):
-                with T.block("T_multiply_1"):
+                with T.sblock("T_multiply_1"):
                     v0 = T.axis.spatial(seq_len, (ax0_ax1_fused_0 * T.int64(1024) + ax0_ax1_fused_1) // T.int64(INTERMEDIATE_SIZE))
                     v1 = T.axis.spatial(T.int64(INTERMEDIATE_SIZE), (ax0_ax1_fused_0 * T.int64(1024) + ax0_ax1_fused_1) % T.int64(INTERMEDIATE_SIZE))
                     T.reads(fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1:v1 + T.int64(INTERMEDIATE_SIZE + 1)])

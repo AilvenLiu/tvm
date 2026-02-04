@@ -646,7 +646,7 @@ def test_ag_hgemm():
                                 m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                                 n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
 
-                                T.block_attr({"tirx.scope_partition": True})
+                                T.sblock_attr({"tirx.scope_partition": True})
                                 with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                                     T.ptx.setmaxnreg(False, 56)
                                     if warp_id == 3:

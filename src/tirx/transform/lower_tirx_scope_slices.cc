@@ -63,14 +63,14 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
-  Stmt VisitStmt_(const BlockRealizeNode* op) final {
+  Stmt VisitStmt_(const SBlockRealizeNode* op) final {
     Stmt block = this->VisitStmt(op->block);
     if (block.same_as(op->block)) {
       return ffi::GetRef<Stmt>(op);
     } else {
-      if (auto* block_ptr = block.as<BlockNode>()) {
+      if (auto* block_ptr = block.as<SBlockNode>()) {
         auto n = CopyOnWrite(op);
-        n->block = ffi::GetRef<Block>(block_ptr);
+        n->block = ffi::GetRef<SBlock>(block_ptr);
         return Stmt(n);
       } else {
         return block;
@@ -78,8 +78,8 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     }
   }
 
-  Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = ffi::GetRef<Block>(op);
+  Stmt VisitStmt_(const SBlockNode* op) final {
+    SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
     if (op->annotations.count("tirx.scope_partition")) {
       // scope partition is enabled, rewrite the body
@@ -125,7 +125,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     ICHECK_EQ(resolved.size(), out_dim);
     n->exec_scope = ExecScope::Create(scope_slice->name);
     if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
-      return IfThenElse(select_cond.value(), BlockRealize({}, Bool(true), block));
+      return IfThenElse(select_cond.value(), SBlockRealize({}, Bool(true), block));
     } else {
       auto slices = scope_slice->slices.as<Array<Range>>().value();
       PrimExpr cond = Bool(true);
@@ -133,7 +133,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         cond = cond && resolved[i] >= slices[i]->min &&
                resolved[i] < slices[i]->extent + slices[i]->min;
       }
-      return IfThenElse(cond, BlockRealize({}, Bool(true), block));
+      return IfThenElse(cond, SBlockRealize({}, Bool(true), block));
     }
   }
 

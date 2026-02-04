@@ -37,7 +37,7 @@ from tvm.script import tirx as Tx
 from tvm.script import relax as R
 from tvm.script.ir_builder import IRBuilder
 from tvm.tir import (
-    Block,
+    SBlock,
     Buffer,
     BufferLoad,
     BufferStore,
@@ -48,7 +48,7 @@ from tvm.tir import (
     Stmt,
     Var,
     Evaluate,
-    BlockRealize,
+    SBlockRealize,
     AllocBuffer,
     DeclBuffer,
     IntImm,
@@ -288,13 +288,13 @@ class EventPrimFuncHelper(StmtExprMutator):
     def visit_seqstmt_(self, op):
         new_seq = []
         seq = [stmt for stmt in op.seq]
-        if isinstance(seq[-1], Block) and seq[-1].annotations.get("marks") is not None and seq[-1].annotations["marks"].value == "entry_mark":
+        if isinstance(seq[-1], SBlock) and seq[-1].annotations.get("marks") is not None and seq[-1].annotations["marks"].value == "entry_mark":
             stmt_list = self.stmt_list
             self.stmt_list = []
             seq = seq[:-1] + stmt_list
         for stmt in reversed(seq):
-            if isinstance(stmt, Block) and stmt.annotations.get("marks") is not None and stmt.annotations["marks"].value == "beg_mark":
-                if isinstance(stmt.body, Block) and stmt.body.annotations.get("marks") is not None and stmt.body.annotations["marks"].value == "entry_mark":
+            if isinstance(stmt, SBlock) and stmt.annotations.get("marks") is not None and stmt.annotations["marks"].value == "beg_mark":
+                if isinstance(stmt.body, SBlock) and stmt.body.annotations.get("marks") is not None and stmt.body.annotations["marks"].value == "entry_mark":
                     continue
                 if not isinstance(stmt.body, LetStmt):
                     # TODO: Need more Robust way to handle other stmt types
@@ -311,7 +311,7 @@ class EventPrimFuncHelper(StmtExprMutator):
 
     def visit_let_stmt_(self, op):
         op = super().visit_let_stmt_(op)
-        if isinstance(op.body, Block) and op.body.annotations.get("marks") is not None and op.body.annotations["marks"].value == "entry_mark":
+        if isinstance(op.body, SBlock) and op.body.annotations.get("marks") is not None and op.body.annotations["marks"].value == "entry_mark":
             stmt_list = self.stmt_list
             self.stmt_list = []
             if len(stmt_list) > 0:
@@ -350,7 +350,7 @@ class EventOpInserter(StmtExprMutator):
         inserter = EventOpInserter(strategy, func_info, tile_scheduler, semaphore_class)
         return inserter.visit_stmt(func_info.func_body)
 
-    def visit_block_(self, block: Block):
+    def visit_block_(self, block: SBlock):
         if block.annotations.get("tirx.tile_class.prefetch") is not None:
             return block
         elif block.annotations.get("tirx.tile_class.run") is not None:
@@ -407,7 +407,7 @@ class EventOpInserter(StmtExprMutator):
             body_list = pushes + waits + [block.body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
             # Reconstruct the block with the new body, preserving all other attributes.
-            return Block(
+            return SBlock(
                 block.iter_vars,
                 block.reads,
                 block.writes,
@@ -479,7 +479,7 @@ class PersistentVarCollector(StmtExprMutator):
             return op.body
         return op
 
-    def visit_block_(self, block: Block):
+    def visit_block_(self, block: SBlock):
         if any(block.annotations.get(key) is not None for key in ["tirx.tile_class.persistent.init", "tirx.tile_class.persistent.finalize"]):
             self.visit_tile_class = True
         elif any(block.annotations.get(key) is not None for key in ["tirx.megakernel.persistent.init", "tirx.megakernel.persistent.finalize"]):
@@ -497,7 +497,7 @@ class PersistentVarCollector(StmtExprMutator):
                 break
         if not any(block.annotations.get(key) for key in annotation_to_var.keys()):
             return block
-        return Block(
+        return SBlock(
             block.iter_vars,
             block.reads,
             block.writes,
@@ -511,7 +511,7 @@ class HostStmtCollector(StmtExprMutator):
         super().__init__()
         self.uppermost_block = None
 
-    def visit_block_realize_(self, op: BlockRealize):
+    def visit_block_realize_(self, op: SBlockRealize):
         self.uppermost_block = op
         return KernelReplacePoint()
 
@@ -741,7 +741,7 @@ class DependencyHandler(StmtExprMutator):
             assert prim_expr is not None, "dependency handling failed to set all output prim exprs"
         # warp the new_stmt into a block
         # it will be processed to fix the scope of the variables declared in the input dependencies in the post process step
-        new_stmt = Block(
+        new_stmt = SBlock(
             iter_vars=[],
             reads=[],
             writes=[],
@@ -756,7 +756,7 @@ class DependencyHandler(StmtExprMutator):
     def visit_buffer_store_(self, op):
         if op.buffer in self.cur_buf_set:
             assert len(op.indices) == 1 and op.indices[0] == 0
-            entry_mark = Block(
+            entry_mark = SBlock(
                 iter_vars=[],
                 reads=[],
                 writes=[],
@@ -778,7 +778,7 @@ class DependencyHandler(StmtExprMutator):
         return super().visit_buffer_store_(op)
 
     def _is_entry_mark(self, stmt: Stmt) -> bool:
-        return (isinstance(stmt, Block) and stmt.annotations.get("marks") is not None
+        return (isinstance(stmt, SBlock) and stmt.annotations.get("marks") is not None
                 and stmt.annotations["marks"].value == "entry_mark")
 
     def visit_seqstmt_(self, op):
@@ -795,7 +795,7 @@ class DependencyHandler(StmtExprMutator):
             else:
                 if flag:
                     flag = False
-                    entry_mark = Block(
+                    entry_mark = SBlock(
                         iter_vars=[],
                         reads=[],
                         writes=[],
@@ -813,7 +813,7 @@ class DependencyHandler(StmtExprMutator):
                     inv_seq.append(entry_mark)
                 inv_seq.append(stmt)
         if flag:
-            entry_mark = Block(
+            entry_mark = SBlock(
                 iter_vars=[],
                 reads=[],
                 writes=[],

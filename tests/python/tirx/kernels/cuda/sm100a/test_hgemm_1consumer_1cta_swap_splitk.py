@@ -303,7 +303,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                         epilogue1()
 
                 with T.cta():
-                    T.block_attr({"tirx.scope_partition": True})
+                    T.sblock_attr({"tirx.scope_partition": True})
                     with T.warpgroup()[1:2]:
                         if warp_id == 3:
                             profiler.init(0)

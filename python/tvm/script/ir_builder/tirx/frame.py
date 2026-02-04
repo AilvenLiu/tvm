@@ -37,7 +37,7 @@ class PrimFuncFrame(TIRFrame): ...
 class SBlockFrame(TIRFrame):
     ...
 
-    def __getitem__(self, slices) -> "BlockFrame":
+    def __getitem__(self, slices) -> "SBlockFrame":
         """Slice operator for block frame.
 
         Parameters
@@ -47,14 +47,14 @@ class SBlockFrame(TIRFrame):
 
         Returns
         -------
-        BlockFrame
+        SBlockFrame
             A new block frame with the slices applied.
         """
         if not isinstance(slices, tuple):
             slices = (slices,)
         if len(slices) == 1 and isinstance(slices[0], PrimExpr):
             # If the slice is a single PrimExpr, it is a select condition
-            return _ffi_api.BlockFrameSlice(self, slices[0])  # pylint: disable=no-member
+            return _ffi_api.SBlockFrameSlice(self, slices[0])  # pylint: disable=no-member
         # Otherwise, the slices are a list of ranges
         slices_t = []
         for s in slices:
@@ -65,7 +65,7 @@ class SBlockFrame(TIRFrame):
                 slices_t.append(s)
             else:
                 assert False, f"Slice must be a slice or Range, got {s} of type {type(s)}"
-        return _ffi_api.BlockFrameSlice(self, slices_t)  # pylint: disable=no-member
+        return _ffi_api.SBlockFrameSlice(self, slices_t)  # pylint: disable=no-member
 
 
 @_register_object("script.ir_builder.tirx.SBlockInitFrame")

@@ -30,7 +30,7 @@ class FuseSplitKReduceRMSnormRopeQTile(SplitKReduceRMSnormRopeQTile):
             with T.cta():
                 reduce_rms_rope_tile.init(None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     reduce_rms_rope_tile.run(m_idx, n_idx, k_idx, partial, qkv, q_rms_weight, rope_pos, cos_sin_cache)
         return split_k_reduce_rms_rope_func, num_tiles, tile_size
 
@@ -59,7 +59,7 @@ class FuseSplitKReduceRMSnormRopeAppendKTile(SplitKReduceRMSnormRopeAppendKTile)
             with T.cta():
                 reduce_rms_rope_append_tile.init(None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     reduce_rms_rope_append_tile.run(m_idx, n_idx, k_idx, partial, k_rms_weight, rope_pos, cos_sin_cache, append_pos, kv_cache)
         return split_k_reduce_rms_rope_append_func, num_tiles, tile_size
 
@@ -84,6 +84,6 @@ class FuseSplitKReduceAppendVTile(SplitKReduceAppendVTile):
             with T.cta():
                 reduce_rms_rope_append_tile.init(None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     reduce_rms_rope_append_tile.run(m_idx, n_idx, k_idx, partial, kv_cache, append_pos)
         return split_k_reduce_append_func, num_tiles, tile_size

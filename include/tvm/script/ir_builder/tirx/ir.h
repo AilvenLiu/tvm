@@ -146,20 +146,20 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
 
 void OpCall(tvm::tirx::tirx::OpCall op_call);
 
-BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
+SBlockFrame SBlockFrameSlice(SBlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
 
-BlockFrame World();
+SBlockFrame World();
 
-BlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+SBlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent);
 
-BlockFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+SBlockFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                ffi::String scope_slice_parent);
 
-BlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+SBlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                 ffi::String scope_slice_parent);
 
-BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+SBlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent);
 
 ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent);

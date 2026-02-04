@@ -180,13 +180,13 @@ def test_print():
             C = T.match_buffer(C_ptr, (M,), dtype_str)
 
             for i in T.grid(M):
-                with T.block("C"):
+                with T.sblock("C"):
                     vi = T.axis.spatial(M, i)
                     C[vi] = A[vi] + B[vi]
                 T.print_buffer(C.data, dtype_str, False, False, dim_num, (M,))
 
         sch = tvm.tir.Schedule(add_func)
-        blk = sch.get_block("C")
+        blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 
         i0, i1 = sch.split(i, factors=[None, M_BLK])
@@ -216,14 +216,14 @@ def test_print():
             C = T.match_buffer(C_ptr, (M, N), dtype_str)
 
             for i, j in T.grid(M, N):
-                with T.block("C"):
+                with T.sblock("C"):
                     vi = T.axis.spatial(M, i)
                     vj = T.axis.spatial(N, j)
                     C[vi, vj] = A[vi, vj] + B[vi, vj]
                 T.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N))
 
         sch = tvm.tir.Schedule(add_func)
-        blk = sch.get_block("C")
+        blk = sch.get_sblock("C")
         i, j = sch.get_loops(blk)
 
         i0, i1 = sch.split(i, factors=[None, M_BLK])
@@ -257,7 +257,7 @@ def test_print():
             C = T.match_buffer(C_ptr, (M, N, K), dtype_str)
 
             for i, j, k in T.grid(M, N, K):
-                with T.block("C"):
+                with T.sblock("C"):
                     vi = T.axis.spatial(M, i)
                     vj = T.axis.spatial(N, j)
                     vk = T.axis.spatial(K, k)
@@ -265,7 +265,7 @@ def test_print():
                 T.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N, K))
 
         sch = tvm.tir.Schedule(add_func)
-        blk = sch.get_block("C")
+        blk = sch.get_sblock("C")
         i, j, k = sch.get_loops(blk)
 
         i0, i1 = sch.split(i, factors=[None, M_BLK])
@@ -302,13 +302,13 @@ def test_print():
             Ten = T.IntImm(dtype_str, 10)
 
             for i in T.grid(M):
-                with T.block("C"):
+                with T.sblock("C"):
                     vi = T.axis.spatial(M, i)
                     C[vi] = A[vi] + B[vi]
                 T.print_buffer(Ten, "int32", False, True, dim_num, ())
 
         sch = tvm.tir.Schedule(add_func)
-        blk = sch.get_block("C")
+        blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 
         i0, i1 = sch.split(i, factors=[None, M_BLK])
@@ -339,13 +339,13 @@ def test_print():
             string_var = T.StringImm(test_string)
 
             for i in T.grid(M):
-                with T.block("C"):
+                with T.sblock("C"):
                     vi = T.axis.spatial(M, i)
                     C[vi] = A[vi] + B[vi]
                 T.print_buffer(string_var, "int8", True, False, dim_num, ())
 
         sch = tvm.tir.Schedule(add_func)
-        blk = sch.get_block("C")
+        blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 
         i0, i1 = sch.split(i, factors=[None, M_BLK])

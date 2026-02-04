@@ -54,7 +54,7 @@ class ScopeIdDefGather : public StmtExprVisitor {
     return gather.scope_id_def;
   }
 
-  void VisitStmt_(const BlockNode* op) override {
+  void VisitStmt_(const SBlockNode* op) override {
     StmtExprVisitor::VisitStmt_(op);
     if (!op->exec_scope.has_value()) return;
     for (const auto& def : op->exec_scope.value()->scope_id_def) {
@@ -69,8 +69,8 @@ class ScopeIdDefRemover : public StmtExprMutator {
  public:
   static Stmt Remove(const Stmt& stmt) { return ScopeIdDefRemover()(stmt); }
 
-  Stmt VisitStmt_(const BlockNode* op) override {
-    Block block = ffi::GetRef<Block>(op);
+  Stmt VisitStmt_(const SBlockNode* op) override {
+    SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
     Stmt body = StmtExprMutator::VisitStmt(op->body);
     if (op->exec_scope.defined()) {
@@ -102,11 +102,11 @@ class ScopeIdDefResolver : public StmtExprMutator {
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
-  Stmt VisitStmt_(const BlockRealizeNode* op) override {
+  Stmt VisitStmt_(const SBlockRealizeNode* op) override {
     auto n_realize = CopyOnWrite(op);
     if (!op->block->exec_scope.defined()) {
       // No exec_scope, return the block as is
-      n_realize->block = Downcast<Block>(StmtExprMutator::VisitStmt_(op->block.get()));
+      n_realize->block = Downcast<SBlock>(StmtExprMutator::VisitStmt_(op->block.get()));
       return Stmt(n_realize);
     }
     const auto& scope = op->block->exec_scope.value();

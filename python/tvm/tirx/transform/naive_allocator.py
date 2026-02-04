@@ -18,7 +18,7 @@
 import functools
 
 from tvm import DataType
-from tvm.tir import AllocBuffer, Block, IntImm
+from tvm.tir import AllocBuffer, SBlock, IntImm
 from tvm.tir.buffer import Buffer
 from tvm.tir.stmt_functor import StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass

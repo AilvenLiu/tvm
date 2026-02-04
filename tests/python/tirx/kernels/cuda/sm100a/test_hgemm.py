@@ -252,7 +252,7 @@ def test_hgemm():
                         epilogue1()
 
                 with T.cta():
-                    T.block_attr({"tirx.scope_partition": True})
+                    T.sblock_attr({"tirx.scope_partition": True})
                     with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                         T.ptx.setmaxnreg(False, 56)
                         if warp_id == 3:

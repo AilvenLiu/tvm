@@ -38,20 +38,20 @@ class FuseGemmTile(GemmTile):
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.persistent.init": True})
+                    T.sblock_attr({"tirx.tile_class.persistent.init": True})
                     gemm_tile.class_init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.prefetch": True})
+                    T.sblock_attr({"tirx.tile_class.prefetch": True})
                     if prefetch_on:
                         gemm_tile.prefetch(m_idx, n_idx, k_idx, A, B, output, None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     gemm_tile.run(m_idx, n_idx, k_idx, A, B, output, None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.persistent.finalize": True})
+                    T.sblock_attr({"tirx.tile_class.persistent.finalize": True})
                     gemm_tile.class_finalize()    
 
         if split_k_factor == 1:
@@ -151,19 +151,19 @@ class FuseGateUpSiluTile(GateUpSiluTile):
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.megakernel.persistent.init": True})
+                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.persistent.init": True})
+                    T.sblock_attr({"tirx.tile_class.persistent.init": True})
                     gemm_tile.class_init(smem_manager)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.prefetch": True})
+                    T.sblock_attr({"tirx.tile_class.prefetch": True})
                     if prefetch_on:
                         gemm_tile.prefetch(m_idx, n_idx, k_idx, A, B, output, None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.run": True})
+                    T.sblock_attr({"tirx.tile_class.run": True})
                     gemm_tile.run(m_idx, n_idx, k_idx, A, B, output, None)
                 with T.cta():
-                    T.block_attr({"tirx.tile_class.persistent.finalize": True})
+                    T.sblock_attr({"tirx.tile_class.persistent.finalize": True})
                     gemm_tile.class_finalize()    
         return gate_up_silu_func, num_tiles, tile_size

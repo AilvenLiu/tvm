@@ -55,13 +55,13 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const BlockNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     if (op->annotations.count(attr::tirx_scope_partition)) {
-      // scope partition is enabled, check if body is a list of BlockRealize
+      // scope partition is enabled, check if body is a list of SBlockRealize
       if (auto seq = op->body.as<SeqStmt>()) {
         ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
         for (const auto& stmt : seq.value()->seq) {
-          auto block_realize = stmt.as<BlockRealize>();
+          auto block_realize = stmt.as<SBlockRealize>();
           if (!block_realize.has_value()) {
             Verify(false) << "TIRxError: Block with scope partition at " << path
                           << " has invalid body " << op->body;
@@ -199,7 +199,7 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const BlockNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     Verify(op->exec_scope.defined())
         << "InternalError: exec_scope is not defined for block at " << path;
     const auto& scope = op->exec_scope.value();
@@ -225,7 +225,7 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const BlockNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     auto verify = [&](const Buffer& buffer) {
       if (buffer->layout.defined()) {
         Verify(buffer->layout.value()->VerifyWellFormed())
@@ -249,7 +249,7 @@ class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const BlockNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     Verify(op->exec_scope != nullptr) << "TIRxError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
     scope_stack_.push_back(scope);
@@ -267,7 +267,7 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const BlockNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     Verify(!root_.has_value()) << "TIRxError: Only one root scope is allowed in device function";
     root_ = op->exec_scope.value();
     auto kernel_scope = ExecScope::Create("kernel");

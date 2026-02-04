@@ -25,7 +25,7 @@ from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir import Block, PrimFunc
+from tvm.tir import SBlock, PrimFunc
 from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
@@ -83,7 +83,7 @@ class DeviceFuncToKernel(StmtExprVisitor):
         new_params = func.params[: -len(tile_num)]
         return PrimFunc(new_params, new_body, func.ret_type, func.buffer_map, func.attrs)
 
-    def visit_block_(self, block: Block):
+    def visit_block_(self, block: SBlock):
         self.exec_scope = block.exec_scope
 
 

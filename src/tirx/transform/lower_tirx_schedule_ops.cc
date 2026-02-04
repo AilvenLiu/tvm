@@ -90,11 +90,11 @@ class TIRxOpScheduler : public StmtExprMutator {
     Stmt body_;
   };
 
-  Stmt VisitStmt_(const BlockRealizeNode* op) final {
-    BlockRealize block_realize = ffi::GetRef<BlockRealize>(op);
+  Stmt VisitStmt_(const SBlockRealizeNode* op) final {
+    SBlockRealize block_realize = ffi::GetRef<SBlockRealize>(op);
     auto* n = block_realize.CopyOnWrite();
     Stmt body = VisitStmt(n->block);
-    if (auto block = body.as<Block>()) {
+    if (auto block = body.as<SBlock>()) {
       n->block = block.value();
       return std::move(block_realize);
     } else {
@@ -102,10 +102,10 @@ class TIRxOpScheduler : public StmtExprMutator {
     }
   }
 
-  Stmt VisitStmt_(const BlockNode* op) final {
+  Stmt VisitStmt_(const SBlockNode* op) final {
     bool is_first_block = false;
     std::swap(is_first_block, is_first_block_);
-    Block block = ffi::GetRef<Block>(op);
+    SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
     // Get the exec_scope
     if (op->exec_scope.defined()) {
@@ -122,7 +122,7 @@ class TIRxOpScheduler : public StmtExprMutator {
         n->body = KernelReplacePointSearcher::Seek(stmt, n->body);
       }
       n->alloc_buffers.insert(n->alloc_buffers.end(), alloc_buffers_.begin(), alloc_buffers_.end());
-      Stmt res = BlockRealize({}, Bool(true), std::move(block));
+      Stmt res = SBlockRealize({}, Bool(true), std::move(block));
       if (is_first_thread_attr_) {
         // Insert host init stmts outside the outermost thread binding or block
         for (const auto& stmt : host_init_stmts_) {
@@ -211,7 +211,7 @@ class ScopeMerger : public StmtExprMutator {
     if (auto* n = stmt.as<SeqStmtNode>()) {
       std::vector<Stmt> seq;
       for (size_t i = 0; i < n->seq.size();) {
-        if (auto* realize = n->seq[i].as<BlockRealizeNode>()) {
+        if (auto* realize = n->seq[i].as<SBlockRealizeNode>()) {
           // Find a sequence of blocks with the same exec_scope
           auto block = realize->block;
           auto* new_block = block.CopyOnWrite();
@@ -219,7 +219,7 @@ class ScopeMerger : public StmtExprMutator {
           ICHECK(block->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
           auto scope = block->exec_scope.value();
           for (i++; i < n->seq.size(); i++) {
-            if (auto* next_realize = n->seq[i].as<BlockRealizeNode>()) {
+            if (auto* next_realize = n->seq[i].as<SBlockRealizeNode>()) {
               const auto& next_block = next_realize->block;
               ICHECK(next_block->exec_scope.defined())
                   << "Internal Error: exec_scope is not defined";
@@ -231,7 +231,7 @@ class ScopeMerger : public StmtExprMutator {
             break;
           }
           new_block->body = SeqStmt::Flatten(new_body);
-          seq.push_back(BlockRealize({}, Bool(true), block));
+          seq.push_back(SBlockRealize({}, Bool(true), block));
         } else {
           seq.push_back(n->seq[i]);
           i++;

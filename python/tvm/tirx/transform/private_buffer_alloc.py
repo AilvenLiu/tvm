@@ -20,7 +20,7 @@ from typing import Dict, List
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tir.buffer import Buffer
-from tvm.tir.stmt import AllocBuffer, AttrStmt, Block, For, OpCall, Stmt
+from tvm.tir.stmt import AllocBuffer, AttrStmt, SBlock, For, OpCall, Stmt
 from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
@@ -37,7 +37,7 @@ class PrivateAllocCollector(StmtVisitor):
         self.buffer_dict = {}
         self.private_buf_refs = {}
 
-    def visit_block_(self, op: Block):
+    def visit_block_(self, op: SBlock):
         if op.exec_scope is not None:
             self.exec_scope_stack_.append(op.exec_scope)
         super().visit_block_(op)
@@ -79,7 +79,7 @@ class PrivateAllocMutator(StmtMutator):
         self.added_workspace = added_workspace
         self.is_outer_block = True
 
-    def visit_block_(self, op: Block):
+    def visit_block_(self, op: SBlock):
         is_outer_block = self.is_outer_block
         self.is_outer_block = False
         op = super().visit_block_(op)
@@ -89,7 +89,7 @@ class PrivateAllocMutator(StmtMutator):
                 body = seek_kernel_replace_point(stmt, body)
             for buffer in reversed(self.alloc_buffers):
                 body = AllocBuffer(buffer, body)
-            block = Block(
+            block = SBlock(
                 [],
                 [],
                 [],

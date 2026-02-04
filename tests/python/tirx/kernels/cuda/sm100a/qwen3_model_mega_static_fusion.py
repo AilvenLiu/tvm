@@ -511,9 +511,9 @@ def get_qwen3_megakernel_mod():
             batch_size = T.int64()
             lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(151936)), "float16")
             compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(151936)))
-            # with T.block("root"):
+            # with T.sblock("root"):
             for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(151936)):
-                with T.block("compute"):
+                with T.sblock("compute"):
                     v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
                     T.reads(lv4[v_i0, v_i1, v_i2])
                     T.writes(compute[v_i0, v_i1, v_i2])
