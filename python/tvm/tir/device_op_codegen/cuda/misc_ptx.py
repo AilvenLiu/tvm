@@ -97,3 +97,15 @@ __forceinline__ __device__ int{bits}_t {func_name}() {{
 }}
 """
     return cuda_func_call(func_name, source_code=source_code, return_type=f"int{bits}")
+
+
+@register_codegen("ptx_any_sync")
+def codegen_ptx_any_sync(mask, pred):
+    """Warp-wide any predicate using __any_sync intrinsic."""
+    func_name = "tvm_builtin_ptx_any_sync"
+    source_code = f"""
+__forceinline__ __device__ int {func_name}(unsigned mask, int pred) {{
+    return __any_sync(mask, pred);
+}}
+"""
+    return cuda_func_call(func_name, mask, pred, source_code=source_code, return_type="int32")

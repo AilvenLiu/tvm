@@ -146,43 +146,6 @@ def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads,
     def ceildiv(a, b):
         return (a + b - 1) // b
 
-    def ptx_exp2(x):
-
-        func_name = "tvm_builtin_ptx_exp2"
-        source_code = f"""
-__forceinline__ __device__ float {func_name}(float x) {{
-  float y;
-  asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
-  return y;
-}}
-"""
-        return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
-
-    def ptx_rcp(x):
-
-        func_name = "tvm_builtin_ptx_rcp"
-        source_code = f"""
-__forceinline__ __device__ float {func_name}(float x) {{
-  float y;
-  asm volatile("rcp.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
-  return y;
-}}
-"""
-        return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
-
-    def any_sync(mask, pred):
-        return T.cuda.func_call(
-            "any_sync",
-            mask,
-            pred,
-            source_code=f"""
-__forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
-  return __any_sync(mask, pred);
-}}
-""",
-            return_type="int32",
-        )
-
     def get_sm_scale():
 
         func_name = "get_sm_scale"
@@ -192,49 +155,6 @@ __device__ __forceinline__ float {func_name}() {{
 }}
 """
         return T.cuda.func_call(func_name, source_code=source_code, return_type="float32")
-
-    def fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr):
-        func_name = "fma_packed_f32x2"
-        source_code = f"""
-__device__ __forceinline__ float2 {func_name}(float a1, float a2, float b1, float b2, float c1, float c2, float* d) {{
-  float2* d_p = (float2*) d;
-  float2 a = make_float2(a1, a2);
-  float2 b = make_float2(b1, b2);
-  float2 c = make_float2(c1, c2);
-  asm volatile("fma.rz.ftz.f32x2 %0, %1, %2, %3;\\n" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)), "l"(reinterpret_cast<uint64_t&>(c)));
-}}
-"""
-        return T.cuda.func_call(
-            func_name, a1, a2, b1, b2, c1, c2, d_addr, source_code=source_code, return_type="void"
-        )
-
-    def mul_packed_f32x2(a1, a2, b1, b2, d_addr):
-        func_name = "mul_packed_f32x2"
-        source_code = f"""
-__device__ __forceinline__ float2 {func_name}(float a1, float a2, float b1, float b2, float* d) {{
-  float2* d_p = (float2*) d;
-  float2 a = make_float2(a1, a2);
-  float2 b = make_float2(b1, b2);
-  asm volatile("mul.rz.ftz.f32x2 %0, %1, %2;\\n" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
-}}
-"""
-        return T.cuda.func_call(
-            func_name, a1, a2, b1, b2, d_addr, source_code=source_code, return_type="void"
-        )
-
-    def sub_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
-        func_name = f"sub_packed_{rounding_mode}_f32x2"
-        source_code = f"""
-__device__ __forceinline__ float2 {func_name}(float a1, float a2, float b1, float b2, float* d) {{
-  float2* d_p = (float2*) d;
-  float2 a = make_float2(a1, a2);
-  float2 b = make_float2(b1, b2);
-  asm volatile("sub.{rounding_mode}.ftz.f32x2 %0, %1, %2;\\n" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
-}}
-"""
-        return T.cuda.func_call(
-            func_name, a1, a2, b1, b2, d_addr, source_code=source_code, return_type="void"
-        )
 
     def combine_int_frac_ex2(x_rounded, frac_ex2):
         func_name = "combine_int_frac_ex2"
@@ -268,12 +188,6 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
         return T.cuda.func_call(func_name, handle, source_code=source_code, return_type="uint32")
 
     @T.macro
-    def unroll_first(loop_body, extent):
-        loop_body(0)
-        for i in T.serial(extent - 1, annotations={"disable_unroll": True}):
-            loop_body(i + 1)
-
-    @T.macro
     def ex2_emulation_2(out, idx, x, y):
         # Polynomial coefficients for exp2 approximation (degree 3)
         poly_ex2_deg3 = T.meta_var(
@@ -293,23 +207,23 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
         # Round down to get integer part (stored as float with integer in lower bits)
         xy_rounded = T.alloc_local([2], "float32")
-        T.cuda.add_packed_f32x2(xy_clamped[0], xy_clamped[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded[0]), rounding_mode="rm")
+        T.ptx.add_packed_f32x2(xy_clamped[0], xy_clamped[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded[0]), rounding_mode="rm")
 
         # Subtract to get the rounded-back value (round to nearest even)
         xy_rounded_back = T.alloc_local([2], "float32")
-        sub_packed_f32x2(xy_rounded[0], xy_rounded[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded_back[0]), rounding_mode="rn")
+        T.ptx.sub_packed_f32x2(xy_rounded[0], xy_rounded[1], fp32_round_int, fp32_round_int, T.address_of(xy_rounded_back[0]), rounding_mode="rn")
 
         # Compute fractional part: xy_frac = xy_clamped - xy_rounded_back
         xy_frac = T.alloc_local([2], "float32")
-        sub_packed_f32x2(xy_clamped[0], xy_clamped[1], xy_rounded_back[0], xy_rounded_back[1], T.address_of(xy_frac[0]), rounding_mode="rn")
+        T.ptx.sub_packed_f32x2(xy_clamped[0], xy_clamped[1], xy_rounded_back[0], xy_rounded_back[1], T.address_of(xy_frac[0]), rounding_mode="rn")
 
         # Evaluate polynomial using Horner's method: ((poly[3] * x + poly[2]) * x + poly[1]) * x + poly[0]
         xy_frac_ex2 = T.alloc_local([2], "float32")
         xy_frac_ex2[0] = poly_ex2_deg3[3]
         xy_frac_ex2[1] = poly_ex2_deg3[3]
-        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[2], poly_ex2_deg3[2], T.address_of(xy_frac_ex2[0]))
-        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[1], poly_ex2_deg3[1], T.address_of(xy_frac_ex2[0]))
-        fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[0], poly_ex2_deg3[0], T.address_of(xy_frac_ex2[0]))
+        T.ptx.fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[2], poly_ex2_deg3[2], T.address_of(xy_frac_ex2[0]))
+        T.ptx.fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[1], poly_ex2_deg3[1], T.address_of(xy_frac_ex2[0]))
+        T.ptx.fma_packed_f32x2(xy_frac_ex2[0], xy_frac_ex2[1], xy_frac[0], xy_frac[1], poly_ex2_deg3[0], poly_ex2_deg3[0], T.address_of(xy_frac_ex2[0]))
 
         # Combine integer and fractional parts: shift integer left by 23 bits and add to fractional exp2
         out[idx] = combine_int_frac_ex2(xy_rounded[0], xy_frac_ex2[0])
@@ -1069,7 +983,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                             row_max_safe[0] = row_max_old[0]
                                             acc_scale[0] = T.float32(1.0)
                                         else:
-                                            acc_scale[0] = ptx_exp2(acc_scale_[0])
+                                            acc_scale[0] = T.ptx.exp2(acc_scale_[0])
 
                                     # row_max is the max value of the tile
                                     # and row_max_scaled is the max value of the tile after scaled
@@ -1085,7 +999,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     bar_softmax_corr_full.arrive(wg_id)
                                     profiler.start(ProfileEventType.Softmax_FMA, tid_in_wg == 0)
                                     for i in T.unroll(BLK_N // 2):
-                                        fma_packed_f32x2(s_chunk_buf[2 * i], s_chunk_buf[2 * i + 1], scale_log2, scale_log2, -row_max_scaled, -row_max_scaled, T.address_of(s_chunk_buf[2 * i]))
+                                        T.ptx.fma_packed_f32x2(s_chunk_buf[2 * i], s_chunk_buf[2 * i + 1], scale_log2, scale_log2, -row_max_scaled, -row_max_scaled, T.address_of(s_chunk_buf[2 * i]))
                                     profiler.end(ProfileEventType.Softmax_FMA, tid_in_wg == 0)
                                     if USE_S0_S1_BARRIER:
                                         bar_s0_s1_sequence.wait(wg_id * 4 + warp_id, phase_s0_s1[0])
@@ -1094,8 +1008,8 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         for i in T.unroll(BLK_N // 4 // 2):
                                             idx = T.meta_var(frag_idx * BLK_N // 4 + 2 * i)
                                             if i * 2 % 16 < 16 - 4 or frag_idx >= 4 - 1 or apply_mask:
-                                                s_chunk_buf[idx] = ptx_exp2(s_chunk_buf[idx])
-                                                s_chunk_buf[idx + 1] = ptx_exp2(s_chunk_buf[idx + 1])
+                                                s_chunk_buf[idx] = T.ptx.exp2(s_chunk_buf[idx])
+                                                s_chunk_buf[idx + 1] = T.ptx.exp2(s_chunk_buf[idx + 1])
                                             else:
                                                 ex2_emulation_2(s_chunk_buf, idx, s_chunk_buf[idx], s_chunk_buf[idx + 1])
                                         with T.thread():
@@ -1186,7 +1100,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         else:
                                             should_rescale[0] = 0
 
-                                        any_needs_rescale = any_sync(0xFFFFFFFF, should_rescale[0])
+                                        any_needs_rescale = T.ptx.any_sync(0xFFFFFFFF, should_rescale[0])
                                         if any_needs_rescale != 0:
                                             if tid_in_wg < BLK_M:
                                                 tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
@@ -1200,7 +1114,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                                     if d_start < HEAD_DIM:
                                                         Tx.copy_async(o_row_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + 16])
                                                         for d in T.unroll(8):
-                                                            mul_packed_f32x2(o_row_buf[d * 2], o_row_buf[d * 2 + 1], acc_scale[0], acc_scale[0], o_row_buf.ptr_to([d * 2]))
+                                                            T.ptx.mul_packed_f32x2(o_row_buf[d * 2], o_row_buf[d * 2 + 1], acc_scale[0], acc_scale[0], o_row_buf.ptr_to([d * 2]))
                                                         Tx.copy_async(tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + 16], o_row_wg[:, 0:16])
                                                 T.ptx.tcgen05.wait.st()
 
@@ -1225,7 +1139,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
                                     profiler.start(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
                                     acc_O_mn_row_is_zero_or_nan = tvm.tir.any(row_sum == T.float32(0.0), row_sum != row_sum)
-                                    norm_scale = ptx_rcp(T.Select(acc_O_mn_row_is_zero_or_nan, T.float32(1.0), row_sum))
+                                    norm_scale = T.ptx.rcp(T.Select(acc_O_mn_row_is_zero_or_nan, T.float32(1.0), row_sum))
                                     tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
                                     o_row_f32_buf = T.alloc_buffer((TMEM_EPI_LD_SIZE,), "float32", scope="local")
                                     o_row_f32_wg = o_row_f32_buf.view(128, TMEM_EPI_LD_SIZE, layout=TileLayout(([128, TMEM_EPI_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
@@ -1236,7 +1150,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                         if d_start < HEAD_DIM:
                                             Tx.copy_async(o_row_f32_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + TMEM_EPI_LD_SIZE])
                                             for d in T.unroll(TMEM_EPI_LD_SIZE // 2):
-                                                mul_packed_f32x2(o_row_f32_buf[d * 2], o_row_f32_buf[d * 2 + 1], norm_scale, norm_scale, o_row_f32_buf.ptr_to([d * 2]))
+                                                T.ptx.mul_packed_f32x2(o_row_f32_buf[d * 2], o_row_f32_buf[d * 2 + 1], norm_scale, norm_scale, o_row_f32_buf.ptr_to([d * 2]))
                                             with T.thread():
                                                 Tx.cast(o_row_f16, o_row_f32_buf)
                                             for i in T.unroll(TMEM_EPI_LD_SIZE // 8):

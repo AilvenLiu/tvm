@@ -927,19 +927,49 @@ TVM_DLL const Op& cuda_ldg();
 TVM_DLL const Op& cuda_get_tmem_addr();
 
 /*!
- * \brief tvm intrinsic for cuda 3-input max instruction
+ * \brief tvm intrinsic for PTX fast exp2 approximation (ex2.approx.ftz.f32)
  */
-TVM_DLL const Op& cuda_reduce3_max_f32();
+TVM_DLL const Op& ptx_exp2();
 
 /*!
- * \brief tvm intrinsic for cuda 3-input min instruction
+ * \brief tvm intrinsic for PTX fast reciprocal approximation (rcp.approx.ftz.f32)
  */
-TVM_DLL const Op& cuda_reduce3_min_f32();
+TVM_DLL const Op& ptx_rcp();
 
 /*!
- * \brief tvm intrinsic for cuda packed add instruction
+ * \brief tvm intrinsic for PTX warp-wide any predicate (__any_sync)
  */
-TVM_DLL const Op& cuda_add_packed_f32x2();
+TVM_DLL const Op& ptx_any_sync();
+
+/*!
+ * \brief tvm intrinsic for PTX 3-input max instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_reduce3_max_f32();
+
+/*!
+ * \brief tvm intrinsic for PTX 3-input min instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_reduce3_min_f32();
+
+/*!
+ * \brief tvm intrinsic for PTX packed add instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_add_packed_f32x2();
+
+/*!
+ * \brief tvm intrinsic for PTX packed subtract instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_sub_packed_f32x2();
+
+/*!
+ * \brief tvm intrinsic for PTX packed multiply instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_mul_packed_f32x2();
+
+/*!
+ * \brief tvm intrinsic for PTX packed FMA instruction (sm_100a+)
+ */
+TVM_DLL const Op& ptx_fma_packed_f32x2();
 
 }  // namespace builtin
 }  // namespace tirx

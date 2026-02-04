@@ -2304,6 +2304,16 @@ class PTXNamespace:
         self.fetch_register: Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
         self.ld_global_acquire = _op_wrapper(_tir_op.ptx_ld_global_acquire)
         self.map_shared_rank = _op_wrapper(_tir_op.ptx_map_shared_rank)
+        self.any_sync = _op_wrapper(_tir_op.ptx_any_sync)
+        # Math operations
+        self.exp2 = _op_wrapper(_tir_op.ptx_exp2)
+        self.rcp = _op_wrapper(_tir_op.ptx_rcp)
+        self.reduce3_min_f32 = _op_wrapper(_tir_op.ptx_reduce3_min_f32)
+        self.reduce3_max_f32 = _op_wrapper(_tir_op.ptx_reduce3_max_f32)
+        self.add_packed_f32x2 = _op_wrapper(_tir_op.ptx_add_packed_f32x2)
+        self.sub_packed_f32x2 = _op_wrapper(_tir_op.ptx_sub_packed_f32x2)
+        self.mul_packed_f32x2 = _op_wrapper(_tir_op.ptx_mul_packed_f32x2)
+        self.fma_packed_f32x2 = _op_wrapper(_tir_op.ptx_fma_packed_f32x2)
         self.mma = MmaNamespace()
         self.cp_async = CpAsyncNamespace()
         self.wgmma = WgmmaNamespace()
@@ -2533,9 +2543,6 @@ class CUDANamespace:
         self.printf = _op_wrapper(_tir_op.cuda_printf)
         self.ldg = _op_wrapper(_tir_op.cuda_ldg)
         self.get_tmem_addr = _op_wrapper(_tir_op.cuda_get_tmem_addr)
-        self.reduce3_max_f32 = _op_wrapper(_tir_op.cuda_reduce3_max_f32)
-        self.reduce3_min_f32 = _op_wrapper(_tir_op.cuda_reduce3_min_f32)
-        self.add_packed_f32x2 = _op_wrapper(_tir_op.cuda_add_packed_f32x2)
 
 
 class NVSHMEMNamespace:

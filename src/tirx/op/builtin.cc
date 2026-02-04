@@ -445,13 +445,31 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_ldg)
 TIR_DEFINE_BUILTIN_FUNC(cuda_get_tmem_addr)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_reduce3_max_f32)
+TIR_DEFINE_BUILTIN_FUNC(ptx_exp2)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_reduce3_min_f32)
+TIR_DEFINE_BUILTIN_FUNC(ptx_rcp)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_add_packed_f32x2)
+TIR_DEFINE_BUILTIN_FUNC(ptx_any_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_reduce3_max_f32)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_reduce3_min_f32)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_add_packed_f32x2)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_sub_packed_f32x2)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_mul_packed_f32x2)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_fma_packed_f32x2)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 }  // namespace builtin
 }  // namespace tirx

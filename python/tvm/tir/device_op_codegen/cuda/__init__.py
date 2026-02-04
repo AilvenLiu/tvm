@@ -53,6 +53,7 @@ from . import misc_ptx
 from . import timer
 from . import cuda_sync
 from . import nvshmem
+from . import math
 
 # Re-export commonly used items
 __all__ = [

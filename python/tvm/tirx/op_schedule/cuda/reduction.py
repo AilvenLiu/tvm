@@ -294,7 +294,7 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
             # Process remaining full chunks of 8
             for outer in T.serial(num_full_chunks - 1):
                 for j in T.unroll(4):
-                    T.cuda.add_packed_f32x2(
+                    T.ptx.add_packed_f32x2(
                         local_sum[2 * j],
                         local_sum[2 * j + 1],
                         src[src_base + 8 * (outer + 1) + 2 * j],
@@ -307,17 +307,17 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
                 local_sum[0] = local_sum[0] + src[src_base + remainder_base + i]
 
             # Final packed add sum: 8 -> 4 -> 2 -> 1
-            T.cuda.add_packed_f32x2(
+            T.ptx.add_packed_f32x2(
                 local_sum[0], local_sum[1],
                 local_sum[2], local_sum[3],
                 T.address_of(local_sum[0]),
             )
-            T.cuda.add_packed_f32x2(
+            T.ptx.add_packed_f32x2(
                 local_sum[4], local_sum[5],
                 local_sum[6], local_sum[7],
                 T.address_of(local_sum[4]),
             )
-            T.cuda.add_packed_f32x2(
+            T.ptx.add_packed_f32x2(
                 local_sum[0], local_sum[1],
                 local_sum[4], local_sum[5],
                 T.address_of(local_sum[0]),
@@ -362,7 +362,7 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
     reduction_len = functools.reduce(operator.mul, src_extent, 1)
 
     op_func = reduce_op_table[reduce_op]
-    reduce3_func = T.cuda.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else T.cuda.reduce3_min_f32
+    reduce3_func = T.ptx.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else T.ptx.reduce3_min_f32
 
     src_base = src_st[0]
     num_full_chunks = reduction_len // 8
