@@ -3,6 +3,7 @@ from functools import partial
 import numpy as np
 import pytest
 import torch
+import math
 from enum import Enum
 
 import tvm
@@ -12,6 +13,7 @@ from tvm.script import tirx as Tx
 from tvm.tir import PrimExpr
 from tvm.tir.layout import TileLayout
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
+from tvm.tirx.tile_scheduler import FlashAttentionLinearScheduler, FlashAttentionLPTScheduler
 
 M_CLUSTER = 1
 N_CLUSTER = 1
@@ -137,6 +139,11 @@ def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads,
     SMEM_SIZE_SCALE = 2 * SMEM_PIPE_DEPTH_Q * BLK_M * F32_BYTES
     SMEM_SIZE_MBAR = 35 * 8
 
+    # L2 cache optimization for LPT scheduling (causal attention)
+    L2_SIZE = 50 * 1024 * 1024  # 50MB L2 cache
+    SIZE_ONE_KV_HEAD = SEQ_LEN_KV * HEAD_DIM * 2 * F16_BYTES  # K+V size per head
+    L2_SWIZZLE = 1 if L2_SIZE < SIZE_ONE_KV_HEAD else (1 << int(math.log2(L2_SIZE // SIZE_ONE_KV_HEAD)))
+
     SMEM_SIZE = 232448
     assert (
         SMEM_SIZE <= 232448
@@ -145,16 +152,6 @@ def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads,
 
     def ceildiv(a, b):
         return (a + b - 1) // b
-
-    def get_sm_scale():
-
-        func_name = "get_sm_scale"
-        source_code = f"""
-__device__ __forceinline__ float {func_name}() {{
-  return 1.44269504088896340736 / sqrtf({HEAD_DIM});
-}}
-"""
-        return T.cuda.func_call(func_name, source_code=source_code, return_type="float32")
 
     def combine_int_frac_ex2(x_rounded, frac_ex2):
         func_name = "combine_int_frac_ex2"
@@ -529,10 +526,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
         num_q_blocks_per_cta = T.meta_var(SMEM_PIPE_DEPTH_Q)
         num_q_blocks = T.meta_var(ceildiv(num_q_blocks_total, num_q_blocks_per_cta))
 
-        # Persistent kernel: limit CTA count to SM number
+        # Task scheduling
         num_total_tasks = T.meta_var(BATCH_SIZE * NUM_KV_HEADS * num_q_blocks)
+
+        # use non-persistent kernel for causal attention
         max_ctas = 148
-        cta_count = T.min(max_ctas, num_total_tasks)
+        cta_count = T.min(max_ctas, num_total_tasks) if not is_causal else num_total_tasks
 
         with T.kernel():
             bx = T.cta_id([cta_count], parent="kernel")
@@ -611,8 +610,25 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 tmem = T.decl_buffer((128, N_COLS_TMEM), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM], [(1, "TLane"), (1, "TCol")])))
                 tmem_as_f16 = T.decl_buffer((128, N_COLS_TMEM * 2), "float16", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM * 2], [(1, "TLane"), (1, "TCol")])))
 
-                task_idx = T.alloc_local([1], "int32")
-                task_idx[0] = bx  # Start from CTA ID
+                # Create appropriate scheduler based on causal mode
+                scheduler = T.meta_var(
+                    FlashAttentionLPTScheduler(
+                        "fa_scheduler",
+                        num_batches=BATCH_SIZE,
+                        num_heads=NUM_KV_HEADS,
+                        num_m_blocks=num_q_blocks,
+                        l2_swizzle=L2_SWIZZLE,
+                    ) if is_causal else FlashAttentionLinearScheduler(
+                        "fa_scheduler",
+                        num_batches=BATCH_SIZE,
+                        num_heads=NUM_KV_HEADS,
+                        num_m_blocks=num_q_blocks,
+                        num_ctas=cta_count,
+                    )
+                )
+
+                scheduler.init(bx)  # Initialize with CTA ID
+
                 if wg_id == 3 and warp_id == 1:
                     profiler.init(0)
                 elif wg_id == 3 and warp_id == 2:
@@ -669,11 +685,11 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                 tmem_p_base = 64
                 tmem_offset = 128
 
-                while task_idx[0] < num_total_tasks:
-                    # Decode task index into batch/kv_head/q_block (must be inside loop for persistent kernel)
-                    batch_idx = task_idx[0] // (num_q_blocks * NUM_KV_HEADS)
-                    kv_head_idx = (task_idx[0] % (num_q_blocks * NUM_KV_HEADS)) // num_q_blocks
-                    m_block_idx = task_idx[0] % num_q_blocks
+                while scheduler.valid():
+                    # Extract indices from scheduler
+                    m_block_idx = T.meta_var(scheduler.m_block_idx)
+                    batch_idx = T.meta_var(scheduler.batch_idx)
+                    kv_head_idx = T.meta_var(scheduler.head_idx)
                     # m_start refers to SEQ_Q positions (not BLK_M rows)
                     m_start = T.meta_var(m_block_idx * SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q)
                     with T.cta():
@@ -862,7 +878,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
                                 T.ptx.setmaxnreg(True, 200)
 
-                                scale_log2 = T.meta_var(get_sm_scale())
+                                scale_log2 = T.meta_var(math.log2(math.e) / math.sqrt(HEAD_DIM))
                                 rescale_threshold = T.meta_var(8.0)
 
                                 row_max = T.alloc_local([1], "float32")
@@ -1169,7 +1185,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                 phase_tmem[0] ^= 1
                                 phase_q[0] ^= 1
 
-                    task_idx[0] = task_idx[0] + cta_count
+                    scheduler.next_tile()
 
                 # Deallocate TMEM after all tasks complete
                 if warp_id_in_cta == 0:
@@ -1580,7 +1596,8 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
 
 if __name__ == "__main__":
     test_flash_attention4(8192, 32, 8, is_causal=False)
-    # TODO: causal attention is still 10% slower than FA4. 
-    # likely due to register pressure issue
     test_flash_attention4(8192, 32, 8, is_causal=True)
+    # TODO: causal attention for non-GQA kernel is still 10% slower than FA4. 
+    # likely due to register pressure issue
+    test_flash_attention4(8192, 32, 32, is_causal=True)
     test_flash_attention4(8192, 32, 32, is_causal=False)

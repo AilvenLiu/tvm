@@ -605,3 +605,175 @@ class IndexedTripleTileScheduler(BaseTileScheduler):
 
     def valid(self):
         return self.linear_idx < self.linear_lim
+
+
+class FlashAttentionLinearScheduler(BaseTileScheduler):
+    """Linear 3D scheduler for flash attention (batch, head, m_block).
+
+    Used for non-causal attention with simple linear decomposition.
+    Maps linear_idx -> (batch_idx, head_idx, m_block_idx) using:
+        batch = linear_idx // (num_heads * num_m_blocks)
+        head = (linear_idx % (num_heads * num_m_blocks)) // num_m_blocks
+        m_block = linear_idx % num_m_blocks
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix for TIR variable names
+    num_batches : int
+        Number of batches
+    num_heads : int
+        Number of KV heads
+    num_m_blocks : int
+        Number of Q blocks (M dimension tiles)
+    num_ctas : int
+        Number of CTAs for persistent kernel stride
+    """
+
+    def __init__(
+        self,
+        prefix: str,
+        num_batches: int,
+        num_heads: int,
+        num_m_blocks: int,
+        num_ctas: int,
+    ):
+        super().__init__(prefix)
+        self._num_batches = num_batches
+        self._num_heads = num_heads
+        self._num_m_blocks = num_m_blocks
+        self._num_ctas = num_ctas
+        self._total_tasks = num_batches * num_heads * num_m_blocks
+
+        # Output indices
+        self.batch_idx = T.local_cell("int32", name=prefix + "_batch_idx")
+        self.head_idx = T.local_cell("int32", name=prefix + "_head_idx")
+        self.m_block_idx = T.local_cell("int32", name=prefix + "_m_block_idx")
+
+    # fmt: off
+    @T.macro
+    def update_current_m_n_idx(self, linear_idx):
+        """Convert linear index to (batch, head, m_block) coordinates."""
+        NUM_HEADS = T.meta_var(self._num_heads)
+        NUM_M_BLOCKS = T.meta_var(self._num_m_blocks)
+        HEAD_M_PRODUCT = T.meta_var(NUM_HEADS * NUM_M_BLOCKS)
+
+        self.batch_idx = linear_idx // HEAD_M_PRODUCT
+        self.head_idx = (linear_idx % HEAD_M_PRODUCT) // NUM_M_BLOCKS
+        self.m_block_idx = linear_idx % NUM_M_BLOCKS
+
+    @T.macro
+    def init(self, cta_id):
+        """Initialize scheduler with CTA ID."""
+        self.linear_idx = cta_id
+        self.update_current_m_n_idx(cta_id)
+
+    @T.macro
+    def next_tile(self):
+        """Advance to next tile by striding by num_ctas."""
+        self.linear_idx = self.linear_idx + self._num_ctas
+        self.update_current_m_n_idx(self.linear_idx)
+    # fmt: on
+
+    def valid(self):
+        """Check if there are more tiles to process."""
+        return self.linear_idx < self._total_tasks
+
+
+class FlashAttentionLPTScheduler(BaseTileScheduler):
+    """LPT scheduler with L2 swizzle for causal flash attention.
+
+    Processes high-work Q blocks (with more KV blocks to attend to) first using
+    Longest Processing Time (LPT) scheduling. Also applies L2 cache swizzle
+    for better cache locality across batch*head dimensions.
+
+    The LPT aspect comes from reversing m_block order: lower Q blocks have more
+    KV blocks to process due to causal masking, so processing them first balances load.
+    
+    The scheduler is only applied to non-persistent kernels.
+
+    L2 Swizzle: Groups consecutive batch*head indices together for L2 locality.
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix for TIR variable names
+    num_batches : int
+        Number of batches
+    num_heads : int
+        Number of KV heads
+    num_m_blocks : int
+        Number of Q blocks (M dimension tiles)
+    num_ctas : int
+        Number of CTAs (should equal total_tasks for causal)
+    l2_swizzle : int
+        L2 swizzle factor for cache locality
+    """
+
+    def __init__(
+        self,
+        prefix: str,
+        num_batches: int,
+        num_heads: int,
+        num_m_blocks: int,
+        l2_swizzle: int,
+    ):
+        super().__init__(prefix)
+        self._num_batches = num_batches
+        self._num_heads = num_heads
+        self._num_m_blocks = num_m_blocks
+        self._l2_swizzle = l2_swizzle
+        self._total_tasks = num_batches * num_heads * num_m_blocks
+
+        # Derived constants for L2 swizzle
+        self._num_hb = num_batches * num_heads
+        self._l2_major = l2_swizzle * num_m_blocks
+        self._num_hb_quotient = self._num_hb // l2_swizzle
+
+        # Output indices
+        self.batch_idx = T.local_cell("int32", name=prefix + "_batch_idx")
+        self.head_idx = T.local_cell("int32", name=prefix + "_head_idx")
+        self.m_block_idx = T.local_cell("int32", name=prefix + "_m_block_idx")
+
+    # fmt: off
+    @T.macro
+    def update_current_m_n_idx(self, linear_idx):
+        """Convert linear index to (batch, head, m_block) with LPT + L2 swizzle."""
+        L2_SWIZZLE = T.meta_var(self._l2_swizzle)
+        L2_MAJOR = T.meta_var(self._l2_major)
+        NUM_HB_QUOTIENT = T.meta_var(self._num_hb_quotient)
+        NUM_HB = T.meta_var(self._num_hb)
+        NUM_HEADS = T.meta_var(self._num_heads)
+        NUM_M_BLOCKS = T.meta_var(self._num_m_blocks)
+
+        # L2 swizzle decomposition
+        bidhb = linear_idx // L2_MAJOR
+        l2_mod = linear_idx % L2_MAJOR
+
+        # Handle residual section (last partial swizzle group)
+        num_hb_remainder = T.max(NUM_HB % L2_SWIZZLE, 1)
+        m_block_raw = T.Select(bidhb < NUM_HB_QUOTIENT, l2_mod // L2_SWIZZLE, l2_mod // num_hb_remainder)
+        bidhb_residual = T.Select(bidhb < NUM_HB_QUOTIENT, l2_mod % L2_SWIZZLE, l2_mod % num_hb_remainder)
+        bidhb_actual = bidhb * L2_SWIZZLE + bidhb_residual
+
+        self.batch_idx = bidhb_actual // NUM_HEADS
+        self.head_idx = bidhb_actual % NUM_HEADS
+
+        # LPT: Reverse block order so high-work blocks are processed first
+        self.m_block_idx = (NUM_M_BLOCKS - 1) - m_block_raw
+
+    @T.macro
+    def init(self, cta_id):
+        """Initialize scheduler with CTA ID."""
+        self.linear_idx = cta_id
+        self.update_current_m_n_idx(cta_id)
+
+    @T.macro
+    def next_tile(self):
+        """Advance to next tile by striding by num_ctas."""
+        self.linear_idx = self._total_tasks
+    # fmt: on
+
+    def valid(self):
+        """Check if there are more tiles to process."""
+        return self.linear_idx < self._total_tasks
