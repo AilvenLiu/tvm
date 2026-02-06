@@ -20,10 +20,11 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
-from tvm.tir.layout import laneid
+from tvm.tir.layout import laneid, tid_in_wg, tx
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
 
+from tvm.tirx.op_schedule.cuda.cast import _cast_layout_supported_for_local
 
 @pytest.mark.parametrize(
     "input",
@@ -572,6 +573,279 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
         mod(A, B)
         print(mod.mod.imports[0].inspect_source())
         tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+
+@pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
+def test_cast_warpgroup_local_view(A_dtype, B_dtype):
+    """Tx.cast in warpgroup scope with offset (tid_in_wg + layout offset). Covers offset/tid_in_wg/warpgroup scope."""
+    N_THREADS, LOCAL_LEN = 128, 8
+    g_shape = (N_THREADS, LOCAL_LEN)
+    g_layout = TileLayout(g_shape)
+    use_offset = True
+    if use_offset:
+        from tvm.tir.layout import Iter, Axis
+        m_axis = Axis.get("m")
+        shard = [Iter(N_THREADS, 1, tid_in_wg), Iter(LOCAL_LEN, 1, m_axis)]
+        cast_layout = TileLayout.from_iters(shard, [], {m_axis: 0})
+    else:
+        cast_layout = TileLayout(([N_THREADS, LOCAL_LEN], [1 @ tid_in_wg, 1]))
+
+    dev = tvm.cuda(0)
+    A_ref = np.random.rand(*g_shape).astype(A_dtype)
+    B_ref = np.zeros(g_shape, dtype=B_dtype)
+    A = tvm.runtime.tensor(A_ref, dev)
+    B = tvm.runtime.tensor(B_ref, dev)
+    B_ref = A_ref.astype(B_dtype)
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def test_cast(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, A_dtype, layout=g_layout)
+        B = T.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            wg_id = T.warpgroup_id([1], parent="cta")
+            tid_in_wg = T.thread_id([N_THREADS], parent="warpgroup")
+
+            with T.thread():
+                reg_src = T.alloc_buffer((LOCAL_LEN,), A_dtype, scope="local")
+                reg_dst = T.alloc_buffer((LOCAL_LEN,), B_dtype, scope="local")
+                with T.thread():
+                    for i in T.serial(LOCAL_LEN):
+                        reg_src[i] = A[tid_in_wg, i]
+                with T.warpgroup():
+                    reg_src_view = reg_src.view(N_THREADS, LOCAL_LEN, layout=cast_layout)
+                    reg_dst_view = reg_dst.view(N_THREADS, LOCAL_LEN, layout=cast_layout)
+                    Tx.cast(reg_dst_view, reg_src_view)
+                with T.thread():
+                    for i in T.serial(LOCAL_LEN):
+                        B[tid_in_wg, i] = reg_dst[i]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_cast})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod(A, B)
+        print(mod.mod.imports[0].inspect_source())
+        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+
+@pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
+def test_cast_cta_local_view(A_dtype, B_dtype):
+    """Tx.cast with view+layout in CTA scope (128 threads, register->register)."""
+    N_THREADS, LOCAL_LEN = 128, 8
+    g_shape = (N_THREADS, LOCAL_LEN)
+    g_layout = TileLayout(g_shape)
+    cast_layout = TileLayout(([N_THREADS, LOCAL_LEN], [1 @ tx, 1]))
+
+    dev = tvm.cuda(0)
+    A_ref = np.random.rand(*g_shape).astype(A_dtype)
+    B_ref = np.zeros(g_shape, dtype=B_dtype)
+    A = tvm.runtime.tensor(A_ref, dev)
+    B = tvm.runtime.tensor(B_ref, dev)
+    B_ref = A_ref.astype(B_dtype)
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def test_cast(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, A_dtype, layout=g_layout)
+        B = T.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx_var = T.thread_id([N_THREADS], parent="cta")
+
+            with T.thread():
+                reg_src = T.alloc_buffer((LOCAL_LEN,), A_dtype, scope="local")
+                reg_dst = T.alloc_buffer((LOCAL_LEN,), B_dtype, scope="local")
+                with T.thread():
+                    for i in T.serial(LOCAL_LEN):
+                        reg_src[i] = A[tx_var, i]
+                with T.cta():
+                    reg_src_view = reg_src.view(N_THREADS, LOCAL_LEN, layout=cast_layout)
+                    reg_dst_view = reg_dst.view(N_THREADS, LOCAL_LEN, layout=cast_layout)
+                    Tx.cast(reg_dst_view, reg_src_view)
+                with T.thread():
+                    for i in T.serial(LOCAL_LEN):
+                        B[tx_var, i] = reg_dst[i]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_cast})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod(A, B)
+        print(mod.mod.imports[0].inspect_source())
+        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+
+def test_cast_layout_partition_and_validation():
+    """Partition table (simplified): partition structure and _cast_layout_supported_for_local."""
+    from tvm.tir.layout import Iter, Axis, warpid
+    from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
+
+    m_axis = Axis.get("m")
+
+    # (layout, expected_supported, optional check: part -> None or assert)
+    cases = [
+        # Supported: single tx, tid_in_wg, thread in middle (from_iters), mixed warpid+laneid
+        (TileLayout(([128, 8], [1 @ tx, 1])), True,
+         lambda p: p[0].get(tx) == ([0], [128]) and p[1] == [1] and p[2] == [8]),
+        (TileLayout(([128, 8], [1 @ tid_in_wg, 1])), True,
+         lambda p: p[0].get(tid_in_wg) == ([0], [128])),
+        (TileLayout.from_iters(
+            [Iter(4, 16, "m"), Iter(8, 2, tx), Iter(2, 1, "m")], [], {}), True,
+         lambda p: p[0].get(tx) == ([1], [8]) and p[1] == [0, 2]),
+        (TileLayout(([2, 8, 4, 2], [2 @ warpid, 4 @ laneid, 1 @ laneid, 1])), True,
+         lambda p: warpid in p[0] and laneid in p[0] and p[1] == [3] and p[2] == [2]),
+        # Rejected: no thread, no local, thread in replica
+        (TileLayout(([64, 8], [1, 1])), False, None),
+        (TileLayout(([8, 8], [1 @ tx, 1 @ laneid])), False, None),
+        (TileLayout.from_iters(
+            [Iter(128, 1, tx), Iter(8, 1, m_axis)], [Iter(2, 1, laneid)], {}), False, None),
+    ]
+
+    for layout, expected_supported, check in cases:
+        part = _get_layout_thread_local_partition(layout)
+        supported = _cast_layout_supported_for_local(layout)
+        assert supported is expected_supported, f"layout={layout}"
+        if expected_supported and check:
+            assert part is not None
+            check(part)
+
+
+def test_cast_mixed_axes_and_subregion():
+    """Test cast with mixed axes and subregion."""
+    from tvm.tir.layout import warpid
+
+    N_WARPS, LANES = 2, 32
+    LOCAL_LEN = 4
+    SLICE_START, SLICE_END = 0, 2
+    full_shape = (8, N_WARPS, 4, LOCAL_LEN)
+    g_layout = TileLayout(full_shape)
+    cast_layout = TileLayout((full_shape, [4 @ laneid, 2 @ warpid, 1 @ laneid, 1]))
+
+    A_ref = np.zeros(full_shape, dtype="float32")
+    for j in range(full_shape[0]):
+        for w in range(full_shape[1]):
+            for k in range(full_shape[2]):
+                for i in range(full_shape[3]):
+                    A_ref[j, w, k, i] = float(j * 1000 + w * 100 + k * 10 + i)
+    # Kernel only casts the subregion; only that part is defined in output
+    B_ref = np.zeros(full_shape, dtype="float16")
+    B_ref[:, :, :, SLICE_START:SLICE_END] = A_ref[:, :, :, SLICE_START:SLICE_END].astype("float16")
+
+    dev = tvm.cuda(0)
+    A = tvm.runtime.tensor(A_ref, dev)
+    B = tvm.runtime.tensor(np.zeros(full_shape, dtype="float16"), dev)
+
+    @T.prim_func(tirx=True)
+    def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, full_shape, "float32", layout=g_layout)
+        B = T.match_buffer(B_ptr, full_shape, "float16", layout=g_layout)
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            warp_id = T.warp_id([N_WARPS], parent="cta")
+            lane_id = T.thread_id([LANES], parent="warp")
+            with T.thread():
+                reg_src = T.alloc_buffer((LOCAL_LEN,), "float32", scope="local")
+                reg_dst = T.alloc_buffer((LOCAL_LEN,), "float16", scope="local")
+                with T.thread():
+                    j, k = lane_id // 4, lane_id % 4
+                    for i in T.serial(LOCAL_LEN):
+                        reg_src[i] = A[j, warp_id, k, i]
+                with T.cta():
+                    reg_src_view = reg_src.view(*full_shape, layout=cast_layout)
+                    reg_dst_view = reg_dst.view(*full_shape, layout=cast_layout)
+                    Tx.cast(
+                        reg_dst_view[0:8, 0:N_WARPS, 0:4, SLICE_START:SLICE_END],
+                        reg_src_view[0:8, 0:N_WARPS, 0:4, SLICE_START:SLICE_END],
+                    )
+                with T.thread():
+                    j, k = lane_id // 4, lane_id % 4
+                    for i in T.serial(LOCAL_LEN):
+                        B[j, warp_id, k, i] = reg_dst[i]
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": kernel})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod(A, B)
+    # Only the cast subregion is written; rest of B may be uninitialized
+    tvm.testing.assert_allclose(
+        B.numpy()[:, :, :, SLICE_START:SLICE_END],
+        B_ref[:, :, :, SLICE_START:SLICE_END],
+        atol=1e-2, rtol=0,
+    )
+
+
+def test_cast_joint_decomposition_extents_order():
+    """Test joint decomposition uses thread dims in layout order with correct extents."""
+    from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
+    from tvm.tir.layout import warpid
+
+    layout = TileLayout(([2, 32, 4], [2 @ warpid, 32 @ laneid, 1]))
+    part = _get_layout_thread_local_partition(layout)
+    assert part is not None
+    thread_groups, local_dims, local_extents = part
+    assert warpid in thread_groups and laneid in thread_groups
+    assert thread_groups[warpid] == ([0], [2])
+    assert thread_groups[laneid] == ([1], [32])
+    assert local_dims == [2]
+    assert local_extents == [4]
+
+    thread_dims_ordered = []
+    for _axis, (dim_indices, extents) in thread_groups.items():
+        for i, dim_idx in enumerate(dim_indices):
+            thread_dims_ordered.append((dim_idx, extents[i]))
+    thread_dims_ordered.sort(key=lambda x: x[0])
+    # Region extent = layout extent for full region
+    shape = [2, 32, 4]
+    joint_all_extents = [shape[dim_idx] for dim_idx, _ in thread_dims_ordered]
+    assert thread_dims_ordered == [(0, 2), (1, 32)], thread_dims_ordered
+    assert joint_all_extents == [2, 32], joint_all_extents
+
+
+def test_cast_validate_extent_mismatch_rejected():
+    """Validation rejects when src and dst layouts have same thread positions but different extents."""
+    from tvm.tir.layout import warpid
+
+    view_shape = (2, 8, 4, 8)
+    g_layout = TileLayout(view_shape)
+    src_layout = TileLayout((view_shape, [2 @ warpid, 4 @ laneid, 1 @ laneid, 1]))
+    dst_layout = TileLayout((view_shape, [2 @ warpid, 8 @ laneid, 1 @ laneid, 1]))  # dim1 extent 8 != 4
+
+    @T.prim_func(tirx=True)
+    def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, view_shape, "float32", layout=g_layout)
+        B = T.match_buffer(B_ptr, view_shape, "float16", layout=g_layout)
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            warp_id = T.warp_id([2], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.thread():
+                reg_src = T.alloc_buffer((8,), "float32", scope="local")
+                reg_dst = T.alloc_buffer((8,), "float16", scope="local")
+                with T.thread():
+                    j, k = lane_id // 4, lane_id % 4
+                    for i in T.serial(8):
+                        reg_src[i] = A[warp_id, j, k, i]
+                with T.cta():
+                    reg_src_view = reg_src.view(*view_shape, layout=src_layout)
+                    reg_dst_view = reg_dst.view(*view_shape, layout=dst_layout)
+                    Tx.cast(reg_dst_view, reg_src_view)
+                with T.thread():
+                    j, k = lane_id // 4, lane_id % 4
+                    for i in T.serial(8):
+                        B[warp_id, j, k, i] = reg_dst[i]
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": kernel})
+        with pytest.raises(Exception, match="validate_cast_local_view failed"):
+            tvm.compile(mod, target=target, tir_pipeline="tirx")
 
 
 if __name__ == "__main__":

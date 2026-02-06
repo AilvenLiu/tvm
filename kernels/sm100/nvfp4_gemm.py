@@ -513,7 +513,13 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                                     Tx.copy(reg_wg[:, :], tmem[:, col_st + ni * TMEM_LD_SIZE : col_st + (ni + 1) * TMEM_LD_SIZE])
                                 # cast
                                 for v in range(TMEM_LD_SIZE):
-                                    reg_16b[ni * TMEM_LD_SIZE + v] = T.Cast("bfloat16", reg[v] * alpha_local)
+                                    reg[v] = reg[v] * alpha_local
+                                # cast fp32 -> bf16 via Tx.cast
+                                with T.warpgroup():
+                                    cast_layout_wg = TileLayout(([CTA_M, TMEM_LD_SIZE], [1 @ axis_tid_in_wg, 1]))
+                                    reg_wg = reg.view(CTA_M, TMEM_LD_SIZE, layout=cast_layout_wg)
+                                    reg_16b_wg = reg_16b.view(CTA_M, TMEM_LD_SIZE, layout=cast_layout_wg)
+                                    Tx.cast(reg_16b_wg, reg_wg)
 
                             singal_iter = T.meta_var(no == MMA_N // EPI_TILE - 1 if SFB_N == 128 else no == 0)
                             if singal_iter:
