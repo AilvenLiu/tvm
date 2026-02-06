@@ -1054,11 +1054,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 T.ptx.mul_packed_f32x2(o_row_f32_buf[d * 2], o_row_f32_buf[d * 2 + 1], norm_scale, norm_scale, o_row_f32_buf.ptr_to([d * 2]))
                                             with T.thread():
                                                 Tx.cast(o_row_f16, o_row_f32_buf)
-                                            for i in T.unroll(TMEM_EPI_LD_SIZE // 8):
-                                                # this is to avoid a bug of arith simplification
-                                                O_smem_vec = O_smem.view(TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE)
-                                                for v in T.vectorized(8):
-                                                    O_smem_vec[i_q, tid_in_wg, d_tile // (EPI_TILE // TMEM_EPI_LD_SIZE), d_tile % (EPI_TILE // TMEM_EPI_LD_SIZE) * TMEM_EPI_LD_SIZE + i * 8 + v] = o_row_f16[i * 8 + v]
+                                                Tx.copy(O_smem[i_q, tid_in_wg, d_tile * TMEM_EPI_LD_SIZE : d_tile * TMEM_EPI_LD_SIZE + TMEM_EPI_LD_SIZE], o_row_f16, vec_len=8)
 
                                         profiler.end(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
                                     T.ptx.fence.proxy("shared")

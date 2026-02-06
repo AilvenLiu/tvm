@@ -171,17 +171,19 @@ def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
         tx = 1
     else:
         return False, f"unsupported exec_scope {sctx.exec_scope.name} for vec_len"
-    vec_len = get_vec_len(
-        dst_buffer_region,
-        src_buffer_region,
-        [
-            128 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
-            64 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
-            32 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
-            1,
-        ],
-        thread_cnt=tx,
-    )
+    vec_len = op_call.config.get("vec_len", None)
+    if vec_len is None:
+        vec_len = get_vec_len(
+            dst_buffer_region,
+            src_buffer_region,
+            [
+                128 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
+                64 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
+                32 // tvm.runtime.DataType(src_buffer_region.buffer.dtype).bits,
+                1,
+            ],
+            thread_cnt=tx,
+        )
     if vec_len is None:
         return False, "no valid vector length; check alignment/extents/thread-count"
     return True, None
