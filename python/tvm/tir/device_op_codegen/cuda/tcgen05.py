@@ -765,7 +765,6 @@ def _tcgen05_mma_common(
     b_dtype = parse_str(b_dtype)
     use_a_tmem = bool(use_a_tmem)
     cta_group = validate_cta_group(cta_group)
-    enable_input_d = bool(enable_input_d)
     scale_input_d = int(scale_input_d)
     if not (0 <= scale_input_d <= 15):
         raise ValueError(
@@ -812,7 +811,7 @@ def _tcgen05_mma_common(
     )
 
     scale_placeholder = ""
-    if enable_input_d and scale_input_d > 0:
+    if scale_input_d > 0:
         scale_operand_idx = mask_start_idx + len(disable_output_lane)
         scale_placeholder = f", %{scale_operand_idx}"
 
@@ -827,12 +826,12 @@ def _tcgen05_mma_common(
     input_operands_list.extend(
         [
             '"r"(i_desc)',  # %3 or %4
-            f'"r"({"1" if enable_input_d else "0"})',  # %4 or %5
+            '"r"(enable_input_d)',  # %4 or %5
         ]
     )
     for i in range(len(disable_output_lane)):
         input_operands_list.append(f'"r"(mask{i})')
-    if enable_input_d and scale_input_d > 0:
+    if scale_input_d > 0:
         input_operands_list.append(f'"n"({scale_input_d})')
 
     input_operands_list = ", ".join(input_operands_list)
@@ -841,11 +840,10 @@ def _tcgen05_mma_common(
         f"ptx_tcgen05_mma_cta_{cta_group}_kind_{kind}"
         + ("_sp" if sparse else "")
         + ("TS" if use_a_tmem else "SS")
-        + ("_enable_input_d" if enable_input_d else "")
         + (f"_{scale_input_d}" if scale_input_d > 0 else "")
     )
     source_code = f"""
-__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, {mask_signature}) {{
+__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, int enable_input_d, {mask_signature}) {{
     asm volatile(
         "{{\\n"
         ".reg .pred p;\\n"
@@ -863,6 +861,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
     if sparse:
         args.append(sp_tmem_addr)
     args.append(i_desc)
+    args.append(enable_input_d)
     args.extend(disable_output_lane)
 
     return cuda_func_call(*args, source_code=source_code)

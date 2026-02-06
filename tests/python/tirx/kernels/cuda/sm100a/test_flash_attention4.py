@@ -10,7 +10,6 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir import PrimExpr
 from tvm.tir.layout import TileLayout
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirx.tile_scheduler import FlashAttentionLinearScheduler, FlashAttentionLPTScheduler
@@ -175,15 +174,6 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             func_name, x_rounded, frac_ex2, source_code=source_code, return_type="float32"
         )
 
-    def handle_to_uint32(handle):
-        func_name = "handle_to_uint32"
-        source_code = f"""
-__device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
-  return __cvta_generic_to_shared(ptr);
-}}
-"""
-        return T.cuda.func_call(func_name, handle, source_code=source_code, return_type="uint32")
-
     @T.macro
     def ex2_emulation_2(out, idx, x, y):
         # Polynomial coefficients for exp2 approximation (degree 3)
@@ -263,243 +253,55 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
             else:
                 T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
-    def encode_instr_desc_host(
-        M, N, d_format, a_format, b_format, trans_a, trans_b, neg_a, neg_b, sat_d, is_sparse
-    ):
-        """
-        Python translation of ptx_tcgen05_encode_instr_descriptor.
-        Encodes the instruction descriptor into a 32-bit integer.
-        """
-        desc = 0
-        desc |= (int(is_sparse) & 0x1) << 2
-        desc |= (int(sat_d) & 0x1) << 3
-        desc |= (int(d_format) & 0x3) << 4
-        desc |= (int(a_format) & 0x7) << 7
-        desc |= (int(b_format) & 0x7) << 10
-        desc |= (int(neg_a) & 0x1) << 13
-        desc |= (int(neg_b) & 0x1) << 14
-        desc |= (int(trans_a) & 0x1) << 15
-        desc |= (int(trans_b) & 0x1) << 16
-
-        n_val = N >> 3
-        desc |= (n_val & 0x3F) << 17
-
-        m_val = M >> 4
-        desc |= (m_val & 0x1F) << 24
-        return desc
-
-    def encode_smem_desc_host(addr, ldo, sdo, swizzle):
-        version = 1
-        lbo_mode = 0
-        base_offset = 0
-
-        swizzle_map = {0: 0, 1: 6, 2: 4, 3: 2, 4: 1}
-        layout_type = swizzle_map.get(swizzle, 0)
-
-        desc = 0
-        start_addr_enc = (addr >> 4) & 0x3FFF
-        desc |= start_addr_enc << 0
-        ldo_enc = ldo & 0x3FFF
-        desc |= ldo_enc << 16
-        sdo_enc = sdo & 0x3FFF
-        desc |= sdo_enc << 32
-        desc |= (version & 0x3) << 46
-        desc |= (base_offset & 0x7) << 49
-        desc |= (lbo_mode & 0x1) << 52
-        desc |= (layout_type & 0x7) << 61
-
-        return desc
-
-    def i64_to_i32x2(value):
-        return (value & 0xFFFFFFFF, (value >> 32) & 0xFFFFFFFF)
-
-    def make_smem_desc_start_addr(start_addr):
-        # 14 bits, remove 4 LSB (bits 0-13 in desc)
-        return (start_addr & 0x3FFFF) >> 4
-
     def make_warp_uniform(val):
         func_name = "make_warp_uniform"
-        source_code = f"""                                                                                                                                                         
-    __device__ __forceinline__ uint32_t {func_name}(uint32_t val) {{                                                                                                               
-        return __shfl_sync(0xffffffff, val, 0);                                                                                                                                    
-    }}                                                                                                                                                                             
+        source_code = f"""
+    __device__ __forceinline__ uint32_t {func_name}(uint32_t val) {{
+        return __shfl_sync(0xffffffff, val, 0);
+    }}
     """
         return T.cuda.func_call(func_name, val, source_code=source_code, return_type="uint32")
 
-    def gemm_qk_helper(smem_a_addr, smem_b_addr, acc_tmem_addr):
-        qk_idesc = encode_instr_desc_host(MMA_M, MMA_N, 1, 0, 0, False, False, False, False, False, False)
-        smem_desc_base_a = encode_smem_desc_host(0, ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-        smem_desc_base_b = encode_smem_desc_host(0, ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-        smem_desc_base_b_lo, smem_desc_b_hi = i64_to_i32x2(smem_desc_base_b)
-        smem_desc_base_a_lo, smem_desc_a_hi = i64_to_i32x2(smem_desc_base_a)
-        smem_desc_start_a_lo = smem_desc_base_a_lo | make_smem_desc_start_addr(smem_a_addr)
-        smem_desc_start_b_lo = smem_desc_base_b_lo | make_smem_desc_start_addr(smem_b_addr)
-        offset_a = [(((k // (BLK_K // MMA_K)) * BLK_K * BLK_N + k % (BLK_K // MMA_K) * MMA_K) * F16_BYTES) >> 4 for k in range(NUM_MMA_QK)]
-        offset_b = offset_a
-        return gemm_qk_ptx(qk_idesc, smem_desc_a_hi, smem_desc_b_hi, offset_a, offset_b, smem_desc_start_a_lo, smem_desc_start_b_lo, False, acc_tmem_addr)
+    class SmemDescriptor:
+        def __init__(self, prefix: str):
+            self.desc = T.local_cell("uint64", name=prefix + "sdesc")
 
-    def gemm_qk_ptx(
-        idesc,
-        smem_desc_a_hi,
-        smem_desc_b_hi,
-        offset_a,
-        offset_b,
-        smem_desc_start_a_lo,
-        smem_desc_start_b_lo,
-        accumulate,
-        acc_tmem_addr,
-    ):
-        func_name = "gemm_qk_ptx"
-        pred_str = "p" if isinstance(accumulate, PrimExpr) else "0" if not accumulate else "1"
-        source_code = (
-            "{\n\t"
-            ".reg .pred leader_thread;\n\t"
-            ".reg .pred p;\n\t"
-            ".reg .b32 idesc;\n\t"
-            ".reg .b32 tmem_acc;\n\t"
-            ".reg .b32 smem_desc_a_lo_start, smem_desc_b_lo_start;\n\t"
-            ".reg .b32 smem_desc_a_lo, smem_desc_b_lo;\n\t"
-            ".reg .b32 smem_desc_a_hi, smem_desc_b_hi;\n\t"
-            ".reg .b64 smem_desc_a, smem_desc_b;\n\t"
-            "elect.sync _|leader_thread, -1;\n\t"
-            f"mov.b32 idesc, {hex(idesc)};\n\t"
-            # f"mov.b32 tmem_acc, {hex(acc_tmem_addr)};\n\t"
-            f"mov.b32 tmem_acc, %3;\n\t"
-            "mov.b32 smem_desc_a_lo_start, %0;\n\t"
-            "mov.b32 smem_desc_b_lo_start, %1;\n\t"
-            f"mov.b32 smem_desc_a_hi, {hex(smem_desc_a_hi)};\n\t"
-            f"mov.b32 smem_desc_b_hi, {hex(smem_desc_b_hi)};\n\t"
-            f"mov.b64 smem_desc_a, {{smem_desc_a_lo_start, smem_desc_a_hi}};\n\t"
-            f"mov.b64 smem_desc_b, {{smem_desc_b_lo_start, smem_desc_b_hi}};\n\t"
-            "setp.ne.b32 p, %2, 0;\n\t"
-            f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], smem_desc_a, smem_desc_b, idesc, {pred_str};\n\t"
-            + "".join(
-                (
-                    # f"add.u32 smem_desc_a_lo, smem_desc_a_lo, {hex(offset_a_diff[k - 1])};\n\t"
-                    # f"add.u32 smem_desc_b_lo, smem_desc_b_lo, {hex(offset_b_diff[k - 1])};\n\t"
-                    f"add.u32 smem_desc_a_lo, smem_desc_a_lo_start, {hex(offset_a[k])};\n\t"
-                    f"add.u32 smem_desc_b_lo, smem_desc_b_lo_start, {hex(offset_b[k])};\n\t"
-                    f"mov.b64 smem_desc_a, {{smem_desc_a_lo, smem_desc_a_hi}};\n\t"
-                    f"mov.b64 smem_desc_b, {{smem_desc_b_lo, smem_desc_b_hi}};\n\t"
-                    f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], smem_desc_a, smem_desc_b, idesc, 1;\n\t"
-                )
-                for k in range(1, NUM_MMA_QK)
+        @T.macro
+        def init(self, smem_ptr, ldo, sdo, swizzle):
+            T.ptx.tcgen05.encode_matrix_descriptor(
+                T.address_of(self.desc), smem_ptr, ldo, sdo, swizzle
             )
-            + "}\n"
-        )
-        source_code = '"' + repr(source_code)[1:-1] + '"'
-        signature = f"""
-        __device__ __forceinline__ void {func_name}(uint32_t smem_desc_start_a_lo, uint32_t smem_desc_start_b_lo, uint32_t accumulate, uint32_t acc_tmem_addr) {{
-            asm volatile({source_code}: : "r"(smem_desc_start_a_lo), "r"(smem_desc_start_b_lo), "r"(accumulate), "r"(acc_tmem_addr));
-        }}
-    """
-        return T.cuda.func_call(
-            func_name,
-            make_warp_uniform(smem_desc_start_a_lo),
-            make_warp_uniform(smem_desc_start_b_lo),
-            accumulate,
-            make_warp_uniform(acc_tmem_addr),
-            source_code=signature,
-            return_type="void",
-        )
+            # Make the lo part (containing start_address) warp-uniform in-place
+            self._make_lo_uniform()
 
-    def gemm_pv_helper(tmem_a, smem_b_addr, accumulate, acc_tmem_addr, mbar_ptr, mbar_phase):
-        pv_idesc = encode_instr_desc_host(MMA_M, MMA_N, 1, 0, 0, False, True, False, False, False, False)
-        smem_desc_base_b = encode_smem_desc_host(0, ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-        smem_desc_base_b_lo, smem_desc_b_hi = i64_to_i32x2(smem_desc_base_b)
-        smem_desc_start_b_lo = smem_desc_base_b_lo | make_smem_desc_start_addr(smem_b_addr)
-        offset_a = [k * MMA_K // 2 for k in range(NUM_MMA_PV)]
-        offset_b = [(k * MMA_K * BLK_K * F16_BYTES) >> 4 for k in range(NUM_MMA_PV)]
-        offset_b_diff = [MMA_K * BLK_K * F16_BYTES >> 4 for k in range(NUM_MMA_PV - 1)]
-        return gemm_pv_ptx(pv_idesc, smem_desc_b_hi, offset_a, offset_b, offset_b_diff, smem_desc_start_b_lo, accumulate, acc_tmem_addr, tmem_a, mbar_ptr, mbar_phase)
+        def _make_lo_uniform(self):
+            """Shuffle the lower 32 bits of the descriptor to ensure warp-uniformity."""
+            func_name = "smem_desc_make_lo_uniform"
+            source_code = f"""
+__forceinline__ __device__ void {func_name}(uint64_t* desc) {{
+    SmemDescriptor* d = reinterpret_cast<SmemDescriptor*>(desc);
+    d->lo = __shfl_sync(0xffffffff, d->lo, 0);
+}}
+"""
+            return T.cuda.func_call(
+                func_name, T.address_of(self.desc),
+                source_code=source_code, return_type="void"
+            )
 
-    def gemm_pv_ptx(
-        idesc,
-        smem_desc_b_hi,
-        offset_a,
-        offset_b,
-        offset_b_diff,
-        smem_desc_start_b_lo,
-        accumulate,
-        acc_tmem_addr,
-        tmem_a,
-        mbar_ptr,
-        mbar_phase,
-    ):
-        func_name = "gemm_pv_ptx"
-        pred_str = "p" if isinstance(accumulate, PrimExpr) else "0" if not accumulate else "1"
-        mbar_wait_str = (
-            ".reg .pred P1; \n\t"
-            "LAB_WAIT: \n\t"
-            "mbarrier.try_wait.parity.shared::cta.b64 P1, [%4], %5, 10000000; \n\t"
-            "@P1 bra DONE; \n\t"
-            "bra     LAB_WAIT; \n\t"
-            "DONE: \n\t"
-        )
-        source_code = (
-            "{\n\t"
-            ".reg .pred leader_thread;\n\t"
-            ".reg .pred p;\n\t"
-            ".reg .b32 idesc;\n\t"
-            ".reg .b32 tmem_acc;\n\t"
-            ".reg .b32 tmem_a;\n\t"
-            ".reg .b32 smem_desc_b_lo_start;\n\t"
-            ".reg .b32 smem_desc_b_lo;\n\t"
-            ".reg .b32 smem_desc_b_hi;\n\t"
-            ".reg .b64 smem_desc_b;\n\t"
-            "elect.sync _|leader_thread, -1;\n\t"
-            f"mov.b32 idesc, {hex(idesc)};\n\t"
-            # f"mov.b32 tmem_acc, {hex(acc_tmem_addr)};\n\t"
-            f"mov.b32 tmem_acc, %3;\n\t"
-            f"mov.b32 tmem_a, %0;\n\t"
-            f"mov.b32 smem_desc_b_lo_start, %1;\n\t"
-            f"mov.b32 smem_desc_b_hi, {hex(smem_desc_b_hi)};\n\t"
-            f"mov.b64 smem_desc_b, {{smem_desc_b_lo_start, smem_desc_b_hi}};\n\t"
-            "setp.ne.b32 p, %2, 0;\n\t"
-            f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], [tmem_a], smem_desc_b, idesc, {pred_str};\n\t"
-            + "".join(
-                (
-                    # f"add.u32 tmem_a, tmem_a, {hex(offset_a_diff[k - 1])};\n\t"
-                    # f"add.u32 smem_desc_b_lo, smem_desc_b_lo, {hex(offset_b_diff[k - 1])};\n\t"
-                    f"add.u32 smem_desc_b_lo, smem_desc_b_lo_start, {hex(offset_b[k])};\n\t"
-                    f"mov.b64 smem_desc_b, {{smem_desc_b_lo, smem_desc_b_hi}};\n\t"
-                    # f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], [tmem_a], smem_desc_b, idesc, 1;\n\t"
-                    f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], [tmem_a + {hex(offset_a[k])}], smem_desc_b, idesc, 1;\n\t"
-                )
-                for k in range(1, 6)
+        def add_16B_offset(self, offset):
+            """Add 16B-aligned offset to lower 32 bits only."""
+            func_name = "tvm_builtin_smem_desc_add_16B_offset"
+            source_code = f"""
+__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
+    SmemDescriptor desc;
+    desc.desc_ = desc_base;
+    desc.lo += static_cast<uint32_t>(offset);
+    return desc.desc_;
+}}
+"""
+            return T.cuda.func_call(
+                func_name, self.desc, offset, source_code=source_code, return_type="uint64"
             )
-            + mbar_wait_str
-            + (
-                "".join(
-                    (
-                        f"add.u32 smem_desc_b_lo, smem_desc_b_lo, {hex(offset_b_diff[k - 1])};\n\t"
-                        f"mov.b64 smem_desc_b, {{smem_desc_b_lo, smem_desc_b_hi}};\n\t"
-                        f"@leader_thread tcgen05.mma.cta_group::1.kind::f16 [tmem_acc], [tmem_a + {hex(offset_a[k])}], smem_desc_b, idesc, 1;\n\t"
-                    )
-                    for k in range(6, NUM_MMA_PV)
-                )
-            )
-            + "}\n"
-        )
-        print(source_code)
-        source_code = '"' + repr(source_code)[1:-1] + '"'
-        signature = f"""
-        __device__ __forceinline__ void {func_name}(uint32_t tmem_a, uint32_t smem_desc_start_b_lo, uint32_t accumulate, uint32_t acc_tmem_addr, void* mbar_ptr, uint32_t mbar_phase) {{
-            unsigned int mbar_ptr_int = __cvta_generic_to_shared(mbar_ptr);
-            asm volatile({source_code}: : "r"(tmem_a), "r"(smem_desc_start_b_lo), "r"(accumulate), "r"(acc_tmem_addr), "r"(mbar_ptr_int), "r"(mbar_phase));
-        }}
-    """
-        return T.cuda.func_call(
-            func_name,
-            make_warp_uniform(tmem_a),
-            make_warp_uniform(smem_desc_start_b_lo),
-            accumulate,
-            make_warp_uniform(acc_tmem_addr),
-            mbar_ptr,
-            mbar_phase,
-            source_code=signature,
-            return_type="void",
-        )
 
     def canonical_warp_idx_sync():
         source_code = """
@@ -788,18 +590,101 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
                             elif warp_id == 0:
                                 with T.warp():
-                                    smem_base_offset = handle_to_uint32(buf.data)
                                     acc = T.local_cell("int32")
                                     acc = 0
 
+                                    # Encode instruction descriptors once
+                                    descI_qk = T.local_cell("uint32")
+                                    T.ptx.tcgen05.encode_instr_descriptor(
+                                        T.address_of(descI_qk), "float32", "float16", "float16",
+                                        MMA_M, MMA_N, MMA_K,
+                                        trans_a=False, trans_b=False, n_cta_groups=CTA_GROUP,
+                                    )
+                                    descI_pv = T.local_cell("uint32")
+                                    T.ptx.tcgen05.encode_instr_descriptor(
+                                        T.address_of(descI_pv), "float32", "float16", "float16",
+                                        MMA_M, MMA_N, MMA_K,
+                                        trans_a=False, trans_b=True, n_cta_groups=CTA_GROUP,
+                                    )
+
                                     @T.macro
-                                    def gemm_qk(q_stage, stage, tmem_col_s, bar_s_full):
-                                        gemm_qk_helper(smem_base_offset + Q_smem.elem_offset * F16_BYTES + q_stage * BLK_M * HEAD_DIM * F16_BYTES, smem_base_offset + K_smem.elem_offset * F16_BYTES + stage * BLK_N * HEAD_DIM * F16_BYTES, tmem_col_s)
+                                    def gemm_qk(q_stage, kv_stage, tmem_col_s, bar_s_full):
+                                        descQ = T.meta_var(SmemDescriptor("Q"))
+                                        descK = T.meta_var(SmemDescriptor("K"))
+                                        # All threads: encode base descriptors ONCE
+                                        descQ.init(Q_smem.ptr_to([q_stage, 0, 0]),
+                                                   ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+                                        descK.init(K_smem.ptr_to([kv_stage, 0, 0]),
+                                                   ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+
+                                        for blk_k in T.unroll(NUM_BLK_K):
+                                            for ki in T.unroll(BLK_K // MMA_K):
+                                                k = blk_k * (BLK_K // MMA_K) + ki
+                                                offset = T.meta_var(
+                                                    (blk_k * BLK_M * BLK_K + ki * MMA_K) * F16_BYTES >> 4
+                                                )
+                                                if T.ptx.elect_sync():
+                                                    T.ptx.tcgen05.mma(
+                                                        "float32", "float16", "float16",
+                                                        T.cuda.get_tmem_addr(0, 0, tmem_col_s),
+                                                        descQ.add_16B_offset(offset),
+                                                        descK.add_16B_offset(offset),
+                                                        descI_qk,
+                                                        use_a_tmem=False,
+                                                        cta_group=CTA_GROUP,
+                                                        enable_input_d=(k > 0),
+                                                    )
                                         bar_s_full.arrive(q_stage)
 
                                     @T.macro
-                                    def gemm_pv(i_q, stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):
-                                        gemm_pv_helper(tmem_col_p, smem_base_offset + V_smem.elem_offset * F16_BYTES + stage * BLK_N * HEAD_DIM * F16_BYTES, should_accumulate, tmem_col_o, bar_p_full_2.mbar.ptr_to([i_q]), phase_tmem[0])
+                                    def gemm_pv(i_q, kv_stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):
+                                        descV = T.meta_var(SmemDescriptor("V"))
+                                        # All threads: encode V descriptor ONCE
+                                        descV.init(V_smem.ptr_to([kv_stage, 0, 0]),
+                                                   ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES,
+                                                   sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
+                                                   swizzle=SWIZZLE)
+
+                                        # First MMA (k=0): runtime accumulate flag
+                                        if T.ptx.elect_sync():
+                                            T.ptx.tcgen05.mma(
+                                                "float32", "float16", "float16",
+                                                T.cuda.get_tmem_addr(0, 0, tmem_col_o),
+                                                T.cuda.get_tmem_addr(0, 0, tmem_col_p),
+                                                descV.add_16B_offset(0), descI_pv,
+                                                use_a_tmem=True, cta_group=CTA_GROUP,
+                                                enable_input_d=should_accumulate,
+                                            )
+                                        
+
+                                        # MMAs k=1..5 (before barrier wait)
+                                        for k in T.unroll(1, 6):
+                                            v_offset = T.meta_var((k * MMA_K * BLK_K * F16_BYTES) >> 4)
+                                            if T.ptx.elect_sync():
+                                                T.ptx.tcgen05.mma(
+                                                    "float32", "float16", "float16",
+                                                    T.cuda.get_tmem_addr(0, 0, tmem_col_o),
+                                                    T.cuda.get_tmem_addr(0, 0, tmem_col_p + k * MMA_K // 2),
+                                                    descV.add_16B_offset(v_offset), descI_pv,
+                                                    use_a_tmem=True, cta_group=CTA_GROUP,
+                                                    enable_input_d=True,
+                                                )
+
+                                        # Barrier wait (all threads)
+                                        T.ptx.mbarrier.try_wait(bar_p_full_2.mbar.ptr_to([i_q]), phase_tmem[0])
+
+                                        # MMAs k=6..NUM_MMA_PV-1 (after barrier wait)
+                                        for k in T.unroll(6, NUM_MMA_PV):
+                                            v_offset = T.meta_var((k * MMA_K * BLK_K * F16_BYTES) >> 4)
+                                            if T.ptx.elect_sync():
+                                                T.ptx.tcgen05.mma(
+                                                    "float32", "float16", "float16",
+                                                    T.cuda.get_tmem_addr(0, 0, tmem_col_o),
+                                                    T.cuda.get_tmem_addr(0, 0, tmem_col_p + k * MMA_K // 2),
+                                                    descV.add_16B_offset(v_offset), descI_pv,
+                                                    use_a_tmem=True, cta_group=CTA_GROUP,
+                                                    enable_input_d=True,
+                                                )
 
                                     for i_q in T.unroll(SMEM_PIPE_DEPTH_Q):
                                         tmem_col_s = tmem_s_base + i_q * tmem_offset
