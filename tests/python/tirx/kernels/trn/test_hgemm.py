@@ -19,7 +19,6 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.transform import LowerTIRx
 
@@ -46,15 +45,15 @@ def test_gemm2(ssh_client):
     dtype = "float16"
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def mm(iter_id, a_sbuf, b_sbuf, c_psum, result_tiles):
-        n = T.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
-        k = T.meta_var(iter_id % NUM_BLOCK_K)
-        m = T.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
-        for mi, ni in T.grid(NUM_TILE_M, NUM_TILE_N):
-            psum_bank = T.meta_var((mi*NUM_TILE_N+ni)%8)
-            TILE_N_START = T.meta_var(ni * TILE_N)
-            TILE_M_START = T.meta_var(mi * TILE_M)
+        n = Tx.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
+        k = Tx.meta_var(iter_id % NUM_BLOCK_K)
+        m = Tx.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
+        for mi, ni in Tx.grid(NUM_TILE_M, NUM_TILE_N):
+            psum_bank = Tx.meta_var((mi*NUM_TILE_N+ni)%8)
+            TILE_N_START = Tx.meta_var(ni * TILE_N)
+            TILE_M_START = Tx.meta_var(mi * TILE_M)
             # FIXME: currently nki has a bug for psum initialization
             # fix this when NKI exposes psum initialization API
             Tx.gemm(c_psum[psum_bank], a_sbuf[iter_id%3, :, TILE_M_START:TILE_M_START+TILE_M], b_sbuf[iter_id%3, :, TILE_N_START:TILE_N_START+TILE_N], c_psum[psum_bank], transpose_A=True)
@@ -76,40 +75,40 @@ def test_gemm2(ssh_client):
                     c_psum[psum_bank],
                 )
 
-    @T.macro
+    @Tx.macro
     def load_A(iter_id, a_sbuf, A):
-        m = T.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
-        k = T.meta_var(iter_id % NUM_BLOCK_K)
+        m = Tx.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
+        k = Tx.meta_var(iter_id % NUM_BLOCK_K)
         Tx.copy(
             a_sbuf[iter_id % 3], A[ k * BLOCK_K : (k + 1) * BLOCK_K, (m) * BLOCK_M : (m + 1) * BLOCK_M]
         )
 
-    @T.macro
+    @Tx.macro
     def load_B(iter_id, b_sbuf, B):
-        n = T.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
-        k = T.meta_var(iter_id % NUM_BLOCK_K)
+        n = Tx.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
+        k = Tx.meta_var(iter_id % NUM_BLOCK_K)
         Tx.copy(
             b_sbuf[iter_id % 3],
             B[(k) * BLOCK_K : (k + 1) * BLOCK_K, n * BLOCK_N : (n + 1) * BLOCK_N],
         )
     # do not reuse memory load, and keep result_tiles small
-    @T.prim_func(tirx=True)
-    def matmul2(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
-        T.func_attr({"num_inputs": 2})
-        A = T.match_buffer(A_ptr, (K, M), dtype)
-        B = T.match_buffer(B_ptr, (K, N), dtype)
-        C = T.match_buffer(C_ptr, (M, N), dtype)
-        with T.kernel():
-            result_tiles = T.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")
-            b_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF")
-            a_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_M), dtype, scope="trn.sbuf", layout="FPF")
-            c_psum = T.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout="FPF", allocated_addr=(0, 0))
+    @Tx.prim_func(tirx=True)
+    def matmul2(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle):
+        Tx.func_attr({"num_inputs": 2})
+        A = Tx.match_buffer(A_ptr, (K, M), dtype)
+        B = Tx.match_buffer(B_ptr, (K, N), dtype)
+        C = Tx.match_buffer(C_ptr, (M, N), dtype)
+        with Tx.kernel():
+            result_tiles = Tx.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")
+            b_sbuf = Tx.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF")
+            a_sbuf = Tx.alloc_buffer((3, BLOCK_K, BLOCK_M), dtype, scope="trn.sbuf", layout="FPF")
+            c_psum = Tx.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout="FPF", allocated_addr=(0, 0))
             load_A(0, a_sbuf, A)
             load_B(0, b_sbuf, B)
-            for iter_id in T.serial(NUM_BLOCK_M * NUM_BLOCK_K * NUM_BLOCK_N-1):
-                m = T.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
-                k = T.meta_var(iter_id % NUM_BLOCK_K)
-                n = T.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
+            for iter_id in Tx.serial(NUM_BLOCK_M * NUM_BLOCK_K * NUM_BLOCK_N-1):
+                m = Tx.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
+                k = Tx.meta_var(iter_id % NUM_BLOCK_K)
+                n = Tx.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
                 load_A(iter_id+1, a_sbuf, A)
                 load_B(iter_id+1, b_sbuf, B)
                 mm(iter_id, a_sbuf, b_sbuf, c_psum, result_tiles)

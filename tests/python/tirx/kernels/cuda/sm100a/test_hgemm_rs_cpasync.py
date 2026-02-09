@@ -27,7 +27,6 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
@@ -108,31 +107,31 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
+        self.state = Tx.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
-    @T.macro
+    @Tx.macro
     def semaphore_wait(self, *coord):
-        with T.thread():
+        with Tx.thread():
             while 1:
-                T.ptx.ld_global_acquire(
+                Tx.ptx.ld_global_acquire(
                     self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
                 )
-                if T.cuda.syncthreads_and(self.state[0] == self.cnt):
+                if Tx.cuda.syncthreads_and(self.state[0] == self.cnt):
                     break
-                T.cuda.nano_sleep(40)
+                Tx.cuda.nano_sleep(40)
 
-    @T.macro
+    @Tx.macro
     def semaphore_notify(self, tid, *coord):
         # wg is synced
-        with T.thread():
+        with Tx.thread():
             if tid % 128 == 0:
-                T.cuda.func_call(
+                Tx.cuda.func_call(
                     "atomic_add_system_uint64",
                     self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)),
-                    T.uint64(1),
+                    Tx.uint64(1),
                     source_code=atomic_add_system_uint64,
                 )
-            T.cuda.thread_fence()
+            Tx.cuda.thread_fence()
 
 
 class Pipeline:
@@ -147,95 +146,95 @@ class Pipeline:
     ):
         self.pipeline_depth = pipeline_depth
         self.pipeline_num = pipeline_num
-        self.mbar_p2c = T.decl_buffer(
+        self.mbar_p2c = Tx.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset,
             name="mbar_p2c",
         )
-        self.mbar_c2p = T.decl_buffer(
+        self.mbar_c2p = Tx.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
             name="mbar_c2p",
         )
-        self.idx = T.local_cell("int32", name="pipeline_idx")
-        self.p2c_phase = T.local_cell("int32", name="pipeline_p2c_phase")
-        self.c2p_phase = T.local_cell("int32", name="pipeline_c2p_phase")
+        self.idx = Tx.local_cell("int32", name="pipeline_idx")
+        self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
+        self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
-    @T.macro
+    @Tx.macro
     def init(self, p2c_thread_count: int = 1, c2p_thread_count: int = 1):
         self.idx = 0
         self.p2c_phase = 0
         self.c2p_phase = 1
-        with T.thread()[0:1]:
-            for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
-                for i in T.serial(0, self.pipeline_depth):
-                    for j in T.serial(0, self.pipeline_num):
+        with Tx.thread()[0:1]:
+            for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+                for i in Tx.serial(0, self.pipeline_depth):
+                    for j in Tx.serial(0, self.pipeline_num):
                         if not self.c_single_cta or cbx == 0:
-                            T.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
+                            Tx.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
                         if not self.p_single_cta or cbx == 0:
-                            T.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
-        T.ptx.fence.proxy("shared")
+                            Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
+        Tx.ptx.fence.proxy("shared")
 
-    @T.macro
+    @Tx.macro
     def advance(self):
         self.idx = (self.idx + 1) % self.pipeline_depth
         if self.idx == 0:
             self.p2c_phase = self.p2c_phase ^ 1
             self.c2p_phase = self.c2p_phase ^ 1
 
-    @T.macro
+    @Tx.macro
     def producer_wait(self, pipeline_idx):
-        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+        for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.p_single_cta or cbx == 0:
-                T.ptx.mbarrier.try_wait(
+                Tx.ptx.mbarrier.try_wait(
                     self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), self.c2p_phase
                 )
 
-    @T.macro
+    @Tx.macro
     def consumer_wait(self, pipeline_idx):
-        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+        for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.c_single_cta or cbx == 0:
-                T.ptx.mbarrier.try_wait(
+                Tx.ptx.mbarrier.try_wait(
                     self.mbar_p2c.ptr_to([self.idx, pipeline_idx]), self.p2c_phase
                 )
 
 
 class TMA2MMAPipeline(Pipeline):
 
-    @T.macro
+    @Tx.macro
     def consumer_release(self, pipeline_idx):
-        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
-            for tx in T.thread_binding(NUM_THREADS, "threadIdx.x"):
+        for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+            for tx in Tx.thread_binding(NUM_THREADS, "threadIdx.x"):
                 if tx % 32 == 0:
                     if not self.c_single_cta:
-                        T.ptx.tcgen05.commit(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), 1)
+                        Tx.ptx.tcgen05.commit(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), 1)
                     elif cbx == 0:
-                        T.ptx.tcgen05.commit(
+                        Tx.ptx.tcgen05.commit(
                             self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), 2, cta_mask=3
                         )
 
 
 class MMA2LDpipeline(Pipeline):
-    @T.macro
+    @Tx.macro
     def consumer_release(self, pipeline_idx):
-        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+        for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.c_single_cta or cbx == 0:
-                T.ptx.mbarrier.arrive(
+                Tx.ptx.mbarrier.arrive(
                     self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), cta_id=0, pred=True
                 )
 
 
 class ReducePipe(Pipeline):
 
-    @T.macro
+    @Tx.macro
     def consumer_release(self, pipeline_idx: int):
-        T.ptx.mbarrier.arrive(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]))
+        Tx.ptx.mbarrier.arrive(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]))
 
 
 half8tofloat8 = """
@@ -258,52 +257,52 @@ __forceinline__ __device__ void float8tohalf8(void* src_addr, void* dst_addr) {
 """
 
 
-A_layout = T.ComposeLayout(
-    T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-    T.TileLayout(
+A_layout = Tx.ComposeLayout(
+    Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+    Tx.TileLayout(
         shard=(
             (PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64),
             (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1),
         )
     ),
 )
-B_layout = T.ComposeLayout(
-    T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-    T.TileLayout(
+B_layout = Tx.ComposeLayout(
+    Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+    Tx.TileLayout(
         shard=((PIPE_DEPTH, BLK_N // 2, 1, 64), (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1))
     ),
 )
-D_layout = T.ComposeLayout(
-    T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-    T.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
+D_layout = Tx.ComposeLayout(
+    Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+    Tx.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
 )
 
 
 # fmt: off
 @I.ir_module(tirx=True)
 class ReduceScatter:
-    @T.prim_func(tirx=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), gemm_out: T.Buffer((M, N), d_type),
-                                    semaphore: T.Buffer((WORLD_SIZE, ), "uint64"),
-                                    out: T.Buffer((LOCAL_M, N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        C_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, "float16", 2, A.data, K, M, K * 2, BLK_K, BLK_M, 1, 1, 0, 3, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, "float16", 2, B.data, K, N, K * 2, BLK_K, BLK_N // 2, 1, 1, 0, 3, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", C_tensor_map, "float16", 2, gemm_out.data, N, M, N * 2, EPI_TILE, BLK_M, 1, 1, 0, 3, 0, 0)
-        with T.kernel():
-            cbx, cby = T.cta_id([CLUSTER_M, CLUSTER_N], parent="cluster")
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            wg_id = T.warpgroup_id([NUM_CONSUMER+1], parent="cta")
-            warp_id = T.warp_id([4], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([NUM_THREADS], parent="cta")
-            rank = T.nvshmem.my_pe()
-            sem = T.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
-            with T.cta():
-                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                profiler = T.meta_var(
+    @Tx.prim_func(tirx=True)
+    def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M, N), d_type),
+                                    semaphore: Tx.Buffer((WORLD_SIZE, ), "uint64"),
+                                    out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+        A_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        B_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        C_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, "float16", 2, A.data, K, M, K * 2, BLK_K, BLK_M, 1, 1, 0, 3, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, "float16", 2, B.data, K, N, K * 2, BLK_K, BLK_N // 2, 1, 1, 0, 3, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_tensor_map, "float16", 2, gemm_out.data, N, M, N * 2, EPI_TILE, BLK_M, 1, 1, 0, 3, 0, 0)
+        with Tx.kernel():
+            cbx, cby = Tx.cta_id([CLUSTER_M, CLUSTER_N], parent="cluster")
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            wg_id = Tx.warpgroup_id([NUM_CONSUMER+1], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([NUM_THREADS], parent="cta")
+            rank = Tx.nvshmem.my_pe()
+            sem = Tx.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
+            with Tx.cta():
+                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                profiler = Tx.meta_var(
                     CudaProfiler(
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
@@ -311,57 +310,57 @@ class ReduceScatter:
                     )
                 )
                 profiler.init(0)
-                with T.cta()[0:GEMM_SMS]:
+                with Tx.cta()[0:GEMM_SMS]:
                     profiler.start(ProfileEventType.GEMM, lane_id == 0)
-                    tmem_addr = T.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
-                    A_smem = T.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
-                    B_smem = T.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
-                    C_smem = T.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
-                    reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                    tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                    A_smem = Tx.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
+                    B_smem = Tx.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
+                    C_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
+                    reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                     reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
-                    reg_fp16 = T.alloc_buffer((BLK_N,), d_type, scope="local")
-                    descA = T.local_cell("uint64")
-                    descB = T.local_cell("uint64")
-                    descI = T.local_cell("uint32")
-                    base_desc_A = T.local_cell("uint64")
-                    base_desc_B = T.local_cell("uint64")
-                    tma2mma_pipe = T.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
-                    mma2ld_pipe = T.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
+                    reg_fp16 = Tx.alloc_buffer((BLK_N,), d_type, scope="local")
+                    descA = Tx.local_cell("uint64")
+                    descB = Tx.local_cell("uint64")
+                    descI = Tx.local_cell("uint32")
+                    base_desc_A = Tx.local_cell("uint64")
+                    base_desc_B = Tx.local_cell("uint64")
+                    tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
+                    mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
                     mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                     tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
-                    ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
-                    tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
-                    m_clusters = T.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
-                    n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = T.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
+                    ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
+                    tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
+                    m_clusters = Tx.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
+                    n_clusters = Tx.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
+                    gemm_tile_scheduler = Tx.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
-                    with T.warp()[0:1]:
-                        T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                    T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
-                    T.cuda.cta_sync()
-                    T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                    tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
+                    with Tx.warp()[0:1]:
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
+                    Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
+                    Tx.cuda.cta_sync()
+                    Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
+                    tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
                                          layout=TileLayout(([128, N_COLS], [1@TCol, 1@TLane])))
                     # reset RF
-                    with T.cta():
-                        T.sblock_attr({"tirx.scope_partition": True})
-                        with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
-                            T.ptx.setmaxnreg(False, 56)
+                    with Tx.cta():
+                        Tx.sblock_attr({"tirx.scope_partition": True})
+                        with Tx.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
+                            Tx.ptx.setmaxnreg(False, 56)
                             if warp_id == 3:
                                 while gemm_tile_scheduler.valid():
-                                    m_idx = T.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
-                                    n_idx = T.meta_var(gemm_tile_scheduler.n_idx)
+                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                    n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
                                     for ko in range(K // BLK_K):
                                         # GMEM -> SMEM
                                         if lane_id == 0:
                                             tma2mma_pipe.producer_wait(0)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)
                                             if cbx == 0:
                                                 # notify the mma stage that tma load is finished
-                                                T.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)
+                                                Tx.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)
                                             tma2mma_pipe.advance()
                                     gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
                                 for i in range(PIPE_DEPTH):
@@ -371,77 +370,77 @@ class ReduceScatter:
                                         tma2mma_pipe.advance()
                             elif warp_id < NUM_CONSUMER:
                                 while gemm_tile_scheduler.valid():
-                                    m_idx = T.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
-                                    n_idx = T.meta_var(gemm_tile_scheduler.n_idx)
-                                    with T.thread():
+                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                    n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
+                                    with Tx.thread():
                                         # MMA
                                         if lane_id == 0 and cbx == 0:
                                             # wait for the last tmem result to be consumed
                                             mma2ld_pipe.producer_wait(warp_id)
-                                            for ko in T.serial(0, K // BLK_K):
+                                            for ko in Tx.serial(0, K // BLK_K):
                                                 # wait for tma load to finish
                                                 tma2mma_pipe.consumer_wait(0)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                                                 for ki in range(BLK_K // MMA_K):
                                                     descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)
                                                     descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)
                                                     if ki == 0 and ko == 0:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
+                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
                                                     else:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
+                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
                                                 tma2mma_pipe.consumer_release(0)
                                                 tma2mma_pipe.advance()
-                                            T.ptx.tcgen05.commit(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]), cta_group=2, cta_mask=3)
+                                            Tx.ptx.tcgen05.commit(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]), cta_group=2, cta_mask=3)
                                             mma2ld_pipe.advance()
                                     gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
-                        with T.warpgroup()[0:NUM_CONSUMER]:
-                            T.ptx.setmaxnreg(True, 224)
+                        with Tx.warpgroup()[0:NUM_CONSUMER]:
+                            Tx.ptx.setmaxnreg(True, 224)
                             while gemm_tile_scheduler.valid():
-                                m_idx = T.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
-                                n_idx = T.meta_var(gemm_tile_scheduler.n_idx)
+                                m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
                                 # wait for the completion of all the mma of the same tile
                                 mma2ld_pipe.consumer_wait(0)
                                 # TMEM -> RF
                                 for i in range(BLK_N // TMEM_LD_SIZE):
-                                    col_st = T.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
+                                    col_st = Tx.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
                                     Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
-                                    with T.thread():
+                                    with Tx.thread():
                                         Tx.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
                                 # the tmem can be overwritten by the next tile
                                 mma2ld_pipe.consumer_release(wg_id)
                                 # RF -> GMEM
                                 for i in range(BLK_N // EPI_TILE):
-                                    with T.thread():
+                                    with Tx.thread():
                                         Tx.copy(C_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
-                                    T.cuda.warpgroup_sync(wg_id+1)
-                                    T.ptx.fence.proxy(scope="shared")
+                                    Tx.cuda.warpgroup_sync(wg_id+1)
+                                    Tx.ptx.fence.proxy(scope="shared")
                                     if lane_id == 0 and warp_id == 0:
-                                        T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
-                                        T.ptx.cp_async.bulk.commit_group()
-                                        T.ptx.cp_async.bulk.wait_group(0)
-                                    T.cuda.warpgroup_sync(wg_id+1)
+                                        Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
+                                        Tx.ptx.cp_async.bulk.commit_group()
+                                        Tx.ptx.cp_async.bulk.wait_group(0)
+                                    Tx.cuda.warpgroup_sync(wg_id+1)
                                 # notify RS ready
-                                comm_m_idx = T.meta_var(m_idx * 4 + wg_id * 2 + cbx)
-                                signal_rank = T.meta_var(comm_m_idx // (LOCAL_M // BLK_M))
+                                comm_m_idx = Tx.meta_var(m_idx * 4 + wg_id * 2 + cbx)
+                                signal_rank = Tx.meta_var(comm_m_idx // (LOCAL_M // BLK_M))
                                 sem.semaphore_notify(tid, signal_rank)
                                 mma2ld_pipe.advance()
                                 gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
                     # dealloc TMEM
-                    with T.warp()[0:1]:
-                        T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                        T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
+                    with Tx.warp()[0:1]:
+                        Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
+                        Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
                     profiler.end(ProfileEventType.GEMM, lane_id == 0)
 
 
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def reduce_sum(
-        staging_buffer: T.Buffer((WORLD_SIZE, LOCAL_M, N), "float16"),
-        out: T.Buffer((LOCAL_M, N), d_type),
+        staging_buffer: Tx.Buffer((WORLD_SIZE, LOCAL_M, N), "float16"),
+        out: Tx.Buffer((LOCAL_M, N), d_type),
     ):
-        src_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        dst_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed(
+        src_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        dst_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        Tx.call_packed(
             "runtime.cuTensorMapEncodeTiled",
             src_tensor_map,
             "float16",
@@ -463,7 +462,7 @@ class ReduceScatter:
             0,
             0,
         )
-        T.call_packed(
+        Tx.call_packed(
             "runtime.cuTensorMapEncodeTiled",
             dst_tensor_map,
             "float16",
@@ -481,47 +480,47 @@ class ReduceScatter:
             0,
             0,
         )
-        with T.kernel():
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            wg_id = T.warpgroup_id([2], parent="cta")
-            warp_id = T.warp_id([4], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
-            tid_in_wg = T.thread_id([128], parent="warpgroup")
-            with T.cta():
-                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                load_pipe = T.meta_var(
+        with Tx.kernel():
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            wg_id = Tx.warpgroup_id([2], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid_in_wg = Tx.thread_id([128], parent="warpgroup")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                load_pipe = Tx.meta_var(
                     ReducePipe(
                         buf.data, 0, RS_LOAD_PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=False
                     )
                 )
-                input_smem = T.decl_buffer(
+                input_smem = Tx.decl_buffer(
                     (RS_LOAD_PIPE_DEPTH, BLK_M_RS, BLK_N_RS),
                     d_type,
                     buf.data,
                     elem_offset=512,
                 )
-                output_smem = T.decl_buffer(
+                output_smem = Tx.decl_buffer(
                     (BLK_M_RS, BLK_N_RS),
                     d_type,
                     buf.data,
                     elem_offset=512 + RS_LOAD_PIPE_DEPTH * BLK_M_RS * BLK_N_RS,
                 )
-                reg_fp16 = T.alloc_buffer((8, ), "float16", scope="local")
-                reg_fp32_tmp = T.alloc_buffer((8), "float32", scope="local")
-                reg_fp32 = T.alloc_buffer((BLK_M_RS * BLK_N_RS // 8 // 128, 8), "float32", scope="local")
-                iter = T.local_cell("int32")
+                reg_fp16 = Tx.alloc_buffer((8, ), "float16", scope="local")
+                reg_fp32_tmp = Tx.alloc_buffer((8), "float32", scope="local")
+                reg_fp32 = Tx.alloc_buffer((BLK_M_RS * BLK_N_RS // 8 // 128, 8), "float32", scope="local")
+                iter = Tx.local_cell("int32")
                 iter = 0
                 load_pipe.init(c2p_thread_count=128)
-                tile_id = T.meta_var(iter * SM_COUNT + bx)
-                T.tvm_storage_sync("shared")
+                tile_id = Tx.meta_var(iter * SM_COUNT + bx)
+                Tx.tvm_storage_sync("shared")
                 if warp_id == 0 and wg_id == 0:
                     while tile_id < LOCAL_M // BLK_M_RS * N // BLK_N_RS:
-                        m_idx = T.meta_var(tile_id // (N // BLK_N_RS))
-                        n_idx = T.meta_var(tile_id % (N // BLK_N_RS))
+                        m_idx = Tx.meta_var(tile_id // (N // BLK_N_RS))
+                        n_idx = Tx.meta_var(tile_id % (N // BLK_N_RS))
                         if lane_id == 0:
                             for i in range(WORLD_SIZE):
                                 load_pipe.producer_wait(0)
-                                T.ptx.cp_async.bulk.tensor.g2c(
+                                Tx.ptx.cp_async.bulk.tensor.g2c(
                                     3,
                                     input_smem.ptr_to([load_pipe.idx, 0, 0]),
                                     load_pipe.mbar_p2c.ptr_to([load_pipe.idx, 0]),
@@ -530,7 +529,7 @@ class ReduceScatter:
                                     m_idx * BLK_M_RS,
                                     i,
                                 )
-                                T.ptx.mbarrier.arrive.expect_tx(
+                                Tx.ptx.mbarrier.arrive.expect_tx(
                                     load_pipe.mbar_p2c.ptr_to([load_pipe.idx, 0]),
                                     BLK_M_RS * BLK_N_RS * 2,
                                 )
@@ -538,44 +537,44 @@ class ReduceScatter:
                         iter += 1
                 elif wg_id == 1:
                     while tile_id < LOCAL_M // BLK_M_RS * N // BLK_N_RS:
-                        m_idx = T.meta_var(tile_id // (N // BLK_N_RS))
-                        n_idx = T.meta_var(tile_id % (N // BLK_N_RS))
+                        m_idx = Tx.meta_var(tile_id // (N // BLK_N_RS))
+                        n_idx = Tx.meta_var(tile_id % (N // BLK_N_RS))
                         for rank in range(WORLD_SIZE):
                             load_pipe.consumer_wait(0)
                             for i in range(BLK_M_RS * BLK_N_RS // 8 // 128):
-                                m_in_smem = T.meta_var((i * 128 + tid_in_wg) // (BLK_N_RS // 8))
-                                n_in_smem = T.meta_var((i * 128 + tid_in_wg) % (BLK_N_RS // 8))
-                                for j in T.vectorized(8):
+                                m_in_smem = Tx.meta_var((i * 128 + tid_in_wg) // (BLK_N_RS // 8))
+                                n_in_smem = Tx.meta_var((i * 128 + tid_in_wg) % (BLK_N_RS // 8))
+                                for j in Tx.vectorized(8):
                                     reg_fp16[j] = input_smem[
                                         load_pipe.idx, m_in_smem, n_in_smem * 8 + j
                                     ]
                                 if rank > 0:
-                                    T.cuda.half8tofloat8(reg_fp16.data, reg_fp32_tmp.data)
-                                    for j in T.vectorized(8):
+                                    Tx.cuda.half8tofloat8(reg_fp16.data, reg_fp32_tmp.data)
+                                    for j in Tx.vectorized(8):
                                         reg_fp32[i, j] += reg_fp32_tmp[j]
                                 else:
-                                    T.cuda.half8tofloat8(reg_fp16.data, reg_fp32.ptr_to([i, 0]))
+                                    Tx.cuda.half8tofloat8(reg_fp16.data, reg_fp32.ptr_to([i, 0]))
                             load_pipe.consumer_release(0)
                             load_pipe.advance()
                         for i in range(BLK_M_RS * BLK_N_RS // 8 // 128):
-                            m_in_smem = T.meta_var((i * 128 + tid_in_wg) // (BLK_N_RS // 8))
-                            n_in_smem = T.meta_var((i * 128 + tid_in_wg) % (BLK_N_RS // 8))
-                            T.cuda.float8tohalf8(reg_fp32.ptr_to([i, 0]), reg_fp16.data)
-                            for j in T.vectorized(8):
+                            m_in_smem = Tx.meta_var((i * 128 + tid_in_wg) // (BLK_N_RS // 8))
+                            n_in_smem = Tx.meta_var((i * 128 + tid_in_wg) % (BLK_N_RS // 8))
+                            Tx.cuda.float8tohalf8(reg_fp32.ptr_to([i, 0]), reg_fp16.data)
+                            for j in Tx.vectorized(8):
                                 output_smem[m_in_smem, n_in_smem * 8 + j] = reg_fp16[j]
-                        T.cuda.warpgroup_sync(1)
-                        T.ptx.fence.proxy(scope="shared")
+                        Tx.cuda.warpgroup_sync(1)
+                        Tx.ptx.fence.proxy(scope="shared")
                         if tid_in_wg == 0:
-                            T.ptx.cp_async.bulk.tensor.s2g(
+                            Tx.ptx.cp_async.bulk.tensor.s2g(
                                 2,
                                 output_smem.ptr_to([0, 0]),
                                 dst_tensor_map,
                                 n_idx * BLK_N_RS,
                                 m_idx * BLK_M_RS,
                             )
-                            T.ptx.cp_async.bulk.commit_group()
-                            T.ptx.cp_async.bulk.wait_group(0)
-                        T.cuda.warpgroup_sync(1)
+                            Tx.ptx.cp_async.bulk.commit_group()
+                            Tx.ptx.cp_async.bulk.wait_group(0)
+                        Tx.cuda.warpgroup_sync(1)
                         iter += 1
 # fmt: on
 

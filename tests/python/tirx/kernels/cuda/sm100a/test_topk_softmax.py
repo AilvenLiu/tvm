@@ -6,7 +6,6 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
@@ -25,9 +24,9 @@ class TopkSoftmaxKernel:
             ProfileEventType.TOPK_SOFTMAX,
         )
 
-    @T.macro
+    @Tx.macro
     def run_tile(self, tile, *args):
-        with T.cta():
+        with Tx.cta():
             tile.run(*args)
 
     def _add_tile(self, tile, profiler_event_type):
@@ -41,24 +40,24 @@ class TopkSoftmaxKernel:
 
     def get_func_static(self, num_experts, dtype="float32"):
         # fmt: off
-        @T.prim_func(tirx=True)
-        def main(gating_output_ptr: T.handle, topk_weights_ptr: T.handle, topk_indices_ptr: T.handle):
-            T.func_attr({"global_symbol": "main", "target": T.target("cuda")})
+        @Tx.prim_func(tirx=True)
+        def main(gating_output_ptr: Tx.handle, topk_weights_ptr: Tx.handle, topk_indices_ptr: Tx.handle):
+            Tx.func_attr({"global_symbol": "main", "target": Tx.target("cuda")})
 
-            num_tokens = T.int32()
-            topk = T.int32()
+            num_tokens = Tx.int32()
+            topk = Tx.int32()
 
-            gating_output_global = T.match_buffer(gating_output_ptr, [num_tokens, num_experts], dtype, scope="global")
-            topk_weights_global = T.match_buffer(topk_weights_ptr, [num_tokens, topk], "float32", scope="global")
-            topk_indices_global = T.match_buffer(topk_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [num_tokens, num_experts], dtype, scope="global")
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [num_tokens, topk], "float32", scope="global")
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [num_tokens, topk], "int32", scope="global")
 
             self.set_tiles(num_experts, num_tokens, topk, dtype)
 
-            with T.kernel():
-                bx = T.cta_id([self.topk_softmax_tile.PERSISTENT_SM_NUMBER], parent="kernel")
-                warp_id_in_cta = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = T.thread_id([self.topk_softmax_tile.bdx], parent="warp")
-                with T.cta():
+            with Tx.kernel():
+                bx = Tx.cta_id([self.topk_softmax_tile.PERSISTENT_SM_NUMBER], parent="kernel")
+                warp_id_in_cta = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                lane_id = Tx.thread_id([self.topk_softmax_tile.bdx], parent="warp")
+                with Tx.cta():
                     # no need of smem_manager
                     self.device_init_all()
 
@@ -70,7 +69,7 @@ class TopkSoftmaxKernel:
     def get_module_static(self, num_experts, dtype="float32"):
         @I.ir_module(tirx=True)
         class StaticModule:
-            @T.prim_func(tirx=True)
+            @Tx.prim_func(tirx=True)
             def main():
                 pass
 

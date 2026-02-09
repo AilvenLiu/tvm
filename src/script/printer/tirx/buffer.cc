@@ -454,7 +454,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
     values.push_back(ListDoc(exclude_docs));
   }
 
-  return TIR(d, "TileLayout")->Call({}, keys, values);
+  return TIRx(d, "TileLayout")->Call({}, keys, values);
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
@@ -468,13 +468,13 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
         "", [](tirx::ComposeLayout layout, AccessPath p, IRDocsifier d) -> Doc {
           auto layoutA = d->AsDoc<ExprDoc>(layout->swizzle, p);
           auto layoutB = d->AsDoc<ExprDoc>(layout->tile_layout, p);
-          return TIR(d, "ComposeLayout")->Call({layoutA, layoutB}, {}, {});
+          return TIRx(d, "ComposeLayout")->Call({layoutA, layoutB}, {}, {});
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::SwizzleLayout>(
         "", [](tirx::SwizzleLayout layout, AccessPath p, IRDocsifier d) -> Doc {
-          return TIR(d, "SwizzleLayout")
+          return TIRx(d, "SwizzleLayout")
               ->Call(
                   {
                       LiteralDoc::Int(layout->per_element, p->Attr("per_element")),

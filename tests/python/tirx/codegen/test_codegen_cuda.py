@@ -21,7 +21,6 @@ import torch
 
 import tvm
 import tvm.testing
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
 DEV = tvm.device("cuda")
@@ -36,14 +35,14 @@ def _get_source(func: tvm.tir.PrimFunc) -> str:
 
 
 def test_cuda_atomic_add():
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((1,), "int32"), B: T.Buffer((1,), "float32")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread()[tx == 0]:
-                T.cuda.atomic_add(A.data, T.int32(1))
-                T.cuda.atomic_add(B.data, T.float32(1.0))
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((1,), "int32"), B: Tx.Buffer((1,), "float32")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread()[tx == 0]:
+                Tx.cuda.atomic_add(A.data, Tx.int32(1))
+                Tx.cuda.atomic_add(B.data, Tx.float32(1.0))
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_atomic_add" in src
@@ -57,39 +56,39 @@ def test_cuda_atomic_add():
 
 
 def test_cuda_thread_fence():
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((16, 16), "int32")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread()[tx == 0]:
-                T.cuda.thread_fence()
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((16, 16), "int32")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread()[tx == 0]:
+                Tx.cuda.thread_fence()
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_thread_fence" in src
 
 
 def test_cuda_nano_sleep():
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((16, 16), "int32")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread()[tx == 0]:
-                T.cuda.nano_sleep(1)
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((16, 16), "int32")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread()[tx == 0]:
+                Tx.cuda.nano_sleep(1)
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_nano_sleep" in src
 
 
 def test_cuda_atomic_cas():
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((16, 16), "int32")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread()[tx == 0]:
-                T.cuda.atomic_cas(A.data, T.int32(1), T.int32(2))
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((16, 16), "int32")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread()[tx == 0]:
+                Tx.cuda.atomic_cas(A.data, Tx.int32(1), Tx.int32(2))
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_atomic_cas" in src
@@ -103,14 +102,14 @@ __device__ int32_t add_one(int32_t a) {
 }
 """
 
-        @T.prim_func(tirx=True)
-        def main(a: T.Buffer((16, 16), "int32"), b: T.Buffer((16, 16), "int32")):
-            with T.kernel():
-                bx = T.cta_id([1], parent="kernel")
-                tx = T.thread_id([32], parent="cta")
-                with T.thread()[tx == 0]:
-                    for i, j in T.grid(16, 16):
-                        b[i, j] = T.cuda.func_call(
+        @Tx.prim_func(tirx=True)
+        def main(a: Tx.Buffer((16, 16), "int32"), b: Tx.Buffer((16, 16), "int32")):
+            with Tx.kernel():
+                bx = Tx.cta_id([1], parent="kernel")
+                tx = Tx.thread_id([32], parent="cta")
+                with Tx.thread()[tx == 0]:
+                    for i, j in Tx.grid(16, 16):
+                        b[i, j] = Tx.cuda.func_call(
                             "add_one",
                             a[i, j],
                             source_code=add_one,
@@ -135,14 +134,14 @@ __device__ void print(int32_t a) {
 }
 """
 
-        @T.prim_func(tirx=True)
-        def main(a: T.Buffer((16, 16), "int32")):
-            with T.kernel():
-                bx = T.cta_id([1], parent="kernel")
-                tx = T.thread_id([32], parent="cta")
-                with T.thread()[tx == 0]:
-                    for i, j in T.grid(16, 16):
-                        T.cuda.func_call("print", a[i, j], source_code=print_func)
+        @Tx.prim_func(tirx=True)
+        def main(a: Tx.Buffer((16, 16), "int32")):
+            with Tx.kernel():
+                bx = Tx.cta_id([1], parent="kernel")
+                tx = Tx.thread_id([32], parent="cta")
+                with Tx.thread()[tx == 0]:
+                    for i, j in Tx.grid(16, 16):
+                        Tx.cuda.func_call("print", a[i, j], source_code=print_func)
 
         src, mod = _get_source(main)
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
@@ -155,23 +154,23 @@ __device__ void print(int32_t a) {
 
 def test_warp_shuffle_xor_sync():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def func(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (32,), dtype="float32", align=16)
+    @Tx.prim_func(tirx=True)
+    def func(A_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, (32,), dtype="float32", align=16)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            warp_id = Tx.warp_id([1], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
 
-            with T.thread():
-                A_local = T.alloc_buffer([1], "float32", scope="local")
-                i = T.alloc_buffer([1], "int32", scope="local")
+            with Tx.thread():
+                A_local = Tx.alloc_buffer([1], "float32", scope="local")
+                i = Tx.alloc_buffer([1], "int32", scope="local")
 
-                A_local[0] = T.float32(31 - lane_id)
+                A_local[0] = Tx.float32(31 - lane_id)
                 i[0] = 16
                 while i[0] >= 1:
-                    A_local[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, A_local[0], i[0], 32, 32)
+                    A_local[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, A_local[0], i[0], 32, 32)
                     i[0] = i[0] // 2
 
                 A[lane_id] = A_local[0]
@@ -192,7 +191,7 @@ def test_warp_shuffle_xor_sync():
 @pytest.mark.parametrize("cp_size", [4, 8, 16])
 @pytest.mark.parametrize("cache_hint", ["", "evict_last"])
 @pytest.mark.parametrize("prefetch_size", [-1, 64, 128, 256])
-@pytest.mark.parametrize("predicate", [-1, T.int32(0), T.int32(1)])
+@pytest.mark.parametrize("predicate", [-1, Tx.int32(0), Tx.int32(1)])
 @pytest.mark.parametrize("fill_mode", ["", "zero"])
 def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
     if fill_mode != "" and predicate == -1:
@@ -200,20 +199,20 @@ def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
 
     N = cp_size // 2
     # fmt: off
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((N), "float16")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([1], parent="cta")
-            with T.thread():
-                A_shared = T.alloc_shared([N], "float16")
-                for i in T.vectorized(N):
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((N), "float16")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([1], parent="cta")
+            with Tx.thread():
+                A_shared = Tx.alloc_shared([N], "float16")
+                for i in Tx.vectorized(N):
                     A_shared[i] = 5.0
-                T.ptx.fence.proxy("shared")
-                T.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)
-                T.ptx.cp_async.commit_group()
-                T.ptx.cp_async.wait_group(0)
-                for i in T.serial(N):
+                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)
+                Tx.ptx.cp_async.commit_group()
+                Tx.ptx.cp_async.wait_group(0)
+                for i in Tx.serial(N):
                     A[i] = A_shared[i] + 1.0
     # fmt: on
 
@@ -238,20 +237,20 @@ def test_ptx_ldmatrix(trans, num):
     dtype = ".b16"
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def main(A: T.Buffer((16, 16), "float16"), B: T.Buffer((16, 16), "float16")):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            A_shared = T.alloc_shared([16, 16], "float16")
-            with T.thread()[tx == 0]:
-                for i, j in T.grid(16, 16):
+    @Tx.prim_func(tirx=True)
+    def main(A: Tx.Buffer((16, 16), "float16"), B: Tx.Buffer((16, 16), "float16")):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            A_shared = Tx.alloc_shared([16, 16], "float16")
+            with Tx.thread()[tx == 0]:
+                for i, j in Tx.grid(16, 16):
                     A_shared[i, j] = A[i, j]
-            T.cuda.cta_sync()
-            with T.thread():
-                A_local = T.alloc_local([8], "float16")
+            Tx.cuda.cta_sync()
+            with Tx.thread():
+                A_local = Tx.alloc_local([8], "float16")
                 A_local[0] = -1.0
-                T.ptx.ldmatrix(
+                Tx.ptx.ldmatrix(
                     trans, num, dtype, A_local.ptr_to([0]), A_shared.ptr_to([tx % 16, tx // 16 * 8])
                 )
                 for i in range(8):
@@ -293,42 +292,42 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
     b_layout = "col"
 
     # fmt: off
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def main(
-        D: T.Buffer((16, 8), d_type),
-        A: T.Buffer((16, 16), a_type),
-        B: T.Buffer((16, 8), b_type),
-        C: T.Buffer((16, 8), c_type),
+        D: Tx.Buffer((16, 8), d_type),
+        A: Tx.Buffer((16, 16), a_type),
+        B: Tx.Buffer((16, 8), b_type),
+        C: Tx.Buffer((16, 8), c_type),
     ):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread():
-                D_local = T.alloc_local([4], d_type)
-                A_local = T.alloc_local([8], a_type)
-                B_local = T.alloc_local([4], b_type)
-                C_local = T.alloc_local([4], c_type)
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread():
+                D_local = Tx.alloc_local([4], d_type)
+                A_local = Tx.alloc_local([8], a_type)
+                B_local = Tx.alloc_local([4], b_type)
+                C_local = Tx.alloc_local([4], c_type)
 
-                @T.macro
+                @Tx.macro
                 def G2L(buf_local, buf_global, block_8x8, mode="row"):
                     if mode == "row":
                         for i in range(block_8x8):
-                            row = T.meta_var(i % 2 * 8 + tx // 4)
-                            col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                            row = Tx.meta_var(i % 2 * 8 + tx // 4)
+                            col = Tx.meta_var(i // 2 * 8 + (tx % 4) * 2)
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row, col + j]
                     elif mode == "col":
                         for i in range(block_8x8):
-                            row = T.meta_var(i % 2 * 8 + (tx % 4) * 2)
-                            col = T.meta_var(i // 2 * 8 + tx // 4)
+                            row = Tx.meta_var(i % 2 * 8 + (tx % 4) * 2)
+                            col = Tx.meta_var(i // 2 * 8 + tx // 4)
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row + j, col]
 
-                @T.macro
+                @Tx.macro
                 def L2G(buf_local, buf_global, block_8x8):
                     for i in range(block_8x8):
-                        row = T.meta_var(i % 2 * 8 + tx // 4)
-                        col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                        row = Tx.meta_var(i % 2 * 8 + tx // 4)
+                        col = Tx.meta_var(i // 2 * 8 + (tx % 4) * 2)
                         for j in range(2):
                             buf_global[row, col + j] = buf_local[i * 2 + j]
 
@@ -338,10 +337,10 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                 G2L(C_local, C, 2)
 
                 if no_c_ptr:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
+                    Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
+                    Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
 
                 L2G(D_local, D, 2)
@@ -384,42 +383,42 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
     b_layout = "col"
 
     # fmt: off
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def main(
-        D: T.Buffer((16, 8), d_type),
-        A: T.Buffer((16, 8), a_type),
-        B: T.Buffer((8, 8), b_type),
-        C: T.Buffer((16, 8), c_type),
+        D: Tx.Buffer((16, 8), d_type),
+        A: Tx.Buffer((16, 8), a_type),
+        B: Tx.Buffer((8, 8), b_type),
+        C: Tx.Buffer((16, 8), c_type),
     ):
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.thread():
-                D_local = T.alloc_local([4], d_type)
-                A_local = T.alloc_local([4], a_type)
-                B_local = T.alloc_local([2], b_type)
-                C_local = T.alloc_local([4], c_type)
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.thread():
+                D_local = Tx.alloc_local([4], d_type)
+                A_local = Tx.alloc_local([4], a_type)
+                B_local = Tx.alloc_local([2], b_type)
+                C_local = Tx.alloc_local([4], c_type)
 
-                @T.macro
+                @Tx.macro
                 def G2L(buf_local, buf_global, block_8x8, mode="row"):
                     if mode == "row":
                         for i in range(block_8x8):
-                            row = T.meta_var(i % 2 * 8 + tx // 4)
-                            col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                            row = Tx.meta_var(i % 2 * 8 + tx // 4)
+                            col = Tx.meta_var(i // 2 * 8 + (tx % 4) * 2)
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row, col + j]
                     elif mode == "col":
                         for i in range(block_8x8):
-                            row = T.meta_var(i % 2 * 8 + (tx % 4) * 2)
-                            col = T.meta_var(i // 2 * 8 + tx // 4)
+                            row = Tx.meta_var(i % 2 * 8 + (tx % 4) * 2)
+                            col = Tx.meta_var(i // 2 * 8 + tx // 4)
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row + j, col]
 
-                @T.macro
+                @Tx.macro
                 def L2G(buf_local, buf_global, block_8x8):
                     for i in range(block_8x8):
-                        row = T.meta_var(i % 2 * 8 + tx // 4)
-                        col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                        row = Tx.meta_var(i % 2 * 8 + tx // 4)
+                        col = Tx.meta_var(i // 2 * 8 + (tx % 4) * 2)
                         for j in range(2):
                             buf_global[row, col + j] = buf_local[i * 2 + j]
 
@@ -429,10 +428,10 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
                 G2L(C_local, C, 2)
 
                 if no_c_ptr:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
+                    Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
+                    Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
 
                 L2G(D_local, D, 2)

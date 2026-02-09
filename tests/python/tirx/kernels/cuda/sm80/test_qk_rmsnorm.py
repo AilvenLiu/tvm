@@ -6,7 +6,6 @@ import torch.nn.functional as F
 
 import math
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from triton.testing import do_bench
 
@@ -62,95 +61,95 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
     shuffle_steps = threads_per_row.bit_length() - 1
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def tir_qk_norm(q_ptr: T.handle, k_ptr: T.handle, q_weight_ptr: T.handle, k_weight_ptr: T.handle, eps_ptr: T.handle, weight_bias_ptr: T.handle, bound_m_ptr: T.handle):
-        num_tokens = T.int32()
-        qo_heads = T.int32()
-        kv_heads = T.int32()
+    @Tx.prim_func(tirx=True)
+    def tir_qk_norm(q_ptr: Tx.handle, k_ptr: Tx.handle, q_weight_ptr: Tx.handle, k_weight_ptr: Tx.handle, eps_ptr: Tx.handle, weight_bias_ptr: Tx.handle, bound_m_ptr: Tx.handle):
+        num_tokens = Tx.int32()
+        qo_heads = Tx.int32()
+        kv_heads = Tx.int32()
 
-        q = T.match_buffer(q_ptr, [num_tokens, qo_heads, head_dim], dtype, scope="global")
-        k = T.match_buffer(k_ptr, [num_tokens, kv_heads, head_dim], dtype, scope="global")
-        q_weight = T.match_buffer(q_weight_ptr, [head_dim], dtype, scope="global")
-        k_weight = T.match_buffer(k_weight_ptr, [head_dim], dtype, scope="global")
-        eps_global = T.match_buffer(eps_ptr, [1], "float32", scope="global")
-        weight_bias_global = T.match_buffer(weight_bias_ptr, [1], "float32", scope="global")
-        bound_m_global = T.match_buffer(bound_m_ptr, [1], "int32", scope="global")
+        q = Tx.match_buffer(q_ptr, [num_tokens, qo_heads, head_dim], dtype, scope="global")
+        k = Tx.match_buffer(k_ptr, [num_tokens, kv_heads, head_dim], dtype, scope="global")
+        q_weight = Tx.match_buffer(q_weight_ptr, [head_dim], dtype, scope="global")
+        k_weight = Tx.match_buffer(k_weight_ptr, [head_dim], dtype, scope="global")
+        eps_global = Tx.match_buffer(eps_ptr, [1], "float32", scope="global")
+        weight_bias_global = Tx.match_buffer(weight_bias_ptr, [1], "float32", scope="global")
+        bound_m_global = Tx.match_buffer(bound_m_ptr, [1], "int32", scope="global")
 
         cta_count = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
 
-        with T.kernel():
-            bx = T.cta_id([cta_count], parent="kernel")
-            tx, ty = T.thread_id([bdx, bdy], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([cta_count], parent="kernel")
+            tx, ty = Tx.thread_id([bdx, bdy], parent="cta")
 
-            with T.thread():
+            with Tx.thread():
                 # Load scalar parameters
-                eps = T.alloc_local([1], "float32")
-                weight_bias = T.alloc_local([1], "float32")
-                bound_m = T.alloc_local([1], "int32")
-                q_job_cnt = T.alloc_local([1], "int32")
-                total_jobs = T.alloc_local([1], "int32")
+                eps = Tx.alloc_local([1], "float32")
+                weight_bias = Tx.alloc_local([1], "float32")
+                bound_m = Tx.alloc_local([1], "int32")
+                q_job_cnt = Tx.alloc_local([1], "int32")
+                total_jobs = Tx.alloc_local([1], "int32")
 
                 eps[0] = eps_global[0]
                 weight_bias[0] = weight_bias_global[0]
                 bound_m[0] = bound_m_global[0]
-                q_job_cnt[0] = T.min(num_tokens, bound_m[0]) * qo_heads
-                total_jobs[0] = q_job_cnt[0] + T.min(num_tokens, bound_m[0]) * kv_heads
+                q_job_cnt[0] = Tx.min(num_tokens, bound_m[0]) * qo_heads
+                total_jobs[0] = q_job_cnt[0] + Tx.min(num_tokens, bound_m[0]) * kv_heads
 
                 # Register allocation for single-pass algorithm
-                x_reg = T.alloc_local([vec_size], dtype)
-                x_reg_f32 = T.alloc_local([vec_size], "float32")
-                weight_reg = T.alloc_local([vec_size], dtype)
-                weight_reg_f32 = T.alloc_local([vec_size], "float32")
-                out_reg = T.alloc_local([vec_size], dtype)
-                sum_sq = T.alloc_local([1], "float32")
-                rms_inv = T.alloc_local([1], "float32")
-                row_idx = T.alloc_local([1], "int32")
-                actual_row = T.alloc_local([1], "int32")
+                x_reg = Tx.alloc_local([vec_size], dtype)
+                x_reg_f32 = Tx.alloc_local([vec_size], "float32")
+                weight_reg = Tx.alloc_local([vec_size], dtype)
+                weight_reg_f32 = Tx.alloc_local([vec_size], "float32")
+                out_reg = Tx.alloc_local([vec_size], dtype)
+                sum_sq = Tx.alloc_local([1], "float32")
+                rms_inv = Tx.alloc_local([1], "float32")
+                row_idx = Tx.alloc_local([1], "int32")
+                actual_row = Tx.alloc_local([1], "int32")
 
                 # Non-persistent: each CTA handles one batch of rows
                 row_idx[0] = bx * rows_per_cta + ty
 
                 if row_idx[0] < total_jobs[0]:
                         # Determine Q or K
-                        is_q = T.meta_var(row_idx[0] < q_job_cnt[0])
-                        qk_ptr: T.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype))) = T.if_then_else(is_q, q.data, k.data)
-                        weight_ptr: T.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype))) = T.if_then_else(is_q, q_weight.data, k_weight.data)
-                        batch_size = T.meta_var(T.if_then_else(is_q, num_tokens * qo_heads, num_tokens * kv_heads))
+                        is_q = Tx.meta_var(row_idx[0] < q_job_cnt[0])
+                        qk_ptr: Tx.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype))) = Tx.if_then_else(is_q, q.data, k.data)
+                        weight_ptr: Tx.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype))) = Tx.if_then_else(is_q, q_weight.data, k_weight.data)
+                        batch_size = Tx.meta_var(Tx.if_then_else(is_q, num_tokens * qo_heads, num_tokens * kv_heads))
 
                         if is_q:
                             actual_row[0] = row_idx[0]
                         else:
                             actual_row[0] = row_idx[0] - q_job_cnt[0]
 
-                        qk = T.decl_buffer(data=qk_ptr, shape=[batch_size, head_dim], dtype=dtype)
-                        weight = T.decl_buffer(data=weight_ptr, shape=[head_dim], dtype=dtype)
+                        qk = Tx.decl_buffer(data=qk_ptr, shape=[batch_size, head_dim], dtype=dtype)
+                        weight = Tx.decl_buffer(data=weight_ptr, shape=[head_dim], dtype=dtype)
 
                         # ============ SINGLE PASS: Load + Sum Squares ============
-                        col_offset = T.meta_var(tx * vec_size)
+                        col_offset = Tx.meta_var(tx * vec_size)
 
                         Tx.copy(x_reg[:], qk[actual_row[0], col_offset:col_offset + vec_size])
                         Tx.cast(x_reg_f32[:], x_reg[:])
 
                         sum_sq[0] = 0.0
-                        for vi in T.unroll(vec_size):
+                        for vi in Tx.unroll(vec_size):
                             sum_sq[0] += x_reg_f32[vi] * x_reg_f32[vi]
 
                         # ============ Warp Reduction for sum_sq ============
                         # Reduce within threads_per_row threads handling the same row
-                        for kr in T.unroll(shuffle_steps):
-                            mask = T.meta_var(threads_per_row >> (kr + 1))
+                        for kr in Tx.unroll(shuffle_steps):
+                            mask = Tx.meta_var(threads_per_row >> (kr + 1))
                             if mask > 0:
-                                sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], mask, 32, 32)
+                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], mask, 32, 32)
 
                         # Compute RMS inverse
-                        rms_inv[0] = T.rsqrt(sum_sq[0] / head_dim + eps[0])
+                        rms_inv[0] = Tx.rsqrt(sum_sq[0] / head_dim + eps[0])
 
                         # ============ SINGLE PASS: Normalize + Write Back ============
                         # Load weight directly from global memory to registers
                         Tx.copy(weight_reg[:], weight[col_offset:col_offset + vec_size])
                         Tx.cast(weight_reg_f32[:], weight_reg[:])
 
-                        for vi in T.unroll(vec_size):
+                        for vi in Tx.unroll(vec_size):
                             weight_reg_f32[vi] = weight_reg_f32[vi] + weight_bias[0]
                             x_reg_f32[vi] = x_reg_f32[vi] * rms_inv[0] * weight_reg_f32[vi]
 

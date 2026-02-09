@@ -2,8 +2,7 @@ import argparse
 import numpy as np
 import torch
 import tvm
-from tvm.script import tir as T
-
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.utils.config import KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, get_source_func
@@ -27,34 +26,34 @@ class LMHeadLayer:
             self.task_num = ceildiv(n, GemmTile.BLK_N)
 
         def _alloc_buffer(self):
-            self.idx = T.alloc_local([1], "int32", name="idx")
+            self.idx = Tx.alloc_local([1], "int32", name="idx")
 
-        @T.macro
+        @Tx.macro
         def init(self, bx):
             self._alloc_buffer()
             self.idx[0] = bx
 
-        @T.macro
+        @Tx.macro
         def next(self):
             self.idx[0] += KernelConfig.SM_NUMBER
 
         def valid(self):
             return self.idx[0] < self.task_num
 
-    @T.macro
+    @Tx.macro
     def body(self, A, B, out, blk_m):
-        gemm_tile = T.meta_var(GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m))
+        gemm_tile = Tx.meta_var(GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m))
         gemm_tile.host_init()
-        with T.kernel():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+        with Tx.kernel():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 smem_manager.set_tile(gemm_tile.__class__)
                 gemm_tile.class_init(smem_manager)
-                scheduler = T.meta_var(self.TileScheduler(self.N))
+                scheduler = Tx.meta_var(self.TileScheduler(self.N))
                 scheduler.init(bx)
                 smem_manager.init()
                 while scheduler.valid():
@@ -65,12 +64,12 @@ class LMHeadLayer:
                 gemm_tile.__class__.class_finalize()
 
     def get_func(self):
-        @T.prim_func(tirx=True)
-        def lm_head_gemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
-            batch_size = T.int32()
-            A_global = T.match_buffer(A_ptr, [batch_size, self.K], dtype="float16", scope="global")
-            B_global = T.match_buffer(B_ptr, [self.N, self.K], dtype="float16", scope="global")
-            out_global = T.match_buffer(out_ptr, [batch_size, self.N], dtype="float16", scope="global")
+        @Tx.prim_func(tirx=True)
+        def lm_head_gemm(A_ptr: Tx.handle, B_ptr: Tx.handle, out_ptr: Tx.handle):
+            batch_size = Tx.int32()
+            A_global = Tx.match_buffer(A_ptr, [batch_size, self.K], dtype="float16", scope="global")
+            B_global = Tx.match_buffer(B_ptr, [self.N, self.K], dtype="float16", scope="global")
+            out_global = Tx.match_buffer(out_ptr, [batch_size, self.N], dtype="float16", scope="global")
             if batch_size <= 32:
                 self.body(A_global, B_global, out_global, 32)
             elif batch_size <= 64:

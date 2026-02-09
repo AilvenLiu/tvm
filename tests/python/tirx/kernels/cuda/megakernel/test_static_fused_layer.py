@@ -6,7 +6,7 @@ from enum import Enum
 import pytest
 
 import tvm
-from tvm.script import tir as T, tirx as Tx, ir as I, relax as R
+from tvm.script import tirx as Tx, ir as I, relax as R
 import tvm.testing
 from tvm import relax as rx
 
@@ -61,11 +61,11 @@ class MegaKernel:
         def f_init_unmatched_dim(dim_len, in_par_size, out_par_size):
             def f_init(i):
                 start_out_par = i * out_par_size
-                end_out_par = T.min(dim_len, (i + 1) * out_par_size)
+                end_out_par = Tx.min(dim_len, (i + 1) * out_par_size)
                 return (end_out_par - 1) // in_par_size - start_out_par // in_par_size + 1
             return f_init
 
-        batch_size = T.var("int64", name="batch_size")
+        batch_size = Tx.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
         residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
         packed_info = rx.Var(
@@ -122,9 +122,9 @@ class MegaKernel:
                 cos_sin_cache = bb.emit(R.TupleGetItem(packed_info, 20))
                 inverse_indptr = bb.emit(R.TupleGetItem(packed_info, 21))
                 inverse_indices = bb.emit(R.TupleGetItem(packed_info, 22))
-                attn_task_num = T.var("int64", name="attn_task_num")
+                attn_task_num = Tx.var("int64", name="attn_task_num")
                 _ = bb.match_cast(R.TupleGetItem(packed_info, 23), R.Shape([attn_task_num]))
-                max_page_num = T.var("int64", name="max_page_num")
+                max_page_num = Tx.var("int64", name="max_page_num")
                 kv_data_ = bb.match_cast(kv_data_, rx.TensorStructInfo([max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM], "float16"))
 
                 # unpack weights
@@ -252,22 +252,22 @@ class MegaKernel:
                         f_init=self.SPLIT_QKV_PROJECT
                     )
                 )
-                attn_tile_num = T.int64(ceildiv(attn_task_num, KernelConfig.WG_NUMBER))
-                remain = T.int64(attn_tile_num % KernelConfig.SM_NUMBER)
-                num = T.int64(attn_tile_num // KernelConfig.SM_NUMBER)
-                unit = T.int64(KernelConfig.WG_NUMBER * (2 + self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
+                attn_tile_num = Tx.int64(ceildiv(attn_task_num, KernelConfig.WG_NUMBER))
+                remain = Tx.int64(attn_tile_num % KernelConfig.SM_NUMBER)
+                num = Tx.int64(attn_tile_num // KernelConfig.SM_NUMBER)
+                unit = Tx.int64(KernelConfig.WG_NUMBER * (2 + self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
                 etensor_notify_attn = bb.emit(
                     R.alloc_event_tensor(
                         workspace,
                         [KernelConfig.SM_NUMBER],
-                        f_init=lambda i: T.if_then_else(i < remain, (num + 1) * unit, num * unit),
+                        f_init=lambda i: Tx.if_then_else(i < remain, (num + 1) * unit, num * unit),
                     )
                 )
                 etensor_attn_merge = bb.emit(
                     R.alloc_event_tensor(
                         workspace,
                         [max_batch_size * self.NUM_KEY_VALUE_HEADS],
-                        f_init=T.min(KernelConfig.SM_NUMBER, attn_tile_num),
+                        f_init=Tx.min(KernelConfig.SM_NUMBER, attn_tile_num),
                     )
                 )
                 etensor_o_proj = bb.emit(
@@ -275,14 +275,14 @@ class MegaKernel:
                         workspace,
                         [self.SPLIT_O_PROJECT],
                         f_init=lambda i:
-                            T.if_then_else(
+                            Tx.if_then_else(
                                 attn_task_num > self.NUM_KEY_VALUE_HEADS * batch_size,
                                 f_init_unmatched_dim(
                                     self.NUM_ATTENTION_HEADS * self.HEAD_DIM,
                                     (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM,
                                     o_proj_size_2,
                                 )(i) * batch_size,
-                                T.min(KernelConfig.SM_NUMBER, attn_tile_num),
+                                Tx.min(KernelConfig.SM_NUMBER, attn_tile_num),
                             ),
                     )
                 )
@@ -341,7 +341,7 @@ class MegaKernel:
                 # Q_REDUCE_RMS_ROPE
                 def reduce_rms_rope_q_dep_notify(i, j, k, notify_idx):
                     beg_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + i * reduce_rms_rope_q_size_0
-                    end_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + T.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
+                    end_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + Tx.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
                     beg = inverse_indptr[beg_idx]
                     end = inverse_indptr[end_idx]
                     return end - beg, -1, inverse_indices[beg + notify_idx]
@@ -360,7 +360,7 @@ class MegaKernel:
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda rank, x, inv_idx: (T.if_then_else(x < self.NUM_ATTENTION_HEADS, reduce_rms_rope_q_num_tiles_0, 0), inv_idx, x, 0),
+                            dep=lambda rank, x, inv_idx: (Tx.if_then_else(x < self.NUM_ATTENTION_HEADS, reduce_rms_rope_q_num_tiles_0, 0), inv_idx, x, 0),
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
@@ -372,7 +372,7 @@ class MegaKernel:
                 # K_RMS_ROPE_APPEND
                 def reduce_rms_rope_append_k_dep(i, j, k, notify_idx):
                     beg_idx = j * batch_size + i * reduce_rms_rope_q_size_0
-                    end_idx = j * batch_size + T.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
+                    end_idx = j * batch_size + Tx.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
                     beg = inverse_indptr[beg_idx]
                     end = inverse_indptr[end_idx]
                     return end - beg, -1, inverse_indices[beg + notify_idx]
@@ -392,7 +392,7 @@ class MegaKernel:
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
                             dep=lambda rank, x, inv_idx: (
-                                T.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), reduce_rms_rope_append_k_num_tiles_0, 0),
+                                Tx.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), reduce_rms_rope_append_k_num_tiles_0, 0),
                                 inv_idx, x - self.NUM_ATTENTION_HEADS, 0
                             ),
                         ),
@@ -407,7 +407,7 @@ class MegaKernel:
                 # V_REDUCE_APPEND
                 def reduce_append_v_dep_notify(i, j, k, notify_idx):
                     beg_idx = j * batch_size + i * reduce_rms_rope_q_size_0
-                    end_idx = j * batch_size + T.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
+                    end_idx = j * batch_size + Tx.min((i + 1) * reduce_rms_rope_q_size_0, batch_size)
                     beg = inverse_indptr[beg_idx]
                     end = inverse_indptr[end_idx]
                     return end - beg, -1, inverse_indices[beg + notify_idx]
@@ -427,7 +427,7 @@ class MegaKernel:
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
                             dep=lambda rank, x, inv_idx: (
-                                T.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, reduce_append_v_num_tiles_0, 0),
+                                Tx.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, reduce_append_v_num_tiles_0, 0),
                                 inv_idx, x - self.NUM_ATTENTION_HEADS - self.NUM_KEY_VALUE_HEADS, 0
                             ),
                         ),
@@ -466,13 +466,13 @@ class MegaKernel:
                             rx.utils.Dependency(
                                 event=etensor_attn_merge,
                                 dep=lambda i, j, k, notify_idx: (
-                                    T.if_then_else(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, 1, 0), -1, 0
+                                    Tx.if_then_else(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, 1, 0), -1, 0
                                 ),
                             ),
                             rx.utils.Dependency(
                                 event=etensor_o_proj,
                                 dep=lambda i, j, k, notify_idx: (
-                                    T.if_then_else(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, self.SPLIT_O_PROJECT, 0), -1, notify_idx
+                                    Tx.if_then_else(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, self.SPLIT_O_PROJECT, 0), -1, notify_idx
                                 ),
                             )
                         ],
@@ -488,9 +488,9 @@ class MegaKernel:
                 # ATTN_MERGE
                 def batch_merge_dep_notify(i, j, k, notify_idx):
                     worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    kv_idx = T.truncdiv(worker_id, batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    range_start = T.truncdiv((kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM, o_proj_size_2)
-                    range_end = T.truncdiv(((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM - 1, o_proj_size_2)
+                    kv_idx = Tx.truncdiv(worker_id, batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
+                    range_start = Tx.truncdiv((kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM, o_proj_size_2)
+                    range_end = Tx.truncdiv(((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM - 1, o_proj_size_2)
                     return range_end - range_start + 1, -1, range_start + notify_idx
 
                 batch_merge_num_tiles_0 = batch_merge_num_tiles[0]
@@ -666,7 +666,7 @@ class MegaKernel:
         inner_blkm128 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=128, profile_on=profile_on)
 
         # dispatcher function
-        batch_size = T.var("int64", name="batch_size")
+        batch_size = Tx.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
         residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
         packed_info = rx.Var(
@@ -699,17 +699,17 @@ class MegaKernel:
 
         with bb.function("megakernel", [x, residual, packed_info, packed_weights, workspace]):
             with bb.dataflow():
-                runtime_batch_size = T.var("int64", name="runtime_batch_size")
+                runtime_batch_size = Tx.var("int64", name="runtime_batch_size")
                 _ = bb.match_cast(R.shape_of(x), R.Shape([runtime_batch_size, self.HIDDEN_SIZE]))
                 if profile_on:
                     output_sinfo = [
                         rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
                         rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
-                        rx.TensorStructInfo([T.int64(1e7)], "uint64")
+                        rx.TensorStructInfo([Tx.int64(1e7)], "uint64")
                     ]
                     output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"),
                                            R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"),
-                                           R.Tensor([T.int64(1e7)], "uint64"))
+                                           R.Tensor([Tx.int64(1e7)], "uint64"))
                 else:
                     output_sinfo = [
                         rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),

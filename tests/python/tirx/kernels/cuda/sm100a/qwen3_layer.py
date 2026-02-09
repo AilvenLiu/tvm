@@ -19,8 +19,8 @@ from mlc_llm.compiler_pass.pipeline import _DebugDump
 from tvm.runtime import ShapeTuple
 
 from tvm.script import relax as R
+from tvm.script import tirx as Tx
 from tvm.script import ir as I
-from tvm.script import tir as T
 from .test_rmsnorm import get_rmsnorm_kernel
 from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
 from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel_cp_async
@@ -290,134 +290,134 @@ def get_qwen3_megakernel_mod():
     # fmt: off
     @I.ir_module
     class Module:
-        @T.prim_func(private=True)
-        def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def rms_norm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def rms_norm1(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def rms_norm1(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def fused_add_rmsnorm(input_ptr: T.handle, residual_ptr: T.handle, weight_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def fused_add_rmsnorm(input_ptr: Tx.handle, residual_ptr: Tx.handle, weight_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def fused_split_silu_multiply(input_ptr: T.handle, output_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def fused_split_silu_multiply(input_ptr: Tx.handle, output_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def split(var_reshape: T.handle, var_T_split: T.handle, var_T_split_1: T.handle, var_T_split_2: T.handle):
-            T.func_attr({"tir.noalias": True})
-            batch_size = T.int64()
-            reshape = T.match_buffer(var_reshape, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            T_split = T.match_buffer(var_T_split, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            T_split_1 = T.match_buffer(var_T_split_1, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            T_split_2 = T.match_buffer(var_T_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            # with T.sblock("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(64), T.int64(128)):
-                with T.sblock("T_split"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T.writes(T_split[v_ax0, v_ax1, v_ax2, v_ax3])
+        @Tx.prim_func(private=True)
+        def split(var_reshape: Tx.handle, var_T_split: Tx.handle, var_T_split_1: Tx.handle, var_T_split_2: Tx.handle):
+            Tx.func_attr({"tir.noalias": True})
+            batch_size = Tx.int64()
+            reshape = Tx.match_buffer(var_reshape, (batch_size, Tx.int64(1), Tx.int64(80), Tx.int64(128)), "float16")
+            T_split = Tx.match_buffer(var_T_split, (batch_size, Tx.int64(1), Tx.int64(64), Tx.int64(128)), "float16")
+            T_split_1 = Tx.match_buffer(var_T_split_1, (batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)), "float16")
+            T_split_2 = Tx.match_buffer(var_T_split_2, (batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)), "float16")
+            # with Tx.sblock("root"):
+            for ax0, ax1, ax2, ax3 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(64), Tx.int64(128)):
+                with Tx.sblock("T_split"):
+                    v_ax0, v_ax1, v_ax2, v_ax3 = Tx.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
+                    Tx.reads(reshape[v_ax0, v_ax1, v_ax2, v_ax3])
+                    Tx.writes(T_split[v_ax0, v_ax1, v_ax2, v_ax3])
                     T_split[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2, v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
-                with T.sblock("T_split_1"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3])
-                    T.writes(T_split_1[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_split_1[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
-                with T.sblock("T_split_2"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3])
-                    T.writes(T_split_2[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_split_2[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3]
+            for ax0, ax1, ax2, ax3 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)):
+                with Tx.sblock("T_split_1"):
+                    v_ax0, v_ax1, v_ax2, v_ax3 = Tx.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
+                    Tx.reads(reshape[v_ax0, v_ax1, v_ax2 + Tx.int64(64), v_ax3])
+                    Tx.writes(T_split_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                    T_split_1[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + Tx.int64(64), v_ax3]
+            for ax0, ax1, ax2, ax3 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)):
+                with Tx.sblock("T_split_2"):
+                    v_ax0, v_ax1, v_ax2, v_ax3 = Tx.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
+                    Tx.reads(reshape[v_ax0, v_ax1, v_ax2 + Tx.int64(72), v_ax3])
+                    Tx.writes(T_split_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                    T_split_2[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + Tx.int64(72), v_ax3]
 
-        @T.prim_func(private=True)
-        def fused_concatenate(p_split_2: T.handle, p_rms_norm1: T.handle, p_rms_norm2: T.handle, p_output0: T.handle):
-            T.func_attr({"tir.noalias": True})
-            batch_size = T.int64()
-            split_2 = T.match_buffer(p_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            rms_norm1 = T.match_buffer(p_rms_norm1, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            rms_norm2 = T.match_buffer(p_rms_norm2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            T_concat_intermediate = T.match_buffer(p_output0, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            # with T.sblock("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(80), T.int64(128)):
-                with T.sblock("T_concat"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T.writes(T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = T.if_then_else(T.int64(72) <= v_ax2, split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], T.if_then_else(T.int64(64) <= v_ax2, rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3]))
+        @Tx.prim_func(private=True)
+        def fused_concatenate(p_split_2: Tx.handle, p_rms_norm1: Tx.handle, p_rms_norm2: Tx.handle, p_output0: Tx.handle):
+            Tx.func_attr({"tir.noalias": True})
+            batch_size = Tx.int64()
+            split_2 = Tx.match_buffer(p_split_2, (batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)), "float16")
+            rms_norm1 = Tx.match_buffer(p_rms_norm1, (batch_size, Tx.int64(1), Tx.int64(64), Tx.int64(128)), "float16")
+            rms_norm2 = Tx.match_buffer(p_rms_norm2, (batch_size, Tx.int64(1), Tx.int64(8), Tx.int64(128)), "float16")
+            T_concat_intermediate = Tx.match_buffer(p_output0, (batch_size, Tx.int64(1), Tx.int64(80), Tx.int64(128)), "float16")
+            # with Tx.sblock("root"):
+            for ax0, ax1, ax2, ax3 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(80), Tx.int64(128)):
+                with Tx.sblock("T_concat"):
+                    v_ax0, v_ax1, v_ax2, v_ax3 = Tx.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
+                    Tx.reads(split_2[v_ax0, v_ax1, v_ax2 - Tx.int64(72), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - Tx.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
+                    Tx.writes(T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
+                    T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = Tx.if_then_else(Tx.int64(72) <= v_ax2, split_2[v_ax0, v_ax1, v_ax2 - Tx.int64(72), v_ax3], Tx.if_then_else(Tx.int64(64) <= v_ax2, rms_norm2[v_ax0, v_ax1, v_ax2 - Tx.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3]))
 
-        @T.prim_func(private=True)
-        def cast(var_lv4: T.handle, var_compute: T.handle):
-            T.func_attr({"op_pattern": 0, "tir.noalias": True})
-            batch_size = T.int64()
-            lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(151936)), "float16")
-            compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(151936)))
-            # with T.sblock("root"):
-            for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(151936)):
-                with T.sblock("compute"):
-                    v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
-                    T.reads(lv4[v_i0, v_i1, v_i2])
-                    T.writes(compute[v_i0, v_i1, v_i2])
-                    compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+        @Tx.prim_func(private=True)
+        def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
+            Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+            batch_size = Tx.int64()
+            lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(151936)), "float16")
+            compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(151936)))
+            # with Tx.sblock("root"):
+            for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(151936)):
+                with Tx.sblock("compute"):
+                    v_i0, v_i1, v_i2 = Tx.axis.remap("SSS", [i0, i1, i2])
+                    Tx.reads(lv4[v_i0, v_i1, v_i2])
+                    Tx.writes(compute[v_i0, v_i1, v_i2])
+                    compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
-        @T.prim_func(private=True)
-        def hgemm1(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm1(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce1(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce1(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def hgemm2(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm2(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce2(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce2(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def hgemm3(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm3(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce3(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce3(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def hgemm4(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm4(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce4(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce4(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def hgemm5(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm5(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce5(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce5(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def rope(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
+        @Tx.prim_func(private=True)
+        def rope(q: Tx.handle, cos_sin_cache: Tx.handle, pos_ids: Tx.handle, q_rope: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def append_paged_kv_cache(cache_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle, pos_map_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def append_paged_kv_cache(cache_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, pos_map_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def decode(q: T.handle, kv: T.handle, lse: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o: T.handle):
+        @Tx.prim_func(private=True)
+        def decode(q: Tx.handle, kv: Tx.handle, lse: Tx.handle, kv_indptr: Tx.handle, kv_last_page_len: Tx.handle, kv_indices: Tx.handle, request_indices: Tx.handle, kv_tile_indices: Tx.handle, max_chunk_size: Tx.handle, o: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def cos_sin_cache(cos_sin_cache: T.handle):
+        @Tx.prim_func(private=True)
+        def cos_sin_cache(cos_sin_cache: Tx.handle):
             pass
 
         @R.function
@@ -447,11 +447,11 @@ def get_qwen3_megakernel_mod():
                 R.Tensor((151936, 5120), dtype="float16"),
             ),
         ):
-            batch_size = T.int64()
-            new_batch_size = T.int64()
-            total_page_num = T.int64()
-            max_page_num = T.int64()
-            page_size = T.int64()
+            batch_size = Tx.int64()
+            new_batch_size = Tx.int64()
+            total_page_num = Tx.int64()
+            max_page_num = Tx.int64()
+            page_size = Tx.int64()
 
             R.func_attr({"num_input": 2})
             cls = Module
@@ -535,7 +535,7 @@ def get_qwen3_megakernel_mod():
                 #########################################################
                 # lv1 = R.call_tir(cls.fused_concatenate, (v, rms_norm1_rs, rms_norm2_rs), out_sinfo=R.Tensor((batch_size, 1, 80, 128), dtype="float16"))
                 # reshape1 = R.reshape(lv1, (batch_size, 80, 128))
-                # lv_2 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
+                # lv_2 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(Tx.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
                 # reshape2 = R.reshape(lv_2, (batch_size, 1, 64, 128))
                 # reshape3 = R.reshape(reshape2, (batch_size, 8192))
                 #########################################################
@@ -646,7 +646,7 @@ res1 = test_qwen3_layer(
 class Module2:
     @R.function
     def batch_decode(input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"), paged_kv_cache: R.Object, packed_params: R.Tuple(R.Tensor((151936, 5120), dtype="float16"), R.Tensor((10240, 5120), dtype="float16"), R.Tensor((5120, 8192), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((51200, 5120), dtype="float16"), R.Tensor((5120, 25600), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((151936, 5120), dtype="float16"))) -> R.Tuple(R.Tensor(("batch_size", 1, 151936), dtype="float32"), R.Object):
-        batch_size = T.int64()
+        batch_size = Tx.int64()
         R.func_attr({"num_input": 2})
         with R.dataflow():
             model_embed_tokens_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[0]
@@ -672,7 +672,7 @@ class Module2:
             rms_norm2: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = R.nn.rms_norm(split_1, model_layers_0_self_attn_k_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
             concat: R.Tensor((batch_size, 1, 80, 128), dtype="float16") = R.concat((rms_norm1, rms_norm2, split_2), axis=2)
             reshape1: R.Tensor((batch_size, 80, 128), dtype="float16") = R.reshape(concat, R.shape([batch_size, 80, 128]))
-            lv = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
+            lv = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(Tx.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
             reshape2: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = R.reshape(lv, R.shape([batch_size, 1, 64, 128]))
             reshape3: R.Tensor((batch_size, 1, 8192), dtype="float16") = R.reshape(reshape2, R.shape([batch_size, 1, 8192]))
             permute_dims1: R.Tensor((8192, 5120), dtype="float16") = R.permute_dims(model_layers_0_self_attn_o_proj_weight1, axes=None)

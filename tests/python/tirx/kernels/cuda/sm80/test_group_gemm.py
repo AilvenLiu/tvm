@@ -31,7 +31,6 @@ from triton import language as tl
 import tvm
 
 from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
@@ -184,9 +183,9 @@ def get_group_gemm_kernel(M, K, E, top_k, N, config, mul_routed_weight):
     assert SMEM_SIZE % VEC_LEN == 0
 
     def int_cell(value):
-        buf = T.local_cell("int32")
+        buf = Tx.local_cell("int32")
         if value is not None:
-            T.buffer_store(buf.buffer, value, 0)
+            Tx.buffer_store(buf.buffer, value, 0)
         return buf
 
     def get_permuted_offset(stride, i, j):
@@ -217,24 +216,24 @@ __device__ __forceinline__ float {func_name}(half x) {{
   return __half2float(x);
 }}
     """
-        return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+        return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
-        with T.thread():
-            C_mma = T.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
-            A_mma = T.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
-            B_mma = T.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
+        with Tx.thread():
+            C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
+            A_mma = Tx.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
+            B_mma = Tx.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
             if init:
-                T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                         C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]))
-                T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                         C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]))
             else:
-                T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                         C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]), C_mma.ptr_to([0]))
-                T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                         C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]), C_mma.ptr_to([4]))
     # fmt: on
 
@@ -248,36 +247,36 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
   *dst_ptr_b128 = *src_ptr_b128;
 }}
 """
-        return T.cuda.func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
+        return Tx.cuda.func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
 
     # fmt: off
 
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def group_gemm(
-        A: T.Buffer((M, K), "float16"),
-        B: T.Buffer((E, N, K), "float16"),
-        C: T.Buffer((M, top_k, N), "float16"),
-        topk_weights: T.Buffer((M, top_k), "float32"),
-        topk_ids: T.Buffer((M, top_k), "int32"),
-        sorted_token_ids_ptr: T.handle,
-        expert_ids_ptr: T.handle,
-        num_tokens_post_padded: T.Buffer((1), "int32"),
+        A: Tx.Buffer((M, K), "float16"),
+        B: Tx.Buffer((E, N, K), "float16"),
+        C: Tx.Buffer((M, top_k, N), "float16"),
+        topk_weights: Tx.Buffer((M, top_k), "float32"),
+        topk_ids: Tx.Buffer((M, top_k), "int32"),
+        sorted_token_ids_ptr: Tx.handle,
+        expert_ids_ptr: Tx.handle,
+        num_tokens_post_padded: Tx.Buffer((1), "int32"),
     ):
-        MAX_SORTED_TOKEN_IDS = T.int32()
-        MAX_EXPERT_IDS = T.int32()
-        sorted_token_ids = T.match_buffer(sorted_token_ids_ptr, (MAX_SORTED_TOKEN_IDS), "int32")
-        expert_ids = T.match_buffer(expert_ids_ptr, (MAX_EXPERT_IDS), "int32")
+        MAX_SORTED_TOKEN_IDS = Tx.int32()
+        MAX_EXPERT_IDS = Tx.int32()
+        sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (MAX_SORTED_TOKEN_IDS), "int32")
+        expert_ids = Tx.match_buffer(expert_ids_ptr, (MAX_EXPERT_IDS), "int32")
 
-        with T.kernel():
-            cta_cnt = T.meta_var(SM_COUNT) # persistent kernel
-            # cta_cnt = T.meta_var(ceildiv(MAX_SORTED_TOKEN_IDS, BLK_M) * ceildiv(N, BLK_N)) # non-persistent kernel
-            bx = T.cta_id([cta_cnt], parent="kernel")
-            wg_id = T.warpgroup_id([WARP_GROUP_COUNT], parent="cta")
-            warp_id = T.warp_id([WARP_COUNT], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            cta_cnt = Tx.meta_var(SM_COUNT) # persistent kernel
+            # cta_cnt = Tx.meta_var(ceildiv(MAX_SORTED_TOKEN_IDS, BLK_M) * ceildiv(N, BLK_N)) # non-persistent kernel
+            bx = Tx.cta_id([cta_cnt], parent="kernel")
+            wg_id = Tx.warpgroup_id([WARP_GROUP_COUNT], parent="cta")
+            warp_id = Tx.warp_id([WARP_COUNT], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
 
-            buf = T.alloc_shared([SMEM_SIZE * WARP_GROUP_COUNT], "uint8", scope="shared.dyn")
-            pool = T.meta_var(Tx.PoolAllocator(buf.data))
+            buf = Tx.alloc_shared([SMEM_SIZE * WARP_GROUP_COUNT], "uint8", scope="shared.dyn")
+            pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
             A_smem = pool.alloc([NUM_STAGES *  BLK_M * BLK_K], "float16", align=16)
             B_smem = pool.alloc([NUM_STAGES *  BLK_N * BLK_K], "float16", align=16)
             pool.move_base_to(0)
@@ -286,53 +285,53 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
             A_gmem_1d = A.view(-1)
             B_gmem_1d = B.view(-1)
 
-            @T.macro
+            @Tx.macro
             def scope_sync():
-                T.cuda.warpgroup_sync(wg_id)
+                Tx.cuda.warpgroup_sync(wg_id)
 
-            with T.thread():
-                @T.macro
+            with Tx.thread():
+                @Tx.macro
                 def compute_tile(m_idx, n_idx):
                     # init states
-                    s_frag = T.alloc_local([NUM_MMA_M, NUM_MMA_N, 8], "float32")
+                    s_frag = Tx.alloc_local([NUM_MMA_M, NUM_MMA_N, 8], "float32")
 
-                    for mma_m, mma_n, i in T.grid(NUM_MMA_M, NUM_MMA_N, 8):
-                        s_frag[mma_m, mma_n, i] = T.float32(0)
+                    for mma_m, mma_n, i in Tx.grid(NUM_MMA_M, NUM_MMA_N, 8):
+                        s_frag[mma_m, mma_n, i] = Tx.float32(0)
 
                     # per-row routing and mask
-                    rmap = T.alloc_local([BLK_M], "int32")
+                    rmap = Tx.alloc_local([BLK_M], "int32")
                     Tx.copy(rmap[:], sorted_token_ids[m_idx * BLK_M : (m_idx + 1) * BLK_M])
-                    rbound = T.meta_var(M * top_k)
+                    rbound = Tx.meta_var(M * top_k)
 
                     # expert
                     eid = int_cell(expert_ids[m_idx])
 
-                    M_rows_per_thread = T.meta_var(ceildiv(BLK_M, AB_THR_LAYOUT_ROW * WARP_COUNT))
-                    N_rows_per_thread = T.meta_var(ceildiv(BLK_N, AB_THR_LAYOUT_ROW * WARP_COUNT))
+                    M_rows_per_thread = Tx.meta_var(ceildiv(BLK_M, AB_THR_LAYOUT_ROW * WARP_COUNT))
+                    N_rows_per_thread = Tx.meta_var(ceildiv(BLK_N, AB_THR_LAYOUT_ROW * WARP_COUNT))
 
                     # prefetch global
-                    thr_local_A_offset = T.alloc_local([M_rows_per_thread], "int32")
-                    thr_local_B_offset = T.alloc_local([N_rows_per_thread], "int32")
+                    thr_local_A_offset = Tx.alloc_local([M_rows_per_thread], "int32")
+                    thr_local_B_offset = Tx.alloc_local([N_rows_per_thread], "int32")
 
-                    @T.macro
+                    @Tx.macro
                     def prefetch_A_offset():
                         for i in range(M_rows_per_thread):
-                            row = T.meta_var(rmap[i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL] // top_k)
-                            col = T.meta_var((lane_id % AB_THR_LAYOUT_COL) * VEC_LEN)
+                            row = Tx.meta_var(rmap[i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL] // top_k)
+                            col = Tx.meta_var((lane_id % AB_THR_LAYOUT_COL) * VEC_LEN)
                             thr_local_A_offset[i] = A.elem_offset_of([row, col])
 
-                    @T.macro
+                    @Tx.macro
                     def prefetch_B_offset():
                         for i in range(N_rows_per_thread):
-                            row = T.meta_var(n_idx * BLK_N + i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL)
-                            col = T.meta_var((lane_id % AB_THR_LAYOUT_COL) * VEC_LEN)
+                            row = Tx.meta_var(n_idx * BLK_N + i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL)
+                            col = Tx.meta_var((lane_id % AB_THR_LAYOUT_COL) * VEC_LEN)
                             thr_local_B_offset[i] = B.elem_offset_of([eid, row, col])
 
                     prefetch_A_offset()
                     prefetch_B_offset()
 
-                    warp_id_m = T.meta_var(warp_id // NUM_WARPS_N)
-                    warp_id_n = T.meta_var(warp_id % NUM_WARPS_N)
+                    warp_id_m = Tx.meta_var(warp_id // NUM_WARPS_N)
+                    warp_id_n = Tx.meta_var(warp_id % NUM_WARPS_N)
                     smem_offset_A_w = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL, lane_id % AB_THR_LAYOUT_COL))
                     smem_offset_B_w = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL, lane_id % AB_THR_LAYOUT_COL))
                     smem_offset_A_r = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id_m * NUM_MMA_M * 16 + lane_id % 16, lane_id // 16))
@@ -343,37 +342,37 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     smem_offset_A_r += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
                     smem_offset_B_r += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
 
-                    @T.macro
+                    @Tx.macro
                     def async_load_A_to_smem(stage):
                         row_in_blk = int_cell(warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL)
                         for i in range(M_rows_per_thread):
-                            T.ptx.cp_async(A_smem.ptr_to([stage * BLK_M * BLK_K + smem_offset_A_w * VEC_LEN]), A_gmem_1d.ptr_to([thr_local_A_offset[i]]), cp_size=16, prefetch_size=128,
+                            Tx.ptx.cp_async(A_smem.ptr_to([stage * BLK_M * BLK_K + smem_offset_A_w * VEC_LEN]), A_gmem_1d.ptr_to([thr_local_A_offset[i]]), cp_size=16, prefetch_size=128,
                                             predicate=rmap[row_in_blk] < rbound)
                             row_in_blk += AB_THR_LAYOUT_ROW * WARP_COUNT
                             thr_local_A_offset[i] += BLK_K
                             smem_offset_A_w = advance_offset_by_row(AB_THR_LAYOUT_ROW * WARP_COUNT, UPCAST_STRIDE_K, smem_offset_A_w)
                         smem_offset_A_w -= M_rows_per_thread * AB_THR_LAYOUT_ROW * WARP_COUNT * UPCAST_STRIDE_K
 
-                    @T.macro
+                    @Tx.macro
                     def async_load_B_to_smem(stage):
                         for i in range(N_rows_per_thread):
-                            T.ptx.cp_async(B_smem.ptr_to([stage * BLK_N * BLK_K + smem_offset_B_w * VEC_LEN]), B_gmem_1d.ptr_to([thr_local_B_offset[i]]), cp_size=16, prefetch_size=128)
+                            Tx.ptx.cp_async(B_smem.ptr_to([stage * BLK_N * BLK_K + smem_offset_B_w * VEC_LEN]), B_gmem_1d.ptr_to([thr_local_B_offset[i]]), cp_size=16, prefetch_size=128)
                             thr_local_B_offset[i] += BLK_K
                             smem_offset_B_w = advance_offset_by_row(AB_THR_LAYOUT_ROW * WARP_COUNT, UPCAST_STRIDE_K, smem_offset_B_w)
                         smem_offset_B_w -= N_rows_per_thread * AB_THR_LAYOUT_ROW * WARP_COUNT * UPCAST_STRIDE_K
 
-                    @T.macro
+                    @Tx.macro
                     def compute_gemm(stage):
-                        a_frag = T.alloc_local([NUM_MMA_M, 8], "float16")
-                        b_frag = T.alloc_local([8], "float16")
+                        a_frag = Tx.alloc_local([NUM_MMA_M, 8], "float16")
+                        b_frag = Tx.alloc_local([8], "float16")
 
                         for mma_k in range(MMA_K):
                             for mma_m in range(NUM_MMA_M):
-                                T.ptx.ldmatrix(False, 4, ".b16", a_frag.ptr_to([mma_m, 0]), A_smem.ptr_to([stage * BLK_M * BLK_K + smem_offset_A_r * VEC_LEN]))
+                                Tx.ptx.ldmatrix(False, 4, ".b16", a_frag.ptr_to([mma_m, 0]), A_smem.ptr_to([stage * BLK_M * BLK_K + smem_offset_A_r * VEC_LEN]))
                                 smem_offset_A_r = advance_offset_by_row(16, UPCAST_STRIDE_K, smem_offset_A_r)
                             smem_offset_A_r = advance_offset_by_column(2, smem_offset_A_r, mma_k) - NUM_MMA_M * 16 * UPCAST_STRIDE_K
                             for mma_n in range(NUM_MMA_N):
-                                T.ptx.ldmatrix(False, 4, ".b16", b_frag.ptr_to([0]), B_smem.ptr_to([stage * BLK_N * BLK_K + smem_offset_B_r * VEC_LEN]))
+                                Tx.ptx.ldmatrix(False, 4, ".b16", b_frag.ptr_to([0]), B_smem.ptr_to([stage * BLK_N * BLK_K + smem_offset_B_r * VEC_LEN]))
                                 smem_offset_B_r = advance_offset_by_row(16, UPCAST_STRIDE_K, smem_offset_B_r)
                                 for mma_m in range(NUM_MMA_M):
                                     mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.byte_offset_of([mma_m, mma_n, 0]),
@@ -387,13 +386,13 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     for stage in range(min(NUM_STAGES, K_TILE_CNT)):
                         async_load_A_to_smem(stage)
                         async_load_B_to_smem(stage)
-                        T.ptx.cp_async.commit_group()
+                        Tx.ptx.cp_async.commit_group()
 
                     # main loop
                     for k_tile in range(K_TILE_CNT - NUM_STAGES):
                         stage = int_cell(k_tile % NUM_STAGES)
                         # wait for the stage to complete
-                        T.ptx.cp_async.wait_group(NUM_STAGES - 1)
+                        Tx.ptx.cp_async.wait_group(NUM_STAGES - 1)
                         scope_sync()
                         # compute gemm for this tile
                         compute_gemm(stage)
@@ -401,10 +400,10 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                         # prefetch next tile for this stage
                         async_load_A_to_smem(stage)
                         async_load_B_to_smem(stage)
-                        T.ptx.cp_async.commit_group()
+                        Tx.ptx.cp_async.commit_group()
 
                     # epilogue
-                    T.ptx.cp_async.wait_group(0)
+                    Tx.ptx.cp_async.wait_group(0)
                     scope_sync()
                     for k_tile in range(min(NUM_STAGES, K_TILE_CNT)):
                         stage = int_cell((k_tile + max(0, K_TILE_CNT - NUM_STAGES)) % NUM_STAGES)
@@ -412,17 +411,17 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     scope_sync()
 
                     # write back
-                    @T.macro
+                    @Tx.macro
                     def store_C_to_smem():
                         for mma_m in range(NUM_MMA_M):
                             for mma_n in range(NUM_MMA_N):
-                                s_frag_f16 = T.alloc_local([8], "float16")
+                                s_frag_f16 = Tx.alloc_local([8], "float16")
                                 Tx.cast(s_frag_f16[:], s_frag[mma_m, mma_n, :])
                                 c_smem_offset_w = int_cell(get_permuted_offset(UPCAST_STRIDE_N, warp_id_m * NUM_MMA_M * 16 + mma_m * 16 + lane_id % 16, warp_id_n * NUM_MMA_N * 2 + mma_n * 2 + lane_id // 16))
                                 c_smem_offset_w += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
-                                T.ptx.stmatrix(4, False, C_smem.ptr_to([c_smem_offset_w * VEC_LEN]), s_frag_f16.ptr_to([0]))
+                                Tx.ptx.stmatrix(4, False, C_smem.ptr_to([c_smem_offset_w * VEC_LEN]), s_frag_f16.ptr_to([0]))
 
-                    @T.macro
+                    @Tx.macro
                     def write_C_to_gmem():
                         C_gmem_1d = C.view(-1)
                         C_gmem_2d = C.view(-1, N)
@@ -441,11 +440,11 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     scope_sync()
                     write_C_to_gmem()
 
-                M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
-                scheduler = T.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt * 2, l2_group_size=1))
+                M_TILE_CNT = Tx.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
+                scheduler = Tx.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt * 2, l2_group_size=1))
                 scheduler.init(bx * 2 + wg_id)
-                m_idx = T.meta_var(scheduler.m_idx)
-                n_idx = T.meta_var(scheduler.n_idx)
+                m_idx = Tx.meta_var(scheduler.m_idx)
+                n_idx = Tx.meta_var(scheduler.n_idx)
 
                 while scheduler.valid():
                     compute_tile(m_idx, n_idx)

@@ -26,7 +26,7 @@ import torch
 
 import tvm
 from tvm.script import ir as I
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc
 
 from .claude_rewrite import rewrite_program

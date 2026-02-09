@@ -21,7 +21,6 @@ import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout, P, F
 from tvm.tirx.transform import NaiveAllocator
@@ -33,19 +32,19 @@ def test_one_alloc():
     dst_shape = [128, 512]
     dst_layout = TileLayout(([128, 512], [1@P, 1@F]))
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
-        with T.kernel():
-            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tx.copy(A_sbuf, A)
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
-        with T.kernel():
-            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout, allocated_addr=[0])
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        A = Tx.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout, allocated_addr=[0])
             Tx.copy(A_sbuf, A)
     # fmt: on
 
@@ -56,19 +55,19 @@ def test_one_alloc():
 
 def test_two_alloc():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
             Tx.copy(B_sbuf[0:256, :], A_sbuf)
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
             Tx.copy(B_sbuf[0:256, :], A_sbuf)
     # fmt: on
 
@@ -79,19 +78,19 @@ def test_two_alloc():
 
 def test_existing_alloc():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[1])
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[1])
             Tx.copy(B_sbuf[0:256, :], A_sbuf)
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[4*512*4+1])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[4*512*4+1])
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
             Tx.copy(B_sbuf[0:256, :], A_sbuf)
     # fmt: on
 
@@ -102,21 +101,21 @@ def test_existing_alloc():
 
 def test_workspace():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
-            C_sbuf = T.alloc_buffer([128, 1024], "float32", scope="trn.sbuf")
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+            C_sbuf = Tx.alloc_buffer([128, 1024], "float32", scope="trn.sbuf")
             Tx.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
-            C_sbuf = T.alloc_buffer([128, 1024], "float32", scope="trn.sbuf", allocated_addr=[2*512*4+4*512*4])
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+            C_sbuf = Tx.alloc_buffer([128, 1024], "float32", scope="trn.sbuf", allocated_addr=[2*512*4+4*512*4])
             Tx.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
     # fmt: on
 
@@ -127,21 +126,21 @@ def test_workspace():
 
 def test_other_scope_alloc():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
-            C_sbuf = T.alloc_buffer([8, 128, 512], "float32", scope="global")
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+            C_sbuf = Tx.alloc_buffer([8, 128, 512], "float32", scope="global")
             Tx.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
-            C_sbuf = T.alloc_buffer([8, 128, 512], "float32", scope="global")
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+            C_sbuf = Tx.alloc_buffer([8, 128, 512], "float32", scope="global")
             Tx.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
     # fmt: on
 
@@ -152,20 +151,20 @@ def test_other_scope_alloc():
 
 def test_buffer_views():
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy(A_ptr: T.handle) -> None:
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+    @Tx.prim_func(tirx=True)
+    def copy(A_ptr: Tx.handle) -> None:
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
             B_view = B_sbuf.view(2, 256, 512)
             Tx.copy(B_view[0], A_sbuf)
 
-    @T.prim_func(tirx=True)
-    def expected(A_ptr: T.handle) -> None:
-        T.func_attr({"global_symbol": "copy"})
-        with T.kernel():
-            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+    @Tx.prim_func(tirx=True)
+    def expected(A_ptr: Tx.handle) -> None:
+        Tx.func_attr({"global_symbol": "copy"})
+        with Tx.kernel():
+            A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
             B_view = B_sbuf.view(2, 256, 512)
             Tx.copy(B_view[0], A_sbuf)
     # fmt: on

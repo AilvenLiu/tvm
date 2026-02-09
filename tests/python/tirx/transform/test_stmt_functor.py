@@ -35,7 +35,7 @@ from tvm.tir.stmt import (
     IfThenElse,
     DeclBuffer,
 )
-from tvm.script import tir as T, tirx as Tx
+from tvm.script import tirx as Tx
 from tvm.tir.stmt_functor import StmtVisitor, StmtMutator, StmtExprVisitor, StmtExprMutator
 import tvm.tirx.operator as tirx_op
 import pytest
@@ -673,8 +673,8 @@ def create_test_statements():
     if_then_else = tir.IfThenElse(tir.LT(x, int_imm), evaluate_stmt, evaluate_stmt)
 
     # Break and continue statements inside a for loop
-    @T.prim_func
-    def func(A: T.Buffer((10,), "int32")):
+    @Tx.prim_func
+    def func(A: Tx.Buffer((10,), "int32")):
         for x in range(10):
             A[x] = x + 1
             if x == 5:
@@ -682,12 +682,12 @@ def create_test_statements():
             continue
 
     # DeclBuffer
-    buffer_decl = tir.DeclBuffer(T.buffer((10,), "int32"), evaluate_stmt)
+    buffer_decl = tir.DeclBuffer(Tx.buffer((10,), "int32"), evaluate_stmt)
 
     # OpCall
-    @T.prim_func
-    def op_call(A: T.Buffer((10,), "int32"), B: T.Buffer((10,), "int32")):
-        with T.kernel():
+    @Tx.prim_func
+    def op_call(A: Tx.Buffer((10,), "int32"), B: Tx.Buffer((10,), "int32")):
+        with Tx.kernel():
             Tx.add(A, B, 1.0)
 
     return {
@@ -1001,7 +1001,7 @@ class NegateIntImmMutator(StmtExprMutator):
 
 
 def test_mutator_transformation():
-    """Test that mutator actually transforms the AST."""
+    """Test that mutator actually transforms the ASTx."""
     evaluate_stmt = create_test_statements()["evaluate"]
     mutator = NegateIntImmMutator()
     result = mutator.visit_stmt(evaluate_stmt)

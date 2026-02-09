@@ -24,9 +24,8 @@ from tvm.relax.frontend import nn
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
+from tvm.script import tirx as Tx
 from tvm.script import relax as R
-from tvm.script import tir as T
-
 from ..megakernel.test_layer import (
     DOWN_PROJ_SPLIT_K_FACTOR,
     SPLIT_O_PROJRCT,
@@ -501,39 +500,39 @@ def get_qwen3_megakernel_mod():
 
     @I.ir_module
     class Module:
-        @T.prim_func
-        def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
+        @Tx.prim_func
+        def rms_norm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def cast(var_lv4: T.handle, var_compute: T.handle):
-            T.func_attr({"op_pattern": 0, "tir.noalias": True})
-            batch_size = T.int64()
-            lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(151936)), "float16")
-            compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(151936)))
-            # with T.sblock("root"):
-            for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(151936)):
-                with T.sblock("compute"):
-                    v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
-                    T.reads(lv4[v_i0, v_i1, v_i2])
-                    T.writes(compute[v_i0, v_i1, v_i2])
-                    compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+        @Tx.prim_func(private=True)
+        def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
+            Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+            batch_size = Tx.int64()
+            lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(151936)), "float16")
+            compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(151936)))
+            # with Tx.sblock("root"):
+            for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(151936)):
+                with Tx.sblock("compute"):
+                    v_i0, v_i1, v_i2 = Tx.axis.remap("SSS", [i0, i1, i2])
+                    Tx.reads(lv4[v_i0, v_i1, v_i2])
+                    Tx.writes(compute[v_i0, v_i1, v_i2])
+                    compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
-        @T.prim_func(private=True)
-        def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def hgemm(A_ptr: Tx.handle, b_ptr: Tx.handle, partial_sum_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
+        @Tx.prim_func(private=True)
+        def reduce(partial_sum_ptr: Tx.handle, D_ptr: Tx.handle):
             pass
 
-        @T.prim_func(private=True)
-        def cos_sin_cache(cos_sin_cache: T.handle):
+        @Tx.prim_func(private=True)
+        def cos_sin_cache(cos_sin_cache: Tx.handle):
             pass
 
         @R.function
         def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
-            max_seq_len = T.int64()
+            max_seq_len = Tx.int64()
             cls = Module
             with R.dataflow():
                 cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
@@ -565,10 +564,10 @@ def get_qwen3_megakernel_mod():
                 R.Tensor((151936, 5120), dtype="float16"),
             ),
         ):
-            batch_size = T.int64()
-            total_page_num = T.int64()
-            max_page_num = T.int64()
-            page_size = T.int64()
+            batch_size = Tx.int64()
+            total_page_num = Tx.int64()
+            max_page_num = Tx.int64()
+            page_size = Tx.int64()
 
             cls = Module
             with R.dataflow():

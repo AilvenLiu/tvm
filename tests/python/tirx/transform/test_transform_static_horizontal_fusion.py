@@ -25,7 +25,6 @@ import tvm.tirx.megakernel.utils.static_scheduler as static_scheduler
 import tvm.tirx.megakernel.utils.dynamic_scheduler as dynamic_scheduler
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
 SM_CNT = 148
@@ -46,20 +45,20 @@ def test_basic():
     # fmt: off
     @I.ir_module(tirx=True)
     class Before:
-        @T.prim_func(tirx=True, private=True)
-        def stage_1(A: T.handle, B: T.handle, m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "stage1"})
-            A_ptr = T.match_buffer(A, (M, N), "float32")
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+        @Tx.prim_func(tirx=True, private=True)
+        def stage_1(A: Tx.handle, B: Tx.handle, m: Tx.int32, n: Tx.int32, k: Tx.int32):
+            Tx.func_attr({"megakernel.device_func": "stage1"})
+            A_ptr = Tx.match_buffer(A, (M, N), "float32")
+            B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
+                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
-                with T.cta():
-                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
-                with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.tile_class.run": True})
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
@@ -69,20 +68,20 @@ def test_basic():
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
 
-        @T.prim_func(tirx=True, private=True)
-        def stage_2(B: T.handle, C: T.handle, m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "stage2"})
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-            C_ptr = T.match_buffer(C, (M, 1), "float32")
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+        @Tx.prim_func(tirx=True, private=True)
+        def stage_2(B: Tx.handle, C: Tx.handle, m: Tx.int32, n: Tx.int32, k: Tx.int32):
+            Tx.func_attr({"megakernel.device_func": "stage2"})
+            B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+            C_ptr = Tx.match_buffer(C, (M, 1), "float32")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
+                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
-                with T.cta():
-                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
-                with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.tile_class.run": True})
                     B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")
@@ -183,20 +182,20 @@ def test_extra_args():
     # fmt: off
     @I.ir_module(tirx=True)
     class Before:
-        @T.prim_func(tirx=True, private=True)
-        def stage_1(A: T.handle, B: T.handle, m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "stage1"})
-            A_ptr = T.match_buffer(A, (M, N), "float32")
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+        @Tx.prim_func(tirx=True, private=True)
+        def stage_1(A: Tx.handle, B: Tx.handle, m: Tx.int32, n: Tx.int32, k: Tx.int32):
+            Tx.func_attr({"megakernel.device_func": "stage1"})
+            A_ptr = Tx.match_buffer(A, (M, N), "float32")
+            B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
+                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
-                with T.cta():
-                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
-                with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.tile_class.run": True})
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
@@ -206,20 +205,20 @@ def test_extra_args():
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
 
-        @T.prim_func(tirx=True, private=True)
-        def stage_2(B: T.handle, C: T.handle, m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "stage2"})
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-            C_ptr = T.match_buffer(C, (M, 1), "float32")
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+        @Tx.prim_func(tirx=True, private=True)
+        def stage_2(B: Tx.handle, C: Tx.handle, m: Tx.int32, n: Tx.int32, k: Tx.int32):
+            Tx.func_attr({"megakernel.device_func": "stage2"})
+            B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+            C_ptr = Tx.match_buffer(C, (M, 1), "float32")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
+                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
-                with T.cta():
-                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
-                with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                with Tx.cta():
+                    Tx.sblock_attr({"tirx.tile_class.run": True})
                     B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")

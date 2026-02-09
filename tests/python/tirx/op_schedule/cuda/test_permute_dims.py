@@ -21,7 +21,6 @@ import numpy as np
 
 import tvm
 import tvm.testing
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
 
@@ -64,15 +63,15 @@ def test_vectorized_permute_dims_2d(task, dtype):
     region = list(slice(None) for _ in range(len(a_shape)))
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def permute_dims(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
+    @Tx.prim_func(tirx=True)
+    def permute_dims(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.cta():
-                with T.warp():
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.cta():
+                with Tx.warp():
                     Tx.permute_dims(A, [1, 0])
     # fmt: on
 
@@ -126,15 +125,15 @@ def test_vectorized_permute_dims_nd(task, dtype):
     order = list(range(ndim - 2)) + [ndim - 1, ndim - 2]
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def permute_dims(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
+    @Tx.prim_func(tirx=True)
+    def permute_dims(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([32], parent="cta")
-            with T.cta():
-                with T.warp():
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([32], parent="cta")
+            with Tx.cta():
+                with Tx.warp():
                     Tx.permute_dims(A[*region], order)
     # fmt: on
 

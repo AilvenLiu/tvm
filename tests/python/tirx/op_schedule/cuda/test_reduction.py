@@ -20,7 +20,6 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.tir.layout import laneid
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
@@ -90,18 +89,18 @@ def test_reduction_op_shared(input, op_type, dtype):
     g_layout_b = s_layout_b = TileLayout(g_shape_b)
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def test_reduction(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
-        B = T.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
+    @Tx.prim_func(tirx=True)
+    def test_reduction(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
+        B = Tx.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([thread_cnt], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
 
-            with T.cta():
-                A_smem = T.alloc_buffer(s_shape_a, dtype, scope="shared", layout=s_layout_a)
-                B_smem = T.alloc_buffer(s_shape_b, dtype, scope="shared", layout=s_layout_b)
+            with Tx.cta():
+                A_smem = Tx.alloc_buffer(s_shape_a, dtype, scope="shared", layout=s_layout_a)
+                B_smem = Tx.alloc_buffer(s_shape_b, dtype, scope="shared", layout=s_layout_b)
 
                 Tx.copy(A_smem[*copy_slice_a], A[*copy_slice_a])
                 if op_type == "sum":
@@ -176,25 +175,25 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
     acc_shape, red_shape = (16, NUM_COL), (16, 4)
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def test_reduction(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
-        B = T.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
+    @Tx.prim_func(tirx=True)
+    def test_reduction(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
+        B = Tx.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
 
-        with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            wg_id = T.warpgroup_id([N_GROUPS], parent="cta")
-            warp_id_in_wg = T.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
-            lane_id = T.thread_id([thread_cnt], parent="warp")
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
+            wg_id = Tx.warpgroup_id([N_GROUPS], parent="cta")
+            warp_id_in_wg = Tx.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
+            lane_id = Tx.thread_id([thread_cnt], parent="warp")
 
-            with T.thread():
+            with Tx.thread():
                 # acc layout
-                atom = T.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+                atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
+                warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-                tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
+                tile = Tx.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
-                acc = T.alloc_buffer(
+                acc = Tx.alloc_buffer(
                     [2, NUM_COL // 4],
                     dtype=dtype,
                     scope="local",
@@ -202,11 +201,11 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
 
                 # red layout
-                red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+                red_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
                 red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
-                red_tile = T.TileLayout(shard=([2, 1], [1, 1]))
+                red_tile = Tx.TileLayout(shard=([2, 1], [1, 1]))
                 red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
-                red = T.alloc_buffer(
+                red = Tx.alloc_buffer(
                     [
                         2,
                     ],
@@ -216,17 +215,17 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
 
                 # load A into acc
-                with T.thread():
-                    for i in T.serial(NUM_COL // 8):
-                        for j in T.unroll(2):
-                            for vec in T.vectorized(2):
+                with Tx.thread():
+                    for i in Tx.serial(NUM_COL // 8):
+                        for j in Tx.unroll(2):
+                            for vec in Tx.vectorized(2):
                                 acc[j, i * 2 + vec] = A[
                                     wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
                                     i * 8 + lane_id % 4 * 2 + vec,
                                 ]
 
                 # reduce
-                with T.warp():
+                with Tx.warp():
                     acc_view = acc.view(*acc_shape, layout=acc_layout)
                     red_view = red.view(*red_shape, layout=red_layout)
                     if op_type == "sum":
@@ -241,8 +240,8 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                             Tx.max(red_view, red_view, thread_reduce=True)
 
                 # write red into B
-                with T.thread():
-                    for i in T.unroll(2):
+                with Tx.thread():
+                    for i in Tx.unroll(2):
                         B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4] = (
                             red[i]
                         )
@@ -295,21 +294,21 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
     dtype = "float32"
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
-        B = T.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
+        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([1], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([1], parent="cta")
 
-            with T.thread():
-                A_local = T.alloc_buffer([reduction_len], dtype, scope="local")
-                B_local = T.alloc_buffer([1], dtype, scope="local")
+            with Tx.thread():
+                A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")
+                B_local = Tx.alloc_buffer([1], dtype, scope="local")
 
                 # Load from global to local
-                for i in T.serial(reduction_len):
+                for i in Tx.serial(reduction_len):
                     A_local[i] = A[i]
 
                 # Initialize B_local for accum test
@@ -379,21 +378,21 @@ def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
     dtype = "float32"
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
-        B = T.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
+        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([1], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([1], parent="cta")
 
-            with T.thread():
-                A_local = T.alloc_buffer([reduction_len], dtype, scope="local")
-                B_local = T.alloc_buffer([1], dtype, scope="local")
+            with Tx.thread():
+                A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")
+                B_local = Tx.alloc_buffer([1], dtype, scope="local")
 
                 # Load from global to local
-                for i in T.serial(reduction_len):
+                for i in Tx.serial(reduction_len):
                     A_local[i] = A[i]
 
                 # Initialize B_local for accum test

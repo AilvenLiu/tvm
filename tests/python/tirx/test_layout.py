@@ -90,23 +90,23 @@ def test_axis():
 
 def test_constructor():
     layout = TileLayout([2, 3, 4])
-    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+    assert str(layout) == 'Tx.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
 
     layout = TileLayout(
         shard=([2, 3, 4], [12, 4, 1]),
     )
-    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+    assert str(layout) == 'Tx.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
 
     layout = TileLayout(
         shard=([2, 3, 4], [12 @ m, 4 @ m, 1 @ m]),
     )
-    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+    assert str(layout) == 'Tx.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
 
     layout = TileLayout(
         shard=([8, 4, 2], [4 @ laneid, 1 @ laneid, 1]),
     )
     assert (
-        str(layout) == 'T.TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]))'
+        str(layout) == 'Tx.TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]))'
     )
 
     layout = TileLayout(
@@ -114,14 +114,14 @@ def test_constructor():
         replica=([4], [1 @ laneid]),
     )
     assert (
-        str(layout) == 'T.TileLayout(shard=([8], [(4, "laneid")]), replica=([4], [(1, "laneid")]))'
+        str(layout) == 'Tx.TileLayout(shard=([8], [(4, "laneid")]), replica=([4], [(1, "laneid")]))'
     )
 
     layout = TileLayout(
         shard=([8], [4 @ laneid]),
         offset=1 @ laneid,
     )
-    assert str(layout) == 'T.TileLayout(shard=([8], [(4, "laneid")]), offset=[("laneid", 1)])'
+    assert str(layout) == 'Tx.TileLayout(shard=([8], [(4, "laneid")]), offset=[("laneid", 1)])'
 
 
 def test_verify_well_formed():

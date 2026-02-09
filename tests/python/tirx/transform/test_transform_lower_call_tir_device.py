@@ -20,22 +20,22 @@ import tvm.testing
 from tvm import relax
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T, tirx as Tx
+from tvm.script import tirx as Tx
 
 
 def test_call_tir_device():
     @I.ir_module(tirx=True)
     class Before:
-        @T.prim_func(tirx=True, private=True)
-        def test1(A: T.Buffer((2048,), "float32"), m: T.int32):
-            with T.cta():
-                thread_id = T.thread_id([128], parent="cta")
+        @Tx.prim_func(tirx=True, private=True)
+        def test1(A: Tx.Buffer((2048,), "float32"), m: Tx.int32):
+            with Tx.cta():
+                thread_id = Tx.thread_id([128], parent="cta")
                 Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
-        @T.prim_func(tirx=True, private=True)
-        def test2(A: T.Buffer((2048, 2048), "float32"), m: T.int32, n: T.int32):
-            with T.cta():
-                thread_id = T.thread_id([128], parent="cta")
+        @Tx.prim_func(tirx=True, private=True)
+        def test2(A: Tx.Buffer((2048, 2048), "float32"), m: Tx.int32, n: Tx.int32):
+            with Tx.cta():
+                thread_id = Tx.thread_id([128], parent="cta")
                 Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function
@@ -61,20 +61,20 @@ def test_call_tir_device():
 
     @I.ir_module(tirx=True)
     class After:
-        @T.prim_func(tirx=True, private=True)
-        def test1_kernel(A: T.Buffer((2048,), "float32")):
-            with T.kernel():
-                m = T.cta_id([16], parent="kernel")
-                with T.cta():
-                    thread_id = T.thread_id([128], parent="cta")
+        @Tx.prim_func(tirx=True, private=True)
+        def test1_kernel(A: Tx.Buffer((2048,), "float32")):
+            with Tx.kernel():
+                m = Tx.cta_id([16], parent="kernel")
+                with Tx.cta():
+                    thread_id = Tx.thread_id([128], parent="cta")
                     Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
-        @T.prim_func(tirx=True, private=True)
-        def test2_kernel(A: T.Buffer((2048, 2048), "float32")):
-            with T.kernel():
-                m, n = T.cta_id([16, 16], parent="kernel")
-                with T.cta():
-                    thread_id = T.thread_id([128], parent="cta")
+        @Tx.prim_func(tirx=True, private=True)
+        def test2_kernel(A: Tx.Buffer((2048, 2048), "float32")):
+            with Tx.kernel():
+                m, n = Tx.cta_id([16, 16], parent="kernel")
+                with Tx.cta():
+                    thread_id = Tx.thread_id([128], parent="cta")
                     Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function

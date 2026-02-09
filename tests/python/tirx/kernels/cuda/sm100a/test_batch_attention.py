@@ -24,7 +24,6 @@ import torch
 import tvm_ffi
 
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirx.bench.utils import ProtonContext, bench
@@ -101,7 +100,7 @@ __forceinline__ __device__ float {func_name}(float x) {{
   return y;
 }}
 """
-    return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 
 def ptx_log2(x):
@@ -113,7 +112,7 @@ __forceinline__ __device__ float {func_name}(float x) {{
   return y;
 }}
 """
-    return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 
 def ptx_rcp(x):
@@ -125,7 +124,7 @@ __forceinline__ __device__ float {func_name}(float x) {{
   return y;
 }}
 """
-    return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 
 def half_to_float(x):
@@ -135,7 +134,7 @@ __device__ __forceinline__ float {func_name}(half x) {{
   return __half2float(x);
 }}
 """
-    return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 
 def fdivdef(x, y):
@@ -145,26 +144,26 @@ __device__ __forceinline__ float {func_name}(float x, float y) {{
   return __fdividef(x, y);
 }}
 """
-    return T.cuda.func_call(func_name, x, y, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, y, source_code=source_code, return_type="float32")
 
 
-@T.macro
+@Tx.macro
 def cast_load(v, vec_len, buf, *indices):
-    with T.thread():
-        v_tmp = T.alloc_local([vec_len], buf.dtype)
-        for i in T.vectorized(vec_len):
-            buffer_load = T.meta_var(T.BufferLoad(buf, indices[:-1] + (indices[-1] + i,)))
+    with Tx.thread():
+        v_tmp = Tx.alloc_local([vec_len], buf.dtype)
+        for i in Tx.vectorized(vec_len):
+            buffer_load = Tx.meta_var(Tx.BufferLoad(buf, indices[:-1] + (indices[-1] + i,)))
             v_tmp[i] = buffer_load
         Tx.cast(v[:], v_tmp[:])
 
 
-@T.macro
+@Tx.macro
 def cast_store(v, vec_len, buf, *indices):
-    with T.thread():
-        v_tmp = T.alloc_local([vec_len], buf.dtype)
+    with Tx.thread():
+        v_tmp = Tx.alloc_local([vec_len], buf.dtype)
         Tx.cast(v_tmp[:], v[:])
-        for i in T.vectorized(vec_len):
-            T.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
+        for i in Tx.vectorized(vec_len):
+            Tx.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
 
 
 def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
@@ -176,19 +175,19 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
     INF = 5e4
 
     def int_var(val=None):
-        frame = T.alloc_local([1], "int32")
+        frame = Tx.alloc_local([1], "int32")
         frame.add_callback(partial(frame.__exit__, None, None, None))
         buf = frame.__enter__()
         if val is not None:
-            T.buffer_store(buf, val, 0)
+            Tx.buffer_store(buf, val, 0)
         return buf
 
     def float_var(val=None):
-        frame = T.alloc_local([1], "float32")
+        frame = Tx.alloc_local([1], "float32")
         frame.add_callback(partial(frame.__exit__, None, None, None))
         buf = frame.__enter__()
         if val is not None:
-            T.buffer_store(buf, val, 0)
+            Tx.buffer_store(buf, val, 0)
         return buf
 
     def ceildiv(a, b):
@@ -264,8 +263,8 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
             return (offset ^ 0x4) + step_size * row_stride
 
         def scope_sync(wg_id):
-            return T.cuda.warpgroup_sync(wg_id)
-            # return T.cuda.cta_sync()
+            return Tx.cuda.warpgroup_sync(wg_id)
+            # return Tx.cuda.cta_sync()
 
         def m16k16_row_sum_f16f16f32(C_ptr, A_ptr):
             func_name = "m16k16_rowsum_f16f16f32"
@@ -285,7 +284,7 @@ __device__ __forceinline__ void {func_name}(float* d, half* s) {{
         "r"(0x3C003C00), "f"(d[0]), "f"(d[1]));
 }}
 """
-            return T.cuda.func_call(func_name, C_ptr, A_ptr, source_code=source_code)
+            return Tx.cuda.func_call(func_name, C_ptr, A_ptr, source_code=source_code)
 
         def store_128b(dst_ptr, src_ptr):
             func_name = "store_128b"
@@ -297,7 +296,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
   *dst_ptr_b128 = *src_ptr_b128;
 }}
 """
-            return T.cuda.func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
+            return Tx.cuda.func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
 
         def get_sm_scale():
             func_name = "get_sm_scale"
@@ -306,59 +305,59 @@ __device__ __forceinline__ float {func_name}() {{
   return 1.44269504088896340736 * 1 / sqrtf({HEAD_DIM});
 }}
 """
-            return T.cuda.func_call(func_name, source_code=source_code, return_type="float32")
+            return Tx.cuda.func_call(func_name, source_code=source_code, return_type="float32")
 
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def batch_attention(
-            q_ptr: T.handle,
-            kv_ptr: T.handle,
-            q_indptr_ptr: T.handle,
-            kv_indptr_ptr: T.handle,
-            partial_indptr_ptr: T.handle,
-            kv_indices_ptr: T.handle,
-            q_len_ptr: T.handle,
-            kv_len_ptr: T.handle,
-            q_start_ptr: T.handle,
-            kv_start_ptr: T.handle,
-            kv_end_ptr: T.handle,
-            kv_head_idx_ptr: T.handle,
-            work_indptr_ptr: T.handle,
-            len_kv_chunk_ptr: T.handle,
-            o_ptr: T.handle,
-            partial_o_ptr: T.handle,
-            partial_lse_ptr: T.handle,
+            q_ptr: Tx.handle,
+            kv_ptr: Tx.handle,
+            q_indptr_ptr: Tx.handle,
+            kv_indptr_ptr: Tx.handle,
+            partial_indptr_ptr: Tx.handle,
+            kv_indices_ptr: Tx.handle,
+            q_len_ptr: Tx.handle,
+            kv_len_ptr: Tx.handle,
+            q_start_ptr: Tx.handle,
+            kv_start_ptr: Tx.handle,
+            kv_end_ptr: Tx.handle,
+            kv_head_idx_ptr: Tx.handle,
+            work_indptr_ptr: Tx.handle,
+            len_kv_chunk_ptr: Tx.handle,
+            o_ptr: Tx.handle,
+            partial_o_ptr: Tx.handle,
+            partial_lse_ptr: Tx.handle,
         ):
-            batch_size = T.int32()
-            max_page_num = T.int64()
-            total_page_num = T.int32()
+            batch_size = Tx.int32()
+            max_page_num = Tx.int64()
+            total_page_num = Tx.int32()
 
-            q_buf = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
-            kv_buf = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16")
-            q_indptr_buf = T.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indptr_buf = T.match_buffer(kv_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            partial_indptr_buf = T.match_buffer(partial_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indices_buf = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
-            q_len_buf = T.match_buffer(q_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_len_buf = T.match_buffer(kv_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            q_start_buf = T.match_buffer(q_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_start_buf = T.match_buffer(kv_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_end_buf = T.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_head_idx_buf = T.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            work_indptr_buf = T.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            len_kv_chunk_buf = T.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
-            o_buf = T.match_buffer(o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
-            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
+            q_buf = Tx.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            kv_buf = Tx.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16")
+            q_indptr_buf = Tx.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indptr_buf = Tx.match_buffer(kv_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            partial_indptr_buf = Tx.match_buffer(partial_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indices_buf = Tx.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
+            q_len_buf = Tx.match_buffer(q_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_len_buf = Tx.match_buffer(kv_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            q_start_buf = Tx.match_buffer(q_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_start_buf = Tx.match_buffer(kv_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_end_buf = Tx.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_head_idx_buf = Tx.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            work_indptr_buf = Tx.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            len_kv_chunk_buf = Tx.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
+            o_buf = Tx.match_buffer(o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            partial_o_buf = Tx.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
+            partial_lse_buf = Tx.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
 
-            with T.kernel():
-                bx = T.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
-                wg_id = T.warpgroup_id([m], parent="cta")
-                warp_id = T.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
-                lane_id = T.thread_id([32], parent="warp")
+            with Tx.kernel():
+                bx = Tx.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
+                wg_id = Tx.warpgroup_id([m], parent="cta")
+                warp_id = Tx.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
+                lane_id = Tx.thread_id([32], parent="warp")
 
-                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = T.meta_var(Tx.PoolAllocator(buf.data))
+                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
                 q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
                 k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
                 v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
@@ -369,12 +368,12 @@ __device__ __forceinline__ float {func_name}() {{
                 smem_o = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
                 print(pool.offset)
 
-                with T.thread():
-                    s_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float32", align=0)
-                    o_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_D_VO, 8], "float32", align=16)
-                    m = T.alloc_local([NUM_MMA_Q, 2], "float32")
-                    d = T.alloc_local([NUM_MMA_Q, 2], "float32")
-                    tid = T.alloc_local([3], "int32")
+                with Tx.thread():
+                    s_frag = Tx.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float32", align=0)
+                    o_frag = Tx.alloc_local([NUM_MMA_Q, NUM_MMA_D_VO, 8], "float32", align=16)
+                    m = Tx.alloc_local([NUM_MMA_Q, 2], "float32")
+                    d = Tx.alloc_local([NUM_MMA_Q, 2], "float32")
+                    tid = Tx.alloc_local([3], "int32")
 
                     tid[0] = lane_id
                     tid[1] = warp_id % NUM_WARPS_Q
@@ -385,12 +384,12 @@ __device__ __forceinline__ float {func_name}() {{
                     v_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_V, wg_id * CTA_TILE_KV + get_warp_idx_kv(tid) * NUM_MMA_KV * 16 + lane_id % 16, lane_id // 16))
                     k_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_K, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
                     v_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_V, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
-                    thr_local_kv_offset = T.alloc_local([NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q], "int64")
+                    thr_local_kv_offset = Tx.alloc_local([NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q], "int64")
 
                     work_idx = int_var()
                     work_idx[0] = work_indptr_buf[bx * WG_COUNT + wg_id]
                     while work_idx[0] < work_indptr_buf[bx * WG_COUNT + wg_id + 1]:
-                        with T.thread():
+                        with Tx.thread():
                             # get_block_coord
                             q_indptr = int_var(q_indptr_buf[work_idx[0]])
                             kv_indptr = int_var(kv_indptr_buf[work_idx[0]])
@@ -406,31 +405,31 @@ __device__ __forceinline__ float {func_name}() {{
                             kv_chunk_idx = int_var(ceildiv(kv_start[0], len_kv_chunk[0]))
                             num_kv_chunks = int_var(ceildiv(kv_len[0], len_kv_chunk[0]))
                             qo_packed_idx_base = int_var(packed_qo_start[0] + get_warp_idx_q(tid) * NUM_MMA_Q * 16)
-                            qo_upperbound = int_var(T.min(q_len[0], ceildiv(qo_packed_idx_base[0] + CTA_TILE_Q, GQA_GROUP_SIZE)))
+                            qo_upperbound = int_var(Tx.min(q_len[0], ceildiv(qo_packed_idx_base[0] + CTA_TILE_Q, GQA_GROUP_SIZE)))
 
-                            @T.macro
+                            @Tx.macro
                             def init_states():
-                                for i0, i1, i2 in T.grid(NUM_MMA_Q, NUM_MMA_D_VO, 8):
-                                    o_frag[i0, i1, i2] = T.float32(0)
-                                for i0, i1 in T.grid(NUM_MMA_Q, 2):
-                                    m[i0, i1] = T.float32(-INF)
-                                    d[i0, i1] = T.float32(0)
+                                for i0, i1, i2 in Tx.grid(NUM_MMA_Q, NUM_MMA_D_VO, 8):
+                                    o_frag[i0, i1, i2] = Tx.float32(0)
+                                for i0, i1 in Tx.grid(NUM_MMA_Q, 2):
+                                    m[i0, i1] = Tx.float32(-INF)
+                                    d[i0, i1] = Tx.float32(0)
 
                             init_states()
 
-                            @T.macro
+                            @Tx.macro
                             def load_q_global_smem():
                                 if get_warp_idx_kv(tid) == 0:
                                     q_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_Q, wg_id * CTA_TILE_Q + get_warp_idx_q(tid) * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
                                     # unroll
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for j in T.unroll(4):
-                                            with T.thread():
-                                                qo_packed_id = T.meta_var(qo_packed_idx_base[0] + lane_id // 8 + mma_q * 16 + j * 4)
-                                                q = int_var(T.floordiv(qo_packed_id, GQA_GROUP_SIZE))
-                                                r = int_var(T.floormod(qo_packed_id, GQA_GROUP_SIZE))
-                                                for mma_do in T.unroll(NUM_MMA_D_QK // 4):
-                                                    T.ptx.cp_async(q_smem.ptr_to([q_smem_offset_w[0] * upcast_size("float16")]),
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for j in Tx.unroll(4):
+                                            with Tx.thread():
+                                                qo_packed_id = Tx.meta_var(qo_packed_idx_base[0] + lane_id // 8 + mma_q * 16 + j * 4)
+                                                q = int_var(Tx.floordiv(qo_packed_id, GQA_GROUP_SIZE))
+                                                r = int_var(Tx.floormod(qo_packed_id, GQA_GROUP_SIZE))
+                                                for mma_do in Tx.unroll(NUM_MMA_D_QK // 4):
+                                                    Tx.ptx.cp_async(q_smem.ptr_to([q_smem_offset_w[0] * upcast_size("float16")]),
                                                                    # TODO: optimize the addr computation here
                                                                    q_buf.ptr_to([q_indptr[0] + q[0], kv_head_idx[0] * GQA_GROUP_SIZE + r[0], (lane_id % 8 + mma_do * 8) * upcast_size("float16")]), cp_size=16, prefetch_size=128,
                                                                    predicate=q[0] < qo_upperbound[0])
@@ -446,32 +445,32 @@ __device__ __forceinline__ float {func_name}() {{
                             scope_sync(wg_id)
                             packed_kv_bound = int_var(kv_indptr[0] * PAGE_SIZE + kv_len[0])
 
-                            @T.macro
+                            @Tx.macro
                             def prefetch_offset(packed_block_iter_base_in):
-                                with T.thread():
+                                with Tx.thread():
                                     packed_block_iter_base = int_var(packed_block_iter_base_in)
-                                    for i in T.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
+                                    for i in Tx.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
                                         packed_block_iter = int_var(packed_block_iter_base[0] + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL
                                                                     + KV_THR_LAYOUT_ROW * NUM_WARPS_Q * NUM_WARPS_KV * i)
-                                        page_iter = int_var(T.floordiv(packed_block_iter[0], PAGE_SIZE))
-                                        entry_idx = int_var(T.floormod(packed_block_iter[0], PAGE_SIZE))
-                                        mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < packed_kv_bound[0], kv_indices_buf[page_iter[0]], 0))
+                                        page_iter = int_var(Tx.floordiv(packed_block_iter[0], PAGE_SIZE))
+                                        entry_idx = int_var(Tx.floormod(packed_block_iter[0], PAGE_SIZE))
+                                        mapped_page = Tx.meta_var(Tx.if_then_else(packed_block_iter[0] < packed_kv_bound[0], kv_indices_buf[page_iter[0]], 0))
                                         thr_local_kv_offset[i] = kv_buf.elem_offset_of([mapped_page, 0, kv_head_idx[0], entry_idx[0], (lane_id % KV_THR_LAYOUT_COL) * upcast_size("float16")])
 
-                            @T.macro
+                            @Tx.macro
                             def page_produce_kv(produce_v: bool, kv_idx_base_in, smem_offset, smem):
                                 v_offset = KV_HEADS * PAGE_SIZE * HEAD_DIM if produce_v else 0
-                                fill_mode = T.meta_var("zero" if produce_v else "")
-                                NUM_MMA_D = T.meta_var(NUM_MMA_D_QK if produce_v else NUM_MMA_D_VO)
-                                UPCAST_STRIDE = T.meta_var(UPCAST_STRIDE_V if produce_v else UPCAST_STRIDE_K)
-                                with T.thread():
+                                fill_mode = Tx.meta_var("zero" if produce_v else "")
+                                NUM_MMA_D = Tx.meta_var(NUM_MMA_D_QK if produce_v else NUM_MMA_D_VO)
+                                UPCAST_STRIDE = Tx.meta_var(UPCAST_STRIDE_V if produce_v else UPCAST_STRIDE_K)
+                                with Tx.thread():
                                     kv_idx_base = int_var(kv_idx_base_in)
                                     kv_idx = int_var(kv_idx_base[0] + warp_id * 4 + lane_id // 8)
                                     kv_buf_1d = kv_buf.view(-1)
                                     # unroll
-                                    for i in T.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
-                                        for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
-                                            T.ptx.cp_async(
+                                    for i in Tx.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
+                                        for j in Tx.unroll(NUM_MMA_D // (8 // size_of("float16"))):
+                                            Tx.ptx.cp_async(
                                                 smem.ptr_to([smem_offset[0] * upcast_size("float16")]),
                                                 # TODO: optimize the addr computation here
                                                 kv_buf_1d.ptr_to([v_offset + thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]), cp_size=16, prefetch_size=128, fill_mode=fill_mode,
@@ -482,39 +481,39 @@ __device__ __forceinline__ float {func_name}() {{
                                         smem_offset[0] = advance_offset_by_row(NUM_WARPS * 4, UPCAST_STRIDE, smem_offset[0]) - size_of("float16") * NUM_MMA_D
                                     smem_offset[0] -= CTA_TILE_KV * UPCAST_STRIDE
 
-                            @T.macro
+                            @Tx.macro
                             def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
-                                with T.thread():
-                                    C_mma = T.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
-                                    A_mma = T.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
-                                    B_mma = T.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
+                                with Tx.thread():
+                                    C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
+                                    A_mma = Tx.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
+                                    B_mma = Tx.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
                                     if init:
-                                        T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                                        Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                                 C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]))
-                                        T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                                        Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                                 C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]))
                                     else:
-                                        T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                                        Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                                 C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]), C_mma.ptr_to([0]))
-                                        T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+                                        Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                                 C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]), C_mma.ptr_to([4]))
 
-                            @T.macro
+                            @Tx.macro
                             def compute_qk():
-                                with T.thread():
-                                    a_frag = T.alloc_local([NUM_MMA_Q, 4], "uint32")
-                                    b_frag = T.alloc_local([4], "uint32")
+                                with Tx.thread():
+                                    a_frag = Tx.alloc_local([NUM_MMA_Q, 4], "uint32")
+                                    b_frag = Tx.alloc_local([4], "uint32")
 
                                     # unroll
-                                    for mma_d in T.unroll(NUM_MMA_D_QK):
-                                        for mma_q in T.unroll(NUM_MMA_Q):
-                                            T.ptx.ldmatrix(False, 4, ".b16", a_frag.ptr_to([mma_q, 0]), q_smem.ptr_to([q_smem_offset_r[0] * upcast_size("float16")]))
+                                    for mma_d in Tx.unroll(NUM_MMA_D_QK):
+                                        for mma_q in Tx.unroll(NUM_MMA_Q):
+                                            Tx.ptx.ldmatrix(False, 4, ".b16", a_frag.ptr_to([mma_q, 0]), q_smem.ptr_to([q_smem_offset_r[0] * upcast_size("float16")]))
                                             q_smem_offset_r[0] = advance_offset_by_row(16, UPCAST_STRIDE_Q, q_smem_offset_r[0])
                                         q_smem_offset_r[0] = advance_offset_by_column(2, q_smem_offset_r[0], mma_d) - NUM_MMA_Q * 16 * UPCAST_STRIDE_Q
-                                        for mma_kv in T.unroll(NUM_MMA_KV):
-                                            T.ptx.ldmatrix(False, 4, ".b16", b_frag.ptr_to([0]), k_smem.ptr_to([k_smem_offset_r[0] * upcast_size("float16")]))
+                                        for mma_kv in Tx.unroll(NUM_MMA_KV):
+                                            Tx.ptx.ldmatrix(False, 4, ".b16", b_frag.ptr_to([0]), k_smem.ptr_to([k_smem_offset_r[0] * upcast_size("float16")]))
                                             k_smem_offset_r[0] = advance_offset_by_row(16, UPCAST_STRIDE_K, k_smem_offset_r[0])
-                                            for mma_q in T.unroll(NUM_MMA_Q):
+                                            for mma_q in Tx.unroll(NUM_MMA_Q):
                                                 if mma_d == 0:
                                                     mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.byte_offset_of([mma_q, mma_kv, 0]),
                                                                                          a_frag, a_frag.byte_offset_of([mma_q, 0]),
@@ -527,63 +526,63 @@ __device__ __forceinline__ float {func_name}() {{
                                     q_smem_offset_r[0] -= NUM_MMA_D_QK * 2
                                     k_smem_offset_r[0] -= NUM_MMA_D_QK * size_of("float16")
 
-                            @T.macro
+                            @Tx.macro
                             def logits_mask():
-                                chunk_end = T.meta_var(kv_end[0])
-                                with T.thread():
+                                chunk_end = Tx.meta_var(kv_end[0])
+                                with Tx.thread():
                                     # unroll
                                     kv_idx_base = int_var(kv_start[0] + (kv_tile_idx[0] * NUM_WARPS_KV + get_warp_idx_kv(tid)) * NUM_MMA_KV * 16)
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for mma_kv in T.unroll(NUM_MMA_KV):
-                                            for reg_id in T.unroll(8):
-                                                with T.thread():
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for mma_kv in Tx.unroll(NUM_MMA_KV):
+                                            for reg_id in Tx.unroll(8):
+                                                with Tx.thread():
                                                     kv_idx = int_var(kv_idx_base[0] + mma_kv * 16 + 2 * (lane_id % 4) + 8 * (reg_id // 4) + reg_id % 2)
-                                                    s_frag[mma_q, mma_kv, reg_id] = T.if_then_else(T.Not(kv_idx[0] >= chunk_end), s_frag[mma_q, mma_kv, reg_id], T.float32(-INF))
+                                                    s_frag[mma_q, mma_kv, reg_id] = Tx.if_then_else(Tx.Not(kv_idx[0] >= chunk_end), s_frag[mma_q, mma_kv, reg_id], Tx.float32(-INF))
 
-                            @T.macro
+                            @Tx.macro
                             def update_mdo_states():
-                                WARP_MASK = T.meta_var(0xFFFFFFFF)
-                                with T.thread():
+                                WARP_MASK = Tx.meta_var(0xFFFFFFFF)
+                                with Tx.thread():
                                     sm_scale = float_var(get_sm_scale())
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for j in T.unroll(2):
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for j in Tx.unroll(2):
                                             m_prev = float_var(m[mma_q, j])
-                                            for mma_kv in T.unroll(NUM_MMA_KV):
-                                                m_local = float_var(T.max(T.max(s_frag[mma_q, mma_kv, j * 2 + 0], s_frag[mma_q, mma_kv, j * 2 + 1]),
-                                                                          T.max(s_frag[mma_q, mma_kv, j * 2 + 4], s_frag[mma_q, mma_kv, j * 2 + 5])))
-                                                m[mma_q, j] = T.max(m[mma_q, j], m_local[0])
-                                            m[mma_q, j] = T.max(m[mma_q, j], T.tvm_warp_shuffle_xor(WARP_MASK, m[mma_q, j], 0x2, 32, 32))
-                                            m[mma_q, j] = T.max(m[mma_q, j], T.tvm_warp_shuffle_xor(WARP_MASK, m[mma_q, j], 0x1, 32, 32))
+                                            for mma_kv in Tx.unroll(NUM_MMA_KV):
+                                                m_local = float_var(Tx.max(Tx.max(s_frag[mma_q, mma_kv, j * 2 + 0], s_frag[mma_q, mma_kv, j * 2 + 1]),
+                                                                          Tx.max(s_frag[mma_q, mma_kv, j * 2 + 4], s_frag[mma_q, mma_kv, j * 2 + 5])))
+                                                m[mma_q, j] = Tx.max(m[mma_q, j], m_local[0])
+                                            m[mma_q, j] = Tx.max(m[mma_q, j], Tx.tvm_warp_shuffle_xor(WARP_MASK, m[mma_q, j], 0x2, 32, 32))
+                                            m[mma_q, j] = Tx.max(m[mma_q, j], Tx.tvm_warp_shuffle_xor(WARP_MASK, m[mma_q, j], 0x1, 32, 32))
 
                                             o_scale = float_var(ptx_exp2(m_prev[0] * sm_scale[0] - m[mma_q, j] * sm_scale[0]))
                                             d[mma_q, j] *= o_scale[0]
                                             # unroll
-                                            for mma_d in T.unroll(NUM_MMA_D_VO):
+                                            for mma_d in Tx.unroll(NUM_MMA_D_VO):
                                                 o_frag[mma_q, mma_d, j * 2 + 0] *= o_scale[0]
                                                 o_frag[mma_q, mma_d, j * 2 + 1] *= o_scale[0]
                                                 o_frag[mma_q, mma_d, j * 2 + 4] *= o_scale[0]
                                                 o_frag[mma_q, mma_d, j * 2 + 5] *= o_scale[0]
                                             # unroll
-                                            for mma_kv in T.unroll(NUM_MMA_KV):
+                                            for mma_kv in Tx.unroll(NUM_MMA_KV):
                                                 s_frag[mma_q, mma_kv, j * 2 + 0] = ptx_exp2(s_frag[mma_q, mma_kv, j * 2 + 0] * sm_scale[0] - m[mma_q, j] * sm_scale[0])
                                                 s_frag[mma_q, mma_kv, j * 2 + 1] = ptx_exp2(s_frag[mma_q, mma_kv, j * 2 + 1] * sm_scale[0] - m[mma_q, j] * sm_scale[0])
                                                 s_frag[mma_q, mma_kv, j * 2 + 4] = ptx_exp2(s_frag[mma_q, mma_kv, j * 2 + 4] * sm_scale[0] - m[mma_q, j] * sm_scale[0])
                                                 s_frag[mma_q, mma_kv, j * 2 + 5] = ptx_exp2(s_frag[mma_q, mma_kv, j * 2 + 5] * sm_scale[0] - m[mma_q, j] * sm_scale[0])
 
-                            @T.macro
+                            @Tx.macro
                             def compute_sfm_v():
-                                with T.thread():
-                                    s_frag_f16 = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float16")
+                                with Tx.thread():
+                                    s_frag_f16 = Tx.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float16")
                                     Tx.cast(s_frag_f16[:, :, :], s_frag[:, :, :])
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for mma_kv in T.unroll(NUM_MMA_KV):
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for mma_kv in Tx.unroll(NUM_MMA_KV):
                                             m16k16_row_sum_f16f16f32(d.ptr_to([mma_q, 0]), s_frag_f16.ptr_to([mma_q, mma_kv, 0]))
-                                    for mma_kv in T.unroll(NUM_MMA_KV):
-                                        for mma_d in T.unroll(NUM_MMA_D_VO):
-                                            with T.thread():
-                                                b_frag = T.alloc_local([4], "uint32")
-                                                T.ptx.ldmatrix(True, 4, ".b16", b_frag.ptr_to([0]), v_smem.ptr_to([v_smem_offset_r[0] * upcast_size("float16")]))
-                                                for mma_q in T.unroll(NUM_MMA_Q):
+                                    for mma_kv in Tx.unroll(NUM_MMA_KV):
+                                        for mma_d in Tx.unroll(NUM_MMA_D_VO):
+                                            with Tx.thread():
+                                                b_frag = Tx.alloc_local([4], "uint32")
+                                                Tx.ptx.ldmatrix(True, 4, ".b16", b_frag.ptr_to([0]), v_smem.ptr_to([v_smem_offset_r[0] * upcast_size("float16")]))
+                                                for mma_q in Tx.unroll(NUM_MMA_Q):
                                                     mma_sync_m16n16k16_row_col_f16f16f32(
                                                         o_frag, o_frag.byte_offset_of([mma_q, mma_d, 0]),
                                                         s_frag_f16, s_frag_f16.byte_offset_of([mma_q, mma_kv, 0]),
@@ -593,10 +592,10 @@ __device__ __forceinline__ float {func_name}() {{
                                         v_smem_offset_r[0] = advance_offset_by_row(16, UPCAST_STRIDE_V, v_smem_offset_r[0]) - size_of("float16") * NUM_MMA_D_VO
                                     v_smem_offset_r[0] -= 16 * NUM_MMA_KV * UPCAST_STRIDE_V
 
-                            @T.macro
+                            @Tx.macro
                             def loop_body(WITH_MASK: bool):
                                 prefetch_offset(block_iter_base[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV)
-                                T.ptx.cp_async.wait_group(1)
+                                Tx.ptx.cp_async.wait_group(1)
                                 scope_sync(wg_id)
 
                                 compute_qk()
@@ -606,21 +605,21 @@ __device__ __forceinline__ float {func_name}() {{
 
                                 scope_sync(wg_id)
                                 page_produce_kv(False, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, k_smem_offset_w, k_smem)
-                                T.ptx.cp_async.commit_group()
-                                T.ptx.cp_async.wait_group(1)
+                                Tx.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.wait_group(1)
 
                                 scope_sync(wg_id)
                                 compute_sfm_v()
                                 scope_sync(wg_id)
 
                                 page_produce_kv(True, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, v_smem_offset_w, v_smem)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
 
                             prefetch_offset(block_iter_base[0] + kv_tile_idx[0] * CTA_TILE_KV)
                             page_produce_kv(False, kv_start[0] + kv_tile_idx[0] * CTA_TILE_KV, k_smem_offset_w, k_smem)
-                            T.ptx.cp_async.commit_group()
+                            Tx.ptx.cp_async.commit_group()
                             page_produce_kv(True, kv_start[0] + kv_tile_idx[0] * CTA_TILE_KV, v_smem_offset_w, v_smem)
-                            T.ptx.cp_async.commit_group()
+                            Tx.ptx.cp_async.commit_group()
 
                             while kv_tile_idx[0] >= mast_tile_idx[0] and kv_tile_idx[0] > 0:
                                 loop_body(True)
@@ -630,7 +629,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 loop_body(False)
                                 kv_tile_idx[0] -= 1
 
-                            T.ptx.cp_async.wait_group(0)
+                            Tx.ptx.cp_async.wait_group(0)
                             scope_sync(wg_id)
 
                             while kv_tile_idx[0] >= 0:
@@ -642,132 +641,132 @@ __device__ __forceinline__ float {func_name}() {{
 
                             scope_sync(wg_id)
 
-                            @T.macro
+                            @Tx.macro
                             def finalize_m():
-                                with T.thread():
+                                with Tx.thread():
                                     sm_scale = float_var(get_sm_scale())
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for j in T.unroll(2):
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for j in Tx.unroll(2):
                                             if m[mma_q, j] != -INF:
                                                 m[mma_q, j] *= sm_scale[0]
 
-                            @T.macro
+                            @Tx.macro
                             def threadblock_sync_mdo_states():
-                                for mma_q in T.unroll(NUM_MMA_Q):
-                                    for mma_d in T.unroll(NUM_MMA_D_VO):
+                                for mma_q in Tx.unroll(NUM_MMA_Q):
+                                    for mma_d in Tx.unroll(NUM_MMA_D_VO):
                                         Tx.copy(cta_sync_o_smem[wg_id, warp_id, mma_q, mma_d, lane_id, :], o_frag[mma_q, mma_d, :])
 
-                                for mma_q in T.unroll(NUM_MMA_Q):
-                                    for j in T.unroll(2):
-                                        with T.thread():
-                                            md = T.alloc_local([2], "float32")
+                                for mma_q in Tx.unroll(NUM_MMA_Q):
+                                    for j in Tx.unroll(2):
+                                        with Tx.thread():
+                                            md = Tx.alloc_local([2], "float32")
                                             md[0] = m[mma_q, j]
                                             md[1] = d[mma_q, j]
                                             Tx.copy(cta_sync_md_smem[wg_id, warp_id, mma_q, j * 8 + lane_id // 4, :], md[:])
                                 scope_sync(wg_id)
 
-                                for mma_q in T.unroll(NUM_MMA_Q):
-                                    with T.thread():
-                                        o_scale = T.alloc_local([2, NUM_WARPS_KV], "float32")
-                                        for j in T.unroll(2):
-                                            with T.thread():
+                                for mma_q in Tx.unroll(NUM_MMA_Q):
+                                    with Tx.thread():
+                                        o_scale = Tx.alloc_local([2, NUM_WARPS_KV], "float32")
+                                        for j in Tx.unroll(2):
+                                            with Tx.thread():
                                                 m_new = float_var(-INF)
                                                 d_new = float_var(1.0)
-                                                for i in T.unroll(NUM_WARPS_KV):
-                                                    with T.thread():
-                                                        md = T.alloc_local([2], "float32")
+                                                for i in Tx.unroll(NUM_WARPS_KV):
+                                                    with Tx.thread():
+                                                        md = Tx.alloc_local([2], "float32")
                                                         Tx.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         m_prev = float_var(m_new[0])
                                                         d_prev = float_var(d_new[0])
-                                                        m_new[0] = T.max(m_new[0], md[0])
+                                                        m_new[0] = Tx.max(m_new[0], md[0])
                                                         d_new[0] = d_prev[0] * ptx_exp2(m_prev[0] - m_new[0]) + md[1] * ptx_exp2(md[0] - m_new[0])
-                                                for i in T.unroll(NUM_WARPS_KV):
-                                                    with T.thread():
-                                                        md = T.alloc_local([2], "float32")
+                                                for i in Tx.unroll(NUM_WARPS_KV):
+                                                    with Tx.thread():
+                                                        md = Tx.alloc_local([2], "float32")
                                                         Tx.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         o_scale[j, i] = ptx_exp2(md[0] - m_new[0])
                                                 m[mma_q, j] = m_new[0]
                                                 d[mma_q, j] = d_new[0]
-                                        for mma_d in T.unroll(NUM_MMA_D_VO):
-                                            with T.thread():
-                                                o_new = T.alloc_local([8], "float32")
-                                                for i in T.unroll(8):
+                                        for mma_d in Tx.unroll(NUM_MMA_D_VO):
+                                            with Tx.thread():
+                                                o_new = Tx.alloc_local([8], "float32")
+                                                for i in Tx.unroll(8):
                                                     o_new[i] = 0.0
-                                                for i in T.unroll(NUM_WARPS_KV):
-                                                    with T.thread():
-                                                        o_i = T.alloc_local([8], "float32")
+                                                for i in Tx.unroll(NUM_WARPS_KV):
+                                                    with Tx.thread():
+                                                        o_i = Tx.alloc_local([8], "float32")
                                                         Tx.copy(o_i[:], cta_sync_o_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, mma_d, lane_id, :])
-                                                        for reg_id in T.unroll(8):
+                                                        for reg_id in Tx.unroll(8):
                                                             o_new[reg_id] += o_i[reg_id] * o_scale[(reg_id % 4) // 2, i]
                                                 Tx.copy(o_frag[mma_q, mma_d, :], o_new[:])
 
-                            @T.macro
+                            @Tx.macro
                             def normalize_d():
-                                with T.thread():
-                                    d_rcp = T.alloc_local([NUM_MMA_Q, 2], "float32")
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for j in T.unroll(2):
-                                            d_rcp[mma_q, j] = T.if_then_else(m[mma_q, j] != -INF, ptx_rcp(d[mma_q, j]), 0.0)
-                                    for mma_q in T.unroll(NUM_MMA_Q):
-                                        for mma_d in T.unroll(NUM_MMA_D_VO):
-                                            for reg_id in T.unroll(8):
+                                with Tx.thread():
+                                    d_rcp = Tx.alloc_local([NUM_MMA_Q, 2], "float32")
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for j in Tx.unroll(2):
+                                            d_rcp[mma_q, j] = Tx.if_then_else(m[mma_q, j] != -INF, ptx_rcp(d[mma_q, j]), 0.0)
+                                    for mma_q in Tx.unroll(NUM_MMA_Q):
+                                        for mma_d in Tx.unroll(NUM_MMA_D_VO):
+                                            for reg_id in Tx.unroll(8):
                                                 o_frag[mma_q, mma_d, reg_id] *= d_rcp[mma_q, (reg_id >> 1) & 1]
 
-                            @T.macro
+                            @Tx.macro
                             def store_o_to_smem(o_smem):
-                                for mma_q in T.unroll(NUM_MMA_Q):
-                                    for mma_d in T.unroll(NUM_MMA_D_VO):
-                                        with T.thread():
-                                            o_frag_f16 = T.alloc_local([8], "float16")
+                                for mma_q in Tx.unroll(NUM_MMA_Q):
+                                    for mma_d in Tx.unroll(NUM_MMA_D_VO):
+                                        with Tx.thread():
+                                            o_frag_f16 = Tx.alloc_local([8], "float16")
                                             Tx.cast(o_frag_f16[:], o_frag[mma_q, mma_d, :])
                                             o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + (get_warp_idx_q(tid) * NUM_MMA_Q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
-                                            T.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
+                                            Tx.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
 
-                            @T.macro
+                            @Tx.macro
                             def write_partial_o(o_ptr_base_offset, o_stride_n):
-                                o_packed_idx_base_warp = T.meta_var(qo_packed_idx_base[0])
-                                o_packed_idx_base_cta = T.meta_var(packed_qo_start[0])
-                                o_smem = T.meta_var(smem_o)
+                                o_packed_idx_base_warp = Tx.meta_var(qo_packed_idx_base[0])
+                                o_packed_idx_base_cta = Tx.meta_var(packed_qo_start[0])
+                                o_smem = Tx.meta_var(smem_o)
                                 warp_id_x = int_var(get_warp_idx_q(tid))
                                 warp_id_z = int_var(get_warp_idx_kv(tid))
 
                                 if warp_id_z[0] == 0:
-                                    with T.thread():
+                                    with Tx.thread():
                                         store_o_to_smem(o_smem)
                                         o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
-                                        for mma_q in T.unroll(NUM_MMA_Q):
-                                            for j in T.unroll(4):
-                                                with T.thread():
+                                        for mma_q in Tx.unroll(NUM_MMA_Q):
+                                            for j in Tx.unroll(4):
+                                                with Tx.thread():
                                                     o_packed_idx = int_var(o_packed_idx_base_warp + lane_id // 8 + mma_q * 16 + j * 4)
-                                                    q = int_var(T.floordiv(o_packed_idx[0], GQA_GROUP_SIZE))
-                                                    r = int_var(T.floormod(o_packed_idx[0], GQA_GROUP_SIZE))
+                                                    q = int_var(Tx.floordiv(o_packed_idx[0], GQA_GROUP_SIZE))
+                                                    r = int_var(Tx.floormod(o_packed_idx[0], GQA_GROUP_SIZE))
                                                     o_ptr_offset = int_var(o_ptr_base_offset + (o_packed_idx[0] - o_packed_idx_base_cta) * o_stride_n + (lane_id % 8) * upcast_size("float16"))
-                                                    for mma_do in T.unroll(NUM_MMA_D_VO // 4):
+                                                    for mma_do in Tx.unroll(NUM_MMA_D_VO // 4):
                                                         if q[0] < qo_upperbound[0]:
                                                             store_128b(partial_o_buf.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
                                                         o_ptr_offset[0] += 8 * upcast_size("float16")
                                                         o_smem_offset_w[0] = advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
                                                     o_smem_offset_w[0] = advance_offset_by_row(4, UPCAST_STRIDE_O, o_smem_offset_w[0]) - 2 * NUM_MMA_D_VO
 
-                            @T.macro
+                            @Tx.macro
                             def write_final_o(o_ptr_base_offset):
-                                o_packed_idx_base = T.meta_var(qo_packed_idx_base[0])
-                                o_smem = T.meta_var(smem_o)
+                                o_packed_idx_base = Tx.meta_var(qo_packed_idx_base[0])
+                                o_smem = Tx.meta_var(smem_o)
                                 warp_id_x = int_var(get_warp_idx_q(tid))
                                 warp_id_z = int_var(get_warp_idx_kv(tid))
 
                                 if warp_id_z[0] == 0:
-                                    with T.thread():
+                                    with Tx.thread():
                                         store_o_to_smem(o_smem)
                                         o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
-                                        for mma_q in T.unroll(NUM_MMA_Q):
-                                            for j in T.unroll(4):
-                                                with T.thread():
+                                        for mma_q in Tx.unroll(NUM_MMA_Q):
+                                            for j in Tx.unroll(4):
+                                                with Tx.thread():
                                                     o_packed_idx = int_var(o_packed_idx_base + lane_id // 8 + mma_q * 16 + j * 4)
-                                                    q = int_var(T.floordiv(o_packed_idx[0], GQA_GROUP_SIZE))
-                                                    r = int_var(T.floormod(o_packed_idx[0], GQA_GROUP_SIZE))
+                                                    q = int_var(Tx.floordiv(o_packed_idx[0], GQA_GROUP_SIZE))
+                                                    r = int_var(Tx.floormod(o_packed_idx[0], GQA_GROUP_SIZE))
                                                     o_ptr_offset = int_var(o_ptr_base_offset + o_buf.elem_offset_of([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
-                                                    for mma_do in T.unroll(NUM_MMA_D_VO // 4):
+                                                    for mma_do in Tx.unroll(NUM_MMA_D_VO // 4):
                                                         if q[0] < qo_upperbound[0]:
                                                             o_buf_1d = o_buf.view(-1)
                                                             store_128b(o_buf_1d.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
@@ -775,19 +774,19 @@ __device__ __forceinline__ float {func_name}() {{
                                                         o_smem_offset_w[0] = advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
                                                     o_smem_offset_w[0] = advance_offset_by_row(4, UPCAST_STRIDE_O, o_smem_offset_w[0]) - 2 * NUM_MMA_D_VO
 
-                            @T.macro
+                            @Tx.macro
                             def write_partial_lse():
                                 if num_kv_chunks[0] > 1:
                                     if get_warp_idx_kv(tid) == 0:
-                                        for mma_q in T.unroll(NUM_MMA_Q):
-                                            for j in T.unroll(2):
-                                                with T.thread():
+                                        for mma_q in Tx.unroll(NUM_MMA_Q):
+                                            for j in Tx.unroll(2):
+                                                with Tx.thread():
                                                     packed_qo_idx = int_var(qo_packed_idx_base[0] + lane_id // 4 + j * 8 + mma_q * 16)
-                                                    q = int_var(T.floordiv(packed_qo_idx[0], GQA_GROUP_SIZE))
-                                                    r = int_var(T.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
+                                                    q = int_var(Tx.floordiv(packed_qo_idx[0], GQA_GROUP_SIZE))
+                                                    r = int_var(Tx.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
                                                     if q[0] < qo_upperbound[0]:
-                                                        partial_lse_buf_offset = T.meta_var((o_indptr[0] + (packed_qo_idx[0] - packed_qo_start[0]) * num_kv_chunks[0] + kv_chunk_idx[0]) * KV_HEADS + kv_head_idx[0])
-                                                        partial_lse_buf[partial_lse_buf_offset] = ptx_log2(d[mma_q, j]) + T.cast(m[mma_q, j], "float32")
+                                                        partial_lse_buf_offset = Tx.meta_var((o_indptr[0] + (packed_qo_idx[0] - packed_qo_start[0]) * num_kv_chunks[0] + kv_chunk_idx[0]) * KV_HEADS + kv_head_idx[0])
+                                                        partial_lse_buf[partial_lse_buf_offset] = ptx_log2(d[mma_q, j]) + Tx.cast(m[mma_q, j], "float32")
 
                             finalize_m()
                             threadblock_sync_mdo_states()
@@ -795,11 +794,11 @@ __device__ __forceinline__ float {func_name}() {{
 
                             if num_kv_chunks[0] > 1:
                                 # reuse q, k, v's smem
-                                with T.thread():
+                                with Tx.thread():
                                     o_ptr_base_offset = int_var(((o_indptr[0] + kv_chunk_idx[0]) * KV_HEADS + kv_head_idx[0]) * HEAD_DIM)
                                     write_partial_o(o_ptr_base_offset[0], num_kv_chunks[0] * KV_HEADS * HEAD_DIM)
                             else:
-                                with T.thread():
+                                with Tx.thread():
                                     o_ptr_base_offset = int_var(o_buf.elem_offset_of([q_indptr[0], kv_head_idx[0] * GQA_GROUP_SIZE, 0]))
                                     write_final_o(o_ptr_base_offset[0])
 
@@ -826,35 +825,35 @@ __device__ __forceinline__ float {func_name}() {{
         class State:
             def __init__(self, vec_size):
                 self.vec_size = vec_size
-                self.o = T.alloc_local([vec_size], "float32", name="state_o")
-                self.m = T.alloc_local([1], "float32", name="state_m")
-                self.d = T.alloc_local([1], "float32", name="state_d")
+                self.o = Tx.alloc_local([vec_size], "float32", name="state_o")
+                self.m = Tx.alloc_local([1], "float32", name="state_m")
+                self.d = Tx.alloc_local([1], "float32", name="state_d")
 
-            @T.macro
+            @Tx.macro
             def init(self):
-                with T.thread():
-                    for i in T.unroll(self.vec_size):
+                with Tx.thread():
+                    for i in Tx.unroll(self.vec_size):
                         self.o[i] = 0.0
                     self.m[0] = -INF
                     self.d[0] = 1.0
 
             # fmt: off
-            @T.macro
+            @Tx.macro
             def merge(self, other_o, other_m, other_d):
-                with T.thread():
+                with Tx.thread():
                     m_prev = float_var(self.m[0])
                     d_prev = float_var(self.d[0])
-                    self.m[0] = T.max(m_prev[0], other_m)
+                    self.m[0] = Tx.max(m_prev[0], other_m)
                     self.d[0] = d_prev[0] * ptx_exp2(m_prev[0] - self.m[0]) + other_d * ptx_exp2(other_m - self.m[0])
-                    for i in T.unroll(self.vec_size):
+                    for i in Tx.unroll(self.vec_size):
                         self.o[i] = self.o[i] * ptx_exp2(m_prev[0] - self.m[0]) + other_o[i] * ptx_exp2(other_m - self.m[0])
             # fmt: on
 
             # fmt: off
-            @T.macro
+            @Tx.macro
             def normalize(self):
-                with T.thread():
-                    for i in T.unroll(self.vec_size):
+                with Tx.thread():
+                    for i in Tx.unroll(self.vec_size):
                         self.o[i] = fdivdef(self.o[i], self.d[0])
             # fmt: on
 
@@ -862,35 +861,35 @@ __device__ __forceinline__ float {func_name}() {{
                 return self.m[0] + ptx_log2(self.d[0])
 
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def batch_attention_merge(
-            partial_o_ptr: T.handle,
-            final_o_ptr: T.handle,
-            partial_lse_ptr: T.handle,
-            num_qo_len_ptr: T.handle,
-            merge_indptr_ptr: T.handle,
-            merge_o_indices_ptr: T.handle,
+            partial_o_ptr: Tx.handle,
+            final_o_ptr: Tx.handle,
+            partial_lse_ptr: Tx.handle,
+            num_qo_len_ptr: Tx.handle,
+            merge_indptr_ptr: Tx.handle,
+            merge_o_indices_ptr: Tx.handle,
         ):
-            batch_size = T.int32()
+            batch_size = Tx.int32()
 
-            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
-            final_o_buf = T.match_buffer(final_o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
-            num_qo_len_buf = T.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
-            merge_indptr_buf = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            merge_o_indices_buf = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            with T.kernel():
-                bx = T.cta_id([SM_COUNT], parent="kernel")
-                warp_id = T.warp_id([NUM_THREADS // 32], parent="cta")
-                lane_id = T.thread_id([32], parent="warp")
+            partial_o_buf = Tx.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
+            final_o_buf = Tx.match_buffer(final_o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            partial_lse_buf = Tx.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
+            num_qo_len_buf = Tx.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
+            merge_indptr_buf = Tx.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
+            merge_o_indices_buf = Tx.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
+            with Tx.kernel():
+                bx = Tx.cta_id([SM_COUNT], parent="kernel")
+                warp_id = Tx.warp_id([NUM_THREADS // 32], parent="cta")
+                lane_id = Tx.thread_id([32], parent="warp")
 
-                with T.thread():
+                with Tx.thread():
                     tx = int_var(lane_id % BDX)
                     ty = int_var(lane_id // BDX)
                     worker_id = int_var(bx * NUM_WARPS + warp_id)
 
-                    buf = T.alloc_shared([SMEM_SIZE], "uint8")
-                    pool = T.meta_var(Tx.PoolAllocator(buf.data))
+                    buf = Tx.alloc_shared([SMEM_SIZE], "uint8")
+                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
                     v_smem = pool.alloc([NUM_WARPS, NUM_SMEM_STAGES, BDY, HEAD_DIM], "float16")
                     s_smem = pool.alloc([NUM_WARPS, 32], "float32")
 
@@ -898,73 +897,73 @@ __device__ __forceinline__ float {func_name}() {{
 
                     i = int_var(worker_id[0])
                     while i[0] < num_qo_len_local[0] * KV_HEADS:
-                        with T.thread():
-                            T.cuda.warp_sync()
-                            packed_qo_idx = int_var(T.floordiv(i[0], KV_HEADS))
-                            kv_head_idx = int_var(T.floormod(i[0], KV_HEADS))
-                            qo_head_idx = int_var(T.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
+                        with Tx.thread():
+                            Tx.cuda.warp_sync()
+                            packed_qo_idx = int_var(Tx.floordiv(i[0], KV_HEADS))
+                            kv_head_idx = int_var(Tx.floormod(i[0], KV_HEADS))
+                            qo_head_idx = int_var(Tx.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
 
-                            partial_idx_to_offset = T.meta_var(lambda off: (merge_indptr_buf[packed_qo_idx[0]] + off) * KV_HEADS + kv_head_idx[0])
-                            merge_idx_to_offset = T.meta_var((merge_o_indices_buf[packed_qo_idx[0]] * KV_HEADS + kv_head_idx[0]) * GQA_GROUP_SIZE + qo_head_idx[0])
+                            partial_idx_to_offset = Tx.meta_var(lambda off: (merge_indptr_buf[packed_qo_idx[0]] + off) * KV_HEADS + kv_head_idx[0])
+                            merge_idx_to_offset = Tx.meta_var((merge_o_indices_buf[packed_qo_idx[0]] * KV_HEADS + kv_head_idx[0]) * GQA_GROUP_SIZE + qo_head_idx[0])
 
-                            state = T.meta_var(State(VEC_SIZE))
+                            state = Tx.meta_var(State(VEC_SIZE))
                             state.init()
 
                             num_index_sets = int_var(merge_indptr_buf[packed_qo_idx[0] + 1] - merge_indptr_buf[packed_qo_idx[0]])
 
                             # prelogue
                             for it in range(NUM_SMEM_STAGES):
-                                with T.thread():
-                                    T.ptx.cp_async(
+                                with Tx.thread():
+                                    Tx.ptx.cp_async(
                                         v_smem.ptr_to([warp_id, it, ty[0], tx[0] * VEC_SIZE]),
                                         partial_o_buf.ptr_to([partial_idx_to_offset(it * BDY + ty[0]) * HEAD_DIM + tx[0] * VEC_SIZE]),
                                         cp_size=16, prefetch_size=128,
                                         predicate=it * BDY + ty[0] < num_index_sets[0]
                                     )
-                                    T.ptx.cp_async.commit_group()
+                                    Tx.ptx.cp_async.commit_group()
 
-                            for it in T.serial(ceildiv(num_index_sets[0], BDY)):
-                                with T.thread():
+                            for it in Tx.serial(ceildiv(num_index_sets[0], BDY)):
+                                with Tx.thread():
                                     if it % BDX == 0:
-                                        s_smem[warp_id, ty[0] * BDX + tx[0]] = T.if_then_else(
+                                        s_smem[warp_id, ty[0] * BDX + tx[0]] = Tx.if_then_else(
                                             it * BDY + (ty[0] * BDX + tx[0]) < num_index_sets[0],
                                             partial_lse_buf[partial_idx_to_offset(it * BDY + ty[0] * BDX + tx[0])],
-                                            T.float32(0)
+                                            Tx.float32(0)
                                         )
-                                        T.cuda.warp_sync()
-                                    T.ptx.cp_async.wait_group(NUM_SMEM_STAGES - 1)
-                                    T.cuda.warp_sync()
+                                        Tx.cuda.warp_sync()
+                                    Tx.ptx.cp_async.wait_group(NUM_SMEM_STAGES - 1)
+                                    Tx.cuda.warp_sync()
 
-                                    v = T.alloc_local([VEC_SIZE], "float32")
+                                    v = Tx.alloc_local([VEC_SIZE], "float32")
                                     cast_load(v, VEC_SIZE, v_smem, warp_id, it % NUM_SMEM_STAGES, ty[0], tx[0] * VEC_SIZE)
 
                                     if it * BDY + ty[0] < num_index_sets[0]:
                                         s = float_var(s_smem[warp_id, (it % BDX) * BDY + ty[0]])
                                         state.merge(v, s[0], 1)
-                                    T.cuda.warp_sync()
+                                    Tx.cuda.warp_sync()
 
-                                    T.ptx.cp_async(
+                                    Tx.ptx.cp_async(
                                         v_smem.ptr_to([warp_id, (it % NUM_SMEM_STAGES), ty[0], tx[0] * VEC_SIZE]),
                                         partial_o_buf.ptr_to([partial_idx_to_offset((it + NUM_SMEM_STAGES) * BDY + ty[0]) * HEAD_DIM + tx[0] * VEC_SIZE]),
                                         cp_size=16, prefetch_size=128,
                                         predicate=(it + NUM_SMEM_STAGES) * BDY + ty[0] < num_index_sets[0]
                                     )
-                                    T.ptx.cp_async.commit_group()
+                                    Tx.ptx.cp_async.commit_group()
 
-                            T.ptx.cp_async.wait_group(0)
-                            T.cuda.warp_sync()
+                            Tx.ptx.cp_async.wait_group(0)
+                            Tx.cuda.warp_sync()
 
-                            @T.macro
+                            @Tx.macro
                             def warp_sync_state():
                                 cast_store(state.o, VEC_SIZE, v_smem, warp_id, 0, ty[0], tx[0] * VEC_SIZE)
                                 s_smem[warp_id, ty[0]] = state.get_lse()
                                 state.init()
-                                T.cuda.warp_sync()
+                                Tx.cuda.warp_sync()
 
-                                for it in T.unroll(BDY):
-                                    with T.thread():
+                                for it in Tx.unroll(BDY):
+                                    with Tx.thread():
                                         s = float_var(s_smem[warp_id, it])
-                                        v = T.alloc_local([VEC_SIZE], "float32")
+                                        v = Tx.alloc_local([VEC_SIZE], "float32")
                                         cast_load(v, VEC_SIZE, v_smem, warp_id, 0, it, tx[0] * VEC_SIZE)
                                         state.merge(v, s[0], 1)
 

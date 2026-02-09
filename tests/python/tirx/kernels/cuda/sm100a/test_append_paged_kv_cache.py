@@ -20,7 +20,6 @@ import numpy as np
 import pytest
 
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
@@ -62,32 +61,32 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
     BDX = HEAD_DIM // VEC_SIZE
     BDY = THREAD_NUM // BDX
     # fmt: off
-    @T.prim_func(tirx=True)
-    def append_paged_kv_cache(cache_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle, pos_map_ptr: T.handle):
-        batch_size = T.int32()
-        max_page_num = T.int32()
-        page_size = T.int32()
+    @Tx.prim_func(tirx=True)
+    def append_paged_kv_cache(cache_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, pos_map_ptr: Tx.handle):
+        batch_size = Tx.int32()
+        max_page_num = Tx.int32()
+        page_size = Tx.int32()
 
-        cache_global = T.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global")
-        k_global = T.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
-        v_global = T.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
-        pos_map_global = T.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", offset_factor=1)
+        cache_global = Tx.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global")
+        k_global = Tx.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
+        v_global = Tx.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
+        pos_map_global = Tx.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", offset_factor=1)
 
-        with T.kernel():
-            tx, ty = T.thread_id([BDX, BDY], parent="cta")
-            bx = T.cta_id([SM_COUNT], parent="kernel")
+        with Tx.kernel():
+            tx, ty = Tx.thread_id([BDX, BDY], parent="cta")
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
 
-            stx = T.meta_var(tx * VEC_SIZE)
+            stx = Tx.meta_var(tx * VEC_SIZE)
 
-            with T.thread():
-                idx = T.alloc_local([1], "int32")
-                real_idx = T.alloc_local([1], "int32")
-                batch_id = T.alloc_local([1], "int32")
-                token_id = T.alloc_local([1], "int32")
-                head_id = T.alloc_local([1], "int32")
-                pos = T.alloc_local([1], "int32")
-                kv_id = T.alloc_local([1], "int32")
-                vec = T.alloc_local([VEC_SIZE], "float16")
+            with Tx.thread():
+                idx = Tx.alloc_local([1], "int32")
+                real_idx = Tx.alloc_local([1], "int32")
+                batch_id = Tx.alloc_local([1], "int32")
+                token_id = Tx.alloc_local([1], "int32")
+                head_id = Tx.alloc_local([1], "int32")
+                pos = Tx.alloc_local([1], "int32")
+                kv_id = Tx.alloc_local([1], "int32")
+                vec = Tx.alloc_local([VEC_SIZE], "float16")
 
                 idx[0] = bx * BDY + ty
                 while idx[0] < batch_size * NUM_TOKENS * NUM_HEADS * 2:

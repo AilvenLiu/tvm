@@ -8,7 +8,7 @@ import tvm.testing
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
 from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.utils.utils import get_source
@@ -76,10 +76,10 @@ class EPDispatchKernel:
             ProfileEventType.EP_DISPATCH_RECV,
         )
 
-    @T.macro
+    @Tx.macro
     def run_tile(self, tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
-        with T.cta():
+        with Tx.cta():
             tile.run(*args)
 
     def _add_tile(self, tile, profiler_event_type):
@@ -118,61 +118,61 @@ class EPDispatchKernel:
         local_num_experts = total_num_experts // world_size
 
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def main_dispatch(
             # input
-            send_tokens_ptr: T.handle,
-            route_experts_ptr: T.handle,
+            send_tokens_ptr: Tx.handle,
+            route_experts_ptr: Tx.handle,
 
             # output
-            recv_tokens_ptr: T.handle,
-            num_recv_tokens_ptr: T.handle,
+            recv_tokens_ptr: Tx.handle,
+            num_recv_tokens_ptr: Tx.handle,
 
             # signal buffers
-            target_wait_ptr: T.handle,
-            actual_wait_ptr: T.handle,
+            target_wait_ptr: Tx.handle,
+            actual_wait_ptr: Tx.handle,
 
             # auxiliary buffers
-            dst_token_indices_ptr: T.handle,
-            dst_token_idx_ptr: T.handle,
+            dst_token_indices_ptr: Tx.handle,
+            dst_token_idx_ptr: Tx.handle,
         ):
-            T.func_attr({"global_symbol": "main_dispatch", "target": T.target("cuda")})
+            Tx.func_attr({"global_symbol": "main_dispatch", "target": Tx.target("cuda")})
 
             # match buffers
-            send_tokens_global = T.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")
-            route_experts_global = T.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
-            recv_tokens_global = T.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")
-            num_recv_tokens_global = T.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
-            target_wait_global = T.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
-            actual_wait_global = T.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
-            dst_token_indices_global = T.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
-            dst_token_idx_global = T.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")
+            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")
+            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
+            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")
+            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
+            target_wait_global = Tx.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
+            actual_wait_global = Tx.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
+            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            dst_token_idx_global = Tx.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")
 
             self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
 
-            with T.kernel():
-                bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = T.thread_id([32], parent="warp")
-                tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-                rank = T.nvshmem.my_pe()
+            with Tx.kernel():
+                bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                lane_id = Tx.thread_id([32], parent="warp")
+                tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                rank = Tx.nvshmem.my_pe()
 
-                with T.cta():
-                    buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                with Tx.cta():
+                    buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+                    smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
                     self.device_init_all(smem_manager)
                     self.class_init_all(smem_manager)
 
                     smem_manager.init()
 
-                    with T.cta()[KernelConfig.SM_NUMBER - 16 : KernelConfig.SM_NUMBER]:
-                        dst_expert_st = T.meta_var(T.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)
+                    with Tx.cta()[KernelConfig.SM_NUMBER - 16 : KernelConfig.SM_NUMBER]:
+                        dst_expert_st = Tx.meta_var(Tx.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)
                         self.run_tile(self.ep_dispatch_precompute_tile, dst_expert_st, route_experts_global, target_wait_global, rank)
-                    with T.cta()[0:num_tokens]:
+                    with Tx.cta()[0:num_tokens]:
                         self.run_tile(self.ep_dispatch_send_tile, bx, send_tokens_global, route_experts_global, recv_tokens_global, actual_wait_global, dst_token_indices_global, dst_token_idx_global, rank)
-                    with T.cta()[0:total_num_experts]:
-                        local_expert_idx = T.meta_var(T.int32(bx // world_size))
-                        src_rank_idx = T.meta_var(T.int32(bx % world_size))
+                    with Tx.cta()[0:total_num_experts]:
+                        local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
+                        src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
                         self.run_tile(self.ep_dispatch_recv_tile, local_expert_idx, src_rank_idx, num_recv_tokens_global, target_wait_global, actual_wait_global, rank)
 
                     smem_manager.exit_tile_runtime()
@@ -194,7 +194,7 @@ class EPDispatchKernel:
     ):
         @I.ir_module(tirx=True)
         class StaticModule:
-            @T.prim_func(tirx=True)
+            @Tx.prim_func(tirx=True)
             def main_dispatch():
                 pass
 
@@ -258,10 +258,10 @@ class EPCombineKernel:
             ProfileEventType.EP_COMBINE_RECV,
         )
 
-    @T.macro
+    @Tx.macro
     def run_tile(self, tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
-        with T.cta():
+        with Tx.cta():
             tile.run(*args)
 
     def _add_tile(self, tile, profiler_event_type):
@@ -300,58 +300,58 @@ class EPCombineKernel:
         local_num_experts = total_num_experts // world_size
 
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def main_combine(
             # input
-            send_tokens_ptr: T.handle,
-            route_experts_ptr: T.handle,
-            route_weights_ptr: T.handle,
-            num_recv_tokens_ptr: T.handle,
-            dst_token_indices_ptr: T.handle,
+            send_tokens_ptr: Tx.handle,
+            route_experts_ptr: Tx.handle,
+            route_weights_ptr: Tx.handle,
+            num_recv_tokens_ptr: Tx.handle,
+            dst_token_indices_ptr: Tx.handle,
 
             # output
-            recv_tokens_ptr: T.handle,
+            recv_tokens_ptr: Tx.handle,
 
             # signal buffers
-            buf_wait_ptr: T.handle,
+            buf_wait_ptr: Tx.handle,
 
             # auxiliary buffers
-            buf_recv_ptr: T.handle,
+            buf_recv_ptr: Tx.handle,
         ):
-            T.func_attr({"global_symbol": "main_combine", "target": T.target("cuda")})
+            Tx.func_attr({"global_symbol": "main_combine", "target": Tx.target("cuda")})
 
             # match buffers
-            send_tokens_global = T.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")
-            route_experts_global = T.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
-            route_weights_global = T.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")
-            num_recv_tokens_global = T.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
-            dst_token_indices_global = T.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
-            recv_tokens_global = T.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")
-            buf_wait_global = T.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")
-            buf_recv_global = T.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")
+            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")
+            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
+            route_weights_global = Tx.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")
+            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
+            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")
+            buf_wait_global = Tx.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")
+            buf_recv_global = Tx.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")
 
             self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
 
-            with T.kernel():
-                bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = T.thread_id([32], parent="warp")
-                tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-                rank = T.nvshmem.my_pe()
+            with Tx.kernel():
+                bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                lane_id = Tx.thread_id([32], parent="warp")
+                tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                rank = Tx.nvshmem.my_pe()
 
-                with T.cta():
-                    buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                with Tx.cta():
+                    buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+                    smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
                     self.device_init_all(smem_manager)
                     self.class_init_all(smem_manager)
 
                     smem_manager.init()
 
-                    with T.cta()[0:total_num_experts]:
-                        local_expert_idx = T.meta_var(T.int32(bx // world_size))
-                        src_rank_idx = T.meta_var(T.int32(bx % world_size))
+                    with Tx.cta()[0:total_num_experts]:
+                        local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
+                        src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
                         self.run_tile(self.ep_combine_send_tile, local_expert_idx, src_rank_idx, send_tokens_global, buf_recv_global, buf_wait_global, num_recv_tokens_global, rank)
-                    with T.cta()[0:num_tokens]:
+                    with Tx.cta()[0:num_tokens]:
                         self.run_tile(self.ep_combine_recv_tile, bx, recv_tokens_global, route_experts_global, route_weights_global, buf_recv_global, buf_wait_global, dst_token_indices_global, rank)
 
                     smem_manager.exit_tile_runtime()
@@ -373,7 +373,7 @@ class EPCombineKernel:
     ):
         @I.ir_module(tirx=True)
         class StaticModule:
-            @T.prim_func(tirx=True)
+            @Tx.prim_func(tirx=True)
             def main_combine():
                 pass
 

@@ -7,7 +7,7 @@ from typing import Type, Literal
 import tvm
 import tvm.testing
 from tvm.script import ir as I
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SemaphoreBase
@@ -68,9 +68,9 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self._set_events(Semaphore, etensor_workspace_global)
         self.set_events_complete(False, Semaphore, etensor_workspace_global)
 
-    @T.macro
+    @Tx.macro
     def task_impl_gemm(self, A, B, partial, output, output32):
-        with T.cta():
+        with Tx.cta():
             if self.use_tma_reduce:
                 self.run_tile(
                     self.gemm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
@@ -93,9 +93,9 @@ class GemmConfigSearcher(MegaKernelWrapper):
                     scope="warpgroup", scope_id=0,
                 )
 
-    @T.macro
+    @Tx.macro
     def task_reduce(self, partial_global, output_global):
-        with T.cta():
+        with Tx.cta():
             self.tile_scheduler.wait(self.evt, self.tile_scheduler.n_idx, wait_level="warp")
             self.run_tile(
                 self.reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
@@ -103,7 +103,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
             )
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def fused_body(
         self,
         A_global,
@@ -121,16 +121,16 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self.set_tiles()
         self.host_init_all()
 
-        with T.kernel():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
             self.init_profiler(profiler_buffer)
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                 
                 self.set_smem_manager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
                 self.device_init_all(self.smem_manager)
@@ -151,10 +151,10 @@ class GemmConfigSearcher(MegaKernelWrapper):
                         self.task_reduce(partial_global, output_global)
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(False)
-                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
                         self.task_impl_wait_etensor_init_complete(False)
                     else:
-                        T.cuda.trap_when_assert_failed(False)
+                        Tx.cuda.trap_when_assert_failed(False)
                     self.smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
                 if self.profiler_on:
@@ -163,34 +163,34 @@ class GemmConfigSearcher(MegaKernelWrapper):
 
     def get_func_static(self, unfused=False):
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def main(
             # input and output
-            A_ptr: T.handle,
-            B_ptr: T.handle,
-            partial_ptr: T.handle,
-            output_ptr: T.handle,
-            output32_ptr: T.handle,
-            etensor_workspace_ptr: T.handle,
-            exec_queue_ptr: T.handle,
-            profiler_buffer: T.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
+            A_ptr: Tx.handle,
+            B_ptr: Tx.handle,
+            partial_ptr: Tx.handle,
+            output_ptr: Tx.handle,
+            output32_ptr: Tx.handle,
+            etensor_workspace_ptr: Tx.handle,
+            exec_queue_ptr: Tx.handle,
+            profiler_buffer: Tx.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
-            T.func_attr(
-                {"global_symbol": "main", "target": T.target("cuda")}
+            Tx.func_attr(
+                {"global_symbol": "main", "target": Tx.target("cuda")}
             )
 
             # match buffer
-            A_global = T.match_buffer(A_ptr, [self.batch_size, self.k], "float16", scope="global")
-            B_global = T.match_buffer(B_ptr, [self.n, self.k], "float16", scope="global")
-            partial_global = T.match_buffer(partial_ptr, [self.split_k, self.batch_size, self.n], "float32", scope="global")
-            output_global = T.match_buffer(output_ptr, [self.batch_size, self.n], "float16", scope="global")
-            output32_global = T.match_buffer(output32_ptr, [self.batch_size, self.n], "float32", scope="global")
+            A_global = Tx.match_buffer(A_ptr, [self.batch_size, self.k], "float16", scope="global")
+            B_global = Tx.match_buffer(B_ptr, [self.n, self.k], "float16", scope="global")
+            partial_global = Tx.match_buffer(partial_ptr, [self.split_k, self.batch_size, self.n], "float32", scope="global")
+            output_global = Tx.match_buffer(output_ptr, [self.batch_size, self.n], "float16", scope="global")
+            output32_global = Tx.match_buffer(output32_ptr, [self.batch_size, self.n], "float32", scope="global")
             
-            etensor_workspace_size = T.int32()
-            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
+            etensor_workspace_size = Tx.int32()
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
             
             # exec queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")
             
             # main
             self.fused_body(
@@ -244,7 +244,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             for k_idx in range(mk.split_k):
                 central_queue.append((0, n_idx, k_idx, 0))
         for i in range(KernelConfig.SM_NUMBER):
-            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
+            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INITx.value))
         if mk.split_k > 1 and not mk.use_tma_reduce:
             m_split = min(batch_size, KernelConfig.SM_NUMBER // (mk.n // SplitKReduceTile.N_UNIT))
             m_tile = ceildiv(batch_size, m_split)

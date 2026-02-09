@@ -61,9 +61,9 @@ def rewrite_program(program, func_name):
     ```
     a_psum = nl.ndarray(shape=(8, nl.par_dim(128), 512], buffer=ncc.psum.mod_alloc(base_bank=0, base_addr=0, num_bank_tiles=(8, ))
 
-    for i in T.sequential_range(4, body_no_reorder=True):
-      for j in T.sequential_range(32, body_no_reorder=True):
-        for k in T.sequential_range(16, body_no_reorder=True):
+    for i in Tx.sequential_range(4, body_no_reorder=True):
+      for j in Tx.sequential_range(32, body_no_reorder=True):
+        for k in Tx.sequential_range(16, body_no_reorder=True):
           a_psum[j % 8, :, :] += nisa.nc_matmul(...)
         b[...] = nl.copy(a_psum[j%8, :, :])
     ```
@@ -75,12 +75,12 @@ def rewrite_program(program, func_name):
     ```
     a_psum = nl.ndarray(shape=(8, nl.par_dim(128), 512], buffer=ncc.psum.mod_alloc(base_bank=0, base_addr=0, num_bank_tiles=(8, ))
 
-    for i in T.sequential_range(4, body_no_reorder=True):
-      for j in T.sequential_range(32, body_no_reorder=True):
-        for k in T.sequential_range(16, body_no_reorder=True):
+    for i in Tx.sequential_range(4, body_no_reorder=True):
+      for j in Tx.sequential_range(32, body_no_reorder=True):
+        for k in Tx.sequential_range(16, body_no_reorder=True):
           a_psum[j % 8, :, :] += nisa.nc_matmul(...)
         b[...] = nl.copy(a_psum[j%8, :, :])
-      for k in T.sequential_range(16, body_no_reorder=True):
+      for k in Tx.sequential_range(16, body_no_reorder=True):
         a_psum[0, :, :] += nisa.nc_matmul(...)
       b[...] = nl.copy(a_psum[0, :, :])
     ```
@@ -90,12 +90,12 @@ def rewrite_program(program, func_name):
     ```
     a_psum = nl.ndarray(shape=(132, 8, nl.par_dim(128), 512], buffer=ncc.psum.mod_alloc(base_bank=0, base_addr=0, num_bank_tiles=(1, 8, ))
 
-    for i in T.sequential_range(4, body_no_reorder=True):
-      for j in T.sequential_range(32, body_no_reorder=True):
-        for k in T.sequential_range(16, body_no_reorder=True):
+    for i in Tx.sequential_range(4, body_no_reorder=True):
+      for j in Tx.sequential_range(32, body_no_reorder=True):
+        for k in Tx.sequential_range(16, body_no_reorder=True):
           a_psum[i*32 + j, j % 8, :, :] += nisa.nc_matmul(...)
         ... = nl.copy(a_psum[i*32 + j,  j%8, :, :])
-      for k in T.sequential_range(16, body_no_reorder=True):
+      for k in Tx.sequential_range(16, body_no_reorder=True):
         a_psum[128+i, 0, :, :] += nisa.nc_matmul(...)
       ... = nl.copy(a_psum[128+i, 0, :, :])
     ```

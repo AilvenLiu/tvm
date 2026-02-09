@@ -12,7 +12,6 @@ import torch
 import tvm
 import tvm.testing
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
@@ -158,9 +157,9 @@ class MegaKernelMOE(MegaKernelWrapper):
         self.class_list.add(subclass)
         return tile
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_gating(self, A, B, output, is_dynamic_sch):
-        with T.cta():
+        with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_gating, lambda notify_idx: (1, -1, 0,),
@@ -171,9 +170,9 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.gate, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, A, B, output, self.profiler)
             self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_topk_softmax(self, gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=True):
-        with T.cta():
+        with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_topk_softmax, lambda notify_idx: (1, -1, 0),
@@ -185,31 +184,31 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global, renormalize=renormalize)
             self.tile_scheduler.notify(self.evt_topk_softmax, lambda notify_idx: (1, -1, 0), scope="cta")
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_align(self, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+        with Tx.cta():
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_moe_align, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
-                        lambda push_idx: (JobType.MOE_COUNT_AND_SORT.value, KernelConfig.SM_NUMBER, push_idx, 0, 0)
+                        lambda push_idx: (JobType.MOE_COUNT_AND_SORTx.value, KernelConfig.SM_NUMBER, push_idx, 0, 0)
                     ), "cta", "cta"
                 )
             self.tile_scheduler.wait(self.evt_topk_softmax, 0, wait_level="cta")
             self.run_tile(self.align, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global)
-            T.cuda.cta_sync()
+            Tx.cuda.cta_sync()
             if tid == 0:
                 # TODO: make this etensor initialization a task
                 if is_dynamic_sch:
                     self.evt_group_gemm_down.sem[0] = (self.evt_group_gemm_down.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE) * (self.HIDDEN_SIZE // GroupGEMMTileSM100.BLK_N // down_proj_task_size)
             self.tile_scheduler.notify(self.evt_moe_align, lambda notify_idx: (1, -1, 0), scope="thread")
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_count_and_sort(self, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch):
-        with T.cta():
+        with Tx.cta():
             if is_dynamic_sch:
-                n_axis_len = T.meta_var(self.INTERMEDIATE_SIZE * 2 // GroupGEMMTileSM100.BLK_N)
+                n_axis_len = Tx.meta_var(self.INTERMEDIATE_SIZE * 2 // GroupGEMMTileSM100.BLK_N)
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_count_and_sort, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
@@ -220,9 +219,9 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.count_and_sort_expert_tokens, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global)
             self.tile_scheduler.notify(self.evt_count_and_sort, lambda notify_idx: (1, -1, 0), scope="cta")
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_group_gemm_gate_up_silu(self, A, B, output, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
-        with T.cta():
+        with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_gate_up, lambda notify_idx: (1, -1, self.tile_scheduler.m_idx),
@@ -233,12 +232,12 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.tile_scheduler.wait(self.evt_count_and_sort, 0, wait_level="warp")
             if is_dynamic_sch or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                 self.run_tile(self.group_gemm_gate_up_silu, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, A, B, output, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)    
-            idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
+            idx = Tx.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
             self.tile_scheduler.notify(self.evt_group_gemm_gate_up, lambda notify_idx: (1, -1, idx), scope="warpgroup", scope_id=0)
 
-    @T.macro
+    @Tx.macro
     def task_impl_moe_group_gemm_down(self, A, B, output, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
-        with T.cta():
+        with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0,),
@@ -246,14 +245,14 @@ class MegaKernelMOE(MegaKernelWrapper):
                         lambda push_idx: (JobType.END.value, KernelConfig.SM_NUMBER, 0, 0, 0)
                     ), "warp", "warp"
                 )
-            wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
+            wait_idx = Tx.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
             self.tile_scheduler.wait(self.evt_group_gemm_gate_up, wait_idx, wait_level="warp")
             if is_dynamic_sch or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                 for i in range(down_proj_task_size):
                     self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx * down_proj_task_size + i, self.tile_scheduler.k_idx, A, B, output, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def fused_body(
         self,
         batch_size,
@@ -292,18 +291,18 @@ class MegaKernelMOE(MegaKernelWrapper):
         self.set_tiles(batch_size, low_batch)
         self.host_init_all()
 
-        with T.kernel():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
-            profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-            profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+        with Tx.kernel():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+            profiler_write_offset = Tx.alloc_buffer([1], "uint32", scope="local", align=8)
+            profiler_tag = Tx.alloc_buffer([1], "uint64", scope="local", align=8)
             self.init_profiler(profiler_buffer)
-            with T.cta():
-                buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+            with Tx.cta():
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                 # initialize smem manager
                 self.set_smem_manager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
 
@@ -330,7 +329,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                         self.task_impl_moe_topk_softmax(gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=False)
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
                         self.task_impl_moe_align(topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORT.value:
+                    elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORTx.value:
                         self.task_impl_moe_count_and_sort(topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value:
                         self.task_impl_moe_group_gemm_gate_up_silu(reordered_hidden_state_global, grp_gate_up_weight_global, silu_mul_output_global, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
@@ -338,10 +337,10 @@ class MegaKernelMOE(MegaKernelWrapper):
                         self.task_impl_moe_group_gemm_down(silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
                         self.task_impl_wait_etensor_init_complete(is_dynamic_sch)
                     else:
-                        T.cuda.trap_when_assert_failed(False)
+                        Tx.cuda.trap_when_assert_failed(False)
                     self.smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
                 if self.profiler_on:
@@ -354,82 +353,82 @@ class MegaKernelMOE(MegaKernelWrapper):
     #       but it requires change on engine side
     def get_func_static(self, unfused=False):
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def main(
             # input and output
-            hidden_state_ptr: T.handle, # input: read-only
-            residual_ptr: T.handle, # input & output: inplace update
-            output_ptr: T.handle, # output
+            hidden_state_ptr: Tx.handle, # input: read-only
+            residual_ptr: Tx.handle, # input & output: inplace update
+            output_ptr: Tx.handle, # output
 
             # weight
-            gate_weight_ptr: T.handle, # read-only
-            grp_gate_up_weight_ptr: T.handle, # read-only
-            grp_down_weight_ptr: T.handle, # read-only
+            gate_weight_ptr: Tx.handle, # read-only
+            grp_gate_up_weight_ptr: Tx.handle, # read-only
+            grp_down_weight_ptr: Tx.handle, # read-only
 
             # intermediate buffer
-            gating_output_ptr: T.handle, # intermediate
-            topk_weights_ptr: T.handle, # intermediate
-            topk_indices_ptr: T.handle, # intermediate
-            sorted_token_ids_ptr: T.handle, # intermediate
-            expert_ids_ptr: T.handle, # intermediate
-            num_valid_tokens_ptr: T.handle, # intermediate
-            num_tokens_post_pad_ptr: T.handle, # intermediate
-            cumsum_buffer_ptr: T.handle, # intermediate
-            reordered_hidden_state_ptr: T.handle, # intermediate
-            gate_up_output_ptr: T.handle, # intermediate
-            silu_mul_output_ptr: T.handle, # intermediate
-            topk_reduce_output_ptr: T.handle, # intermediate
+            gating_output_ptr: Tx.handle, # intermediate
+            topk_weights_ptr: Tx.handle, # intermediate
+            topk_indices_ptr: Tx.handle, # intermediate
+            sorted_token_ids_ptr: Tx.handle, # intermediate
+            expert_ids_ptr: Tx.handle, # intermediate
+            num_valid_tokens_ptr: Tx.handle, # intermediate
+            num_tokens_post_pad_ptr: Tx.handle, # intermediate
+            cumsum_buffer_ptr: Tx.handle, # intermediate
+            reordered_hidden_state_ptr: Tx.handle, # intermediate
+            gate_up_output_ptr: Tx.handle, # intermediate
+            silu_mul_output_ptr: Tx.handle, # intermediate
+            topk_reduce_output_ptr: Tx.handle, # intermediate
 
 
             # event tensor
-            etensor_workspace_ptr: T.handle, # not required to reset. Must be 0 before launch.
+            etensor_workspace_ptr: Tx.handle, # not required to reset. Must be 0 before launch.
 
             # execution queue
-            exec_queue_ptr: T.handle,
-            profiler_buffer: T.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
+            exec_queue_ptr: Tx.handle,
+            profiler_buffer: Tx.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
-            T.func_attr(
-                {"global_symbol": "main", "target": T.target("cuda")}
+            Tx.func_attr(
+                {"global_symbol": "main", "target": Tx.target("cuda")}
             )
 
             # match buffer
-            batch_size = T.int32()
+            batch_size = Tx.int32()
 
             # input and output
-            hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            gate_weight_global = T.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_gate_up_weight_global = T.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_down_weight_global = T.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
+            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
+            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
 
             # intermediate buffer
-            gating_output_global = T.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
-            topk_weights_global = T.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
-            topk_indices_global = T.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
-            max_num_tokens_padded = T.int32()
-            sorted_token_ids_global = T.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_valid_tokens_global = T.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_tokens_post_pad_global = T.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
-            cumsum_buffer_global = T.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
-            reordered_hidden_state_global = T.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
-            gate_up_output_global = T.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
-            silu_mul_output_global = T.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            topk_reduce_output_global = T.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
+            max_num_tokens_padded = Tx.int32()
+            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
+            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
+            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
+            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
+            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
+            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
 
             # event tensor
-            etensor_workspace_size = T.int32()
-            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
+            etensor_workspace_size = Tx.int32()
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
             
             # exec queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
 
-            @T.macro
+            @Tx.macro
             def run(low_batch, dynamic_gemm_size):
-                num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
+                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,
@@ -450,86 +449,86 @@ class MegaKernelMOE(MegaKernelWrapper):
 
     def get_func_dynamic(self):
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def main(
             # input and output
-            hidden_state_ptr: T.handle, # input: read-only
-            residual_ptr: T.handle, # input & output: inplace update
-            output_ptr: T.handle, # output
+            hidden_state_ptr: Tx.handle, # input: read-only
+            residual_ptr: Tx.handle, # input & output: inplace update
+            output_ptr: Tx.handle, # output
 
             # weight
-            gate_weight_ptr: T.handle, # read-only
-            grp_gate_up_weight_ptr: T.handle, # read-only
-            grp_down_weight_ptr: T.handle, # read-only
+            gate_weight_ptr: Tx.handle, # read-only
+            grp_gate_up_weight_ptr: Tx.handle, # read-only
+            grp_down_weight_ptr: Tx.handle, # read-only
 
             # intermediate buffer
-            gating_output_ptr: T.handle, # intermediate
-            topk_weights_ptr: T.handle, # intermediate
-            topk_indices_ptr: T.handle, # intermediate
-            sorted_token_ids_ptr: T.handle, # intermediate
-            expert_ids_ptr: T.handle, # intermediate
-            num_valid_tokens_ptr: T.handle, # intermediate
-            num_tokens_post_pad_ptr: T.handle, # intermediate
-            cumsum_buffer_ptr: T.handle, # intermediate
-            reordered_hidden_state_ptr: T.handle, # intermediate
-            gate_up_output_ptr: T.handle, # intermediate
-            silu_mul_output_ptr: T.handle, # intermediate
-            topk_reduce_output_ptr: T.handle, # intermediate
+            gating_output_ptr: Tx.handle, # intermediate
+            topk_weights_ptr: Tx.handle, # intermediate
+            topk_indices_ptr: Tx.handle, # intermediate
+            sorted_token_ids_ptr: Tx.handle, # intermediate
+            expert_ids_ptr: Tx.handle, # intermediate
+            num_valid_tokens_ptr: Tx.handle, # intermediate
+            num_tokens_post_pad_ptr: Tx.handle, # intermediate
+            cumsum_buffer_ptr: Tx.handle, # intermediate
+            reordered_hidden_state_ptr: Tx.handle, # intermediate
+            gate_up_output_ptr: Tx.handle, # intermediate
+            silu_mul_output_ptr: Tx.handle, # intermediate
+            topk_reduce_output_ptr: Tx.handle, # intermediate
 
 
             # event tensor
-            etensor_workspace_ptr: T.handle, # not required to reset. Must be 0 before launch.
+            etensor_workspace_ptr: Tx.handle, # not required to reset. Must be 0 before launch.
 
             # execution queue
-            queue_tasks_ptr: T.handle,
-            queue_head_ptr: T.handle,
-            queue_tail_ptr: T.handle,
-            profiler_buffer: T.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
+            queue_tasks_ptr: Tx.handle,
+            queue_head_ptr: Tx.handle,
+            queue_tail_ptr: Tx.handle,
+            profiler_buffer: Tx.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
-            T.func_attr(
-                {"global_symbol": "main", "target": T.target("cuda")}
+            Tx.func_attr(
+                {"global_symbol": "main", "target": Tx.target("cuda")}
             )
 
             # match buffer
-            batch_size = T.int32()
+            batch_size = Tx.int32()
 
             # input and output
-            hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            gate_weight_global = T.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_gate_up_weight_global = T.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_down_weight_global = T.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
+            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
+            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
 
             # intermediate buffer
-            gating_output_global = T.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
-            topk_weights_global = T.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
-            topk_indices_global = T.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
-            max_num_tokens_padded = T.int32()
-            sorted_token_ids_global = T.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_valid_tokens_global = T.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_tokens_post_pad_global = T.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
-            cumsum_buffer_global = T.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
-            reordered_hidden_state_global = T.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
-            gate_up_output_global = T.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
-            silu_mul_output_global = T.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            topk_reduce_output_global = T.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
+            max_num_tokens_padded = Tx.int32()
+            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
+            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
+            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
+            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
+            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
+            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
 
             # event tensor
-            etensor_workspace_size = T.int32()
-            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
+            etensor_workspace_size = Tx.int32()
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
 
             # exec queue
-            queue_tasks_global = T.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
-            queue_head_global = T.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
-            queue_tail_global = T.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
+            queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
+            queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
+            queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
 
-            @T.macro
+            @Tx.macro
             def run(low_batch, dynamic_gemm_size, down_proj_task_size):
-                num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
+                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,

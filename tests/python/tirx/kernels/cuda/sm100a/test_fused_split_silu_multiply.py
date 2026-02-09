@@ -20,7 +20,6 @@ import numpy as np
 import pytest
 
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
@@ -56,34 +55,34 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
     BDY = THREAD_NUM // BDX
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
-        batch_size = T.int32()
+    @Tx.prim_func(tirx=True)
+    def fused_split_silu_multiply(input_cat_ptr: Tx.handle, output_ptr: Tx.handle):
+        batch_size = Tx.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
-        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
+        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
+        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
-        with T.kernel():
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            tx, ty = T.thread_id([BDX, BDY], parent="cta")
-            thread_id = T.meta_var(ty * BDX + tx)
+        with Tx.kernel():
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            tx, ty = Tx.thread_id([BDX, BDY], parent="cta")
+            thread_id = Tx.meta_var(ty * BDX + tx)
 
-            with T.thread():
-                idx = T.alloc_local([1], "int32")
-                vec1 = T.alloc_local([VEC_SIZE], "float16")
-                vec2 = T.alloc_local([VEC_SIZE], "float16")
+            with Tx.thread():
+                idx = Tx.alloc_local([1], "int32")
+                vec1 = Tx.alloc_local([VEC_SIZE], "float16")
+                vec2 = Tx.alloc_local([VEC_SIZE], "float16")
 
                 idx[0] = bx * BDX * BDY + thread_id
                 while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                    intermediate_idx = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
-                    batch_idx = T.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
-                    for kv in T.vectorized(VEC_SIZE):
+                    intermediate_idx = Tx.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
+                    batch_idx = Tx.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
+                    for kv in Tx.vectorized(VEC_SIZE):
                         vec1[kv] = input_cat_global[batch_idx, intermediate_idx + kv]
-                    for kv in T.vectorized(VEC_SIZE):
+                    for kv in Tx.vectorized(VEC_SIZE):
                         vec2[kv] = input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv]
-                    for kv in T.serial(VEC_SIZE):
-                        vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
-                    for kv in T.vectorized(VEC_SIZE):
+                    for kv in Tx.serial(VEC_SIZE):
+                        vec1[kv] = vec1[kv] * Tx.sigmoid(vec1[kv]) * vec2[kv]
+                    for kv in Tx.vectorized(VEC_SIZE):
                         output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
                     idx[0] += SM_COUNT * BDX * BDY
     # fmt: on
@@ -100,54 +99,54 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
     PIPE_DEPTH = 10
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
-        batch_size = T.int32()
+    @Tx.prim_func(tirx=True)
+    def fused_split_silu_multiply(input_cat_ptr: Tx.handle, output_ptr: Tx.handle):
+        batch_size = Tx.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
-        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
+        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
+        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
-        with T.kernel():
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            tx = T.thread_id([THREAD_NUM], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            tx = Tx.thread_id([THREAD_NUM], parent="cta")
 
-            with T.thread():
-                idx = T.alloc_local([1], "int32")
-                shared_buf = T.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
-                vec1 = T.alloc_local([VEC_SIZE], "float16")
-                vec2 = T.alloc_local([VEC_SIZE], "float16")
+            with Tx.thread():
+                idx = Tx.alloc_local([1], "int32")
+                shared_buf = Tx.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
+                vec1 = Tx.alloc_local([VEC_SIZE], "float16")
+                vec2 = Tx.alloc_local([VEC_SIZE], "float16")
                 idx[0] = 0
-                real_idx = T.meta_var(idx[0] * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
-                non_bulk_copy = T.meta_var({"dispatch": "non-bulk-copy", "vec_len": VEC_SIZE})
+                real_idx = Tx.meta_var(idx[0] * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
+                non_bulk_copy = Tx.meta_var({"dispatch": "non-bulk-copy", "vec_len": VEC_SIZE})
                 while idx[0] < PIPE_DEPTH - 1:
-                    intermediate_idx = T.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
-                    batch_idx = T.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
+                    intermediate_idx = Tx.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
+                    batch_idx = Tx.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
                         Tx.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], **non_bulk_copy)
                         Tx.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], **non_bulk_copy)
-                    T.ptx.cp_async.commit_group()
+                    Tx.ptx.cp_async.commit_group()
                     idx[0] += 1
 
                 idx[0] = 0
                 while real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                    intermediate_idx = T.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
-                    batch_idx = T.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
-                    idx_to_prefetch = T.meta_var(idx[0] + PIPE_DEPTH - 1)
-                    real_idx_to_prefetch = T.meta_var(idx_to_prefetch * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
-                    intermediate_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)
-                    batch_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)
+                    intermediate_idx = Tx.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
+                    batch_idx = Tx.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
+                    idx_to_prefetch = Tx.meta_var(idx[0] + PIPE_DEPTH - 1)
+                    real_idx_to_prefetch = Tx.meta_var(idx_to_prefetch * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
+                    intermediate_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)
+                    batch_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx_to_prefetch * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tx.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
-                        Tx.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
-                    T.ptx.cp_async.commit_group()
-                    T.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
-                    for kv in T.vectorized(VEC_SIZE):
-                        vec1[kv] = shared_buf[T.truncmod(idx[0], PIPE_DEPTH), 0, tx, kv]
-                    for kv in T.vectorized(VEC_SIZE):
-                        vec2[kv] = shared_buf[T.truncmod(idx[0], PIPE_DEPTH), 1, tx, kv]
-                    for kv in T.serial(VEC_SIZE):
-                        vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
-                    for kv in T.vectorized(VEC_SIZE):
+                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
+                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
+                    Tx.ptx.cp_async.commit_group()
+                    Tx.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
+                    for kv in Tx.vectorized(VEC_SIZE):
+                        vec1[kv] = shared_buf[Tx.truncmod(idx[0], PIPE_DEPTH), 0, tx, kv]
+                    for kv in Tx.vectorized(VEC_SIZE):
+                        vec2[kv] = shared_buf[Tx.truncmod(idx[0], PIPE_DEPTH), 1, tx, kv]
+                    for kv in Tx.serial(VEC_SIZE):
+                        vec1[kv] = vec1[kv] * Tx.sigmoid(vec1[kv]) * vec2[kv]
+                    for kv in Tx.vectorized(VEC_SIZE):
                         output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
                     idx[0] += 1
     # fmt: on
@@ -158,21 +157,21 @@ def get_fused_split1_silu1_multiply1_kernel(out_dim):
     INTERMEDIATE_SIZE = out_dim
 
     # fmt: off
-    @T.prim_func
-    def fused_split1_silu1_multiply1(p_fastertransformer_gemm_fp16_int514: T.handle, p_output0: T.handle):
-        T.func_attr({"tir.is_scheduled": True, "tir.noalias": True})
-        seq_len = T.int64()
-        fastertransformer_gemm_fp16_int514 = T.match_buffer(p_fastertransformer_gemm_fp16_int514, (T.int64(1), seq_len, T.int64(INTERMEDIATE_SIZE * 2)), "float16")
-        T_multiply_intermediate_1 = T.match_buffer(p_output0, (T.int64(1), seq_len, T.int64(INTERMEDIATE_SIZE)), "float16")
-        # with T.sblock("root"):
-        for ax0_ax1_fused_0 in T.thread_binding(seq_len * T.int64(INTERMEDIATE_SIZE // 1024), thread="blockIdx.x"):
-            for ax0_ax1_fused_1 in T.thread_binding(T.int64(1024), thread="threadIdx.x"):
-                with T.sblock("T_multiply_1"):
-                    v0 = T.axis.spatial(seq_len, (ax0_ax1_fused_0 * T.int64(1024) + ax0_ax1_fused_1) // T.int64(INTERMEDIATE_SIZE))
-                    v1 = T.axis.spatial(T.int64(INTERMEDIATE_SIZE), (ax0_ax1_fused_0 * T.int64(1024) + ax0_ax1_fused_1) % T.int64(INTERMEDIATE_SIZE))
-                    T.reads(fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1:v1 + T.int64(INTERMEDIATE_SIZE + 1)])
-                    T.writes(T_multiply_intermediate_1[T.int64(0), v0, v1])
-                    T_multiply_intermediate_1[T.int64(0), v0, v1] = fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1] * T.sigmoid(fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1]) * fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1 + T.int64(INTERMEDIATE_SIZE)]
+    @Tx.prim_func
+    def fused_split1_silu1_multiply1(p_fastertransformer_gemm_fp16_int514: Tx.handle, p_output0: Tx.handle):
+        Tx.func_attr({"tir.is_scheduled": True, "tir.noalias": True})
+        seq_len = Tx.int64()
+        fastertransformer_gemm_fp16_int514 = Tx.match_buffer(p_fastertransformer_gemm_fp16_int514, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE * 2)), "float16")
+        T_multiply_intermediate_1 = Tx.match_buffer(p_output0, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE)), "float16")
+        # with Tx.sblock("root"):
+        for ax0_ax1_fused_0 in Tx.thread_binding(seq_len * Tx.int64(INTERMEDIATE_SIZE // 1024), thread="blockIdx.x"):
+            for ax0_ax1_fused_1 in Tx.thread_binding(Tx.int64(1024), thread="threadIdx.x"):
+                with Tx.sblock("T_multiply_1"):
+                    v0 = Tx.axis.spatial(seq_len, (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) // Tx.int64(INTERMEDIATE_SIZE))
+                    v1 = Tx.axis.spatial(Tx.int64(INTERMEDIATE_SIZE), (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) % Tx.int64(INTERMEDIATE_SIZE))
+                    Tx.reads(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1:v1 + Tx.int64(INTERMEDIATE_SIZE + 1)])
+                    Tx.writes(T_multiply_intermediate_1[Tx.int64(0), v0, v1])
+                    T_multiply_intermediate_1[Tx.int64(0), v0, v1] = fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1] * Tx.sigmoid(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1]) * fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1 + Tx.int64(INTERMEDIATE_SIZE)]
 
     # fmt: on
     return fused_split1_silu1_multiply1

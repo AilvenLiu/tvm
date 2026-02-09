@@ -47,6 +47,12 @@ class PrinterConfigNode : public ffi::Object {
   std::string ir_prefix = "I";
   /*! \brief The prefix of TIR nodes */
   std::string tir_prefix = "T";
+  /*!
+   * \brief The TIR module name used in the printed import (e.g. "tir" or "tirx").
+   * Used in the header comment: "from tvm.script import <tir_import_module> as <tir_prefix>".
+   * When tir_prefix is "Tx", set to "tirx" so the printed script uses "import tirx as Tx".
+   */
+  std::string tir_import_module = "tir";
   /*! \brief The prefix of TIRX nodes */
   std::string tirx_prefix = "Tx";
   /*! \brief The prefix of Relax nodes */

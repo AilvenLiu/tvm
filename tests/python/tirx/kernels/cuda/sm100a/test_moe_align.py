@@ -4,7 +4,6 @@ import torch
 
 import tvm
 import tvm.testing
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.kernels.moe_align import MOEAlignTile, CountAndSortExpertTokens
@@ -34,27 +33,27 @@ test_configs = [
 
 def get_moe_align_kernel(pad_sorted_token_ids):
     # fmt: off
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def moe_align_kernel(
-        topk_ids_ptr: T.handle,
-        sorted_token_ids_ptr: T.handle,
-        expert_ids_ptr: T.handle,
-        num_tokens_post_pad: T.Buffer((1,), "int32"),
-        num_valid_tokens_ptr: T.handle,
-        cumsum_buffer: T.Buffer((NUM_EXPERTS+1,), "int32"),
+        topk_ids_ptr: Tx.handle,
+        sorted_token_ids_ptr: Tx.handle,
+        expert_ids_ptr: Tx.handle,
+        num_tokens_post_pad: Tx.Buffer((1,), "int32"),
+        num_valid_tokens_ptr: Tx.handle,
+        cumsum_buffer: Tx.Buffer((NUM_EXPERTS+1,), "int32"),
     ):
-        num_tokens = T.int32()
-        topk_ids = T.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
-        max_num_tokens_padded = T.int32()
-        sorted_token_ids = T.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
-        expert_ids = T.match_buffer(expert_ids_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
-        num_valid_tokens = T.match_buffer(num_valid_tokens_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
-        moe_align_tile = T.meta_var(MOEAlignTile(NUM_EXPERTS, num_tokens * TOPK, BLOCK_SIZE, pad_sorted_token_ids=pad_sorted_token_ids))
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-            smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+        num_tokens = Tx.int32()
+        topk_ids = Tx.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
+        max_num_tokens_padded = Tx.int32()
+        sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
+        expert_ids = Tx.match_buffer(expert_ids_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
+        num_valid_tokens = Tx.match_buffer(num_valid_tokens_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
+        moe_align_tile = Tx.meta_var(MOEAlignTile(NUM_EXPERTS, num_tokens * TOPK, BLOCK_SIZE, pad_sorted_token_ids=pad_sorted_token_ids))
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+            smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
             smem_manager.set_tile(moe_align_tile)
             moe_align_tile.init(smem_manager)
             smem_manager.init()
@@ -64,27 +63,27 @@ def get_moe_align_kernel(pad_sorted_token_ids):
     # fmt: on
 
 
-@T.prim_func(tirx=True)
+@Tx.prim_func(tirx=True)
 def count_and_sort_expert_tokens_kernel(
-    topk_ids_ptr: T.handle,
-    sorted_token_ids_ptr: T.handle,
-    cumsum_buffer: T.Buffer((NUM_EXPERTS + 1,), "int32"),
-    data_ptr: T.handle,
-    reordered_data_ptr: T.handle,
+    topk_ids_ptr: Tx.handle,
+    sorted_token_ids_ptr: Tx.handle,
+    cumsum_buffer: Tx.Buffer((NUM_EXPERTS + 1,), "int32"),
+    data_ptr: Tx.handle,
+    reordered_data_ptr: Tx.handle,
 ):
-    num_tokens = T.int32()
-    topk_ids = T.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
-    max_num_tokens_padded = T.int32()
-    sorted_token_ids = T.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
-    data = T.match_buffer(data_ptr, (num_tokens, HIDDEN_SIZE), dtype="float16")
-    reordered_data = T.match_buffer(reordered_data_ptr, (max_num_tokens_padded, HIDDEN_SIZE), dtype="float16")
-    count_and_sort_tile = T.meta_var(CountAndSortExpertTokens(num_tokens * TOPK, HIDDEN_SIZE, TOPK))
-    with T.kernel():
-        bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-        tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+    num_tokens = Tx.int32()
+    topk_ids = Tx.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
+    max_num_tokens_padded = Tx.int32()
+    sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
+    data = Tx.match_buffer(data_ptr, (num_tokens, HIDDEN_SIZE), dtype="float16")
+    reordered_data = Tx.match_buffer(reordered_data_ptr, (max_num_tokens_padded, HIDDEN_SIZE), dtype="float16")
+    count_and_sort_tile = Tx.meta_var(CountAndSortExpertTokens(num_tokens * TOPK, HIDDEN_SIZE, TOPK))
+    with Tx.kernel():
+        bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+        tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
         topk_ids_flattened = topk_ids.view(-1)
-        buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-        smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+        buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+        smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
         smem_manager.set_tile(count_and_sort_tile)
         count_and_sort_tile.init(smem_manager)
         smem_manager.init()

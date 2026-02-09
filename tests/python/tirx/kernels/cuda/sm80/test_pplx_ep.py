@@ -22,11 +22,11 @@ import numpy as np
 import pytest
 
 import tvm
+from tvm.script import tirx as Tx
 import tvm.testing
 from tvm.contrib.popen_pool import PopenWorker
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
-from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 
 
@@ -79,69 +79,69 @@ def test_dispatch_combine(world_size=8):
             def __init__(self, cnt, buffer):
                 self.cnt = cnt
                 self.sem = buffer
-                self.state = T.alloc_buffer(
+                self.state = Tx.alloc_buffer(
                     [1], "int32", scope="local", align=4, name="semaphore_state"
                 )
 
-            @T.macro
+            @Tx.macro
             def wait(self):
-                with T.thread():
+                with Tx.thread():
                     while 1:
-                        T.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=0))
-                        if T.cuda.syncthreads_and(self.state[0] == self.cnt):
+                        Tx.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=0))
+                        if Tx.cuda.syncthreads_and(self.state[0] == self.cnt):
                             break
-                        T.cuda.nano_sleep(40)
+                        Tx.cuda.nano_sleep(40)
 
-            @T.macro
+            @Tx.macro
             def signal(self):
-                with T.thread():
-                    T.cuda.cta_sync()
-                    with T.thread()[0:1]:
-                        T.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
-                    T.cuda.thread_fence()
+                with Tx.thread():
+                    Tx.cuda.cta_sync()
+                    with Tx.thread()[0:1]:
+                        Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
+                    Tx.cuda.thread_fence()
 
-            @T.macro
+            @Tx.macro
             def sync(self):
                 self.signal()
                 self.wait()
 
         def int_var():
-            return T.alloc_buffer([1], "uint32", scope="local", align=4)
+            return Tx.alloc_buffer([1], "uint32", scope="local", align=4)
 
-        @T.macro
+        @Tx.macro
         def zero_smem(tid, smem_buf):
             # zero out the shared memory buffer
-            for k in T.serial(T.ceildiv(N_EXPERTS, N_WARPS_DISPATCH * 32)):
-                idx = T.meta_var(k * N_WARPS_DISPATCH * 32 + tid)
+            for k in Tx.serial(Tx.ceildiv(N_EXPERTS, N_WARPS_DISPATCH * 32)):
+                idx = Tx.meta_var(k * N_WARPS_DISPATCH * 32 + tid)
                 if idx < N_EXPERTS:
                     smem_buf[idx] = 0
-            T.cuda.cta_sync()
+            Tx.cuda.cta_sync()
 
-        @T.macro
+        @Tx.macro
         def warp_count(lane_id, dst_expert, count, send_experts):
             # threads in a leader warp collectively counts the number of tokens to send to a dest expert
             count[0] = 0
-            for k in T.serial(T.ceildiv(M * K, 32)):
-                idx = T.meta_var(k * 32 + lane_id)
+            for k in Tx.serial(Tx.ceildiv(M * K, 32)):
+                idx = Tx.meta_var(k * 32 + lane_id)
                 if idx < M * K:
-                    row = T.meta_var(idx // K)
-                    col = T.meta_var(idx % K)
+                    row = Tx.meta_var(idx // K)
+                    col = Tx.meta_var(idx % K)
                     expert = send_experts[row, col]
                     if expert == dst_expert:
                         count[0] += 1
             i = int_var()
             i[0] = 16
             while i[0] >= 1:
-                count[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, count[0], i[0], 32, 32)
+                count[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, count[0], i[0], 32, 32)
                 i[0] = i[0] // 2
 
-        @T.macro
+        @Tx.macro
         def thread_signal(group_idx, lane_id, dst_expert, count, buf_target_wait):
             # a single thread signal the count
-            dst_local_expert = T.meta_var(T.int32(dst_expert % N_LOCAL_EXPERTS))
-            dst_rank = T.meta_var(T.int32(dst_expert // N_LOCAL_EXPERTS))
+            dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % N_LOCAL_EXPERTS))
+            dst_rank = Tx.meta_var(Tx.int32(dst_expert // N_LOCAL_EXPERTS))
             if lane_id == 0:
-                T.nvshmem.signal_op(
+                Tx.nvshmem.signal_op(
                     sig_addr=buf_target_wait.access_ptr(
                         "w", offset=buf_target_wait.elem_offset_of([dst_local_expert, group_idx])
                     ),
@@ -150,24 +150,24 @@ def test_dispatch_combine(world_size=8):
                     pe=dst_rank,
                 )
 
-        @T.macro
+        @Tx.macro
         def thread_accum(tid, token_idx, send_experts, smem_buf):
             # threads collectively accum the token index counter
             if tid < K:
                 dst_expert = send_experts[token_idx, tid]
                 smem_buf[dst_expert] += 1
 
-        @T.macro
+        @Tx.macro
         def thread_prepare_buf(n_threads, tid, token_idx, send_tokens, buf_send):
             # thread collectively prepare the send buffer for the dispatch kernel
-            for k in T.serial(T.ceildiv(HIDDEN_DIM, n_threads)):
-                idx = T.meta_var(k * n_threads + tid)
+            for k in Tx.serial(Tx.ceildiv(HIDDEN_DIM, n_threads)):
+                idx = Tx.meta_var(k * n_threads + tid)
                 if idx < HIDDEN_DIM:
                     buf_send[token_idx, idx] = send_tokens[token_idx, idx]
             if tid == 0:
-                buf_send[token_idx, HIDDEN_DIM] = T.cast(token_idx, dtype)
+                buf_send[token_idx, HIDDEN_DIM] = Tx.cast(token_idx, dtype)
 
-        @T.macro
+        @Tx.macro
         def warp_dispatch_exp(
             group_idx,
             warp_id,
@@ -179,15 +179,15 @@ def test_dispatch_combine(world_size=8):
             buf_actual_wait,
         ):
             # warps collectively send a target token, where each warp sends to one dest expert
-            n_warps = T.meta_var(T.int32(N_WARPS_DISPATCH - 1))
-            for k in T.serial(T.ceildiv(K, n_warps)):
-                exp_idx = T.meta_var(k * n_warps + warp_id)
+            n_warps = Tx.meta_var(Tx.int32(N_WARPS_DISPATCH - 1))
+            for k in Tx.serial(Tx.ceildiv(K, n_warps)):
+                exp_idx = Tx.meta_var(k * n_warps + warp_id)
                 if exp_idx < K:
                     dst_expert = send_experts[token_idx, exp_idx]
-                    dst_local_expert = T.meta_var(T.int32(dst_expert % N_LOCAL_EXPERTS))
-                    dst_rank = T.meta_var(T.int32(dst_expert // N_LOCAL_EXPERTS))
-                    dst_index = T.meta_var(T.int32(smem_buf[dst_expert] - 1))
-                    T.nvshmem.putmem_signal_nbi.warp(
+                    dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % N_LOCAL_EXPERTS))
+                    dst_rank = Tx.meta_var(Tx.int32(dst_expert // N_LOCAL_EXPERTS))
+                    dst_index = Tx.meta_var(Tx.int32(smem_buf[dst_expert] - 1))
+                    Tx.nvshmem.putmem_signal_nbi.warp(
                         dst=buf_recv.access_ptr(
                             "w",
                             offset=buf_recv.elem_offset_of(
@@ -207,7 +207,7 @@ def test_dispatch_combine(world_size=8):
                         pe=dst_rank,
                     )
 
-        @T.macro
+        @Tx.macro
         def cta_wait(
             bx,
             tid,
@@ -218,13 +218,13 @@ def test_dispatch_combine(world_size=8):
             smem_expert_st,
             smem_token_st,
         ):
-            group_offset_cta = T.meta_var(bx * N_RECV_GROUPS_PER_CTA)
+            group_offset_cta = Tx.meta_var(bx * N_RECV_GROUPS_PER_CTA)
             if group_offset_cta < N_RECV_GROUPS:
-                group_idx = T.meta_var(tid + group_offset_cta)
-                if group_idx < T.min(N_RECV_GROUPS, group_offset_cta + N_RECV_GROUPS_PER_CTA):
-                    local_expert = T.meta_var(group_idx // N_GROUP)
-                    group_rank = T.meta_var(group_idx % N_GROUP)
-                    T.nvshmem.wait_until(
+                group_idx = Tx.meta_var(tid + group_offset_cta)
+                if group_idx < Tx.min(N_RECV_GROUPS, group_offset_cta + N_RECV_GROUPS_PER_CTA):
+                    local_expert = Tx.meta_var(group_idx // N_GROUP)
+                    group_rank = Tx.meta_var(group_idx % N_GROUP)
+                    Tx.nvshmem.wait_until(
                         ivar=buf_target_wait.access_ptr(
                             "r", offset=buf_target_wait.elem_offset_of([local_expert, group_rank])
                         ),
@@ -232,25 +232,25 @@ def test_dispatch_combine(world_size=8):
                         cmp_value=0,
                     )
                     num_recv_tokens = buf_target_wait[local_expert, group_rank] - 1
-                    T.nvshmem.wait_until(
+                    Tx.nvshmem.wait_until(
                         ivar=buf_actual_wait.access_ptr(
                             "r", offset=buf_actual_wait.elem_offset_of([local_expert, group_rank])
                         ),
                         cmp="eq",
                         cmp_value=num_recv_tokens,
                     )
-                    smem_expert_st[tid] = T.cuda.atomic_add(
+                    smem_expert_st[tid] = Tx.cuda.atomic_add(
                         recv_num_per_expert.access_ptr(
                             "rw", offset=recv_num_per_expert.elem_offset_of([local_expert])
                         ),
-                        T.uint32(num_recv_tokens),
+                        Tx.uint32(num_recv_tokens),
                     )
-                    smem_token_st[tid] = T.cuda.atomic_add(
-                        recv_num_total.access_ptr("rw", offset=0), T.uint32(num_recv_tokens)
+                    smem_token_st[tid] = Tx.cuda.atomic_add(
+                        recv_num_total.access_ptr("rw", offset=0), Tx.uint32(num_recv_tokens)
                     )
-                T.cuda.cta_sync()
+                Tx.cuda.cta_sync()
 
-        @T.macro
+        @Tx.macro
         def thread_compute_meta(
             bx,
             tid,
@@ -265,29 +265,29 @@ def test_dispatch_combine(world_size=8):
             smem_token_st,
         ):
             # threads collectively compute meta data
-            n_threads = T.meta_var(N_WARPS_DISPATCH * 32)
-            group_offset_cta = T.meta_var(bx * N_RECV_GROUPS_PER_CTA)
+            n_threads = Tx.meta_var(N_WARPS_DISPATCH * 32)
+            group_offset_cta = Tx.meta_var(bx * N_RECV_GROUPS_PER_CTA)
             if group_offset_cta < N_RECV_GROUPS:
-                for k in T.serial(T.min(N_RECV_GROUPS_PER_CTA, N_RECV_GROUPS - group_offset_cta)):
-                    group_idx = T.meta_var(k + group_offset_cta)
-                    local_expert = T.meta_var(group_idx // N_GROUP)
-                    group_rank = T.meta_var(group_idx % N_GROUP)
+                for k in Tx.serial(Tx.min(N_RECV_GROUPS_PER_CTA, N_RECV_GROUPS - group_offset_cta)):
+                    group_idx = Tx.meta_var(k + group_offset_cta)
+                    local_expert = Tx.meta_var(group_idx // N_GROUP)
+                    group_rank = Tx.meta_var(group_idx % N_GROUP)
                     num_recv_tokens = buf_target_wait[local_expert, group_rank] - 1
-                    for t in T.serial(T.ceildiv(num_recv_tokens, n_threads)):
-                        token_idx = T.meta_var(t * n_threads + tid)
+                    for t in Tx.serial(Tx.ceildiv(num_recv_tokens, n_threads)):
+                        token_idx = Tx.meta_var(t * n_threads + tid)
                         if token_idx < num_recv_tokens:
-                            meta_idx = T.meta_var(smem_token_st[k] + token_idx)
-                            buf_meta_index[meta_idx] = T.cast(
+                            meta_idx = Tx.meta_var(smem_token_st[k] + token_idx)
+                            buf_meta_index[meta_idx] = Tx.cast(
                                 buf_recv[local_expert, group_rank, token_idx, HIDDEN_DIM], "uint32"
                             )
-                            buf_meta_expert[meta_idx] = T.cast(local_expert, "uint32")
-                            buf_meta_offset[meta_idx] = T.cast(
+                            buf_meta_expert[meta_idx] = Tx.cast(local_expert, "uint32")
+                            buf_meta_offset[meta_idx] = Tx.cast(
                                 smem_expert_st[k] + token_idx, "uint32"
                             )
-                            buf_meta_group[meta_idx] = T.cast(group_rank, "uint32")
-                            buf_meta_token[meta_idx] = T.cast(token_idx, "uint32")
+                            buf_meta_group[meta_idx] = Tx.cast(group_rank, "uint32")
+                            buf_meta_token[meta_idx] = Tx.cast(token_idx, "uint32")
 
-        @T.macro
+        @Tx.macro
         def thread_store_tokens(
             bx,
             tid,
@@ -299,25 +299,25 @@ def test_dispatch_combine(world_size=8):
             buf_meta_group,
             buf_meta_token,
         ):
-            num_tokens = T.meta_var(T.int32(recv_num_total[0]))
-            for k in T.serial(T.ceildiv(num_tokens, N_BLOCKS_DISPATCH)):
-                token_idx = T.meta_var(k * N_BLOCKS_DISPATCH + bx)
+            num_tokens = Tx.meta_var(Tx.int32(recv_num_total[0]))
+            for k in Tx.serial(Tx.ceildiv(num_tokens, N_BLOCKS_DISPATCH)):
+                token_idx = Tx.meta_var(k * N_BLOCKS_DISPATCH + bx)
                 if token_idx < num_tokens:
                     meta_offset = buf_meta_offset[token_idx]
                     meta_expert = buf_meta_expert[token_idx]
                     meta_group = buf_meta_group[token_idx]
                     meta_token = buf_meta_token[token_idx]
-                    n_threads = T.meta_var(N_WARPS_DISPATCH * 32)
-                    for k in T.serial(T.ceildiv(HIDDEN_DIM, n_threads * VEC_SIZE)):
-                        idx = T.meta_var(k * n_threads * VEC_SIZE + tid * VEC_SIZE)
+                    n_threads = Tx.meta_var(N_WARPS_DISPATCH * 32)
+                    for k in Tx.serial(Tx.ceildiv(HIDDEN_DIM, n_threads * VEC_SIZE)):
+                        idx = Tx.meta_var(k * n_threads * VEC_SIZE + tid * VEC_SIZE)
                         if idx < HIDDEN_DIM:
-                            for vec in T.vectorized(VEC_SIZE):
+                            for vec in Tx.vectorized(VEC_SIZE):
                                 recv_tokens[meta_expert, meta_offset, idx + vec] = buf_recv[
                                     meta_expert, meta_group, meta_token, idx + vec
                                 ]
-                    T.cuda.cta_sync()
+                    Tx.cuda.cta_sync()
 
-        @T.macro
+        @Tx.macro
         def thread_prepare_buf_back(
             bx,
             tid,
@@ -329,22 +329,22 @@ def test_dispatch_combine(world_size=8):
             buf_meta_offset,
         ):
             # threads collectively prepare the send buffer for the combine kernel
-            total_tokens = T.meta_var(T.int32(send_num_total[0]))
-            for k in T.serial(T.ceildiv(total_tokens, N_BLOCKS_COMBINE)):
-                token_idx = T.meta_var(k * N_BLOCKS_COMBINE + bx)
+            total_tokens = Tx.meta_var(Tx.int32(send_num_total[0]))
+            for k in Tx.serial(Tx.ceildiv(total_tokens, N_BLOCKS_COMBINE)):
+                token_idx = Tx.meta_var(k * N_BLOCKS_COMBINE + bx)
                 if token_idx < total_tokens:
-                    expert = T.int32(buf_meta_expert[token_idx])
-                    offset = T.int32(buf_meta_offset[token_idx])
-                    for k in T.serial(T.ceildiv(HIDDEN_DIM, n_threads * VEC_SIZE)):
-                        idx = T.meta_var(k * n_threads * VEC_SIZE + tid * VEC_SIZE)
+                    expert = Tx.int32(buf_meta_expert[token_idx])
+                    offset = Tx.int32(buf_meta_offset[token_idx])
+                    for k in Tx.serial(Tx.ceildiv(HIDDEN_DIM, n_threads * VEC_SIZE)):
+                        idx = Tx.meta_var(k * n_threads * VEC_SIZE + tid * VEC_SIZE)
                         if idx < HIDDEN_DIM:
-                            for vec in T.vectorized(VEC_SIZE):
+                            for vec in Tx.vectorized(VEC_SIZE):
                                 buf_send_new[token_idx, idx + vec] = send_tokens[
                                     expert, offset, idx + vec
                                 ]
-                    T.cuda.cta_sync()
+                    Tx.cuda.cta_sync()
 
-        @T.macro
+        @Tx.macro
         def warp_dispatch_dp(
             rank,
             bx,
@@ -358,19 +358,19 @@ def test_dispatch_combine(world_size=8):
             buf_meta_group,
         ):
             # warps collectively send a target token, where each warp sends to one dest dp group
-            total_tokens = T.meta_var(T.int32(send_num_total[0]))
-            for k in T.serial(T.ceildiv(total_tokens, N_BLOCKS_COMBINE)):
-                token_idx = T.meta_var(k * N_BLOCKS_COMBINE + bx)
+            total_tokens = Tx.meta_var(Tx.int32(send_num_total[0]))
+            for k in Tx.serial(Tx.ceildiv(total_tokens, N_BLOCKS_COMBINE)):
+                token_idx = Tx.meta_var(k * N_BLOCKS_COMBINE + bx)
                 if token_idx < total_tokens:
-                    expert = T.int32(buf_meta_expert[token_idx])
-                    index = T.int32(buf_meta_index[token_idx])
-                    group = T.int32(buf_meta_group[token_idx])
-                    dst_expert = T.meta_var(T.int32(rank * N_LOCAL_EXPERTS + expert))
-                    for k in T.serial(T.ceildiv(GROUP_SIZE, N_WARPS_COMBINE)):
-                        idx = T.meta_var(k * N_WARPS_COMBINE + warp_id)
+                    expert = Tx.int32(buf_meta_expert[token_idx])
+                    index = Tx.int32(buf_meta_index[token_idx])
+                    group = Tx.int32(buf_meta_group[token_idx])
+                    dst_expert = Tx.meta_var(Tx.int32(rank * N_LOCAL_EXPERTS + expert))
+                    for k in Tx.serial(Tx.ceildiv(GROUP_SIZE, N_WARPS_COMBINE)):
+                        idx = Tx.meta_var(k * N_WARPS_COMBINE + warp_id)
                         if idx < GROUP_SIZE:
-                            dst_rank = T.meta_var(group * GROUP_SIZE + idx)
-                            T.nvshmem.putmem_signal_nbi.warp(
+                            dst_rank = Tx.meta_var(group * GROUP_SIZE + idx)
+                            Tx.nvshmem.putmem_signal_nbi.warp(
                                 dst=buf_recv.access_ptr(
                                     "w", offset=buf_recv.elem_offset_of([dst_expert, index, 0])
                                 ),
@@ -386,7 +386,7 @@ def test_dispatch_combine(world_size=8):
                                 pe=dst_rank,
                             )
 
-        @T.macro
+        @Tx.macro
         def thread_combine(
             bx,
             tid,
@@ -398,76 +398,76 @@ def test_dispatch_combine(world_size=8):
             send_weights,
         ):
             # threads collectively compute the weighted sum
-            for k in T.serial(T.ceildiv(M, N_BLOCKS_COMBINE)):
+            for k in Tx.serial(Tx.ceildiv(M, N_BLOCKS_COMBINE)):
                 token_idx = k * N_BLOCKS_COMBINE + bx
                 if token_idx < M:
-                    T.nvshmem.wait_until(
+                    Tx.nvshmem.wait_until(
                         ivar=buf_actual_wait.access_ptr(
                             "r", offset=buf_actual_wait.elem_offset_of([token_idx])
                         ),
                         cmp="eq",
                         cmp_value=K,
                     )
-                    sum = T.alloc_buffer([1], dtype, scope="local", align=8)
-                    for k in T.serial(T.ceildiv(HIDDEN_DIM, n_threads)):
-                        idx = T.meta_var(k * n_threads + tid)
+                    sum = Tx.alloc_buffer([1], dtype, scope="local", align=8)
+                    for k in Tx.serial(Tx.ceildiv(HIDDEN_DIM, n_threads)):
+                        idx = Tx.meta_var(k * n_threads + tid)
                         if idx < HIDDEN_DIM:
                             sum[0] = 0
-                            for exp in T.serial(K):
+                            for exp in Tx.serial(K):
                                 expert = send_experts[token_idx, exp]
                                 weight = send_weights[token_idx, exp]
                                 sum[0] += weight * buf_recv[expert, token_idx, idx]
                             recv_tokens[token_idx, idx] = sum[0]
 
         # fmt: off
-        @T.prim_func(tirx=True)
-        def dispatch_kernel(send_tokens: T.Buffer((M, HIDDEN_DIM), dtype), # input tokens to dispatch
-                            send_experts: T.Buffer((M, K), "uint32"), # input tokens route to topk experts
-                            recv_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # received tokens
-                            recv_num_per_expert: T.Buffer((N_LOCAL_EXPERTS), "uint32"), # number of tokens to receive per local expert
-                            recv_num_total: T.Buffer((1,), "uint32"), # total number of tokens to receive
-                            buf_target_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number expect to wait on per expert per group
-                            buf_actual_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number actually wait on per expert per group
-                            buf_send: T.Buffer((M, HIDDEN_DIM + 1), dtype), # send buffer for (token data, token index)
-                            buf_recv: T.Buffer((N_LOCAL_EXPERTS, N_GROUP, M, HIDDEN_DIM + 1), dtype), # receive buffer for (token data, token index)
-                            buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
-                            buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
-                            buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
-                            buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
-                            buf_meta_token: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert and data group
-                            sem_bar: T.Buffer((1,), "int32"), # semaphore for grid-level barrier
+        @Tx.prim_func(tirx=True)
+        def dispatch_kernel(send_tokens: Tx.Buffer((M, HIDDEN_DIM), dtype), # input tokens to dispatch
+                            send_experts: Tx.Buffer((M, K), "uint32"), # input tokens route to topk experts
+                            recv_tokens: Tx.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # received tokens
+                            recv_num_per_expert: Tx.Buffer((N_LOCAL_EXPERTS), "uint32"), # number of tokens to receive per local expert
+                            recv_num_total: Tx.Buffer((1,), "uint32"), # total number of tokens to receive
+                            buf_target_wait: Tx.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number expect to wait on per expert per group
+                            buf_actual_wait: Tx.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number actually wait on per expert per group
+                            buf_send: Tx.Buffer((M, HIDDEN_DIM + 1), dtype), # send buffer for (token data, token index)
+                            buf_recv: Tx.Buffer((N_LOCAL_EXPERTS, N_GROUP, M, HIDDEN_DIM + 1), dtype), # receive buffer for (token data, token index)
+                            buf_meta_index: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
+                            buf_meta_expert: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
+                            buf_meta_offset: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
+                            buf_meta_group: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
+                            buf_meta_token: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert and data group
+                            sem_bar: Tx.Buffer((1,), "int32"), # semaphore for grid-level barrier
                             ):
-            with T.kernel():
-                bx = T.cta_id([N_BLOCKS_DISPATCH], parent="kernel")
-                warp_id = T.warp_id([N_WARPS_DISPATCH], parent="cta")
-                lane_id = T.thread_id([32], parent="warp")
-                tid = T.thread_id([N_WARPS_DISPATCH * 32], parent="cta")
-                rank = T.nvshmem.my_pe()
-                grid_bar = T.meta_var(GridBarrier(N_BLOCKS_DISPATCH, sem_bar))
-                group_rank = T.meta_var(T.int32(rank % GROUP_SIZE))
-                group_idx = T.meta_var(T.int32(rank // GROUP_SIZE))
+            with Tx.kernel():
+                bx = Tx.cta_id([N_BLOCKS_DISPATCH], parent="kernel")
+                warp_id = Tx.warp_id([N_WARPS_DISPATCH], parent="cta")
+                lane_id = Tx.thread_id([32], parent="warp")
+                tid = Tx.thread_id([N_WARPS_DISPATCH * 32], parent="cta")
+                rank = Tx.nvshmem.my_pe()
+                grid_bar = Tx.meta_var(GridBarrier(N_BLOCKS_DISPATCH, sem_bar))
+                group_rank = Tx.meta_var(Tx.int32(rank % GROUP_SIZE))
+                group_idx = Tx.meta_var(Tx.int32(rank // GROUP_SIZE))
 
-                with T.cta():
-                    smem_buf = T.alloc_buffer([N_EXPERTS], "uint32", scope="shared", align=128) # for send token index m calculation
-                    smem_expert_st = T.alloc_buffer([N_RECV_GROUPS_PER_CTA,], "uint32", scope="shared", align=4) # start index of expert for each CTA
-                    smem_token_st = T.alloc_buffer([N_RECV_GROUPS_PER_CTA,], "uint32", scope="shared", align=4) # start index of token for each CTA
+                with Tx.cta():
+                    smem_buf = Tx.alloc_buffer([N_EXPERTS], "uint32", scope="shared", align=128) # for send token index m calculation
+                    smem_expert_st = Tx.alloc_buffer([N_RECV_GROUPS_PER_CTA,], "uint32", scope="shared", align=4) # start index of expert for each CTA
+                    smem_token_st = Tx.alloc_buffer([N_RECV_GROUPS_PER_CTA,], "uint32", scope="shared", align=4) # start index of token for each CTA
 
                     if DISPATCH_SEND:
                         zero_smem(tid, smem_buf)
-                        with T.warp()[N_WARPS_DISPATCH - 1:N_WARPS_DISPATCH]:
-                            for k in T.serial(T.ceildiv(N_EXPERTS, N_BLOCKS_DISPATCH * GROUP_SIZE)):
-                                dst_expert = T.meta_var(T.uint32(k * N_BLOCKS_DISPATCH * GROUP_SIZE + bx * GROUP_SIZE + group_rank))
+                        with Tx.warp()[N_WARPS_DISPATCH - 1:N_WARPS_DISPATCH]:
+                            for k in Tx.serial(Tx.ceildiv(N_EXPERTS, N_BLOCKS_DISPATCH * GROUP_SIZE)):
+                                dst_expert = Tx.meta_var(Tx.uint32(k * N_BLOCKS_DISPATCH * GROUP_SIZE + bx * GROUP_SIZE + group_rank))
                                 if dst_expert < N_EXPERTS:
                                     count = int_var()
                                     warp_count(lane_id, dst_expert, count, send_experts)
                                     thread_signal(group_idx, lane_id, dst_expert, count, buf_target_wait)
-                        with T.warp()[0:N_WARPS_DISPATCH - 1]:
+                        with Tx.warp()[0:N_WARPS_DISPATCH - 1]:
                             for m in range(M):
                                 thread_accum(tid, m, send_experts, smem_buf)
-                                if m % (N_BLOCKS_DISPATCH * GROUP_SIZE) == T.int32(bx * GROUP_SIZE + group_rank):
-                                    n_threads = T.meta_var(T.int32(N_WARPS_DISPATCH - 1) * 32)
+                                if m % (N_BLOCKS_DISPATCH * GROUP_SIZE) == Tx.int32(bx * GROUP_SIZE + group_rank):
+                                    n_threads = Tx.meta_var(Tx.int32(N_WARPS_DISPATCH - 1) * 32)
                                     thread_prepare_buf(n_threads, tid, m, send_tokens, buf_send)
-                                    T.ptx.bar.sync(1, n_threads)
+                                    Tx.ptx.bar.sync(1, n_threads)
                                     warp_dispatch_exp(group_idx, warp_id, m, smem_buf, send_experts, buf_send, buf_recv, buf_actual_wait)
                     if DISPATCH_RECV:
                         cta_wait(bx, tid, buf_target_wait, buf_actual_wait, recv_num_total, recv_num_per_expert, smem_expert_st, smem_token_st)
@@ -478,29 +478,29 @@ def test_dispatch_combine(world_size=8):
         # fmt: on
 
         # fmt: off
-        @T.prim_func(tirx=True)
-        def combine_kernel(send_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # send tokens
-                        send_num_total: T.Buffer((1,), "uint32"), # total number of tokens to send back
-                        send_experts: T.Buffer((M, K), "uint32"), # input tokens route to topk experts
-                        send_weights: T.Buffer((M, K), dtype), # input tokens weight for topk experts
-                        recv_tokens_new: T.Buffer((M, HIDDEN_DIM), dtype), # final output tokens after weighted sum
-                        buf_send_new: T.Buffer((MAX_SEND_TOKENS, HIDDEN_DIM), dtype), # send buffer
-                        buf_recv_new: T.Buffer((N_EXPERTS, M, HIDDEN_DIM), dtype), # recv buffer
-                        buf_actual_wait_new: T.Buffer((M,), "uint64"), # the number to wait on
-                        buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
-                        buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
-                        buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
-                        buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
+        @Tx.prim_func(tirx=True)
+        def combine_kernel(send_tokens: Tx.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # send tokens
+                        send_num_total: Tx.Buffer((1,), "uint32"), # total number of tokens to send back
+                        send_experts: Tx.Buffer((M, K), "uint32"), # input tokens route to topk experts
+                        send_weights: Tx.Buffer((M, K), dtype), # input tokens weight for topk experts
+                        recv_tokens_new: Tx.Buffer((M, HIDDEN_DIM), dtype), # final output tokens after weighted sum
+                        buf_send_new: Tx.Buffer((MAX_SEND_TOKENS, HIDDEN_DIM), dtype), # send buffer
+                        buf_recv_new: Tx.Buffer((N_EXPERTS, M, HIDDEN_DIM), dtype), # recv buffer
+                        buf_actual_wait_new: Tx.Buffer((M,), "uint64"), # the number to wait on
+                        buf_meta_index: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
+                        buf_meta_expert: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
+                        buf_meta_offset: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
+                        buf_meta_group: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
                         ):
-            with T.kernel():
-                bx = T.cta_id([N_BLOCKS_COMBINE], parent="kernel")
-                warp_id = T.warp_id([N_WARPS_COMBINE], parent="cta")
-                lane_id = T.thread_id([32], parent="warp")
-                tid = T.thread_id([N_WARPS_COMBINE * 32], parent="cta")
-                rank = T.nvshmem.my_pe()
-                n_threads = T.meta_var(N_WARPS_COMBINE * 32)
+            with Tx.kernel():
+                bx = Tx.cta_id([N_BLOCKS_COMBINE], parent="kernel")
+                warp_id = Tx.warp_id([N_WARPS_COMBINE], parent="cta")
+                lane_id = Tx.thread_id([32], parent="warp")
+                tid = Tx.thread_id([N_WARPS_COMBINE * 32], parent="cta")
+                rank = Tx.nvshmem.my_pe()
+                n_threads = Tx.meta_var(N_WARPS_COMBINE * 32)
 
-                with T.cta():
+                with Tx.cta():
                     if COMBINE_SEND:
                         thread_prepare_buf_back(bx, tid, n_threads, send_num_total, send_tokens, buf_send_new, buf_meta_expert, buf_meta_offset)
                         warp_dispatch_dp(rank, bx, warp_id, send_num_total, buf_send_new, buf_recv_new, buf_actual_wait_new, buf_meta_expert, buf_meta_index, buf_meta_group)

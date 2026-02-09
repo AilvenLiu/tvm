@@ -21,7 +21,6 @@ import numpy as np
 
 import tvm
 import tvm.testing
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout, tid_in_wg, TLane, TCol
 
@@ -119,23 +118,23 @@ def test_copy_g2s_s2g(task, dtype, scope):
     r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
 
     if scope == "cta":
-        scoper = T.cta
+        scoper = Tx.cta
     elif scope == "thread":
-        scoper = T.thread
+        scoper = Tx.thread
         thread_cnt = 1
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
-        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+    @Tx.prim_func(tirx=True)
+    def copy_sync(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([thread_cnt], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
 
             with scoper():
-                A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
+                A_smem = Tx.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
                 Tx.copy(A_smem[*r_smem], A[*r_gmem])
                 Tx.copy(B[*r_gmem], A_smem[*r_smem])
@@ -187,17 +186,17 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
     r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
-        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+    @Tx.prim_func(tirx=True)
+    def copy_sync(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([thread_cnt], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
 
-            with T.thread():
-                A_local = T.alloc_buffer(l_shape, dtype, scope="local", layout=layoutLocal)
+            with Tx.thread():
+                A_local = Tx.alloc_buffer(l_shape, dtype, scope="local", layout=layoutLocal)
 
                 Tx.copy(A_local[*r_lmem], A[*r_gmem])
                 Tx.copy(B[*r_gmem], A_local[*r_lmem])
@@ -245,63 +244,63 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
     local_view = TileLayout(shard=([128, WIDTH], [1@tid_in_wg, 1]))
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (128, WIDTH), dtype)
-        B = T.match_buffer(B_ptr, (128, WIDTH), dtype)
+    @Tx.prim_func(tirx=True)
+    def copy_sync(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128, WIDTH), dtype)
+        B = Tx.match_buffer(B_ptr, (128, WIDTH), dtype)
 
         A_flat = A.view(-1)
         B_flat = B.view(-1)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            wg_id = T.warpgroup_id([1], parent="cta")
-            warp_id = T.warp_id([4], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
-            tid_in_wg = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            wg_id = Tx.warpgroup_id([1], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid_in_wg = Tx.thread_id([128], parent="cta")
 
-            tmem_addr = T.alloc_shared([1], "uint32")
+            tmem_addr = Tx.alloc_shared([1], "uint32")
 
-            with T.warpgroup()[0:1]:
-                with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
+            with Tx.warpgroup()[0:1]:
+                with Tx.warp()[0:1]:
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
 
-                T.tvm_storage_sync("shared")
+                Tx.tvm_storage_sync("shared")
 
-                tmem = T.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
+                tmem = Tx.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
                                      layout=TileLayout(([128, OFFSET + WIDTH], [1@TLane, 1@TCol])))
 
-                A_reg = T.alloc_local((WIDTH), dtype)
-                B_reg = T.alloc_local((WIDTH), dtype)
+                A_reg = Tx.alloc_local((WIDTH), dtype)
+                B_reg = Tx.alloc_local((WIDTH), dtype)
                 A_local = A_reg.view(128, WIDTH, layout=local_view) # collective view of the whole warpgroup
                 B_local = B_reg.view(128, WIDTH, layout=local_view) # collective view of the whole warpgroup
 
                 # A -> A_local
-                with T.thread():
+                with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
-                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
                         Tx.copy(A_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])
                     for i in range(WIDTH):
-                        B_reg[i] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                        B_reg[i] = Tx.cast(0, dtype)
+                Tx.cuda.cta_sync()
 
                 # A_local -> tmem
                 Tx.copy(tmem[:, OFFSET: OFFSET + WIDTH], A_local[:, :])
-                T.cuda.cta_sync()
+                Tx.cuda.cta_sync()
 
                 # tmem -> B_local
                 Tx.copy(B_local[:, :], tmem[:, OFFSET: OFFSET + WIDTH])
-                T.cuda.cta_sync()
+                Tx.cuda.cta_sync()
 
                 # B_local -> B
-                with T.thread():
+                with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
-                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
                         Tx.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN])
 
-                with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
+                with Tx.warp()[0:1]:
+                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
+                    Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -349,64 +348,64 @@ def test_copy_tmem2reg_sliced_local(dtype, width_32b, local_offset_32b):
     local_view = TileLayout(shard=([128, TOTAL_LOCAL_WIDTH], [1@tid_in_wg, 1]))
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (128, WIDTH), dtype)
-        B = T.match_buffer(B_ptr, (128, WIDTH), dtype)
+    @Tx.prim_func(tirx=True)
+    def copy_sync(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128, WIDTH), dtype)
+        B = Tx.match_buffer(B_ptr, (128, WIDTH), dtype)
 
         A_flat = A.view(-1)
         B_flat = B.view(-1)
 
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            wg_id = T.warpgroup_id([1], parent="cta")
-            warp_id = T.warp_id([4], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
-            tid_in_wg = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            wg_id = Tx.warpgroup_id([1], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid_in_wg = Tx.thread_id([128], parent="cta")
 
-            tmem_addr = T.alloc_shared([1], "uint32")
+            tmem_addr = Tx.alloc_shared([1], "uint32")
 
-            with T.warpgroup()[0:1]:
-                with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+            with Tx.warpgroup()[0:1]:
+                with Tx.warp()[0:1]:
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
 
-                T.tvm_storage_sync("shared")
+                Tx.tvm_storage_sync("shared")
 
-                tmem = T.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
+                tmem = Tx.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
                                      layout=TileLayout(([128, WIDTH], [1@TLane, 1@TCol])))
 
                 # Allocate larger local buffer, but only use a slice
-                A_reg = T.alloc_local((TOTAL_LOCAL_WIDTH), dtype)
-                B_reg = T.alloc_local((TOTAL_LOCAL_WIDTH), dtype)
+                A_reg = Tx.alloc_local((TOTAL_LOCAL_WIDTH), dtype)
+                B_reg = Tx.alloc_local((TOTAL_LOCAL_WIDTH), dtype)
                 A_local = A_reg.view(128, TOTAL_LOCAL_WIDTH, layout=local_view)
                 B_local = B_reg.view(128, TOTAL_LOCAL_WIDTH, layout=local_view)
 
                 # A -> A_local (only the slice we care about)
-                with T.thread():
+                with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
-                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
                         Tx.copy(A_reg[LOCAL_OFFSET + i * VEC_LEN: LOCAL_OFFSET + i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])
                     for i in range(TOTAL_LOCAL_WIDTH):
-                        B_reg[i] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                        B_reg[i] = Tx.cast(0, dtype)
+                Tx.cuda.cta_sync()
 
                 # A_local[sliced] -> tmem (use sliced region)
                 Tx.copy(tmem[:, 0:WIDTH], A_local[:, LOCAL_OFFSET:LOCAL_OFFSET + WIDTH])
-                T.cuda.cta_sync()
+                Tx.cuda.cta_sync()
 
                 # tmem -> B_local[sliced] (use sliced region)
                 Tx.copy(B_local[:, LOCAL_OFFSET:LOCAL_OFFSET + WIDTH], tmem[:, 0:WIDTH])
-                T.cuda.cta_sync()
+                Tx.cuda.cta_sync()
 
                 # B_local -> B
-                with T.thread():
+                with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
-                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
                         Tx.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[LOCAL_OFFSET + i * VEC_LEN: LOCAL_OFFSET + i * VEC_LEN + VEC_LEN])
 
-                with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+                with Tx.warp()[0:1]:
+                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
+                    Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
     # fmt: on
 
     target = tvm.target.Target("cuda")

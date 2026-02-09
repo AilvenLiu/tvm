@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
@@ -249,92 +248,92 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
         HEAD_PER_CTA = plan_info.head_per_cta
 
         # fmt: off
-        @T.prim_func(tirx=True)
-        def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, lse_ptr: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle,
-                          kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o_ptr: T.handle):
+        @Tx.prim_func(tirx=True)
+        def decode_kernel(q_ptr: Tx.handle, kv_ptr: Tx.handle, lse_ptr: Tx.handle, kv_indptr: Tx.handle, kv_last_page_len: Tx.handle,
+                          kv_indices: Tx.handle, request_indices: Tx.handle, kv_tile_indices: Tx.handle, max_chunk_size: Tx.handle, o_ptr: Tx.handle):
 
-            batch_size = T.int32()
-            max_page_num = T.int32()
-            total_page_num = T.int32()
-            new_batch_size = T.int32()
-            request_indices_global_elem_offset = T.int32()
-            kv_tile_indices_global_elem_offset = T.int32()
-            max_chunk_size_global_elem_offset = T.int32()
+            batch_size = Tx.int32()
+            max_page_num = Tx.int32()
+            total_page_num = Tx.int32()
+            new_batch_size = Tx.int32()
+            request_indices_global_elem_offset = Tx.int32()
+            kv_tile_indices_global_elem_offset = Tx.int32()
+            max_chunk_size_global_elem_offset = Tx.int32()
 
-            q_global = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global")
-            kv_global = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global")
-            kv_indptr_global = T.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
-            kv_last_page_len_global = T.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", offset_factor=1)
-            kv_indices_global = T.match_buffer(kv_indices, [total_page_num], "int32", scope="global", offset_factor=1)
-            request_indices_global = T.match_buffer(request_indices, [new_batch_size], "int32", scope="global", elem_offset=request_indices_global_elem_offset)
-            kv_tile_indices_global = T.match_buffer(kv_tile_indices, [new_batch_size], "int32", scope="global", elem_offset=kv_tile_indices_global_elem_offset)
-            max_chunk_size_global = T.match_buffer(max_chunk_size, [1], "int32", scope="global", elem_offset=max_chunk_size_global_elem_offset)
-            o_global = T.match_buffer(o_ptr, [new_batch_size, QO_HEADS, HEAD_DIM], O_TYPE, scope="global")
-            lse_global = T.match_buffer(lse_ptr, [new_batch_size, QO_HEADS], "float32", scope="global")
+            q_global = Tx.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global")
+            kv_global = Tx.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global")
+            kv_indptr_global = Tx.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
+            kv_last_page_len_global = Tx.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", offset_factor=1)
+            kv_indices_global = Tx.match_buffer(kv_indices, [total_page_num], "int32", scope="global", offset_factor=1)
+            request_indices_global = Tx.match_buffer(request_indices, [new_batch_size], "int32", scope="global", elem_offset=request_indices_global_elem_offset)
+            kv_tile_indices_global = Tx.match_buffer(kv_tile_indices, [new_batch_size], "int32", scope="global", elem_offset=kv_tile_indices_global_elem_offset)
+            max_chunk_size_global = Tx.match_buffer(max_chunk_size, [1], "int32", scope="global", elem_offset=max_chunk_size_global_elem_offset)
+            o_global = Tx.match_buffer(o_ptr, [new_batch_size, QO_HEADS, HEAD_DIM], O_TYPE, scope="global")
+            lse_global = Tx.match_buffer(lse_ptr, [new_batch_size, QO_HEADS], "float32", scope="global")
 
-            with T.kernel():
-                bx = T.cta_id([SM_COUNT], parent="kernel")
-                tx, ty, tz = T.thread_id([BDX, BDY, BDZ], parent="cta")
+            with Tx.kernel():
+                bx = Tx.cta_id([SM_COUNT], parent="kernel")
+                tx, ty, tz = Tx.thread_id([BDX, BDY, BDZ], parent="cta")
                 kv_global_1d = kv_global.view(-1)
 
-                with T.cta():
+                with Tx.cta():
                     # allocate the memory
-                    buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                    pool = T.meta_var(Tx.PoolAllocator(buf.data))
+                    buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
                     k_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     v_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     kv_offset = pool.alloc([BDZ, BDX, BDY, TILE_PER_BDX], "int32")
                     epi_o = pool.alloc([BDZ, BDY, BDX, HEAD_PER_CTA, VEC_SIZE], "float32")
                     epi_md = pool.alloc([BDZ, BDY, HEAD_PER_CTA, 2], "float32")
 
-                    with T.thread():
+                    with Tx.thread():
 
                         # allocate the reg
-                        idx = T.alloc_local([1], "int32")
-                        tmp = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float16")
-                        q = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
-                        k = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
-                        v = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
-                        s = T.alloc_local([HEAD_PER_CTA, TILE_PER_BDX * BDY], "float32")
-                        batch_idx = T.alloc_local([1], "int32")
-                        chunk_start_logical = T.alloc_local([1], "int32")
-                        chunk_end_logical = T.alloc_local([1], "int32")
-                        chunk_size = T.alloc_local([1], "int32")
-                        indices = T.alloc_local([1], "int32")
-                        kv_offset_cp = T.alloc_local([TILE_PER_BDX], "int32")
-                        o = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
-                        m = T.alloc_local([HEAD_PER_CTA, 2], "float32")
-                        d = T.alloc_local([HEAD_PER_CTA, 2], "float32")
-                        m_tmp = T.alloc_local([HEAD_PER_CTA, 1], "float32")
-                        d_tmp = T.alloc_local([HEAD_PER_CTA, 1], "float32")
-                        o_tmp = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
-                        cur = T.alloc_local([1], "int32")
-                        tx_start = T.meta_var(tx * VEC_SIZE)
+                        idx = Tx.alloc_local([1], "int32")
+                        tmp = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float16")
+                        q = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
+                        k = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
+                        v = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
+                        s = Tx.alloc_local([HEAD_PER_CTA, TILE_PER_BDX * BDY], "float32")
+                        batch_idx = Tx.alloc_local([1], "int32")
+                        chunk_start_logical = Tx.alloc_local([1], "int32")
+                        chunk_end_logical = Tx.alloc_local([1], "int32")
+                        chunk_size = Tx.alloc_local([1], "int32")
+                        indices = Tx.alloc_local([1], "int32")
+                        kv_offset_cp = Tx.alloc_local([TILE_PER_BDX], "int32")
+                        o = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
+                        m = Tx.alloc_local([HEAD_PER_CTA, 2], "float32")
+                        d = Tx.alloc_local([HEAD_PER_CTA, 2], "float32")
+                        m_tmp = Tx.alloc_local([HEAD_PER_CTA, 1], "float32")
+                        d_tmp = Tx.alloc_local([HEAD_PER_CTA, 1], "float32")
+                        o_tmp = Tx.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
+                        cur = Tx.alloc_local([1], "int32")
+                        tx_start = Tx.meta_var(tx * VEC_SIZE)
 
-                        @T.macro
+                        @Tx.macro
                         def fetch_kv_offset(kt, kv_head_id_beg, offset):
-                            token_id = T.meta_var(chunk_start_logical[0] + offset)
+                            token_id = Tx.meta_var(chunk_start_logical[0] + offset)
                             if token_id < chunk_end_logical[0]:
-                                p = T.meta_var(token_id // PAGE_SIZE)
-                                r = T.meta_var(token_id % PAGE_SIZE)
-                                indices[0] = T.cuda.ldg(kv_indices_global.ptr_to([p]), "int32")
+                                p = Tx.meta_var(token_id // PAGE_SIZE)
+                                r = Tx.meta_var(token_id % PAGE_SIZE)
+                                indices[0] = Tx.cuda.ldg(kv_indices_global.ptr_to([p]), "int32")
                                 kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM
                                                                   + kv_head_id_beg * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM)
-                        @T.macro
+                        @Tx.macro
                         def sync_blk():
                             if BDZ <= 4:
-                                T.ptx.bar.sync(1 + tz, BDX * BDY)
+                                Tx.ptx.bar.sync(1 + tz, BDX * BDY)
                             else:
-                                T.ptx.bar.sync(1, BDX * BDY * BDZ)
+                                Tx.ptx.bar.sync(1, BDX * BDY * BDZ)
 
                         cur[0] = bx
                         while cur[0] < new_batch_size * KV_HEADS // HEAD_PER_CTA:
-                            new_batch_id = T.meta_var(cur[0] * HEAD_PER_CTA // KV_HEADS)
-                            kv_head_id_beg = T.meta_var((cur[0] * HEAD_PER_CTA) % KV_HEADS)
+                            new_batch_id = Tx.meta_var(cur[0] * HEAD_PER_CTA // KV_HEADS)
+                            kv_head_id_beg = Tx.meta_var((cur[0] * HEAD_PER_CTA) % KV_HEADS)
 
                             # fetch q
                             batch_idx[0] = request_indices_global[new_batch_id]
-                            for kb in T.unroll(HEAD_PER_CTA):
+                            for kb in Tx.unroll(HEAD_PER_CTA):
                                 Tx.copy(tmp[kb, :], q_global[batch_idx[0], (kv_head_id_beg + kb) * BDY + ty, tx_start:tx_start + VEC_SIZE])
                                 Tx.cast(q[kb, :], tmp[kb, :])
 
@@ -343,7 +342,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             chunk_end_logical[0] = chunk_start_logical[0]
                             if SPLIT_KV:
                                 chunk_start_logical[0] += max_chunk_size_global[0] * kv_tile_indices_global[new_batch_id]
-                                chunk_end_logical[0] = T.min(chunk_start_logical[0] + max_chunk_size_global[0],
+                                chunk_end_logical[0] = Tx.min(chunk_start_logical[0] + max_chunk_size_global[0],
                                                             chunk_end_logical[0] + (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE
                                                             + kv_last_page_len_global[batch_idx[0]])
                             else:
@@ -351,162 +350,162 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             chunk_size[0] = chunk_end_logical[0] - chunk_start_logical[0]
 
                             # fetch kv-offset
-                            for kt in T.unroll(TILE_PER_BDX):
+                            for kt in Tx.unroll(TILE_PER_BDX):
                                 fetch_kv_offset(kt, kv_head_id_beg, ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
-                            T.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy("shared")
                             sync_blk()
 
-                            for kp in T.unroll(PIPE_DEPTH):
+                            for kp in Tx.unroll(PIPE_DEPTH):
                                 # get kv-offset used in cp
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     kv_offset_cp[kt] = kv_offset[tz, kp, ty, kt] + tx * VEC_SIZE
 
                                 # fetch K
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
-                                        for kb in T.unroll(HEAD_PER_CTA):
-                                            g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
+                                        for kb in Tx.unroll(HEAD_PER_CTA):
+                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tx.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
 
                                 # fetch V
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
-                                        for kb in T.unroll(HEAD_PER_CTA):
-                                            g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
+                                        for kb in Tx.unroll(HEAD_PER_CTA):
+                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tx.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
 
                             # initilize the value
                             idx[0] = 0
-                            for kb in T.unroll(HEAD_PER_CTA):
-                                for kv in T.unroll(VEC_SIZE):
+                            for kb in Tx.unroll(HEAD_PER_CTA):
+                                for kv in Tx.unroll(VEC_SIZE):
                                     o[kb, kv] = 0.0
-                                m[kb, 0] = T.float32('-inf')
+                                m[kb, 0] = Tx.float32('-inf')
                                 d[kb, 0] = 1.0
                             # pipeline
-                            for ki in T.serial(ceildiv(chunk_size[0], (TILE_PER_BDX * BDY * BDZ))):
+                            for ki in Tx.serial(ceildiv(chunk_size[0], (TILE_PER_BDX * BDY * BDZ))):
                                 # fetch new kv-offset
                                 if ((ki + PIPE_DEPTH) % BDX == 0):
-                                    for kt in T.unroll(TILE_PER_BDX):
+                                    for kt in Tx.unroll(TILE_PER_BDX):
                                         fetch_kv_offset(kt, kv_head_id_beg,
                                                         (ki + PIPE_DEPTH) * TILE_PER_BDX * BDY * BDZ  + ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
-                                    T.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy("shared")
 
                                 # compute qk
-                                T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for K
+                                Tx.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for K
                                 sync_blk()
-                                for kb in T.unroll(HEAD_PER_CTA):
+                                for kb in Tx.unroll(HEAD_PER_CTA):
                                     m[kb, 1] = m[kb, 0]
-                                for kt in T.unroll(TILE_PER_BDX * BDY):
-                                    for kb in T.unroll(HEAD_PER_CTA):
+                                for kt in Tx.unroll(TILE_PER_BDX * BDY):
+                                    for kb in Tx.unroll(HEAD_PER_CTA):
                                         # cast k to f32
                                         Tx.cast(k[kb, :], k_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
                                         s[kb, kt] = 0.0
                                         # local gemm
-                                        for kv in T.unroll(VEC_SIZE):
+                                        for kv in Tx.unroll(VEC_SIZE):
                                             s[kb, kt] += q[kb, kv] * k[kb, kv]
                                         # reduce from other tx's sum
-                                        for kr in T.unroll(find_power_of_two(BDX // 2) + 1):
-                                            s[kb, kt] = s[kb, kt] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, s[kb, kt], (BDX // 2) >> kr, 32, 32)
+                                        for kr in Tx.unroll(find_power_of_two(BDX // 2) + 1):
+                                            s[kb, kt] = s[kb, kt] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, s[kb, kt], (BDX // 2) >> kr, 32, 32)
                                         s[kb, kt] *= SM_SCALE
                                         if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt >= chunk_size[0]:
-                                            s[kb, kt] = T.float32('-inf')
+                                            s[kb, kt] = Tx.float32('-inf')
                                         # update max value
-                                        m[kb, 0] = T.max(m[kb, 0], s[kb, kt])
+                                        m[kb, 0] = Tx.max(m[kb, 0], s[kb, kt])
 
                                 # update the sum for softmax
                                 if TILE_PER_BDX * BDY * tz < chunk_size[0]:
-                                    for kb in T.unroll(HEAD_PER_CTA):
-                                        o_scale = T.meta_var(T.exp2(m[kb, 1] - m[kb, 0]))
+                                    for kb in Tx.unroll(HEAD_PER_CTA):
+                                        o_scale = Tx.meta_var(Tx.exp2(m[kb, 1] - m[kb, 0]))
                                         d[kb, 0] *= o_scale
-                                        for kt in T.unroll(TILE_PER_BDX * BDY):
-                                            s[kb, kt] = T.exp2(s[kb, kt] - m[kb, 0])
+                                        for kt in Tx.unroll(TILE_PER_BDX * BDY):
+                                            s[kb, kt] = Tx.exp2(s[kb, kt] - m[kb, 0])
                                             d[kb, 0] += s[kb, kt]
-                                        for kv in T.unroll(VEC_SIZE):
+                                        for kv in Tx.unroll(VEC_SIZE):
                                             o[kb, kv] = o[kb, kv] * o_scale
                                 sync_blk()
 
                                 # get kv-offset used in cp
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     kv_offset_cp[kt] = kv_offset[tz, (ki + PIPE_DEPTH) % BDX, ty, kt] + tx * VEC_SIZE
 
                                 # fetch K
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
-                                        for kb in T.unroll(HEAD_PER_CTA):
-                                            g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
+                                        for kb in Tx.unroll(HEAD_PER_CTA):
+                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tx.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
 
                                 # calculate softmax(qk)v
-                                T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for V
+                                Tx.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for V
                                 sync_blk()
-                                for kt in T.unroll(TILE_PER_BDX * BDY):
-                                    for kb in T.unroll(HEAD_PER_CTA):
+                                for kt in Tx.unroll(TILE_PER_BDX * BDY):
+                                    for kb in Tx.unroll(HEAD_PER_CTA):
                                         if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt < chunk_size[0]:
                                             Tx.cast(v[kb, :], v_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
-                                            for kv in T.unroll(VEC_SIZE):
+                                            for kv in Tx.unroll(VEC_SIZE):
                                                 o[kb, kv] += s[kb, kt] * v[kb, kv]
                                 sync_blk()
 
                                 # fetch V
-                                for kt in T.unroll(TILE_PER_BDX):
+                                for kt in Tx.unroll(TILE_PER_BDX):
                                     if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
-                                        for kb in T.unroll(HEAD_PER_CTA):
-                                            g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
+                                        for kb in Tx.unroll(HEAD_PER_CTA):
+                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tx.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
                                 idx[0] = (idx[0] + 1) % PIPE_DEPTH
 
-                            T.ptx.cp_async.wait_group(0)
+                            Tx.ptx.cp_async.wait_group(0)
 
                             # prepare o,m,d in smem for merging
-                            for kb in T.unroll(HEAD_PER_CTA):
-                                for kv in T.unroll(VEC_SIZE):
+                            for kb in Tx.unroll(HEAD_PER_CTA):
+                                for kv in Tx.unroll(VEC_SIZE):
                                     epi_o[tz, ty, tx, kb, kv] = o[kb, kv]
                             if tx == 0:
-                                for kb in T.unroll(HEAD_PER_CTA):
+                                for kb in Tx.unroll(HEAD_PER_CTA):
                                     epi_md[tz, ty, kb, 0] = m[kb, 0]
                                     epi_md[tz, ty, kb, 1] = d[kb, 0]
-                            T.ptx.fence.proxy("shared")
-                            T.cuda.cta_sync()
+                            Tx.ptx.fence.proxy("shared")
+                            Tx.cuda.cta_sync()
                             # merge o through different tz
                             if tz == 0:
-                                for kb in T.unroll(HEAD_PER_CTA):
-                                    m[kb, 0] = T.float32('-inf')
+                                for kb in Tx.unroll(HEAD_PER_CTA):
+                                    m[kb, 0] = Tx.float32('-inf')
                                     d[kb, 0] = 1.0
-                                    for kv in T.unroll(VEC_SIZE):
+                                    for kv in Tx.unroll(VEC_SIZE):
                                         o[kb, kv] = 0.0
-                                    for kz in T.unroll(BDZ):
+                                    for kz in Tx.unroll(BDZ):
                                         if TILE_PER_BDX * BDY * kz < chunk_size[0]:
                                             m_tmp[kb, 0] = epi_md[kz, ty, kb, 0]
                                             d_tmp[kb, 0] = epi_md[kz, ty, kb, 1]
-                                            for kv in T.unroll(VEC_SIZE):
+                                            for kv in Tx.unroll(VEC_SIZE):
                                                 o_tmp[kb, kv] = epi_o[kz, ty, tx, kb, kv]
                                             m[kb, 1] = m[kb, 0]
                                             d[kb, 1] = d[kb, 0]
-                                            m[kb, 0] = T.max(m[kb, 1], m_tmp[kb, 0])
-                                            d[kb, 0] = d[kb, 1] * T.exp2(m[kb, 1] - m[kb, 0]) + d_tmp[kb, 0] * T.exp2(m_tmp[kb, 0] - m[kb, 0])
-                                            for kv in T.unroll(VEC_SIZE):
-                                                o[kb, kv] = o[kb, kv] * T.exp2(m[kb, 1] - m[kb, 0]) + o_tmp[kb, kv] * T.exp2(m_tmp[kb, 0] - m[kb, 0])
+                                            m[kb, 0] = Tx.max(m[kb, 1], m_tmp[kb, 0])
+                                            d[kb, 0] = d[kb, 1] * Tx.exp2(m[kb, 1] - m[kb, 0]) + d_tmp[kb, 0] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])
+                                            for kv in Tx.unroll(VEC_SIZE):
+                                                o[kb, kv] = o[kb, kv] * Tx.exp2(m[kb, 1] - m[kb, 0]) + o_tmp[kb, kv] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])
                                     # normalize
-                                    for kv in T.unroll(VEC_SIZE):
+                                    for kv in Tx.unroll(VEC_SIZE):
                                         o[kb, kv] = o[kb, kv] / d[kb, 0]
                                 # store to global mem
-                                for kb in T.unroll(HEAD_PER_CTA):
-                                    qo_head_id = T.meta_var((kv_head_id_beg + kb) * BDY + ty)
+                                for kb in Tx.unroll(HEAD_PER_CTA):
+                                    qo_head_id = Tx.meta_var((kv_head_id_beg + kb) * BDY + ty)
                                     if SPLIT_KV:
                                         Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], o[kb, :])
                                     else:
                                         Tx.cast(tmp[kb, :], o[kb, :])
                                         Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], tmp[kb, :])
                                     if tx == 0:
-                                        lse_global[new_batch_id, qo_head_id] = m[kb, 0] + T.log2(d[kb, 0])
+                                        lse_global[new_batch_id, qo_head_id] = m[kb, 0] + Tx.log2(d[kb, 0])
 
                             cur[0] += SM_COUNT
         # fmt: on
@@ -520,24 +519,24 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
         BDX, BDY = plan_info.bd_m
 
         # fmt: off
-        @T.prim_func(tirx=True)
-        def merge_kernel(o_tmp_ptr: T.handle, o_indptr: T.handle, o_ptr: T.handle, lse_tmp_ptr: T.handle, lse_ptr: T.handle):
-            batch_size = T.int32()
-            new_batch_size = T.int32()
-            o_tmp_global = T.match_buffer(o_tmp_ptr, [new_batch_size, NUM_HEADS, HEAD_DIM], "float32", scope="global")
-            o_indptr_global = T.match_buffer(o_indptr, [batch_size + 1], "int32", scope="global")
-            o_global = T.match_buffer(o_ptr, [batch_size, NUM_HEADS, HEAD_DIM], "float16", scope="global")
-            lse_tmp_global = T.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_HEADS], "float32", scope="global")
-            lse_global = T.match_buffer(lse_ptr, [batch_size, NUM_HEADS], "float32", scope="global")
+        @Tx.prim_func(tirx=True)
+        def merge_kernel(o_tmp_ptr: Tx.handle, o_indptr: Tx.handle, o_ptr: Tx.handle, lse_tmp_ptr: Tx.handle, lse_ptr: Tx.handle):
+            batch_size = Tx.int32()
+            new_batch_size = Tx.int32()
+            o_tmp_global = Tx.match_buffer(o_tmp_ptr, [new_batch_size, NUM_HEADS, HEAD_DIM], "float32", scope="global")
+            o_indptr_global = Tx.match_buffer(o_indptr, [batch_size + 1], "int32", scope="global")
+            o_global = Tx.match_buffer(o_ptr, [batch_size, NUM_HEADS, HEAD_DIM], "float16", scope="global")
+            lse_tmp_global = Tx.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_HEADS], "float32", scope="global")
+            lse_global = Tx.match_buffer(lse_ptr, [batch_size, NUM_HEADS], "float32", scope="global")
 
-            with T.kernel():
-                bx = T.cta_id([SM_COUNT], parent="kernel")
-                tx, ty = T.thread_id([BDX, BDY], parent="cta")
+            with Tx.kernel():
+                bx = Tx.cta_id([SM_COUNT], parent="kernel")
+                tx, ty = Tx.thread_id([BDX, BDY], parent="cta")
 
-                with T.cta():
+                with Tx.cta():
                     # allocate the memory
-                    buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                    pool = T.meta_var(Tx.PoolAllocator(buf.data))
+                    buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
                     o_tmp_smem = pool.alloc([PIPE_DEPTH, BDY, HEAD_DIM], "float32")
                     lse_tmp_smem_load = pool.alloc([BDY, BDX], "float32")
                     lse_tmp_smem_use = lse_tmp_smem_load.view(BDX, BDY)
@@ -545,20 +544,20 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                     o_epi_smem = pool.alloc([BDY, HEAD_DIM], "float32")
                     lse_epi_smem = pool.alloc([BDY], "float32")
 
-                    with T.thread():
-                        idx = T.alloc_local([1], "int32")
-                        head_idx = T.alloc_local([1], "int32")
-                        batch_idx = T.alloc_local([1], "int32")
-                        new_beg_batch_idx = T.alloc_local([1], "int32")
-                        num = T.alloc_local([1], "int32")
-                        tmp = T.alloc_local([VEC_SIZE], "float16")
-                        o = T.alloc_local([VEC_SIZE], "float32")
-                        m = T.alloc_local([2], "float32")
-                        d = T.alloc_local([2], "float32")
-                        m_tmp = T.alloc_local([1], "float32")
-                        o_tmp = T.alloc_local([VEC_SIZE], "float32")
+                    with Tx.thread():
+                        idx = Tx.alloc_local([1], "int32")
+                        head_idx = Tx.alloc_local([1], "int32")
+                        batch_idx = Tx.alloc_local([1], "int32")
+                        new_beg_batch_idx = Tx.alloc_local([1], "int32")
+                        num = Tx.alloc_local([1], "int32")
+                        tmp = Tx.alloc_local([VEC_SIZE], "float16")
+                        o = Tx.alloc_local([VEC_SIZE], "float32")
+                        m = Tx.alloc_local([2], "float32")
+                        d = Tx.alloc_local([2], "float32")
+                        m_tmp = Tx.alloc_local([1], "float32")
+                        o_tmp = Tx.alloc_local([VEC_SIZE], "float32")
 
-                        tx_start = T.meta_var(tx * VEC_SIZE)
+                        tx_start = Tx.meta_var(tx * VEC_SIZE)
 
                         idx[0] = bx
                         while idx[0] < batch_size * NUM_HEADS:
@@ -576,85 +575,85 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 continue
 
                             # pipeline
-                            for kp in T.unroll(PIPE_DEPTH):
+                            for kp in Tx.unroll(PIPE_DEPTH):
                                 if kp * BDY + ty < num[0]:
                                     Tx.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
                                                   dispatch="non-bulk-copy", vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
+                                Tx.ptx.cp_async.commit_group()
 
                             # initialize the value
-                            m[0] = T.float32('-inf')
+                            m[0] = Tx.float32('-inf')
                             d[0] = 1.0
-                            for kv in T.unroll(VEC_SIZE):
+                            for kv in Tx.unroll(VEC_SIZE):
                                 o[kv] = 0.0
 
-                            for ki in T.serial(ceildiv(num[0], BDY)):
+                            for ki in Tx.serial(ceildiv(num[0], BDY)):
                                 if ki % BDX == 0:
                                     # load lse
                                     if ki * BDY + ty * BDX + tx < num[0]:
                                         lse_tmp_smem_load[ty, tx] = lse_tmp_global[new_beg_batch_idx[0] + ki * BDY + ty * BDX + tx, head_idx[0]]
                                     else:
                                         lse_tmp_smem_load[ty, tx] = 0.0
-                                    T.ptx.fence.proxy("shared")
-                                    T.ptx.bar.sync(2, BDX * BDY)
+                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.bar.sync(2, BDX * BDY)
 
-                                T.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
-                                T.ptx.bar.sync(2, BDX * BDY)
-                                T.ptx.fence.proxy("shared")
+                                Tx.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
+                                Tx.ptx.bar.sync(2, BDX * BDY)
+                                Tx.ptx.fence.proxy("shared")
 
-                                for kv in T.serial(VEC_SIZE):
+                                for kv in Tx.serial(VEC_SIZE):
                                     o_tmp[kv] = o_tmp_smem[ki % PIPE_DEPTH, ty, tx * VEC_SIZE + kv]
                                 if ki * BDY + ty < num[0]:
                                     m_tmp[0] = lse_tmp_smem_use[ki % BDX, ty]
                                     m[1] = m[0]
                                     d[1] = d[0]
-                                    m[0] = T.max(m[1], m_tmp[0])
-                                    d[0] = d[1] * T.exp2(m[1] - m[0]) + T.exp2(m_tmp[0] - m[0])
-                                    for kv in T.unroll(VEC_SIZE):
-                                        o[kv] = o[kv] * T.exp2(m[1] - m[0]) + o_tmp[kv] * T.exp2(m_tmp[0] - m[0])
-                                T.ptx.bar.sync(2, BDX * BDY)
+                                    m[0] = Tx.max(m[1], m_tmp[0])
+                                    d[0] = d[1] * Tx.exp2(m[1] - m[0]) + Tx.exp2(m_tmp[0] - m[0])
+                                    for kv in Tx.unroll(VEC_SIZE):
+                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])
+                                Tx.ptx.bar.sync(2, BDX * BDY)
                                 if (PIPE_DEPTH + ki) * BDY + ty < num[0]:
                                     Tx.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
                                                   dispatch="non-bulk-copy", vec_len=VEC_SIZE)
-                                T.ptx.cp_async.commit_group()
-                            T.ptx.cp_async.wait_group(0)
-                            T.ptx.bar.sync(2, BDX * BDY)
+                                Tx.ptx.cp_async.commit_group()
+                            Tx.ptx.cp_async.wait_group(0)
+                            Tx.ptx.bar.sync(2, BDX * BDY)
                             # normalize
-                            for kv in T.unroll(VEC_SIZE):
+                            for kv in Tx.unroll(VEC_SIZE):
                                 o[kv] = o[kv] / d[0]
 
                             # reduce
-                            for kv in T.serial(VEC_SIZE):
+                            for kv in Tx.serial(VEC_SIZE):
                                 o_epi_smem[ty, tx * VEC_SIZE + kv] = o[kv]
-                            lse_epi_smem[ty] = m[0] + T.log2(d[0])
-                            m[0] = T.float32('-inf')
+                            lse_epi_smem[ty] = m[0] + Tx.log2(d[0])
+                            m[0] = Tx.float32('-inf')
                             d[0] = 1.0
-                            for kv in T.serial(VEC_SIZE):
+                            for kv in Tx.serial(VEC_SIZE):
                                 o[kv] = 0.0
-                            T.ptx.fence.proxy("shared")
-                            T.ptx.bar.sync(2, BDX * BDY)
+                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.bar.sync(2, BDX * BDY)
                             if ty == 0:
-                                for ky in T.serial(BDY):
+                                for ky in Tx.serial(BDY):
                                     m_tmp[0] = lse_epi_smem[ky]
-                                    for kv in T.serial(VEC_SIZE):
+                                    for kv in Tx.serial(VEC_SIZE):
                                         o_tmp[kv] = o_epi_smem[ky, tx * VEC_SIZE + kv]
                                     m[1] = m[0]
                                     d[1] = d[0]
-                                    m[0] = T.max(m[1], m_tmp[0])
-                                    d[0] = d[1] * T.exp2(m[1] - m[0]) + T.exp2(m_tmp[0] - m[0])
-                                    for kv in T.unroll(VEC_SIZE):
-                                        o[kv] = o[kv] * T.exp2(m[1] - m[0]) + o_tmp[kv] * T.exp2(m_tmp[0] - m[0])
+                                    m[0] = Tx.max(m[1], m_tmp[0])
+                                    d[0] = d[1] * Tx.exp2(m[1] - m[0]) + Tx.exp2(m_tmp[0] - m[0])
+                                    for kv in Tx.unroll(VEC_SIZE):
+                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])
 
-                                for kv in T.unroll(VEC_SIZE):
+                                for kv in Tx.unroll(VEC_SIZE):
                                     o[kv] = o[kv] / d[0]
 
                                 # store to global mem
                                 Tx.cast(tmp[:], o[:])
                                 Tx.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])
                                 if tx == 0:
-                                    lse_global[batch_idx[0], head_idx[0]] = m[0] + T.log2(d[0])
+                                    lse_global[batch_idx[0], head_idx[0]] = m[0] + Tx.log2(d[0])
                             idx[0] += SM_COUNT
         # fmt: on
         return merge_kernel

@@ -16,55 +16,54 @@
 # under the License.
 import pytest
 
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.analysis import verify_tirx_well_formed as verify
 
 
 def test_root_scope():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1() -> None:
-        with T.thread():
+        with Tx.thread():
             pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2() -> None:
-        with T.warp():
-            with T.thread():
+        with Tx.warp():
+            with Tx.thread():
                 pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3() -> None:
-        with T.cta():
-            with T.warp():
-                with T.thread():
+        with Tx.cta():
+            with Tx.warp():
+                with Tx.thread():
                     pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.warp():
-                    with T.thread():
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.warp():
+                    with Tx.thread():
                         pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test5() -> None:
-        with T.world():
-            with T.kernel():
-                with T.cta():
-                    with T.warp():
-                        with T.thread():
+        with Tx.world():
+            with Tx.kernel():
+                with Tx.cta():
+                    with Tx.warp():
+                        with Tx.thread():
                             pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test6() -> None:
-        with T.world():
-            with T.kernel():
-                with T.cta():
-                    with T.warp():
-                        with T.cluster():
+        with Tx.world():
+            with Tx.kernel():
+                with Tx.cta():
+                    with Tx.warp():
+                        with Tx.cluster():
                             pass
 
     # fmt: on
@@ -79,49 +78,49 @@ def test_root_scope():
 
 def test_nested_scope():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.warp():
-                    with T.thread():
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.warp():
+                    with Tx.thread():
                         pass
-                with T.thread():
+                with Tx.thread():
                     pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2() -> None:
-        with T.kernel():
-            with T.thread():
-                with T.cta():
-                    with T.thread():
+        with Tx.kernel():
+            with Tx.thread():
+                with Tx.cta():
+                    with Tx.thread():
                         pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3() -> None:
-        with T.kernel():
-            with T.warp():
-                with T.thread():
-                    with T.cta():
-                        with T.thread():
+        with Tx.kernel():
+            with Tx.warp():
+                with Tx.thread():
+                    with Tx.cta():
+                        with Tx.thread():
                             pass
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4() -> None:
-        with T.kernel():
-            with T.thread():
-                with T.warpgroup():
-                    with T.warp():
-                        with T.thread():
+        with Tx.kernel():
+            with Tx.thread():
+                with Tx.warpgroup():
+                    with Tx.warp():
+                        with Tx.thread():
                             pass
-                with T.warpgroup():
-                    with T.warp():
-                        with T.thread():
+                with Tx.warpgroup():
+                    with Tx.warp():
+                        with Tx.thread():
                             pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test5() -> None:
-        with T.kernel():
-            with T.world():
+        with Tx.kernel():
+            with Tx.world():
                 pass
     # fmt: on
 
@@ -135,51 +134,51 @@ def test_nested_scope():
 
 def test_scope_slice():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.warpgroup()[0:1]:
-                    with T.thread():
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.warpgroup()[0:1]:
+                    with Tx.thread():
                         pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.warpgroup()[0:3]:
-                    with T.warpgroup()[1:2]:
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.warpgroup()[0:3]:
+                    with Tx.warpgroup()[1:2]:
                         pass
-                    with T.warpgroup()[2:3]:
-                        with T.thread()[T.ptx.elect_sync()]:
+                    with Tx.warpgroup()[2:3]:
+                        with Tx.thread()[Tx.ptx.elect_sync()]:
                             pass
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.warpgroup()[0:3]:
-                    with T.warpgroup()[1:5]:
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.warpgroup()[0:3]:
+                    with Tx.warpgroup()[1:5]:
                         pass
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.thread()[0:3]:
-                    with T.thread()[T.ptx.elect_sync()]:
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.thread()[0:3]:
+                    with Tx.thread()[Tx.ptx.elect_sync()]:
                         pass
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test5() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.thread()[T.ptx.elect_sync()]:
-                    with T.thread()[T.ptx.elect_sync()]:
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.thread()[Tx.ptx.elect_sync()]:
+                    with Tx.thread()[Tx.ptx.elect_sync()]:
                         pass
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test6() -> None:
-        with T.kernel():
-            with T.cta():
-                with T.thread()[T.ptx.elect_sync()]:
-                    with T.thread()[T.int32(0)]:
+        with Tx.kernel():
+            with Tx.cta():
+                with Tx.thread()[Tx.ptx.elect_sync()]:
+                    with Tx.thread()[Tx.int32(0)]:
                         pass
     # fmt: on
     verify(test1)
@@ -195,57 +194,57 @@ def test_scope_slice():
 
 def test_scope_partition():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
-        with T.kernel():
-            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            tx = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
+            warp_id = Tx.warp_id([4], parent="cta")
+            tx = Tx.thread_id([128], parent="cta")
 
-            with T.cta():
-                T.sblock_attr({"tirx.scope_partition": True})
-                with T.thread()[0:30]:
-                    T.evaluate(tx)
-                with T.thread()[30:128]:
-                    T.evaluate(tx)
-    @T.prim_func(tirx=True, check_well_formed=False)
+            with Tx.cta():
+                Tx.sblock_attr({"tirx.scope_partition": True})
+                with Tx.thread()[0:30]:
+                    Tx.evaluate(tx)
+                with Tx.thread()[30:128]:
+                    Tx.evaluate(tx)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
-        with T.kernel():
-            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            tx = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
+            warp_id = Tx.warp_id([4], parent="cta")
+            tx = Tx.thread_id([128], parent="cta")
 
-            with T.cta():
-                T.sblock_attr({"tirx.scope_partition": True})
-                with T.thread()[0:30]:
-                    T.evaluate(tx)
-                with T.thread():
-                    T.evaluate(tx)
-    @T.prim_func(tirx=True, check_well_formed=False)
+            with Tx.cta():
+                Tx.sblock_attr({"tirx.scope_partition": True})
+                with Tx.thread()[0:30]:
+                    Tx.evaluate(tx)
+                with Tx.thread():
+                    Tx.evaluate(tx)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3():
-        with T.kernel():
-            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            tx = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
+            warp_id = Tx.warp_id([4], parent="cta")
+            tx = Tx.thread_id([128], parent="cta")
 
-            with T.thread():
-                T.sblock_attr({"tirx.scope_partition": True})
-                with T.thread()[0:30]:
-                    T.evaluate(tx)
-                T.evaluate(tx)
-    @T.prim_func(tirx=True, check_well_formed=False)
+            with Tx.thread():
+                Tx.sblock_attr({"tirx.scope_partition": True})
+                with Tx.thread()[0:30]:
+                    Tx.evaluate(tx)
+                Tx.evaluate(tx)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4():
-        with T.kernel():
-            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            tx = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
+            warp_id = Tx.warp_id([4], parent="cta")
+            tx = Tx.thread_id([128], parent="cta")
 
-            with T.thread():
-                T.sblock_attr({"tirx.scope_partition": True})
-                with T.thread()[0:30]:
-                    T.evaluate(tx)
-                with T.warp()[30:128]:
-                    T.evaluate(tx)
+            with Tx.thread():
+                Tx.sblock_attr({"tirx.scope_partition": True})
+                with Tx.thread()[0:30]:
+                    Tx.evaluate(tx)
+                with Tx.warp()[30:128]:
+                    Tx.evaluate(tx)
     # fmt: on
 
     verify(test1)
@@ -259,89 +258,89 @@ def test_scope_partition():
 
 def test_scope_id_consistency():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            wid = Tx.warp_id([4], parent="cta")
+            lane = Tx.thread_id([32], parent="warp")
 
-            with T.thread():
+            with Tx.thread():
                 pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
-            tid = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            wid = Tx.warp_id([4], parent="cta")
+            lane = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([128], parent="cta")
 
-            with T.thread():
+            with Tx.thread():
                 pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([2], parent="cta")
-            lane = T.thread_id([32], parent="warp")
-            tid = T.thread_id([128], parent="cta")
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            wid = Tx.warp_id([2], parent="cta")
+            lane = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([128], parent="cta")
 
-            with T.thread():
+            with Tx.thread():
                 pass
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4():
-        with T.kernel():
-            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
-            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
-            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
-            with T.cta():
-                with T.warp():
-                    with T.thread():
-                        T.evaluate(bx + by + bz)
-                        T.evaluate(cbx + cby + cbz)
-                        T.evaluate(clx + cly + clz)
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = Tx.cluster_id([4, 5, 12], parent="kernel")
+            with Tx.cta():
+                with Tx.warp():
+                    with Tx.thread():
+                        Tx.evaluate(bx + by + bz)
+                        Tx.evaluate(cbx + cby + cbz)
+                        Tx.evaluate(clx + cly + clz)
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test5():
-        with T.kernel():
-            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
-            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
-            clx, cly, clz = T.cluster_id([3, 5, 12], parent="kernel")
-            with T.cta():
-                with T.warp():
-                    with T.thread():
-                        T.evaluate(bx + by + bz)
-                        T.evaluate(cbx + cby + cbz)
-                        T.evaluate(clx + cly + clz)
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = Tx.cluster_id([3, 5, 12], parent="kernel")
+            with Tx.cta():
+                with Tx.warp():
+                    with Tx.thread():
+                        Tx.evaluate(bx + by + bz)
+                        Tx.evaluate(cbx + cby + cbz)
+                        Tx.evaluate(clx + cly + clz)
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test6():
-        with T.kernel():
-            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
-            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
-            with T.cluster():
-                cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
-                with T.warp():
-                    with T.thread():
-                        T.evaluate(bx + by + bz)
-                        T.evaluate(cbx + cby + cbz)
-                        T.evaluate(clx + cly + clz)
+        with Tx.kernel():
+            clx, cly, clz = Tx.cluster_id([4, 5, 12], parent="kernel")
+            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            with Tx.cluster():
+                cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+                with Tx.warp():
+                    with Tx.thread():
+                        Tx.evaluate(bx + by + bz)
+                        Tx.evaluate(cbx + cby + cbz)
+                        Tx.evaluate(clx + cly + clz)
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test7():
-        with T.kernel():
-            clx, cly, clz = T.cluster_id([3, 5, 12], parent="kernel")
-            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
-            with T.cluster():
-                cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
-                with T.warp():
-                    with T.thread():
-                        T.evaluate(bx + by + bz)
-                        T.evaluate(cbx + cby + cbz)
-                        T.evaluate(clx + cly + clz)
+        with Tx.kernel():
+            clx, cly, clz = Tx.cluster_id([3, 5, 12], parent="kernel")
+            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            with Tx.cluster():
+                cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+                with Tx.warp():
+                    with Tx.thread():
+                        Tx.evaluate(bx + by + bz)
+                        Tx.evaluate(cbx + cby + cbz)
+                        Tx.evaluate(clx + cly + clz)
 
     # fmt: on
 
@@ -360,15 +359,15 @@ def test_scope_id_consistency():
 def test_layout():
     ### TileLayout
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            wid = Tx.warp_id([4], parent="cta")
+            lane = Tx.thread_id([32], parent="warp")
 
-            with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout((2, 1)))
+            with Tx.thread():
+                A = Tx.alloc_buffer((2,), layout=Tx.TileLayout((2, 1)))
 
                 A[0] = 0
     # fmt: on
@@ -376,15 +375,15 @@ def test_layout():
 
     ### SwizzleLayout
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            wid = Tx.warp_id([4], parent="cta")
+            lane = Tx.thread_id([32], parent="warp")
 
-            with T.thread():
-                A = T.alloc_buffer((512,), scope="shared", layout=T.SwizzleLayout(3, 3, 3))
+            with Tx.thread():
+                A = Tx.alloc_buffer((512,), scope="shared", layout=Tx.SwizzleLayout(3, 3, 3))
 
                 A[0] = 0
     # fmt: on
@@ -393,56 +392,56 @@ def test_layout():
 
 def test_host():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
-    def test1(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test1(A_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
 
-        A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
+        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
 
-        with T.kernel():
-            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
-                for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
-                    with T.thread():
-                        bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
-                        phase = T.alloc_buffer((1,), "int32", scope="local")
-                        A_smem = T.alloc_buffer((16, 16), "float32", scope="shared", align=128)
+        with Tx.kernel():
+            for blockIdx in Tx.thread_binding(1, thread="blockIdx.x"):
+                for threadIdx in Tx.thread_binding(128, thread="threadIdx.x"):
+                    with Tx.thread():
+                        bar = Tx.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                        phase = Tx.alloc_buffer((1,), "int32", scope="local")
+                        A_smem = Tx.alloc_buffer((16, 16), "float32", scope="shared", align=128)
 
                         phase[0] = 0
                         if threadIdx == 0:
-                            T.ptx.mbarrier.init(bar.data, 1)
-                            T.ptx.fence.proxy("shared")
-                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.data, bar.data, A_map, 0, 0)
-                            T.ptx.mbarrier.arrive.expect_tx(bar.data, 16*16*4)
-                        T.ptx.mbarrier.try_wait(bar.data, phase[0])
+                            Tx.ptx.mbarrier.init(bar.data, 1)
+                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.data, bar.data, A_map, 0, 0)
+                            Tx.ptx.mbarrier.arrive.expect_tx(bar.data, 16*16*4)
+                        Tx.ptx.mbarrier.try_wait(bar.data, phase[0])
                         phase[0] = phase[0] ^ 1
-                        T.print_buffer(A_smem.data, "float32", False, False, 2, 16*16)
+                        Tx.print_buffer(A_smem.data, "float32", False, False, 2, 16*16)
     # fmt: on
     verify(test1)
 
 
 def test_device_func():
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
-    def test1(A: T.Buffer((128,), "float32")):
-        with T.cta():
-            thread_id = T.thread_id([128], parent="cta")
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test1(A: Tx.Buffer((128,), "float32")):
+        with Tx.cta():
+            thread_id = Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
 
-    @T.prim_func(tirx=True, check_well_formed=False)
-    def test2(A: T.Buffer((128,), "float32")):
-        with T.kernel():
-            cta_id = T.cta_id([128], parent="kernel")
-            thread_id = T.thread_id([128], parent="cta")
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test2(A: Tx.Buffer((128,), "float32")):
+        with Tx.kernel():
+            cta_id = Tx.cta_id([128], parent="kernel")
+            thread_id = Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
 
-    @T.prim_func(tirx=True, check_well_formed=False)
-    def test3(A: T.Buffer((128,), "float32")):
-        with T.cta():
-            thread_id = T.thread_id([128], parent="cta")
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test3(A: Tx.Buffer((128,), "float32")):
+        with Tx.cta():
+            thread_id = Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
-        with T.cta():
-            thread_id = T.thread_id([128], parent="cta")
+        with Tx.cta():
+            thread_id = Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
     # fmt: on
     verify(test1, device_func=True)

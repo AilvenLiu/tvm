@@ -4,7 +4,6 @@ import pytest
 import torch
 
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
@@ -38,92 +37,92 @@ def get_rmsnorm_kernel(hidden_size):
     smem_size = (bdy + hidden_size) * F32_BYTES
 
     # fmt: off
-    @T.prim_func(tirx=True)
-    def rmsnorm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
-        batch_size = T.int32()
-        input_global = T.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")
-        weight_global = T.match_buffer(weight_ptr, [hidden_size], "float16", scope="global")
-        out_global = T.match_buffer(out_ptr, [batch_size, hidden_size], "float16", scope="global")
+    @Tx.prim_func(tirx=True)
+    def rmsnorm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
+        batch_size = Tx.int32()
+        input_global = Tx.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")
+        weight_global = Tx.match_buffer(weight_ptr, [hidden_size], "float16", scope="global")
+        out_global = Tx.match_buffer(out_ptr, [batch_size, hidden_size], "float16", scope="global")
 
-        with T.kernel():
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            tx, ty = T.thread_id([bdx, bdy], parent="cta")
-            thread_id = T.meta_var(ty * bdx + tx)
+        with Tx.kernel():
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            tx, ty = Tx.thread_id([bdx, bdy], parent="cta")
+            thread_id = Tx.meta_var(ty * bdx + tx)
 
-            with T.cta():
-                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = T.meta_var(Tx.PoolAllocator(buf.data))
+            with Tx.cta():
+                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
 
                 x_smem = pool.alloc([hidden_size], "float32")
                 sum_sq_smem = pool.alloc([bdy], "float32")
 
-                with T.thread():
-                    input_vec = T.alloc_local([vec_size], "float16")
-                    weight_vec = T.alloc_local([vec_size], "float16")
-                    input_vec_f32 = T.alloc_local([vec_size], "float32")
-                    weight_vec_f32 = T.alloc_local([vec_size], "float32")
-                    x_vec = T.alloc_local([vec_size], "float32")
-                    x_tmp = T.alloc_local([1], "float32")
-                    sum_sq = T.alloc_local([1], "float32")
-                    rms_norm = T.alloc_local([1], "float32")
-                    idx = T.alloc_local([1], "int32")
+                with Tx.thread():
+                    input_vec = Tx.alloc_local([vec_size], "float16")
+                    weight_vec = Tx.alloc_local([vec_size], "float16")
+                    input_vec_f32 = Tx.alloc_local([vec_size], "float32")
+                    weight_vec_f32 = Tx.alloc_local([vec_size], "float32")
+                    x_vec = Tx.alloc_local([vec_size], "float32")
+                    x_tmp = Tx.alloc_local([1], "float32")
+                    sum_sq = Tx.alloc_local([1], "float32")
+                    rms_norm = Tx.alloc_local([1], "float32")
+                    idx = Tx.alloc_local([1], "int32")
 
                     idx[0] = bx
                     while idx[0] < batch_size:
                         # add & sum square
                         sum_sq[0] = 0.0
-                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                            for kv in T.unroll(vec_size):
+                        for ki in Tx.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
+                            for kv in Tx.unroll(vec_size):
                                 input_vec[kv] = 0.0
                                 x_vec[kv] = 0.0
-                            st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
+                            st = Tx.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
                                 Tx.copy(input_vec[:], input_global[idx[0], st:st + vec_size])
                                 Tx.cast(input_vec_f32[:], input_vec[:])
-                                for kv in T.unroll(vec_size):
+                                for kv in Tx.unroll(vec_size):
                                     x_tmp[0] = input_vec_f32[kv]
                                     sum_sq[0] += x_tmp[0] * x_tmp[0]
                                     x_vec[kv] = x_tmp[0]
                                 Tx.copy(x_smem[st:st + vec_size], x_vec[:])
 
                         # warp reduce sum
-                        for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
-                            sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                        for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
+                            sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                         sum_sq_smem[ty] = sum_sq[0]
-                        T.ptx.bar.sync(1, bdx * bdy)
-                        T.ptx.fence.proxy("shared")
+                        Tx.ptx.bar.sync(1, bdx * bdy)
+                        Tx.ptx.fence.proxy("shared")
                         # reduce sum through different warps
                         if ty == 0:
                             if tx < bdy:
                                 sum_sq[0] = sum_sq_smem[tx]
                             else:
                                 sum_sq[0] = 0.0
-                            for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
-                                sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                            for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
+                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                             sum_sq_smem[0] = sum_sq[0]
-                        T.ptx.bar.sync(1, bdx * bdy)
-                        T.ptx.fence.proxy("shared")
+                        Tx.ptx.bar.sync(1, bdx * bdy)
+                        Tx.ptx.fence.proxy("shared")
                         # rms norm
-                        rms_norm[0] = T.rsqrt(sum_sq_smem[0] / hidden_size + EPS)
+                        rms_norm[0] = Tx.rsqrt(sum_sq_smem[0] / hidden_size + EPS)
 
                         # handle the weight
-                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                            for kv in T.unroll(vec_size):
+                        for ki in Tx.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
+                            for kv in Tx.unroll(vec_size):
                                 input_vec[kv] = 0.0
                                 weight_vec_f32[kv] = 0.0
                                 x_vec[kv] = 0.0
-                            st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
+                            st = Tx.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
                                 Tx.copy(weight_vec[:], weight_global[st:st + vec_size])
                                 Tx.copy(x_vec[:], x_smem[st:st + vec_size])
                                 Tx.cast(weight_vec_f32[:], weight_vec[:])
-                            for kv in T.unroll(vec_size):
+                            for kv in Tx.unroll(vec_size):
                                 input_vec_f32[kv] = x_vec[kv] * rms_norm[0] * weight_vec_f32[kv]
                             if st < hidden_size:
                                 Tx.cast(input_vec[:], input_vec_f32[:])
                                 Tx.copy(out_global[idx[0], st:st + vec_size], input_vec[:])
 
-                        T.ptx.bar.sync(1, bdx * bdy)
+                        Tx.ptx.bar.sync(1, bdx * bdy)
                         idx[0] += SM_COUNT
     # fmt: on
     return rmsnorm

@@ -18,9 +18,9 @@ import numpy as np
 import math
 from enum import Enum
 import tvm
+from tvm.script import tirx as Tx
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
-from tvm.script import tir as T
 from tvm.tirx.bench.utils import bench, ProtonContext, export_to_perfetto_trace, CudaProfiler
 from tvm.tirx.tile_scheduler import IndexedTripleTileScheduler
 
@@ -134,91 +134,91 @@ def test_fp16_fused_attn():
             self.empty = empty
             self.bytes = bytes
 
-        @T.macro
+        @Tx.macro
         def init(self, tid):
-            with T.thread()[tid == 0]:
-                for i in T.serial(KV_STAGES):
-                    T.ptx.mbarrier.init(self.full.ptr_to([i]), 1)
-                    T.ptx.mbarrier.init(self.empty.ptr_to([i]), 2 * WG_SIZE)  # 2 consumers
+            with Tx.thread()[tid == 0]:
+                for i in Tx.serial(KV_STAGES):
+                    Tx.ptx.mbarrier.init(self.full.ptr_to([i]), 1)
+                    Tx.ptx.mbarrier.init(self.empty.ptr_to([i]), 2 * WG_SIZE)  # 2 consumers
             # fence the barrier init, the memory ordering is visible across the whole block
-            T.ptx.fence.mbarrier_init()
+            Tx.ptx.fence.mbarrier_init()
 
-        @T.macro
+        @Tx.macro
         def producer_acquire(self, state, profiler, leader_cond):
-            stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
-            cur_full = T.meta_var(self.full.ptr_to([stage]))
-            T.ptx.mbarrier.try_wait(cur_empty, state.phase)
+            stage = Tx.meta_var(state.index)
+            cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
+            cur_full = Tx.meta_var(self.full.ptr_to([stage]))
+            Tx.ptx.mbarrier.try_wait(cur_empty, state.phase)
             profiler.start(ProfileEventType.IssueLoadKV, leader_cond)
-            T.ptx.mbarrier.arrive.expect_tx(cur_full, self.bytes)
+            Tx.ptx.mbarrier.arrive.expect_tx(cur_full, self.bytes)
 
-        @T.macro
+        @Tx.macro
         def producer_tail(self, state):
-            stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
-            for _ in T.serial(KV_STAGES):
-                T.ptx.mbarrier.try_wait(cur_empty, state.phase)
+            stage = Tx.meta_var(state.index)
+            cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
+            for _ in Tx.serial(KV_STAGES):
+                Tx.ptx.mbarrier.try_wait(cur_empty, state.phase)
                 state.advance()
 
-        @T.macro
+        @Tx.macro
         def consumer_wait(self, state):
-            stage = T.meta_var(state.index)
-            cur_full = T.meta_var(self.full.ptr_to([stage]))
-            T.ptx.mbarrier.try_wait(cur_full, state.phase)
+            stage = Tx.meta_var(state.index)
+            cur_full = Tx.meta_var(self.full.ptr_to([stage]))
+            Tx.ptx.mbarrier.try_wait(cur_full, state.phase)
 
-        @T.macro
+        @Tx.macro
         def consumer_release(self, state):
-            stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
-            T.ptx.mbarrier.arrive(cur_empty)
+            stage = Tx.meta_var(state.index)
+            cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
+            Tx.ptx.mbarrier.arrive(cur_empty)
 
-        @T.macro
+        @Tx.macro
         def copy(self, state, smem, tmap, *coord):
             # copy [HEAD_DIM, BLK_KV/BLK_Q] from global [HAED_DIM, hidx, BLK_KV/BLK_Q * idx, bidx] to smem
             # copy at most [TMA_TILE, BLK_KV/BLK_Q] elements per iteration due to the restriction of swizzle
-            stage = T.meta_var(state.index)
-            cur_full = T.meta_var(self.full.ptr_to([stage]))
-            for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                T.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])
+            stage = Tx.meta_var(state.index)
+            cur_full = Tx.meta_var(self.full.ptr_to([stage]))
+            for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
+                Tx.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])
 
     class PipelineState:
         def __init__(self, prefix: str):
-            self.index = T.local_cell("int32", name=prefix + "_index")
-            self.phase = T.local_cell("int32", name=prefix + "_phase")
+            self.index = Tx.local_cell("int32", name=prefix + "_index")
+            self.phase = Tx.local_cell("int32", name=prefix + "_phase")
 
-        @T.macro
+        @Tx.macro
         def init(self, index, phase):
             self.index = index
             self.phase = phase
 
-        @T.macro
+        @Tx.macro
         def copy(self, other):
             self.index = other.index
             self.phase = other.phase
 
-        @T.macro
+        @Tx.macro
         def advance(self):
             self.index = self.index + 1
             if self.index == KV_STAGES:
                 self.index = 0
                 self.phase = self.phase ^ 1
 
-    @T.macro
+    @Tx.macro
     def ptx_wgmma_noop_barrier(accum, accum_count):
-        for i in T.serial(accum_count):
-            T.ptx.wgmma.noop_barrier(accum[i])
+        for i in Tx.serial(accum_count):
+            Tx.ptx.wgmma.noop_barrier(accum[i])
 
-    @T.macro
+    @Tx.macro
     def mask(S_reg, consumer_id, warp_id_in_wg, lane_id, q_row_base, kv_col_base, QO_LEN, KV_LEN):
-        quad_id = T.meta_var(lane_id // 4)
-        quad_lane = T.meta_var(lane_id % 4)
-        with T.thread():
-            row = T.local_cell("int32")
-            col = T.local_cell("int32")
+        quad_id = Tx.meta_var(lane_id // 4)
+        quad_lane = Tx.meta_var(lane_id % 4)
+        with Tx.thread():
+            row = Tx.local_cell("int32")
+            col = Tx.local_cell("int32")
             row = q_row_base + consumer_id * 64 + warp_id_in_wg * 16 + quad_id
             col = kv_col_base + quad_lane * 2 - (KV_LEN - QO_LEN)
             if not CAUSAL:
-                for i in T.serial(S_REG_COUNT // 4):
+                for i in Tx.serial(S_REG_COUNT // 4):
                     if col >= KV_LEN:
                         S_reg[i * 4] = -INF
                         S_reg[i * 4 + 2] = -INF
@@ -227,7 +227,7 @@ def test_fp16_fused_attn():
                         S_reg[i * 4 + 3] = -INF
                     col = col + 8
             else:
-                for i in T.serial(S_REG_COUNT // 4):
+                for i in Tx.serial(S_REG_COUNT // 4):
                     if (row < col):# or (col[0] - QO_LEN >= 0):
                         S_reg[i * 4] = -INF
                     if (row < col + 1):# or (col[0] + 1 - QO_LEN >= 0):
@@ -243,98 +243,98 @@ def test_fp16_fused_attn():
         row = 4 * BLK_Q // ((NUM_WARPS // 4 - 1) * 128)
 
         def __init__(self, prefix: str):
-            self.row_max = T.alloc_buffer((self.row), "float32", scope="local") # m
-            self.row_max_old = T.alloc_buffer((self.row), "float32", scope="local") # m_old
-            self.row_sum = T.alloc_buffer((self.row), "float32", scope="local") # l
-            self.scores_scale = T.alloc_buffer((self.row), "float32", scope="local") # e^*(m_old - m_new)
+            self.row_max = Tx.alloc_buffer((self.row), "float32", scope="local") # m
+            self.row_max_old = Tx.alloc_buffer((self.row), "float32", scope="local") # m_old
+            self.row_sum = Tx.alloc_buffer((self.row), "float32", scope="local") # l
+            self.scores_scale = Tx.alloc_buffer((self.row), "float32", scope="local") # e^*(m_old - m_new)
             IRBuilder.current().name(prefix + "_row_max", self.row_max)
             IRBuilder.current().name(prefix + "_row_max_old", self.row_max_old)
             IRBuilder.current().name(prefix + "_row_sum", self.row_sum)
             IRBuilder.current().name(prefix + "_scores_scale", self.scores_scale)
 
-        @T.macro
+        @Tx.macro
         def init(self):
-            for i in T.serial(self.row):
+            for i in Tx.serial(self.row):
                 self.row_max[i] = -INF
                 self.row_sum[i] = 0
                 self.scores_scale[i] = 1.0
 
-        @T.macro
+        @Tx.macro
         def scale_o(self, O_regs):
-            for i in T.serial(self.row):
-                scale = T.meta_var(self.scores_scale[i])
-                for j in T.serial(HEAD_DIM // 8):
+            for i in Tx.serial(self.row):
+                scale = Tx.meta_var(self.scores_scale[i])
+                for j in Tx.serial(HEAD_DIM // 8):
                     O_regs[i * 2 + j * 4] = O_regs[i * 2 + j * 4] * scale
                     O_regs[i * 2 + j * 4 + 1] = O_regs[i * 2 + j * 4 + 1] * scale
 
-        @T.macro
+        @Tx.macro
         def reduce_m(self, S_regs):
-            for i in T.serial(self.row):
-                row_max = T.meta_var(self.row_max[i])
+            for i in Tx.serial(self.row):
+                row_max = Tx.meta_var(self.row_max[i])
                 # thread reduce
-                for j in T.serial(BLK_KV // 8):
-                    self.row_max[i] = T.max(row_max, S_regs[i * 2 + j * 4])
-                    self.row_max[i] = T.max(row_max, S_regs[i * 2 + j * 4 + 1])
+                for j in Tx.serial(BLK_KV // 8):
+                    self.row_max[i] = Tx.max(row_max, S_regs[i * 2 + j * 4])
+                    self.row_max[i] = Tx.max(row_max, S_regs[i * 2 + j * 4 + 1])
                 # quad reduce, (T0, T1, T2, T3), (T4, T5, T6, T7) ...
-                self.row_max[i] = T.max(row_max, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 2, 32, 32))
-                self.row_max[i] = T.max(row_max, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 1, 32, 32))
+                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 2, 32, 32))
+                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 1, 32, 32))
 
-        @T.macro
+        @Tx.macro
         def scale_apply_exp2(self, S_regs):
-            for i in T.serial(self.row):
-                row_max = T.meta_var(self.row_max[i])
-                for j in T.serial(BLK_KV // 8):
-                    S_regs[i * 2 + j * 4] = T.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
-                    S_regs[i * 2 + j * 4 + 1] = T.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
+            for i in Tx.serial(self.row):
+                row_max = Tx.meta_var(self.row_max[i])
+                for j in Tx.serial(BLK_KV // 8):
+                    S_regs[i * 2 + j * 4] = Tx.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
+                    S_regs[i * 2 + j * 4 + 1] = Tx.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
 
-        @T.macro
+        @Tx.macro
         def reduce_l(self, S_regs):
-            for i in T.serial(self.row):
-                row_sum = T.meta_var(self.row_sum[i])
+            for i in Tx.serial(self.row):
+                row_sum = Tx.meta_var(self.row_sum[i])
                 self.row_sum[i] *= self.scores_scale[i]
                 # thread reduce
-                for j in T.serial(BLK_KV // 8):
+                for j in Tx.serial(BLK_KV // 8):
                     self.row_sum[i] = row_sum + S_regs[i * 2 + j * 4]
                     self.row_sum[i] = row_sum + S_regs[i * 2 + j * 4 + 1]
 
-        @T.macro
+        @Tx.macro
         def init_m_P_l(self, S_regs):
             self.reduce_m(S_regs)
             self.scale_apply_exp2(S_regs)
             self.reduce_l(S_regs)
 
-        @T.macro
+        @Tx.macro
         def update_m_P_l(self, S_regs):
-            for i in T.serial(self.row):
+            for i in Tx.serial(self.row):
                 self.row_max_old[i] = self.row_max[i]
             self.reduce_m(S_regs)
-            for i in T.serial(self.row):
-                self.scores_scale[i] = T.exp2((self.row_max_old[i] - self.row_max[i]) * self.sm_scale_log2)
+            for i in Tx.serial(self.row):
+                self.scores_scale[i] = Tx.exp2((self.row_max_old[i] - self.row_max[i]) * self.sm_scale_log2)
             self.scale_apply_exp2(S_regs)
             self.reduce_l(S_regs)
 
-        @T.macro
+        @Tx.macro
         def finalize(self):
             # quad reduce, (T0, T1, T2, T3), (T4, T5, T6, T7) ...
-            for i in T.serial(self.row):
-                self.row_sum[i] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, self.row_sum[i], 2, 32, 32)
-                self.row_sum[i] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, self.row_sum[i], 1, 32, 32)
+            for i in Tx.serial(self.row):
+                self.row_sum[i] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.row_sum[i], 2, 32, 32)
+                self.row_sum[i] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.row_sum[i], 1, 32, 32)
                 self.scores_scale[i] = 1.0 / self.row_sum[i]
 
-    @T.macro
+    @Tx.macro
     def gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, consumer_id, consumer_k):
         ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
-        T.ptx.wgmma.fence()
+        Tx.ptx.wgmma.fence()
 
-        k_stage = T.meta_var(consumer_k.index)
-        with T.thread():
-            scaleD = T.local_cell("int32")
+        k_stage = Tx.meta_var(consumer_k.index)
+        with Tx.thread():
+            scaleD = Tx.local_cell("int32")
             scaleD = 0
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
-            for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
-                    T.ptx.wgmma.mma_async.ss(
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
+            for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
+                for wgmma_tile in Tx.serial(TMA_TILE // WGMMA_QK_K):
+                    Tx.ptx.wgmma.mma_async.ss(
                         WGMMA_QK_M, WGMMA_QK_N, WGMMA_QK_K, "float16", "float32", False, False,
                         1.0, 1.0, scaleD, desc_Q, desc_K, *[S_reg[i] for i in range(S_REG_COUNT)]
                     )
@@ -344,54 +344,54 @@ def test_fp16_fused_attn():
                 desc_Q = desc_Q + (2 * (-TMA_TILE + BLK_Q * TMA_TILE) >> 4)
                 desc_K = desc_K + (2 * (-TMA_TILE + BLK_KV * TMA_TILE) >> 4)
 
-        T.ptx.wgmma.commit_group()
+        Tx.ptx.wgmma.commit_group()
         ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
 
-    @T.macro
+    @Tx.macro
     def gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v):
         ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
         ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
-        T.ptx.wgmma.fence()
+        Tx.ptx.wgmma.fence()
 
-        v_stage = T.meta_var(consumer_v.index)
-        T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_V), smem_v.ptr_to([v_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
-        for wgmma_tile in T.serial(BLK_KV // WGMMA_PV_K):
-            P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)
-            T.ptx.wgmma.mma_async.rs(
+        v_stage = Tx.meta_var(consumer_v.index)
+        Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_V), smem_v.ptr_to([v_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
+        for wgmma_tile in Tx.serial(BLK_KV // WGMMA_PV_K):
+            P_offset = Tx.meta_var(wgmma_tile * WGMMA_PV_K // 4)
+            Tx.ptx.wgmma.mma_async.rs(
                 WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
                 1.0, 1.0, True, desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)])
             )
             desc_V = desc_V + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 
-        T.ptx.wgmma.commit_group()
+        Tx.ptx.wgmma.commit_group()
         ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
         ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
 
-    @T.macro
+    @Tx.macro
     def r2S(warp_id, lane_id, smem_o, O_reg, n_tile):
-        T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
-        with T.thread():
-            O_half = T.alloc_buffer([8], "float32", scope="local")
-            for st_tile in T.serial(4):
-                for i in T.serial(8):
+        Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
+        with Tx.thread():
+            O_half = Tx.alloc_buffer([8], "float32", scope="local")
+            for st_tile in Tx.serial(4):
+                for i in Tx.serial(8):
                     O_half[i] = O_reg[n_tile * 32 + st_tile * 8 + i]
-                col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
-                col = T.meta_var((lane_id % 8) ^ col_noswizzle)
-                row = T.meta_var(warp_id * 16 + lane_id % 16)
-                T.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))
+                col_noswizzle = Tx.meta_var(st_tile * 2 + lane_id // 16)
+                col = Tx.meta_var((lane_id % 8) ^ col_noswizzle)
+                row = Tx.meta_var(warp_id * 16 + lane_id % 16)
+                Tx.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))
 
-    @T.macro
+    @Tx.macro
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
-        T.ptx.fence.proxy("shared")
-        T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
-        with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
-            T.ptx.cp_async.bulk.commit_group()
-            T.ptx.cp_async.bulk.wait_group(1, read=True)
+        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
+        with Tx.thread()[warp_id == 0 and lane_id == 0]:
+            Tx.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
+            Tx.ptx.cp_async.bulk.commit_group()
+            Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
-    @T.macro
+    @Tx.macro
     def write_epilogue(warp_id, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg):
-        for n_tile in T.serial(HEAD_DIM // TMA_TILE):
+        for n_tile in Tx.serial(HEAD_DIM // TMA_TILE):
             if n_tile != 0:
                 # s2G for the previous stage
                 s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile - 1)
@@ -400,91 +400,91 @@ def test_fp16_fused_attn():
         # s2G for the last stage
         s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, HEAD_DIM // TMA_TILE - 1)
 
-    @T.prim_func(tirx=True)
-    def manual(Q_ptr: T.handle, K_ptr: T.handle, V_ptr: T.handle, b_indices_ptr: T.handle, h_indices_ptr: T.handle,
-               q_indices_ptr: T.handle, tiles_indptr_ptr: T.handle, O_ptr: T.handle, profiler_buffer_ptr: T.handle) -> None:
-        qo_layout = T.meta_var(T.TileLayout(QO_SHAPE))
-        kv_layout = T.meta_var(T.TileLayout(KV_SHAPE))
-        Q = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
-        K = T.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
-        V = T.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
-        b_indices = T.match_buffer(b_indices_ptr, (total_qtiles,), "int32", scope="global")
-        h_indices = T.match_buffer(h_indices_ptr, (total_qtiles,), "int32", scope="global")
-        q_indices = T.match_buffer(q_indices_ptr, (total_qtiles,), "int32", scope="global")
-        tiles_indptr = T.match_buffer(tiles_indptr_ptr, (SM_COUNT + 1,), "int32", scope="global")
-        O = T.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
-        profiler_buffer = T.match_buffer(profiler_buffer_ptr, (PROFILER_BUFFER_SIZE,), "uint64", scope="global")
+    @Tx.prim_func(tirx=True)
+    def manual(Q_ptr: Tx.handle, K_ptr: Tx.handle, V_ptr: Tx.handle, b_indices_ptr: Tx.handle, h_indices_ptr: Tx.handle,
+               q_indices_ptr: Tx.handle, tiles_indptr_ptr: Tx.handle, O_ptr: Tx.handle, profiler_buffer_ptr: Tx.handle) -> None:
+        qo_layout = Tx.meta_var(Tx.TileLayout(QO_SHAPE))
+        kv_layout = Tx.meta_var(Tx.TileLayout(KV_SHAPE))
+        Q = Tx.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
+        K = Tx.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
+        V = Tx.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
+        b_indices = Tx.match_buffer(b_indices_ptr, (total_qtiles,), "int32", scope="global")
+        h_indices = Tx.match_buffer(h_indices_ptr, (total_qtiles,), "int32", scope="global")
+        q_indices = Tx.match_buffer(q_indices_ptr, (total_qtiles,), "int32", scope="global")
+        tiles_indptr = Tx.match_buffer(tiles_indptr_ptr, (SM_COUNT + 1,), "int32", scope="global")
+        O = Tx.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
+        profiler_buffer = Tx.match_buffer(profiler_buffer_ptr, (PROFILER_BUFFER_SIZE,), "uint64", scope="global")
 
-        Q_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        K_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        V_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        O_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        Q_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        K_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        V_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        O_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
 
-        GSHAPE_QO = T.meta_var((HEAD_DIM, NHEADS, QO_LEN, BATCH_SIZE))
-        GSTRIDES_QO = T.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * QO_LEN))
-        SSHAPE_QO = T.meta_var((TMA_TILE, 1, BLK_Q, 1))
+        GSHAPE_QO = Tx.meta_var((HEAD_DIM, NHEADS, QO_LEN, BATCH_SIZE))
+        GSTRIDES_QO = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * QO_LEN))
+        SSHAPE_QO = Tx.meta_var((TMA_TILE, 1, BLK_Q, 1))
 
-        GSHAPE_KV = T.meta_var((HEAD_DIM, NHEADS, KV_LEN, BATCH_SIZE))
-        GSTRIDES_KV = T.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * KV_LEN))
-        SSHAPE_KV = T.meta_var((TMA_TILE, 1, BLK_KV, 1))
+        GSHAPE_KV = Tx.meta_var((HEAD_DIM, NHEADS, KV_LEN, BATCH_SIZE))
+        GSTRIDES_KV = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * KV_LEN))
+        SSHAPE_KV = Tx.meta_var((TMA_TILE, 1, BLK_KV, 1))
 
-        COMMMON = T.meta_var((1, 1, 1, 1, 0, SWIZZLE, 0, 0))
+        COMMMON = Tx.meta_var((1, 1, 1, 1, 0, SWIZZLE, 0, 0))
 
-        T.call_packed("runtime.cuTensorMapEncodeTiled", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
 
-        with T.kernel():
-            bx = T.cta_id([SM_COUNT], parent="kernel")
-            warp_id = T.warp_id([NUM_WARPS], parent="cta")
-            tid = T.thread_id([NUM_WARPS * 32], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            wg_id = T.warpgroup_id([NUM_WARPS // 4], parent="cta")
-            warp_id_in_wg = T.warp_id([4], parent="warpgroup")
+        with Tx.kernel():
+            bx = Tx.cta_id([SM_COUNT], parent="kernel")
+            warp_id = Tx.warp_id([NUM_WARPS], parent="cta")
+            tid = Tx.thread_id([NUM_WARPS * 32], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([NUM_WARPS // 4], parent="cta")
+            warp_id_in_wg = Tx.warp_id([4], parent="warpgroup")
 
-            with T.cta():
+            with Tx.cta():
                 # dyn smem buffer
-                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 # smem storage
-                bar_Q = T.decl_buffer([1], "uint64", buf.data, elem_offset=0)
-                bar_O = T.decl_buffer([1], "uint64", buf.data, elem_offset=1)
-                full_k = T.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2)
-                empty_k = T.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + KV_STAGES)
-                full_v = T.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 2 * KV_STAGES)
-                empty_v = T.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 3 * KV_STAGES)
-                smem_q = T.decl_buffer([BLK_Q * HEAD_DIM], "float16", buf.data, elem_offset=512) # 1024B
-                smem_k = T.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + BLK_Q * HEAD_DIM)
+                bar_Q = Tx.decl_buffer([1], "uint64", buf.data, elem_offset=0)
+                bar_O = Tx.decl_buffer([1], "uint64", buf.data, elem_offset=1)
+                full_k = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2)
+                empty_k = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + KV_STAGES)
+                full_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 2 * KV_STAGES)
+                empty_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 3 * KV_STAGES)
+                smem_q = Tx.decl_buffer([BLK_Q * HEAD_DIM], "float16", buf.data, elem_offset=512) # 1024B
+                smem_k = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + BLK_Q * HEAD_DIM)
                 # v and o share the same smem region for reuse
-                smem_v = T.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
-                smem_o = T.decl_buffer([STAGES_EPI, BLK_Q, TMA_TILE], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
+                smem_v = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
+                smem_o = Tx.decl_buffer([STAGES_EPI, BLK_Q, TMA_TILE], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
 
-                with T.thread():
+                with Tx.thread():
                     # tile scheduler
-                    tile_scheduler = T.meta_var(IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
+                    tile_scheduler = Tx.meta_var(IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
                     # pipeline
-                    pipeline_k = T.meta_var(Pipeline(full_k, empty_k, TMA_BYTES_K))
-                    pipeline_v = T.meta_var(Pipeline(full_v, empty_v, TMA_BYTES_V))
-                    producer_k = T.meta_var(PipelineState("producer_k"))
-                    producer_v = T.meta_var(PipelineState("producer_v"))
-                    consumer_k = T.meta_var(PipelineState("consumer_k"))
-                    consumer_v = T.meta_var(PipelineState("consumer_v"))
-                    leader_cond = T.meta_var(tid % 128 == 0)
-                    q_phase = T.local_cell("int32")
+                    pipeline_k = Tx.meta_var(Pipeline(full_k, empty_k, TMA_BYTES_K))
+                    pipeline_v = Tx.meta_var(Pipeline(full_v, empty_v, TMA_BYTES_V))
+                    producer_k = Tx.meta_var(PipelineState("producer_k"))
+                    producer_v = Tx.meta_var(PipelineState("producer_v"))
+                    consumer_k = Tx.meta_var(PipelineState("consumer_k"))
+                    consumer_v = Tx.meta_var(PipelineState("consumer_v"))
+                    leader_cond = Tx.meta_var(tid % 128 == 0)
+                    q_phase = Tx.local_cell("int32")
                     # producer WG regs
-                    kv_tile_idx_load = T.local_cell("int32")
-                    kv_tile_idx_read = T.local_cell("int32")
+                    kv_tile_idx_load = Tx.local_cell("int32")
+                    kv_tile_idx_read = Tx.local_cell("int32")
                     # smem desc_Q, desc_K, desc_V
-                    desc_Q = T.local_cell("uint64")
-                    desc_K = T.local_cell("uint64")
-                    desc_V = T.local_cell("uint64")
+                    desc_Q = Tx.local_cell("uint64")
+                    desc_K = Tx.local_cell("uint64")
+                    desc_V = Tx.local_cell("uint64")
                     # accums
-                    S_reg = T.alloc_buffer([S_REG_COUNT], "float32", scope="local")
-                    P_reg = T.alloc_buffer([S_REG_COUNT // 2], "uint32", scope="local")
-                    O_reg = T.alloc_buffer([O_REG_COUNT], "float32", scope="local")
+                    S_reg = Tx.alloc_buffer([S_REG_COUNT], "float32", scope="local")
+                    P_reg = Tx.alloc_buffer([S_REG_COUNT // 2], "uint32", scope="local")
+                    O_reg = Tx.alloc_buffer([O_REG_COUNT], "float32", scope="local")
 
                     # profiler
-                    profiler = T.meta_var(
+                    profiler = Tx.meta_var(
                         CudaProfiler(
                             profiler_buffer,
                             write_stride=PROFILER_WRITE_STRIDE,
@@ -494,15 +494,15 @@ def test_fp16_fused_attn():
                     profiler.init(wg_id)
 
                     # softmax
-                    softmax = T.meta_var(Softmax("softmax"))
+                    softmax = Tx.meta_var(Softmax("softmax"))
                     ############################################################################## INITIALIZATION
                     # tile scheduler
                     tile_scheduler.init(bx)
                     # barriers
-                    with T.thread()[tid == 0]:
-                        T.ptx.mbarrier.init(bar_Q.ptr_to([0]), 1)
-                        T.ptx.mbarrier.init(bar_O.ptr_to([0]), 1)
-                    T.ptx.fence.mbarrier_init()
+                    with Tx.thread()[tid == 0]:
+                        Tx.ptx.mbarrier.init(bar_Q.ptr_to([0]), 1)
+                        Tx.ptx.mbarrier.init(bar_O.ptr_to([0]), 1)
+                    Tx.ptx.fence.mbarrier_init()
                     # pipelines
                     pipeline_k.init(tid)
                     pipeline_v.init(tid)
@@ -513,49 +513,49 @@ def test_fp16_fused_attn():
                     consumer_v.init(0, 0)
                     q_phase = 0
                     # sync to make sure everything is initialized and visible
-                    T.cuda.cta_sync()
+                    Tx.cuda.cta_sync()
 
-                    bar_Q_ptr = T.meta_var(bar_Q.ptr_to([0]))
-                    q_idx = T.meta_var(tile_scheduler.q_idx)
-                    h_idx = T.meta_var(tile_scheduler.h_idx)
-                    b_idx = T.meta_var(tile_scheduler.b_idx)
-                    attend_kv_len = T.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile
-                    num_kv_tiles = T.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
-                    is_leader = T.meta_var(T.ptx.elect_sync())
+                    bar_Q_ptr = Tx.meta_var(bar_Q.ptr_to([0]))
+                    q_idx = Tx.meta_var(tile_scheduler.q_idx)
+                    h_idx = Tx.meta_var(tile_scheduler.h_idx)
+                    b_idx = Tx.meta_var(tile_scheduler.b_idx)
+                    attend_kv_len = Tx.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile
+                    num_kv_tiles = Tx.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
+                    is_leader = Tx.meta_var(Tx.ptx.elect_sync())
 
-                    P_reg_fp16 = T.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
-                    with T.cta():
-                        T.sblock_attr({"tirx.scope_partition": True})
-                        with T.warpgroup()[0:1]:
+                    P_reg_fp16 = Tx.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
+                    with Tx.cta():
+                        Tx.sblock_attr({"tirx.scope_partition": True})
+                        with Tx.warpgroup()[0:1]:
                             ############################################################################## PRODUCER
                             # deallocate registers
-                            T.ptx.setmaxnreg(False, 24)
+                            Tx.ptx.setmaxnreg(False, 24)
                             # only 1 warp is responsible for the producer
-                            with T.warp()[0:1]:
+                            with Tx.warp()[0:1]:
                                 while (tile_scheduler.valid()):
                                     if q_idx * BLK_Q >= QO_LEN:
                                         break
                                     kv_tile_idx_load = num_kv_tiles - 1
                                     # copy a tile of K first
-                                    with T.thread()[is_leader]:
+                                    with Tx.thread()[is_leader]:
                                         pipeline_k.producer_acquire(producer_k, profiler, leader_cond)
                                         pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, kv_tile_idx_load * BLK_KV, b_idx)
                                         profiler.end(ProfileEventType.IssueLoadKV, leader_cond)
                                         producer_k.advance()
                                     # wait for consumers to finish the previous Q tile, then load the current Q tile
-                                    T.ptx.bar.sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
+                                    Tx.ptx.bar.sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
                                     profiler.start(ProfileEventType.IssueLoadQ, leader_cond)
-                                    with T.thread()[is_leader]:
-                                        T.ptx.mbarrier.arrive.expect_tx(bar_Q_ptr, TMA_BYTES_Q)
-                                        for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                                            T.ptx.cp_async.bulk.tensor.g2c(
+                                    with Tx.thread()[is_leader]:
+                                        Tx.ptx.mbarrier.arrive.expect_tx(bar_Q_ptr, TMA_BYTES_Q)
+                                        for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(
                                                 4, smem_q.ptr_to([tma_tile * TMA_TILE * BLK_Q]), bar_Q_ptr, Q_map,
                                                 tma_tile * TMA_TILE, h_idx, q_idx * BLK_Q, b_idx
                                             )
                                     profiler.end(ProfileEventType.IssueLoadQ, leader_cond)
                                     # wait for the consumers to finish writing last O_tile to gmem to reuse for Vsmem
-                                    T.ptx.bar.sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
-                                    with T.thread()[is_leader]:
+                                    Tx.ptx.bar.sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
+                                    with Tx.thread()[is_leader]:
                                         while kv_tile_idx_load > 0:
                                             # load k tiles
                                             pipeline_k.producer_acquire(producer_k, profiler, leader_cond)
@@ -577,39 +577,39 @@ def test_fp16_fused_attn():
                                     tile_scheduler.next_tile()
                                 # wait until all the consumers finish
                                 # in our case, I think it's fine to let producers exit early since there's no cluster coordination
-                                with T.thread()[is_leader]:
+                                with Tx.thread()[is_leader]:
                                     pipeline_k.producer_tail(producer_k)
                                     pipeline_v.producer_tail(producer_v)
-                        with T.warpgroup()[1:3]:
+                        with Tx.warpgroup()[1:3]:
                             ############################################################################## CONSUMER
                             # allocate registers
-                            T.ptx.setmaxnreg(True, 240)
+                            Tx.ptx.setmaxnreg(True, 240)
                             # inform the producer to Q is ready to be loaded
-                            T.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
+                            Tx.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
                             while (tile_scheduler.valid()):
                                 if q_idx * BLK_Q >= QO_LEN:
                                     break
                                 kv_tile_idx_read = num_kv_tiles - 1
                                 # wait Q to be loaded
-                                T.ptx.mbarrier.try_wait(bar_Q_ptr, q_phase)
+                                Tx.ptx.mbarrier.try_wait(bar_Q_ptr, q_phase)
                                 q_phase = q_phase ^ 1
                                 # wait first K tile to be loaded
                                 pipeline_k.consumer_wait(consumer_k)
                                 # initialize the S and O reg
-                                for i in T.serial(S_REG_COUNT):
-                                    S_reg[i] = T.float32(0)
-                                for i in T.serial(O_REG_COUNT):
-                                    O_reg[i] = T.float16(0)
+                                for i in Tx.serial(S_REG_COUNT):
+                                    S_reg[i] = Tx.float32(0)
+                                for i in Tx.serial(O_REG_COUNT):
+                                    O_reg[i] = Tx.float16(0)
                                 # initialize the softmax (m=-INF, l=0)
                                 softmax.init()
                                 profiler.start(ProfileEventType.GemmQK, leader_cond)
                                 # calculate S_0 = Q^TK_0
                                 gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
                                 # wait for O of last tile to be written back to gmem, notifify the producer to load V
-                                T.ptx.cp_async.bulk.wait_group(0)
-                                T.ptx.bar.arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
+                                Tx.ptx.cp_async.bulk.wait_group(0)
+                                Tx.ptx.bar.arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
                                 # wait for the gemm result of S_0 = Q^TK_0
-                                T.ptx.wgmma.wait_group(0)
+                                Tx.ptx.wgmma.wait_group(0)
                                 profiler.end(ProfileEventType.GemmQK, leader_cond)
                                 # release the first K tile
                                 pipeline_k.consumer_release(consumer_k)
@@ -622,18 +622,18 @@ def test_fp16_fused_attn():
                                 profiler.end(ProfileEventType.SoftmaxUpdate, leader_cond)
                                 profiler.start(ProfileEventType.WritePReg, leader_cond)
                                 # copy to P_0 and downcast to float16
-                                for i in T.serial(S_REG_COUNT):
-                                    P_reg_fp16[i] = T.Cast("float16", S_reg[i])
+                                for i in Tx.serial(S_REG_COUNT):
+                                    P_reg_fp16[i] = Tx.Cast("float16", S_reg[i])
                                 profiler.end(ProfileEventType.WritePReg, leader_cond)
-                                with T.thread():
-                                    masking_step = T.local_cell("int32")
-                                    n_masking_steps = T.local_cell("int32")
+                                with Tx.thread():
+                                    masking_step = Tx.local_cell("int32")
+                                    n_masking_steps = Tx.local_cell("int32")
                                     masking_step = 0
                                     n_masking_steps = 0 if not CAUSAL else ceildiv(BLK_Q, BLK_KV)
                                     kv_tile_idx_read = kv_tile_idx_read - 1
                                     # split out tiles of K and V that require masking
 
-                                    @T.macro
+                                    @Tx.macro
                                     def consumer_body(do_masking):
                                         pipeline_k.consumer_wait(consumer_k)
                                         profiler.start(ProfileEventType.GemmQK, leader_cond)
@@ -649,7 +649,7 @@ def test_fp16_fused_attn():
                                         # commit O_{i-1} += P_{i-1}V_{i-1} but do not wait
                                         gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
                                         # wait for the gemm result of S_i = Q^TK_i
-                                        T.ptx.wgmma.wait_group(1)
+                                        Tx.ptx.wgmma.wait_group(1)
                                         profiler.end(ProfileEventType.GemmQK, leader_cond)
                                         # release the current K tile
                                         pipeline_k.consumer_release(consumer_k)
@@ -661,7 +661,7 @@ def test_fp16_fused_attn():
                                         softmax.update_m_P_l(S_reg)
                                         profiler.end(ProfileEventType.SoftmaxUpdate, leader_cond)
                                         # wait for P_{i-1}V_{i-1} to be computed
-                                        T.ptx.wgmma.wait_group(0)
+                                        Tx.ptx.wgmma.wait_group(0)
                                         profiler.end(ProfileEventType.GemmPV, leader_cond)
                                         # release the previous V tile
                                         pipeline_v.consumer_release(consumer_v)
@@ -669,8 +669,8 @@ def test_fp16_fused_attn():
                                         consumer_v.advance()
                                         profiler.start(ProfileEventType.WritePReg, leader_cond)
                                         # copy to P_{i-1} and downcast to float16
-                                        for i in T.serial(S_REG_COUNT):
-                                            P_reg_fp16[i] = T.Cast("float16", S_reg[i])
+                                        for i in Tx.serial(S_REG_COUNT):
+                                            P_reg_fp16[i] = Tx.Cast("float16", S_reg[i])
                                         profiler.end(ProfileEventType.WritePReg, leader_cond)
 
                                     while (masking_step < n_masking_steps and kv_tile_idx_read >= 0):
@@ -683,7 +683,7 @@ def test_fp16_fused_attn():
                                         kv_tile_idx_read = kv_tile_idx_read - 1
 
                                 # notify the producer to load the next Q tile
-                                T.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
+                                Tx.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
                                 profiler.start(ProfileEventType.ScaleO, leader_cond)
                                 # scale O for the last tile
                                 softmax.scale_o(O_reg)
@@ -698,7 +698,7 @@ def test_fp16_fused_attn():
                                 softmax.finalize()
                                 profiler.end(ProfileEventType.SoftmaxUpdate, leader_cond)
                                 # wait for the last O += PV to be computed
-                                T.ptx.wgmma.wait_group(0)
+                                Tx.ptx.wgmma.wait_group(0)
                                 profiler.end(ProfileEventType.GemmPV, leader_cond)
                                 # release the last V tile
                                 pipeline_v.consumer_release(consumer_v)
@@ -709,7 +709,7 @@ def test_fp16_fused_attn():
                                 profiler.end(ProfileEventType.ScaleO, leader_cond)
                                 ####### Epilogue, write O back to gmem
                                 # make sure all consumer threads finish V consumption, so Vsmem can be reused for Osmem
-                                T.ptx.bar.sync(NameBarrier.O_LOAD_READY, MMA_THREADS)
+                                Tx.ptx.bar.sync(NameBarrier.O_LOAD_READY, MMA_THREADS)
                                 profiler.start(ProfileEventType.WriteO, leader_cond)
                                 # write O back to gmem
                                 write_epilogue(warp_id - 4, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg)

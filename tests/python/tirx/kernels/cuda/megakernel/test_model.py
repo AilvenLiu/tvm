@@ -30,8 +30,8 @@ from tvm.relax.frontend import nn
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
+from tvm.script import tirx as Tx
 from tvm.script import relax as R
-from tvm.script import tir as T
 from tvm.tirx.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
