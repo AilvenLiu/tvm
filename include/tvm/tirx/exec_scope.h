@@ -153,6 +153,14 @@ class ScopeIdResolveTable {
                                       int out_dim, ffi::String target_kind,
                                       const LaunchParams& params);
 
+  /*! \brief Check if a scope cur name needs warp_id_in_cta in launch params */
+  static bool NeedWarpIdInCta(const ffi::String& scope_cur) {
+    return scope_cur == "warp" || scope_cur == "warpgroup";
+  }
+
+  /*! \brief Compute the warp_id_in_cta shuffle expression from threadIdx in launch params */
+  static PrimExpr ComputeWarpIdInCta(const LaunchParams& params);
+
  private:
   static std::string GetKey(const ScopePair& scope, const ffi::String& target_kind) {
     return scope->parent.operator std::string() + "__##__" + scope->cur.operator std::string() +

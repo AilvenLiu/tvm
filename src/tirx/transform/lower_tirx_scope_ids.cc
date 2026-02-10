@@ -25,21 +25,12 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_scope_ids.cc
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirp_op.h>
-#include <tvm/tirx/transform.h>
-========
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_scope_ids.cc
 
 #include <unordered_map>
 
@@ -124,13 +115,38 @@ class ScopeIdDefResolver : public StmtExprMutator {
     // Step 2: Extract kernel launch parameters
     LaunchParams launch_params;
     ExtractKernelLaunchParams(verifier.id_set, target_, &launch_params);
-    kernel_launch_params_ = launch_params;
+    
 
     // Step 3: Visit the block and resolve the scope ids, replace them with kernel launch params
     auto block = op->block;
     auto* n = block.CopyOnWrite();
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
+    // Collect all scope id defs as LetStmt bindings
+    std::vector<std::pair<Var, PrimExpr>> scope_lets;
+
+    // Check if any scope needs warp_id_in_cta
+    bool need_warp_id = false;
+    for (const auto& def : scope_id_def) {
+      if (ScopeIdResolveTable::NeedWarpIdInCta(def->scope->cur)) {
+        need_warp_id = true;
+        break;
+      }
+    }
+
+    // If warp/warpgroup scopes exist, compute warp_id_in_cta once with single shuffle
+    // and add it to launch params so resolve functions can access it
+    if (need_warp_id) {
+      PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params);
+      Var warp_id_in_cta_var("warp_id_in_cta", shuffled.dtype());
+      scope_lets.push_back({warp_id_in_cta_var, shuffled});
+      n->annotations.Set("tirx.warp_id_in_cta", warp_id_in_cta_var);
+      IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var, kThreadIndex,
+                      "warp_id_in_cta");
+      launch_params.insert({"warp_id_in_cta", warp_iv});
+    }
+    kernel_launch_params_ = launch_params;
+
     for (const auto& def : scope_id_def) {
       // Resolve the scope ids defined in the scope
       auto resolved =
@@ -140,7 +156,10 @@ class ScopeIdDefResolver : public StmtExprMutator {
           << "Internal Error: Inconsistent resolved size " << resolved.size() << " vs "
           << def->extents.size();
       for (size_t i = 0; i < def->def_ids.size(); i++) {
-        id_map[def->def_ids[i]] = resolved[i];
+        PrimExpr value = resolved[i];
+        Var let_var(def->def_ids[i]->name_hint, value.dtype());
+        id_map[def->def_ids[i]] = let_var;
+        scope_lets.push_back({let_var, value});
       }
     }
     n->body = Substitute(n->body, id_map);
@@ -149,8 +168,14 @@ class ScopeIdDefResolver : public StmtExprMutator {
     // Step 4: Remove the scope_id_def inside the scope
     Stmt ret = ScopeIdDefRemover::Remove(Stmt(n_realize));
 
-    // Step 5: Wrap the block with thread_extent attributes
+    // Step 5: Wrap with LetStmts for all scope id values
+    for (auto it = scope_lets.rbegin(); it != scope_lets.rend(); ++it) {
+      ret = LetStmt(it->first, it->second, ret);
+    }
+
+    // Step 6: Wrap the block with thread_extent attributes
     for (const auto& [tag, iv] : kernel_launch_params_.value()) {
+      if (tag == "warp_id_in_cta") continue;
       ret = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, ret);
     }
     // Clear the kernel launch params after the kernel scope is resolved
@@ -218,13 +243,9 @@ Pass LowerTIRxResolveScopeIds() {
     n->body = ScopeIdDefResolver::Resolve(n->body, target);
     return f;
   };
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_scope_ids.cc
-  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRpResolveScopeIds", {});
-========
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxResolveScopeIds", {});
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_scope_ids.cc
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

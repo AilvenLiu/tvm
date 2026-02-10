@@ -59,6 +59,7 @@ class ScheduleContextRemover : public StmtExprMutator {
     auto* n = block.CopyOnWrite();
     n->annotations.erase("scope_id_extent_map");
     n->annotations.erase("thread_var_map");
+    n->annotations.erase("tirx.warp_id_in_cta");
     n->body = VisitStmt(n->body);
     return std::move(block);
   }

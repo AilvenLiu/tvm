@@ -24,21 +24,21 @@
 
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_scope_slices.cc
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirp_op.h>
-#include <tvm/tirx/transform.h>
-========
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_scope_slices.cc
+=======
+#include <tvm/tirx/exec_scope.h>
+#include <tvm/tirx/function.h>
+#include <tvm/tirx/builtin.h>
+#include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirx_op.h>
+#include <tvm/tirx/transform.h>
+>>>>>>> 7e7a455d25 ([LowerTIRx] Generate warp-uniform warp_id when lowering scope id (#467)):src/tir/transform/lower_tirx_scope_slices.cc
 
 namespace tvm {
 namespace tirx {
@@ -81,6 +81,18 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   Stmt VisitStmt_(const SBlockNode* op) final {
     SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
+    bool is_kernel = op->exec_scope.defined() && op->exec_scope.value()->Is("kernel");
+    if (is_kernel) {
+      need_warp_id_in_cta_letstmt_ = false;
+      if (op->annotations.count("tirx.warp_id_in_cta")) {
+        warp_id_in_cta_var_ = Downcast<Var>(op->annotations.at("tirx.warp_id_in_cta"));
+        // Add warp_id_in_cta to launch params so resolve functions can access it
+        IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
+                        "warp_id_in_cta");
+        launch_params_["warp_id_in_cta"] = warp_iv;
+        n->annotations.erase("tirx.warp_id_in_cta");
+      }
+    }
     if (op->annotations.count("tirx.scope_partition")) {
       // scope partition is enabled, rewrite the body
       auto seq = block->body.as<SeqStmt>();
@@ -105,6 +117,10 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       // no scope partition, visit the body
       n->body = VisitStmt(n->body);
     }
+    if (is_kernel && need_warp_id_in_cta_letstmt_) {
+      n->body = LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(), n->body);
+      need_warp_id_in_cta_letstmt_ = false;
+    }
     // no scope partition, return the block as is
     if (!op->exec_scope.defined()) {
       return std::move(block);
@@ -120,8 +136,19 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
                       ? 1
                       : scope_slice->slices.as<Array<Range>>().value().size();
-    auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
-                                                 target_->kind->name, launch_params_);
+    // If the scope needs warp_id_in_cta and it's not yet in launch_params_, compute it on-demand
+    if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
+        launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
+      PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
+      warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
+      warp_id_in_cta_value_ = shuffled;
+      need_warp_id_in_cta_letstmt_ = true;
+      IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
+                      "warp_id_in_cta");
+      launch_params_["warp_id_in_cta"] = warp_iv;
+    }
+    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
+        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
     n->exec_scope = ExecScope::Create(scope_slice->name);
     if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
@@ -139,6 +166,9 @@ class ExecScopeSliceResolver : public StmtExprMutator {
 
   LaunchParams launch_params_;
   const Target& target_;
+  ffi::Optional<Var> warp_id_in_cta_var_;
+  ffi::Optional<PrimExpr> warp_id_in_cta_value_;
+  bool need_warp_id_in_cta_letstmt_ = false;
 };
 
 namespace {
@@ -160,13 +190,9 @@ Pass LowerTIRxResolveScopeSlices() {
     n->body = ExecScopeSliceResolver::Resolve(n->body, target);
     return f;
   };
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_scope_slices.cc
-  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRpResolveScopeSlices", {});
-========
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxResolveScopeSlices", {});
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_scope_slices.cc
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

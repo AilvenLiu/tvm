@@ -218,12 +218,6 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 func_name, self.desc, offset, source_code=source_code, return_type="uint64"
             )
 
-    warp_id_func_source = R"""
-__forceinline__ __device__ int canonical_warp_idx_sync() {
-    return __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
-}
-"""
-
     copy_128b_source_code = R"""
 __forceinline__ __device__ void tvm_builtin_copy_128b(void* dst_ptr, void* src_ptr) {
     uint4* src_ = reinterpret_cast<uint4*>(src_ptr);
@@ -297,13 +291,10 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
         with T.kernel():
             cluster_rank_ = T.cta_id([CLUSTER_SIZE], parent="cluster")
             cta_idx = T.cta_id([GRID_SIZE], parent="kernel")
-            warp_id_ = T.warp_id([NUM_WARPS], parent="cta")
+            warp_id = T.warp_id([NUM_WARPS], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             tid_in_wg = T.thread_id([128], parent="warpgroup")
             
-            warp_id = T.local_cell("int32")
-            warp_id = T.cuda.func_call("canonical_warp_idx_sync", return_type="int32", source_code=warp_id_func_source)
-
             cluster_rank = T.local_cell("int32")
             cluster_rank = cluster_rank_
             # General pair calculations - works for any cluster shape

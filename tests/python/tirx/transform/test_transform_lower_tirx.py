@@ -85,6 +85,12 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.thread():
                 A = Tx.alloc_local((2,), "float16", layout=None)
@@ -150,6 +156,12 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.thread():
                 A = Tx.alloc_local((8,), layout=None)
@@ -226,6 +238,13 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        wg_id: Tx.int32 = warp_id_in_cta // 4
+        warp_id_in_wg: Tx.int32 = warp_id_in_cta % 4
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.thread():
                 acc = Tx.alloc_local((64,), layout=None)
@@ -236,7 +255,7 @@ def test_lower_view_get():
                         for i in range(16):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
+                                    acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
                 with Tx.cta():
                     A = Tx.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
                     with Tx.thread():
@@ -244,7 +263,7 @@ def test_lower_view_get():
                         for i in range(16):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    out_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
+                                    out_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
     # fmt: on
 
     compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRx)
@@ -518,6 +537,12 @@ def test_lower_tirx_keep_different_swizzle():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.thread():
                 A = Tx.alloc_local((2,), "float16", layout=None)
@@ -559,9 +584,13 @@ def test_lower_scope_id():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.thread():
-                Tx.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x)
+                Tx.evaluate(bx + by + bz + tx)
     # fmt: on
     compare(before1, after1, LowerTIRx)
 
@@ -586,9 +615,18 @@ def test_lower_scope_id():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 8)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 8)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        cbx: Tx.int32 = clusterCtaIdx_x
+        cby: Tx.int32 = clusterCtaIdx_y
+        cbz: Tx.int32 = clusterCtaIdx_z
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.thread():
-                Tx.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x % 32 + clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
+                Tx.evaluate(bx + by + bz + warp_id + lane_id + cbx + cby + cbz)
 
     # fmt: on
     compare(before2, after2, LowerTIRx)
@@ -621,14 +659,28 @@ def test_lower_scope_id():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 8)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 384)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 10)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        cbx: Tx.int32 = clusterCtaIdx_x
+        cby: Tx.int32 = clusterCtaIdx_y
+        cbz: Tx.int32 = clusterCtaIdx_z
+        clx: Tx.int32 = Tx.ptx.fetch_register(32, "clusterid.x")
+        cly: Tx.int32 = Tx.ptx.fetch_register(32, "clusterid.y")
+        clz: Tx.int32 = Tx.ptx.fetch_register(32, "clusterid.z")
+        wg_id: Tx.int32 = warp_id_in_cta // 4
+        warp_id: Tx.int32 = warp_id_in_cta % 4
+        lane_id: Tx.int32 = threadIdx_x % 32
+        tid_in_wg: Tx.int32 = threadIdx_x % 128
         with Tx.kernel():
             with Tx.cta():
                 with Tx.warpgroup():
                     with Tx.thread():
-                        Tx.evaluate(blockIdx_x + blockIdx_y + blockIdx_z)
-                        Tx.evaluate(clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
-                        Tx.evaluate(Tx.ptx.fetch_register(32, "clusterid.x") + Tx.ptx.fetch_register(32, "clusterid.y") + Tx.ptx.fetch_register(32, "clusterid.z"))
-                        Tx.evaluate(threadIdx_x // 128 + threadIdx_x % 128 // 32 + threadIdx_x % 32 + threadIdx_x % 128)
+                        Tx.evaluate(bx + by + bz)
+                        Tx.evaluate(cbx + cby + cbz)
+                        Tx.evaluate(clx + cly + clz)
+                        Tx.evaluate(wg_id + warp_id + lane_id + tid_in_wg)
     # fmt: on
 
     compare(before3, after3, LowerTIRx)
@@ -660,10 +712,17 @@ def test_lower_scope_id2():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        wg_id: Tx.int32 = warp_id_in_cta // 4
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.cta():
                 with Tx.thread():
-                    Tx.evaluate(threadIdx_x // 128 + threadIdx_x // 32 + threadIdx_x)
+                    Tx.evaluate(wg_id + warp_id + tx)
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -698,18 +757,30 @@ def test_lower_scope_id3():
             threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
             blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
             blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+            warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+            bx: Tx.int32 = blockIdx_x
+            by: Tx.int32 = blockIdx_y
+            bz: Tx.int32 = blockIdx_z
+            warp_id: Tx.int32 = warp_id_in_cta
+            tx: Tx.int32 = threadIdx_x
             with Tx.kernel():
                 with Tx.cta():
                     with Tx.thread():
-                        Tx.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x)
+                        Tx.evaluate(bx + by + bz + warp_id + tx)
         blockIdx_x = Tx.launch_thread("blockIdx.x", 6)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 7)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 8)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.cta():
                 with Tx.thread():
-                    Tx.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x)
+                    Tx.evaluate(bx + by + bz + warp_id + tx)
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -739,19 +810,25 @@ def test_lower_scope_slice():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:
                 with Tx.cta():
                     if threadIdx_x >= 0 and threadIdx_x < 64:
                         with Tx.thread():
-                            Tx.evaluate(threadIdx_x)
-                            Tx.evaluate(threadIdx_x // 32)
+                            Tx.evaluate(tx)
+                            Tx.evaluate(warp_id)
                     if Tx.ptx.elect_sync():
                         with Tx.thread():
-                            Tx.evaluate(threadIdx_x)
-                    if threadIdx_x == 0:
+                            Tx.evaluate(tx)
+                    if tx == 0:
                         with Tx.thread():
-                            Tx.evaluate(threadIdx_x)
+                            Tx.evaluate(tx)
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -783,20 +860,29 @@ def test_lower_scope_partition1():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.cta():
                 if threadIdx_x >= 0 and threadIdx_x < 32:
                     with Tx.thread():
-                        Tx.evaluate(threadIdx_x)
-                elif threadIdx_x >= 32 and threadIdx_x < 64:
-                    with Tx.thread():
-                        Tx.evaluate(threadIdx_x)
-                elif threadIdx_x >= 64 and threadIdx_x < 96:
-                    with Tx.thread():
-                        Tx.evaluate(threadIdx_x)
-                elif threadIdx_x >= 96 and threadIdx_x < 128:
-                    with Tx.thread():
-                        Tx.evaluate(threadIdx_x)
+                        Tx.evaluate(tx)
+                else:
+                    if threadIdx_x >= 32 and threadIdx_x < 64:
+                        with Tx.thread():
+                            Tx.evaluate(tx)
+                    else:
+                        if threadIdx_x >= 64 and threadIdx_x < 96:
+                            with Tx.thread():
+                                Tx.evaluate(tx)
+                        else:
+                            if threadIdx_x >= 96 and threadIdx_x < 128:
+                                with Tx.thread():
+                                    Tx.evaluate(tx)
     # fmt: on
 
     compare(before, main, LowerTIRx)
@@ -834,26 +920,33 @@ def test_lower_scope_partition2():
         clusterCtaIdx_y = Tx.launch_thread("clusterCtaIdx.y", 1)
         blockIdx_x = Tx.launch_thread("blockIdx.x", 148)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        cbx: Tx.int32 = clusterCtaIdx_x
+        cby: Tx.int32 = clusterCtaIdx_y
+        bx: Tx.int32 = blockIdx_x
+        wg_id: Tx.int32 = warp_id_in_cta // 4
+        warp_id: Tx.int32 = warp_id_in_cta % 4
+        lane_id: Tx.int32 = threadIdx_x % 32
         with Tx.kernel():
             with Tx.cta():
-                if threadIdx_x // 128 >= 1 and threadIdx_x // 128 < 2:
+                if warp_id_in_cta // 4 >= 1 and warp_id_in_cta // 4 < 2:
                     with Tx.warpgroup():
-                        if threadIdx_x % 128 // 32 >= 3 and threadIdx_x % 128 // 32 < 4:
+                        if warp_id_in_cta % 4 >= 3 and warp_id_in_cta % 4 < 4:
                             with Tx.warp():
-                                Tx.evaluate(threadIdx_x % 128 // 32)
+                                Tx.evaluate(warp_id)
                         else:
-                            if threadIdx_x % 128 // 32 >= 2 and threadIdx_x % 128 // 32 < 3:
+                            if warp_id_in_cta % 4 >= 2 and warp_id_in_cta % 4 < 3:
                                 with Tx.warp():
-                                    Tx.evaluate(threadIdx_x % 128 // 32)
+                                    Tx.evaluate(warp_id)
                             else:
-                                if threadIdx_x % 128 // 32 >= 0 and threadIdx_x % 128 // 32 < 1:
+                                if warp_id_in_cta % 4 >= 0 and warp_id_in_cta % 4 < 1:
                                     with Tx.warp():
-                                        Tx.evaluate(threadIdx_x % 128 // 32)
+                                        Tx.evaluate(warp_id)
                 else:
-                    if threadIdx_x // 128 >= 0 and threadIdx_x // 128 < 1:
+                    if warp_id_in_cta // 4 >= 0 and warp_id_in_cta // 4 < 1:
                         with Tx.warpgroup():
                             with Tx.thread():
-                                Tx.evaluate(threadIdx_x % 128 // 32)
+                                Tx.evaluate(warp_id)
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -883,15 +976,23 @@ def test_lower_layout():
                             A_smem[row, col + vec] = A[bx * 128 + row, col + vec]
 
     @Tx.prim_func(private=True, tirx=True)
-    def after(A: Tx.Buffer((128, 32), "float16", layout=None)) -> None:
+    def after(A_handle: Tx.handle) -> None:
+        A = Tx.match_buffer(A_handle, (128, 32), "float16", layout=None)
         A_1 = Tx.decl_buffer((4096,), "float16", data=A.data, layout=None)
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        warp_id: Tx.int32 = warp_id_in_cta
+        lane_id: Tx.int32 = threadIdx_x % 32
+        tid: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.cta():
-                A_smem = Tx.alloc_buffer((4096,), "float16", scope="shared", layout=None)
+                A_smem = Tx.alloc_shared((4096,), "float16", layout=None)
                 with Tx.thread():
                     for tile in range(4):
                         for vec in Tx.vectorized(8):
@@ -943,6 +1044,8 @@ def test_lower_decl_buffer_access_ptr():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        bx: Tx.int32 = blockIdx_x
+        tx: Tx.int32 = threadIdx_x
         with Tx.kernel():
             with Tx.cta():
                 buf = Tx.alloc_buffer((1024,), "uint8", scope="shared.dyn", layout=None)
@@ -969,11 +1072,13 @@ def test_lower_separate_scope_id_def():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        tx: Tx.int32 = threadIdx_x
+        bx: Tx.int32 = blockIdx_x
         with Tx.kernel():
             with Tx.cta():
-                if threadIdx_x == 0:
+                if tx == 0:
                     with Tx.thread():
-                        Tx.evaluate(threadIdx_x)
+                        Tx.evaluate(tx)
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -999,6 +1104,8 @@ def test_lower_buffer_offset():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        tx: Tx.int32 = threadIdx_x
+        bx: Tx.int32 = blockIdx_x
         with Tx.kernel():
             with Tx.cta():
                 with Tx.thread():

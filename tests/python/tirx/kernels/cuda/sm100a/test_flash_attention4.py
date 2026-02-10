@@ -252,15 +252,6 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             else:
                 Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
-    def make_warp_uniform(val):
-        func_name = "make_warp_uniform"
-        source_code = f"""
-    __device__ __forceinline__ uint32_t {func_name}(uint32_t val) {{
-        return __shfl_sync(0xffffffff, val, 0);
-    }}
-    """
-        return Tx.cuda.func_call(func_name, val, source_code=source_code, return_type="uint32")
-
     class SmemDescriptor:
         def __init__(self, prefix: str):
             self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
@@ -302,14 +293,6 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 func_name, self.desc, offset, source_code=source_code, return_type="uint64"
             )
 
-    def canonical_warp_idx_sync():
-        source_code = """
-        __device__ __forceinline__ int canonical_warp_idx_sync() {{
-            return __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
-        }}
-    """
-        return Tx.cuda.func_call("canonical_warp_idx_sync", source_code=source_code, return_type="int")
-
     Q_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, NUM_BLK_K, BLK_K), (BLK_M * HEAD_DIM, BLK_K, BLK_M * BLK_K, 1))))
     K_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((SMEM_PIPE_DEPTH_KV, BLK_N, NUM_BLK_K, BLK_K), (BLK_N * HEAD_DIM, BLK_K, BLK_N * BLK_K, 1))))
     O_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE), (BLK_M * HEAD_DIM, EPI_TILE, BLK_M * EPI_TILE, 1))))
@@ -336,15 +319,12 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
         with Tx.kernel():
             bx = Tx.cta_id([cta_count], parent="kernel")
-            tid = Tx.thread_id([512], parent="cta")
-            warp_id_in_cta = canonical_warp_idx_sync()
-
+            wg_id = Tx.warpgroup_id([4], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             Tx.attr(0, "tirx.persistent_kernel", True)
             with Tx.cta():
-                warp_id = warp_id_in_cta % 4
-                wg_id = warp_id_in_cta // 4
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
                 # Allocate Q buffer with alignment
@@ -404,7 +384,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                 profiler = Tx.meta_var(CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON))
 
-                if warp_id_in_cta == 0:
+                if wg_id == 0 and warp_id == 0:
                     Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr[0]), n_cols=N_COLS_TMEM, cta_group=CTA_GROUP)
                     Tx.cuda.trap_when_assert_failed(tmem_addr[0] == Tx.uint32(0))
 
@@ -1068,7 +1048,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                     scheduler.next_tile()
 
                 # Deallocate TMEM after all tasks complete
-                if warp_id_in_cta == 0:
+                if wg_id == 0 and warp_id == 0:
                     Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=CTA_GROUP)
                     Tx.ptx.tcgen05.dealloc(0, n_cols=N_COLS_TMEM, cta_group=CTA_GROUP)
 

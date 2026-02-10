@@ -17,6 +17,7 @@
  * under the License.
  */
 #include <tvm/arith/analyzer.h>
+#include <tvm/tirx/builtin.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/op.h>
 
@@ -221,13 +222,6 @@ ffi::Array<PrimExpr> ScopeIdResolveTable::Resolve(
   return it->second.func_(extents, out_dim, params);
 }
 
-#define TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF \
-  static TVM_ATTRIBUTE_UNUSED ScopeIdResolveTable::Registry& res
-
-#define TVM_REGISTER_SCOPEID_RESOLVE(parent, cur, target_kind)        \
-  TVM_STR_CONCAT(TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF, __COUNTER__) = \
-      ::tvm::tirx::ScopeIdResolveTable::Global()->Register(parent, cur, target_kind)
-
 using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
 std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchParams& params,
@@ -240,14 +234,6 @@ std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchPara
   return {(*it).second->var, (*it).second->dom->extent};
 }
 
-Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& prefix,
-                                 int out_dim) {
-  Array<PrimExpr> ret;
-  for (size_t i = 0; i < out_dim; i++) {
-    ret.push_back(GetThread(prefix + static_cast<char>('x' + i), params).first);
-  }
-  return std::move(ret);
-}
 
 // Helper function to handle common thread index calculations
 inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
@@ -257,6 +243,33 @@ inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
   std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
   return tx + ty * ex + tz * ex * ey;
 }
+
+PrimExpr ScopeIdResolveTable::ComputeWarpIdInCta(const LaunchParams& params) {
+  PrimExpr warp_id = FloorDiv(GetLinearThreadIndex(params), 32);
+  PrimExpr mask = IntImm(DataType::UInt(32), 0xffffffff);
+  return Call(warp_id.dtype(), builtin::tvm_warp_shuffle(),
+              {mask, warp_id, IntImm(DataType::Int(32), 0), IntImm(DataType::Int(32), 32),
+               IntImm(DataType::Int(32), 32)});
+}
+
+#define TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF \
+  static TVM_ATTRIBUTE_UNUSED ScopeIdResolveTable::Registry& res
+
+#define TVM_REGISTER_SCOPEID_RESOLVE(parent, cur, target_kind)        \
+  TVM_STR_CONCAT(TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF, __COUNTER__) = \
+      ::tvm::tirx::ScopeIdResolveTable::Global()->Register(parent, cur, target_kind)
+
+
+Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& prefix,
+                                 int out_dim) {
+  Array<PrimExpr> ret;
+  for (size_t i = 0; i < out_dim; i++) {
+    ret.push_back(GetThread(prefix + static_cast<char>('x' + i), params).first);
+  }
+  return std::move(ret);
+}
+
+
 
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
     .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
@@ -296,12 +309,23 @@ TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
 // Define common modifiers
 auto identity = [](PrimExpr x) { return x; };
 auto mod4 = [](PrimExpr x) { return FloorMod(x, 4); };
+auto div4 = [](PrimExpr x) { return FloorDiv(x, 4); };
 auto mod32 = [](PrimExpr x) { return FloorMod(x, 32); };
 auto mod128 = [](PrimExpr x) { return FloorMod(x, 128); };
 
-REGISTER_1D_THREAD_SCOPE("cta", "warpgroup", 128, identity);
-REGISTER_1D_THREAD_SCOPE("cta", "warp", 32, identity);
-REGISTER_1D_THREAD_SCOPE("warpgroup", "warp", 32, mod4);
+// Warp-related scopes: resolve from warp_id_in_cta in launch params
+#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                                 \
+  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                   \
+      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                     \
+              const LaunchParams& params) -> Array<PrimExpr> {                                     \
+        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now";  \
+        arith::Analyzer ana;                                                                       \
+        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))};                \
+      })
+
+REGISTER_1D_WARP_SCOPE("cta", "warpgroup", div4);
+REGISTER_1D_WARP_SCOPE("cta", "warp", identity);
+REGISTER_1D_WARP_SCOPE("warpgroup", "warp", mod4);
 REGISTER_1D_THREAD_SCOPE("warpgroup", "thread", 1, mod128);
 REGISTER_1D_THREAD_SCOPE("warp", "thread", 1, mod32);
 
@@ -311,5 +335,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace tvm
