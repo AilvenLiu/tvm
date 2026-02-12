@@ -85,6 +85,19 @@ void ScheduleContextNode::AddInitStmt(Stmt stmt, bool host) {
   callbacks.Set(tag, stmts);
 }
 
+void ScheduleContextNode::AddPostBufferDefStmt(Buffer buffer, Stmt stmt) {
+  auto mapping = getOrSetDefault(callbacks, callback::kPostBufferDefStmt,
+                                 ffi::Map<Buffer, ffi::Array<Stmt>>());
+  auto it = mapping.find(buffer);
+  ffi::Array<Stmt> stmts;
+  if (it != mapping.end()) {
+    stmts = (*it).second;
+  }
+  stmts.push_back(stmt);
+  mapping.Set(buffer, stmts);
+  callbacks.Set(callback::kPostBufferDefStmt, mapping);
+}
+
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
                                  ffi::Map<ffi::String, IterVar> launch_params,
                                  ffi::Map<Var, Range> var_range_map, bool alloc_only,
@@ -110,7 +123,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                                     callbacks);
            })
       .def_method("tirx.ScheduleContextAddAllocBuffer", &ScheduleContextNode::AddAllocBuffer)
-      .def_method("tirx.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt);
+      .def_method("tirx.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt)
+      .def_method("tirx.ScheduleContextAddPostBufferDefStmt",
+                   &ScheduleContextNode::AddPostBufferDefStmt);
 }
 
 /********************* Schedule Ops **********************/

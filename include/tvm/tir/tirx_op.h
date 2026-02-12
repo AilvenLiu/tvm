@@ -69,6 +69,10 @@ constexpr const char* kDeviceInitStmt = "device_init_stmt";
  *  which will be inserted at the beginning of the kernel
  */
 constexpr const char* kHostInitStmt = "host_init_stmt";
+/*! \brief Statements to be inserted after a specific buffer's definition (DeclBuffer/AllocBuffer).
+ *  Stored as Map<Buffer, Array<Stmt>>.
+ */
+constexpr const char* kPostBufferDefStmt = "post_buffer_def_stmt";
 }  // namespace callback
 
 /*!
@@ -110,6 +114,12 @@ class ScheduleContextNode : public Object {
    *  If False, the statement will be added to the kernel body (at the beginning of the kernel).
    */
   void AddInitStmt(Stmt stmt, bool host = false);
+
+  /*! \brief Add a statement to be inserted after a buffer's definition.
+   *  \param buffer The buffer whose DeclBuffer/AllocBuffer scope the stmt should appear in.
+   *  \param stmt The statement to be inserted.
+   */
+  void AddPostBufferDefStmt(Buffer buffer, Stmt stmt);
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScheduleContext", ScheduleContextNode, Object);
 };

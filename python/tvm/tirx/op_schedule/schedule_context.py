@@ -58,6 +58,7 @@ class ScheduleContext(Object, Scriptable):
     kPrivateAlloc = "private_alloc"
     kDeviceInitStmt = "device_init_stmt"
     kHostInitStmt = "host_init_stmt"
+    kPostBufferDefStmt = "post_buffer_def_stmt"
 
     def __init__(
         self,
@@ -106,6 +107,18 @@ class ScheduleContext(Object, Scriptable):
             If False, the statement will be added to the kernel body (at the beginning of the kernel).
         """
         _ffi_api.ScheduleContextAddInitStmt(self, stmt, host)  # pylint: disable=no-member
+
+    def add_post_buffer_def_stmt(self, buffer: Buffer, stmt: Stmt) -> None:
+        """Add a statement to be inserted after a buffer's definition (DeclBuffer/AllocBuffer).
+
+        Parameters
+        ----------
+        buffer : Buffer
+            The buffer whose definition scope the statement should appear in.
+        stmt : Stmt
+            The statement to be inserted.
+        """
+        _ffi_api.ScheduleContextAddPostBufferDefStmt(self, buffer, stmt)  # pylint: disable=no-member
 
     def is_cuda(self) -> bool:
         """Check if the target is CUDA."""

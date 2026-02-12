@@ -699,16 +699,15 @@ def codegen_ptx_tcgen05_encode_instr_descriptor_block_scaled(
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_format,
                                             int b_format, int s_format, bool trans_a, bool trans_b,
-                                            bool neg_a, bool neg_b, bool is_sparse,
-                                            uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr) {{
+                                            bool neg_a, bool neg_b, bool is_sparse) {{
   InstrDescriptorBlockScaled _desc;
 
   _desc.a_format_ = uint8_t(a_format);
   _desc.b_format_ = uint8_t(b_format);
   _desc.scale_format_ = uint8_t(s_format);
 
-  _desc.a_sf_id_ = (sfa_tmem_addr & 0xC0000000) >> 30;
-  _desc.b_sf_id_ = (sfb_tmem_addr & 0xC0000000) >> 30;
+  _desc.a_sf_id_ = 0;
+  _desc.b_sf_id_ = 0;
 
   _desc.m_dim_ = (M >> 4);
   _desc.n_dim_ = (N >> 3);
@@ -738,8 +737,6 @@ __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_
         neg_a,
         neg_b,
         is_sparse,
-        sfa_tmem_addr,
-        sfb_tmem_addr,
         source_code=source_code,
     ), ["instr_descriptor_block_scaled"]
 

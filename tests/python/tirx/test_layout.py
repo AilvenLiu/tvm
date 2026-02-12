@@ -1579,6 +1579,11 @@ def test_slice():
         assert sliced is not None
         verify_slice(layout, shape, region, sliced)
 
+        region = [tvm.ir.Range(5, 8)]
+        sliced_2 = layout.slice(shape, region).canonicalize()
+        assert sliced_2 is not None
+        assert_structural_equal(sliced, sliced_2)
+
     case1()
 
     def case2():

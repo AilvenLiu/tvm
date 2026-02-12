@@ -267,6 +267,12 @@ std::string CodeGenC::GetBufferRef(DataType t, const BufferNode* buffer, PrimExp
     os << "*("
        << "(" << ptr_cast(t) << vid << ")"
        << " + " << index_str << " / " << div_factor << ")";
+  } else if (t.is_float4_e2m1fn() && t.lanes() == 1) {
+    // float4_e2m1fn: sizeof(__nv_fp4_e2m1) = 1 byte, but data is packed
+    // 2 elements per byte.  Divide element index by 2 to get byte offset.
+    // This returns an lvalue so it works for address_of() and stores.
+    // Nibble extraction (for loads) is handled in VisitExpr_(BufferLoadNode*).
+    os << "*(" << ptr_cast(t) << "(" << vid << " + " << index_str << " / 2))";
   } else if (t == buffer_element_dtype) {
     os << buffer_str << "[" << index_str << "]";
   } else {
@@ -790,7 +796,17 @@ void CodeGenC::VisitExpr_(const BufferLoadNode* op, std::ostream& os) {  // NOLI
   // delcare type.
   if (value_dtype.lanes() == element_dtype.lanes()) {
     std::string ref = GetBufferRef(op->dtype, op->buffer.get(), index);
-    HandleVolatileLoads(ref, op, os);
+    if (value_dtype.is_float4_e2m1fn() && value_dtype.lanes() == 1) {
+      // GetBufferRef returns an lvalue: *(ptr + index/2), which reads the
+      // full byte.  Extract the correct nibble (low for even, high for odd).
+      std::string index_str = PrintExpr(index);
+      std::ostringstream nibble;
+      nibble << "([](__nv_fp4_storage_t v) { __nv_fp4_e2m1 t; t.__x = v; return t; })"
+             << "(((" << ref << ").__x >> ((" << index_str << " % 2) * 4)) & 0xF)";
+      HandleVolatileLoads(nibble.str(), op, os);
+    } else {
+      HandleVolatileLoads(ref, op, os);
+    }
   } else {
     bool can_vector_load = false;
     arith::PVar<PrimExpr> base;

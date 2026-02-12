@@ -165,6 +165,36 @@ class TIRxOpScheduler : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const AllocBufferNode* op) final {
+    Stmt body = VisitStmt(op->body);
+    auto it = post_buffer_def_stmts_.find(op->buffer.get());
+    if (it != post_buffer_def_stmts_.end()) {
+      for (const auto& stmt : it->second) {
+        body = KernelReplacePointSearcher::Seek(stmt, body);
+      }
+      post_buffer_def_stmts_.erase(it);
+    }
+    if (body.same_as(op->body)) return ffi::GetRef<Stmt>(op);
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
+    return Stmt(n);
+  }
+
+  Stmt VisitStmt_(const DeclBufferNode* op) final {
+    Stmt body = VisitStmt(op->body);
+    auto it = post_buffer_def_stmts_.find(op->buffer.get());
+    if (it != post_buffer_def_stmts_.end()) {
+      for (const auto& stmt : it->second) {
+        body = KernelReplacePointSearcher::Seek(stmt, body);
+      }
+      post_buffer_def_stmts_.erase(it);
+    }
+    if (body.same_as(op->body)) return ffi::GetRef<Stmt>(op);
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
+    return Stmt(n);
+  }
+
   Stmt VisitStmt_(const tirx::OpCallNode* op) final {
     tirx::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
     static auto f_op_scheduler_ = ffi::Function::GetGlobal("tirx.f_op_scheduler");
@@ -184,6 +214,13 @@ class TIRxOpScheduler : public StmtExprMutator {
       auto stmt_list = stmts.value().as<Array<Stmt>>().value();
       host_init_stmts_.insert(host_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
     }
+    if (auto mapping = sctx->callbacks.Get(tirx::callback::kPostBufferDefStmt)) {
+      auto map = Downcast<ffi::Map<Buffer, Array<Stmt>>>(mapping.value());
+      for (const auto& [buffer, stmts] : map) {
+        auto& vec = post_buffer_def_stmts_[buffer.get()];
+        vec.insert(vec.end(), stmts.begin(), stmts.end());
+      }
+    }
     return res->body;
   }
 
@@ -194,6 +231,7 @@ class TIRxOpScheduler : public StmtExprMutator {
   std::vector<Buffer> alloc_buffers_;
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
+  std::unordered_map<const BufferNode*, std::vector<Stmt>> post_buffer_def_stmts_;
 
   bool is_first_block_{true};
   bool is_first_thread_attr_{true};

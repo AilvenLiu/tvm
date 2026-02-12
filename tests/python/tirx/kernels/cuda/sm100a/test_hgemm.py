@@ -302,7 +302,7 @@ def test_hgemm():
                                     def mma(is_remain, ks):
                                         # wait tma
                                         tma2mma.wait(ks, 0, phase[0])
-                                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + BLK_N], A_smem[ks, warp_id, :, :], B_smem[ks, :, :], dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI,
+                                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], A_smem[ks, warp_id, :, :], B_smem[ks, :, :], dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI,
                                                         accum=tvm.tir.Not(stage == 0 and ((not is_remain) or (is_remain and PIPE_CYCLE == 0))))
                                         mma2tma.arrive(ks)
 

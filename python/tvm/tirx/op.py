@@ -5836,7 +5836,9 @@ def ptx_fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fma_packed_f32x2", a1, a2, b1, b2, c1, c2, d_addr, rounding_mode)
+    return call_intrin(
+        "", "tir.ptx_fma_packed_f32x2", a1, a2, b1, b2, c1, c2, d_addr, rounding_mode
+    )
 
 
 def ptx_ld_global_acquire(res, addr):

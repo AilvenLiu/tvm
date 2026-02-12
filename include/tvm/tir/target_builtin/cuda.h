@@ -513,10 +513,10 @@ TVM_DLL const Op& ptx_tcgen05_encode_instr_descriptor();
 /*!
  * \brief tvm intrinsic to encode instruction descriptor for tcgen05 MMA block scaled.
  *
- * ptx_tcgen05_encode_instr_descriptor_block_scaled(PrimExpr desc, string d_dtype, string a_dtype,
- * string b_dtype, string sfa_dtype, string stb_dtype, string sfa_tmem_addr, string sfb_tmem_addr,
- * int M, int N, int K, bool trans_a, bool trans_b, int n_cta_groups, bool neg_a, bool neg_b, bool
- * is_sparse)
+ * ptx_tcgen05_encode_instr_descriptor_block_scaled(PrimExpr desc, string d_dtype,
+ * string a_dtype, string b_dtype, string sfa_dtype, string stb_dtype,
+ * int M, int N, int K, bool trans_a, bool trans_b,
+ * int n_cta_groups, bool neg_a, bool neg_b, bool is_sparse)
  */
 TVM_DLL const Op& ptx_tcgen05_encode_instr_descriptor_block_scaled();
 

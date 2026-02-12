@@ -347,6 +347,8 @@ def gemm_async(
     C: Union[BufferRegion, Buffer],
     A: Union[BufferRegion, Buffer],
     B: Union[BufferRegion, Buffer],
+    SFA: Optional[Union[BufferRegion, Buffer]] = None,
+    SFB: Optional[Union[BufferRegion, Buffer]] = None,
     transA: bool = False,
     transB: bool = False,
     accum: bool = False,
@@ -367,6 +369,12 @@ def gemm_async(
     B : Union[BufferRegion, Buffer]
         The buffer of matrix B.
 
+    SFA : Optional[Union[BufferRegion, Buffer]]
+        The scale factor buffer for matrix A (block-scaled MMA only).
+
+    SFB : Optional[Union[BufferRegion, Buffer]]
+        The scale factor buffer for matrix B (block-scaled MMA only).
+
     transA : bool
         False if A is K-major (MxK), True if A is MN-major (KxM).
 
@@ -386,6 +394,24 @@ def gemm_async(
     C = _to_region(C)
     A = _to_region(A)
     B = _to_region(B)
+    if SFA is not None and SFB is not None:
+        SFA = _to_region(SFA)
+        SFB = _to_region(SFB)
+        return f_insert(
+            tirx_op.GemmAsync(
+                C,
+                A,
+                B,
+                SFA,
+                SFB,
+                transA,
+                transB,
+                accum,
+                workspace=workspace,
+                config=config,
+                dispatch=dispatch,
+            )
+        )
     return f_insert(
         tirx_op.GemmAsync(
             C, A, B, transA, transB, accum, workspace=workspace, config=config, dispatch=dispatch
@@ -1146,7 +1172,7 @@ class PoolAllocator:
         axis_separators=None,
         layout="default",
         name=None,
-    ) -> frame.DeclBufferFrame:
+    ) -> Union[frame.DeclBufferFrame, Buffer]:
         if align > 0:
             self.offset = (self.offset + align - 1) // align * align
         res = decl_buffer(

@@ -187,30 +187,28 @@ def tir_kernel(M: int, N: int, K: int):
     def skip():
         pass
 
-    A_layout = T.ComposeLayout(
-        T.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-        T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))),
-    )
-    B_layout = T.ComposeLayout(
-        T.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-        T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_N, BLK_K), (BLK_N * BLK_K, BLK_K, 1))),
-    )
-    D_layout = T.ComposeLayout(
-        T.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-        T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
-    )
+    A_layout = T.ComposeLayout(T.SwizzleLayout(4, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))))
+    B_layout = T.ComposeLayout(T.SwizzleLayout(4, 3, 3, swizzle_inner=True), T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_N, BLK_K), (BLK_N * BLK_K, BLK_K, 1))))
+    D_layout = T.ComposeLayout(T.SwizzleLayout(3, 2, 3, swizzle_inner=True), T.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))))
 
     SFA_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
     SFB_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
 
+    # TMEM SF layouts: stride-0 K_MMA (all MMA iters share same SF since
+    # quantization group = BLK_K = 128 = 4 MMAs × 32).
+    # Shard: [pipe, M, 32, K_MMA] — pipe as leading dim for natural slicing.
+    sf_mma_k = 1  # fp8 + e8m0fnu
+    M_sf = 128 // 32  # 4 row chunks
+    sfa_epc = 32 // sfa_type.bits  # 4
+    sfb_epc = 32 // sfb_type.bits  # 4
+    K_ITERS = BLK_K // MMA_K  # 4 MMA iterations per pipe stage
+    K_PER_PIPE = sf_mma_k * K_ITERS  # 4 SF elements per pipe stage
+    M_sf_sfb = BLK_SFB // 32  # 8 row chunks for N > 128
+    SFA_tmem_layout = TileLayout(shard=([TMEM_PIPE_DEPTH, M_sf, 32, K_ITERS], [M_sf * sfa_epc @ TCol, sfa_epc @ TCol, 1 @ TLane, 0 @ TCol]), replica=([4], [32 @ TLane]))
+    SFB_tmem_layout = TileLayout(shard=([TMEM_PIPE_DEPTH, M_sf_sfb, 32, K_ITERS], [M_sf_sfb * sfb_epc @ TCol, sfb_epc @ TCol, 1 @ TLane, 0 @ TCol]), replica=([4], [32 @ TLane]))
+
     @T.prim_func(tirx=True)
-    def kernel(
-        A: T.Buffer((M, K), a_type),
-        B: T.Buffer((N, K), b_type),
-        D: T.Buffer((M, N), d_type),
-        SFA: T.Buffer((math.ceil(K / QUANT_SIZE) // 4, M), "uint32"),
-        SFB: T.Buffer((math.ceil(K / QUANT_SIZE) // 4, N), "uint32"),
-    ):
+    def kernel(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), D: T.Buffer((M, N), d_type), SFA: T.Buffer((math.ceil(K / QUANT_SIZE) // 4, M), "uint32"), SFB: T.Buffer((math.ceil(K / QUANT_SIZE) // 4, N), "uint32")):
         # fmt: off
         with T.kernel():
             cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
@@ -238,8 +236,6 @@ def tir_kernel(M: int, N: int, K: int):
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
                 reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 stage = T.local_cell("int32")
-                descA = T.local_cell("uint64")
-                descB = T.local_cell("uint64")
                 descSFA = T.local_cell("uint64")
                 descSFB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
@@ -272,6 +268,8 @@ def tir_kernel(M: int, N: int, K: int):
                 T.cuda.cluster_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
+                SFA_tmem = T.decl_buffer((TMEM_PIPE_DEPTH, 128, K_PER_PIPE), sfa_type, scope="tmem", allocated_addr=SFA_TMEM_START_COL, layout=SFA_tmem_layout)
+                SFB_tmem = T.decl_buffer((TMEM_PIPE_DEPTH, BLK_SFB, K_PER_PIPE), sfb_type, scope="tmem", allocated_addr=SFB_TMEM_START_COL, layout=SFB_tmem_layout)
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -362,8 +360,7 @@ def tir_kernel(M: int, N: int, K: int):
                             if cbx == 0:
                                 tmem_idx = T.local_cell("int32", "tmem_idx")
                                 tmem_phase = T.local_cell("int32", "tmem_phase")
-                                T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type,
-                                                                                    0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
+                                T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
                                 phase = 0
                                 while tile_scheduler.valid():
                                     m_idx = T.meta_var(tile_scheduler.m_idx)
@@ -385,38 +382,15 @@ def tir_kernel(M: int, N: int, K: int):
                                             # copy sf to tmem
                                             if stage % 4 == 0:
                                                 for ki in T.unroll(0, BLK_SFA // 128):
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(
-                                                        T.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]),
-                                                        ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
-                                                    )
-                                                    T.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4,
-                                                                        descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
+                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)
+                                                    T.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4, descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
                                                 for ki in T.unroll(0, BLK_SFB // 128):
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(
-                                                        T.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]),
-                                                        ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
-                                                    )
-                                                    T.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4,
-                                                                        descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
+                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)
+                                                    T.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4, descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
 
                                             # issue mma
                                             T.cuda.runtime_instr_desc(T.address_of(descI), stage % 4)
-                                            for ki in T.unroll(BLK_K // MMA_K):
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                    ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                    ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE)
-
-                                                if stage == 0 and ki == 0:
-                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB,
-                                                                                    SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
-                                                                                    SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
-                                                                                    descI, False, CTA_GROUP, False)
-                                                else:
-                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB,
-                                                                                    SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
-                                                                                    SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
-                                                                                    descI, False, CTA_GROUP, True)
+                                            Tx.gemm_async(tmem[:, tmem_idx * MMA_N: tmem_idx * MMA_N + MMA_N], A_smem[ks, :, :], B_smem[ks, :, :], SFA=SFA_tmem[tmem_idx, :, :], SFB=SFB_tmem[tmem_idx, :, :], accum=(stage != 0), dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
                                             mma2tma_bar.arrive(ks)
 
                                         @T.macro

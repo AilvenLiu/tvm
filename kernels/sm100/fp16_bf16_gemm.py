@@ -217,7 +217,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     @T.macro
                     def mma_stage(stage, accum):
                         T.ptx.mbarrier.try_wait(tma2mma.ptr_to([stage]), phase_tma2mma) # wait for the tma to finish
-                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + BLK_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
+                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
                         T.ptx.tcgen05.commit(mma2tma.ptr_to([stage]), cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma
 
                     @T.macro

@@ -342,20 +342,52 @@ class Gemm(OpCall):
 
 
 class GemmAsync(OpCall):
-    """General matrix multiplication asynchronously."""
+    """General matrix multiplication asynchronously.
+
+    Supports two arg layouts:
+    - Regular (6 args): C, A, B, transA, transB, accum
+    - Block-scaled (8 args): C, A, B, SFA, SFB, transA, transB, accum
+    """
 
     op = get_tirx_op("gemm_async")
     output = ArgProperty(0)
     lhs = ArgProperty(1)
     rhs = ArgProperty(2)
-    transA = ArgProperty(4)
-    transB = ArgProperty(5)
-    accum = ArgProperty(6)
+
+    @property
+    def is_block_scaled(self) -> bool:
+        """Whether this is a block-scaled MMA operation."""
+        return len(self.args) == 8
+
+    @property
+    def sfa(self):
+        """Get the scale factor buffer for A (None for regular MMA)."""
+        return self.args[3] if self.is_block_scaled else None
+
+    @property
+    def sfb(self):
+        """Get the scale factor buffer for B (None for regular MMA)."""
+        return self.args[4] if self.is_block_scaled else None
+
+    @property
+    def transA(self):
+        return self.args[5] if self.is_block_scaled else self.args[3]
+
+    @property
+    def transB(self):
+        return self.args[6] if self.is_block_scaled else self.args[4]
+
+    @property
+    def accum(self):
+        return self.args[7] if self.is_block_scaled else self.args[5]
 
     @property
     def srcs(self) -> List[PrimExpr]:
-        """Get the source matrices."""
-        return [self.lhs, self.rhs]
+        """Get the source matrices (including scale factors if block-scaled)."""
+        srcs = [self.lhs, self.rhs]
+        if self.is_block_scaled:
+            srcs.extend([self.sfa, self.sfb])
+        return srcs
 
     @property
     def dsts(self) -> List[PrimExpr]:

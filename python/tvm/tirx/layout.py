@@ -239,7 +239,7 @@ class TLayout(Object):
         ----------
         shape : List[PrimExpr]
             The shape of the layout
-        region : List[Tuple[PrimExpr, PrimExpr]]
+        region : List[Tuple[PrimExpr, PrimExpr], tvm.ir.Range]
             The region to slice, each element is (begin, end)
 
         Returns
@@ -248,8 +248,14 @@ class TLayout(Object):
             The sliced layout, or None if slicing is not possible
         """
         assert len(shape) == len(region), "shape and region must have the same length"
-        region = [tvm.ir.Range(r[0], r[1]) for r in region]
-        return _ffi_api.TLayoutSlice(self, shape, region)  # pylint: disable=no-member
+
+        region_list = []
+        for range_i in region:
+            if isinstance(range_i, tvm.ir.Range):
+                region_list.append(range_i)
+            else:
+                region_list.append(tvm.ir.Range(range_i[0], range_i[1]))
+        return _ffi_api.TLayoutSlice(self, shape, region_list)  # pylint: disable=no-member
 
     def tile_to(self, to_shape: List[PrimExpr], current_shape: List[PrimExpr]) -> "TLayout":
         """Tile the current layout to the given shape.
@@ -671,14 +677,6 @@ class TileLayout(TLayout):
     def get_scope(self) -> Optional[Tuple[ExecScope, ExecScope]]:
         """Get the scope pair of the layout."""
         return _ffi_api.TileLayoutGetScope(self)  # pylint: disable=no-member
-
-    def slice(
-        self, shape: List[PrimExpr], region: List[Tuple[PrimExpr, PrimExpr]]
-    ) -> Optional["TileLayout"]:
-        """Slice the layout with a given shape and region."""
-        assert len(shape) == len(region), "shape and region must have the same length"
-        region = [tvm.ir.Range(r[0], r[1]) for r in region]
-        return _ffi_api.TileLayoutSlice(self, shape, region)  # pylint: disable=no-member
 
     @classmethod
     def trainium(
