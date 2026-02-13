@@ -329,6 +329,15 @@ void TIRVisitorWithPath::VisitStmt_(const tirx::OpCallNode* op, AccessPath path)
   }
 }
 
+void TIRVisitorWithPath::VisitStmt_(const AllocBufferNode* op, AccessPath path) {
+  auto context = WithDef(op->buffer, path->Attr("buffer"));
+  Visit(op->body, path->Attr("body"));
+}
+
+void TIRVisitorWithPath::VisitStmt_(const ExecScopeStmtNode* op, AccessPath path) {
+  Visit(op->body, path->Attr("body"));
+}
+
 void TIRVisitorWithPath::VisitExpr_(const VarNode* op, AccessPath path) {}
 
 void TIRVisitorWithPath::VisitExpr_(const SizeVarNode* op, AccessPath path) {

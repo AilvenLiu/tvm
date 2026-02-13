@@ -28,6 +28,7 @@
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
@@ -47,8 +48,11 @@ class ScopeIdDefGather : public StmtExprVisitor {
 
   void VisitStmt_(const SBlockNode* op) override {
     StmtExprVisitor::VisitStmt_(op);
-    if (!op->exec_scope.has_value()) return;
-    for (const auto& def : op->exec_scope.value()->scope_id_def) {
+  }
+
+  void VisitStmt_(const ExecScopeStmtNode* op) override {
+    StmtExprVisitor::VisitStmt_(op);
+    for (const auto& def : op->exec_scope->scope_id_def) {
       scope_id_def.push_back(def);
     }
   }
@@ -64,21 +68,25 @@ class ScopeIdDefRemover : public StmtExprMutator {
     SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
     Stmt body = StmtExprMutator::VisitStmt(op->body);
-    if (op->exec_scope.defined()) {
-      if (const auto* slice = op->exec_scope.value().as<ExecScopeSliceNode>()) {
-        auto n_scope = ffi::make_object<ExecScopeSliceNode>(*slice);
-        n_scope->scope_id_def = {};
-        n->exec_scope = ExecScopeSlice(n_scope);
-      } else if (const auto* scope = op->exec_scope.value().as<ExecScopeNode>()) {
-        auto n_scope = ffi::make_object<ExecScopeNode>(*scope);
-        n_scope->scope_id_def = {};
-        n->exec_scope = ExecScope(n_scope);
-      } else {
-        LOG(FATAL) << "Internal Error: unknown exec_scope type: " << op->exec_scope.value();
-      }
-    }
     n->body = body;
     return block;
+  }
+
+  Stmt VisitStmt_(const ExecScopeStmtNode* op) override {
+    Stmt body = StmtExprMutator::VisitStmt(op->body);
+    ExecScope new_scope;
+    if (const auto* slice = op->exec_scope.as<ExecScopeSliceNode>()) {
+      auto n_scope = ffi::make_object<ExecScopeSliceNode>(*slice);
+      n_scope->scope_id_def = {};
+      new_scope = ExecScopeSlice(n_scope);
+    } else if (const auto* scope = op->exec_scope.as<ExecScopeNode>()) {
+      auto n_scope = ffi::make_object<ExecScopeNode>(*scope);
+      n_scope->scope_id_def = {};
+      new_scope = ExecScope(n_scope);
+    } else {
+      LOG(FATAL) << "Internal Error: unknown exec_scope type: " << op->exec_scope;
+    }
+    return ExecScopeStmt(new_scope, body);
   }
 };
 
@@ -93,20 +101,23 @@ class ScopeIdDefResolver : public StmtExprMutator {
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
-  Stmt VisitStmt_(const SBlockRealizeNode* op) override {
-    auto n_realize = CopyOnWrite(op);
-    if (!op->block->exec_scope.defined()) {
-      // No exec_scope, return the block as is
-      n_realize->block = Downcast<SBlock>(StmtExprMutator::VisitStmt_(op->block.get()));
-      return Stmt(n_realize);
+  Stmt VisitStmt_(const ExecScopeStmtNode* op) override {
+    const auto& scope = op->exec_scope;
+    if (!scope->Is("kernel")) {
+      // Non-kernel ExecScopeStmt: just visit body and reconstruct
+      Stmt body = VisitStmt(op->body);
+      if (body.same_as(op->body)) {
+        return ffi::GetRef<Stmt>(op);
+      }
+      return ExecScopeStmt(scope, body);
     }
-    const auto& scope = op->block->exec_scope.value();
+    // Kernel scope: resolve scope ids
     ICHECK(!scope->Is("world")) << "TIRx Error: world scope is not supported at the moment";
-    ICHECK(scope->Is("kernel") && !kernel_launch_params_.has_value())
-        << "TIRx Error: a scope is not wrapped in a kernel scope";
+    ICHECK(!kernel_launch_params_.has_value())
+        << "TIRx Error: nested kernel scopes are not supported";
 
-    // Step 0: Gather the scope id defs from all the scope
-    Array<ScopeIdDef> scope_id_def = std::move(ScopeIdDefGather::Gather(op->block));
+    // Step 0: Gather the scope id defs from all nested scopes
+    Array<ScopeIdDef> scope_id_def = std::move(ScopeIdDefGather::Gather(ffi::GetRef<Stmt>(op)));
 
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
@@ -115,14 +126,8 @@ class ScopeIdDefResolver : public StmtExprMutator {
     // Step 2: Extract kernel launch parameters
     LaunchParams launch_params;
     ExtractKernelLaunchParams(verifier.id_set, target_, &launch_params);
-    
-
-    // Step 3: Visit the block and resolve the scope ids, replace them with kernel launch params
-    auto block = op->block;
-    auto* n = block.CopyOnWrite();
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
-    // Collect all scope id defs as LetStmt bindings
     std::vector<std::pair<Var, PrimExpr>> scope_lets;
 
     // Check if any scope needs warp_id_in_cta
@@ -134,13 +139,10 @@ class ScopeIdDefResolver : public StmtExprMutator {
       }
     }
 
-    // If warp/warpgroup scopes exist, compute warp_id_in_cta once with single shuffle
-    // and add it to launch params so resolve functions can access it
     if (need_warp_id) {
       PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params);
       Var warp_id_in_cta_var("warp_id_in_cta", shuffled.dtype());
       scope_lets.push_back({warp_id_in_cta_var, shuffled});
-      n->annotations.Set("tirx.warp_id_in_cta", warp_id_in_cta_var);
       IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var, kThreadIndex,
                       "warp_id_in_cta");
       launch_params.insert({"warp_id_in_cta", warp_iv});
@@ -148,7 +150,6 @@ class ScopeIdDefResolver : public StmtExprMutator {
     kernel_launch_params_ = launch_params;
 
     for (const auto& def : scope_id_def) {
-      // Resolve the scope ids defined in the scope
       auto resolved =
           ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
                                        target_->kind->name, kernel_launch_params_.value());
@@ -162,25 +163,33 @@ class ScopeIdDefResolver : public StmtExprMutator {
         scope_lets.push_back({let_var, value});
       }
     }
-    n->body = Substitute(n->body, id_map);
-    n_realize->block = block;
+
+    // Step 3: Substitute scope ids in body, then visit
+    Stmt new_body = Substitute(op->body, id_map);
+    new_body = VisitStmt(new_body);
+    Stmt ret = ExecScopeStmt(scope, new_body);
 
     // Step 4: Remove the scope_id_def inside the scope
-    Stmt ret = ScopeIdDefRemover::Remove(Stmt(n_realize));
+    ret = ScopeIdDefRemover::Remove(ret);
 
     // Step 5: Wrap with LetStmts for all scope id values
     for (auto it = scope_lets.rbegin(); it != scope_lets.rend(); ++it) {
       ret = LetStmt(it->first, it->second, ret);
     }
 
-    // Step 6: Wrap the block with thread_extent attributes
+    // Step 6: Wrap with thread_extent attributes
     for (const auto& [tag, iv] : kernel_launch_params_.value()) {
       if (tag == "warp_id_in_cta") continue;
       ret = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, ret);
     }
-    // Clear the kernel launch params after the kernel scope is resolved
     kernel_launch_params_ = std::nullopt;
     return ret;
+  }
+
+  Stmt VisitStmt_(const SBlockRealizeNode* op) override {
+    auto n_realize = CopyOnWrite(op);
+    n_realize->block = Downcast<SBlock>(StmtExprMutator::VisitStmt_(op->block.get()));
+    return Stmt(n_realize);
   }
 
   void ExtractKernelLaunchParams(const ScopeIdDefVerifier::ScopeIdSet& id_set, const Target& target,
@@ -247,5 +256,5 @@ Pass LowerTIRxResolveScopeIds() {
 }
 
 }  // namespace transform
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

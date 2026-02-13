@@ -20,7 +20,7 @@ from typing import Dict, List
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tir.buffer import Buffer
-from tvm.tir.stmt import AllocBuffer, AttrStmt, SBlock, For, OpCall, Stmt
+from tvm.tir.stmt import AllocBuffer, AttrStmt, SBlock, ExecScopeStmt, For, OpCall, Stmt
 from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
@@ -38,11 +38,12 @@ class PrivateAllocCollector(StmtVisitor):
         self.private_buf_refs = {}
 
     def visit_block_(self, op: SBlock):
-        if op.exec_scope is not None:
-            self.exec_scope_stack_.append(op.exec_scope)
         super().visit_block_(op)
-        if op.exec_scope is not None:
-            self.exec_scope_stack_.pop()
+
+    def visit_exec_scope_stmt_(self, op: ExecScopeStmt):
+        self.exec_scope_stack_.append(op.exec_scope)
+        super().visit_exec_scope_stmt_(op)
+        self.exec_scope_stack_.pop()
 
     def visit_attr_(self, op: AttrStmt):
         if op.attr_key == "thread_extent":
@@ -79,6 +80,19 @@ class PrivateAllocMutator(StmtMutator):
         self.added_workspace = added_workspace
         self.is_outer_block = True
 
+    def visit_exec_scope_stmt_(self, op: ExecScopeStmt):
+        is_outer_block = self.is_outer_block
+        self.is_outer_block = False
+        op = super().visit_exec_scope_stmt_(op)
+        if is_outer_block:
+            body = op.body
+            for stmt in self.init_stmts:
+                body = seek_kernel_replace_point(stmt, body)
+            for buffer in reversed(self.alloc_buffers):
+                body = AllocBuffer(buffer, body)
+            return ExecScopeStmt(op.exec_scope, body)
+        return op
+
     def visit_block_(self, op: SBlock):
         is_outer_block = self.is_outer_block
         self.is_outer_block = False
@@ -98,7 +112,6 @@ class PrivateAllocMutator(StmtMutator):
                 alloc_buffers=op.alloc_buffers,
                 match_buffers=op.match_buffers,
                 annotations=op.annotations,
-                exec_scope=op.exec_scope,
             )
             return block
         return op

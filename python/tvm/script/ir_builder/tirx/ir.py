@@ -465,13 +465,13 @@ def sblock(
     return _ffi_api.Block(name, no_realize, exec_scope, scope_slice_extents, scope_slice_parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def world() -> frame.SBlockFrame:
-    """The block declaration statement.
+def world() -> frame.ExecScopeFrame:
+    """The execution scope declaration for world scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.World()  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -479,8 +479,8 @@ def world() -> frame.SBlockFrame:
 def kernel(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "world",
-) -> frame.SBlockFrame:
-    """The block declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for kernel scope.
 
     Parameters
     ----------
@@ -492,8 +492,8 @@ def kernel(
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.Kernel(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -501,13 +501,13 @@ def kernel(
 def cluster(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "world",
-) -> frame.SBlockFrame:
-    """The cluster declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for cluster scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.Cluster(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -515,13 +515,13 @@ def cluster(
 def cta(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "kernel",
-) -> frame.SBlockFrame:
-    """The block declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for CTA scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.CTA(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -529,13 +529,13 @@ def cta(
 def warpgroup(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.SBlockFrame:
-    """The warpgroup declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for warpgroup scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.WarpGroup(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -543,13 +543,13 @@ def warpgroup(
 def warp(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.SBlockFrame:
-    """The block declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for warp scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.Warp(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
@@ -557,13 +557,13 @@ def warp(
 def thread(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
-) -> frame.SBlockFrame:
-    """The block declaration statement.
+) -> frame.ExecScopeFrame:
+    """The execution scope declaration for thread scope.
 
     Returns
     -------
-    res : frame.SBlockFrame
-        The SBlockFrame.
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame.
     """
     return _ffi_api.Thread(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 

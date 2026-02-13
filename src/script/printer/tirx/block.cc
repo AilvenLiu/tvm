@@ -43,25 +43,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     }
   }
 
-  if (block->exec_scope.defined()) {
-    for (auto scope_id_def : block->exec_scope.value()->scope_id_def) {
-      ffi::Array<ExprDoc> lhs;
-      for (auto scope_id : scope_id_def->def_ids) {
-        lhs.push_back(DefineVar(scope_id, *frame, d));
-      }
-      ExprDoc rhs =
-          TIR(d, scope_id_def->scope->cur + "_id")
-              ->Call({d->AsDoc<ExprDoc>(
-                         scope_id_def->extents,
-                         block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("extents"))},
-                     {"parent"},
-                     {LiteralDoc::Str(
-                         scope_id_def->scope->parent,
-                         block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
-      (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
-    }
-  }
-
   // Step 1. Handle block var and block bindings
   // Step 1.1. Obtain all loop var defined along path
   std::unordered_map<const tirx::VarNode*, tirx::For> loop_vars;
@@ -243,36 +224,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
 
   /*********** tirx ***********/
-  if (block->exec_scope.defined()) {
-    if (auto scope_slice_opt = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
-      auto scope_slice = scope_slice_opt.value();
-      ExprDoc extents_doc =
-          d->AsDoc<ExprDoc>(scope_slice->extents, block_p->Attr("exec_scope")->Attr("extents"));
-      ExprDoc parent_doc =
-          LiteralDoc::Str(scope_slice->parent, block_p->Attr("exec_scope")->Attr("parent"));
-      ExprDoc call = TIR(d, block->exec_scope.value()->name)->Call({extents_doc, parent_doc});
-      if (auto slices_opt = scope_slice->slices.as<ffi::Array<Range>>()) {
-        auto slices = slices_opt.value();
-        // slices
-        ffi::Array<Doc> slices_doc;
-        for (size_t i = 0; i < slices.size(); ++i) {
-          auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayItem(i);
-          auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));
-          auto stop = d->AsDoc<ExprDoc>(slices[i]->min + slices[i]->extent, path->Attr("extent"));
-          slices_doc.push_back(SliceDoc(start, stop, std::nullopt));
-        }
-        return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
-      } else {
-        // select_cond
-        auto cond = scope_slice->slices.as<PrimExpr>().value();
-        auto cond_doc = d->AsDoc<ExprDoc>(cond, block_p->Attr("exec_scope")->Attr("select_cond"));
-        return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
-      }
-    } else {
-      return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),
-                      (*frame)->stmts);
-    }
-  }
   return ScopeDoc(std::nullopt,
                   TIR(d, "sblock")  //
                       ->Call({LiteralDoc::Str(block->name_hint, block_p->Attr("name_hint"))},
@@ -297,6 +248,64 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 TVM_SCRIPT_REPR(tirx::SBlockNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::ExecScopeStmt>(
+        "", [](tir::ExecScopeStmt stmt, AccessPath p, IRDocsifier d) -> Doc {
+          With<TIRFrame> frame(d, stmt);
+          tir::ExecScope exec_scope = stmt->exec_scope;
+          AccessPath scope_p = p->Attr("exec_scope");
+
+          // Print scope_id_def if present
+          for (auto scope_id_def : exec_scope->scope_id_def) {
+            ffi::Array<ExprDoc> lhs;
+            for (auto scope_id : scope_id_def->def_ids) {
+              lhs.push_back(DefineVar(scope_id, *frame, d));
+            }
+            ExprDoc rhs =
+                TIR(d, scope_id_def->scope->cur + "_id")
+                    ->Call({d->AsDoc<ExprDoc>(scope_id_def->extents,
+                                             scope_p->Attr("scope_id_def")->Attr("extents"))},
+                           {"parent"},
+                           {LiteralDoc::Str(scope_id_def->scope->parent,
+                                           scope_p->Attr("scope_id_def")->Attr("parent"))});
+            (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
+          }
+
+          // Print body
+          AsDocBody(stmt->body, p->Attr("body"), frame->get(), d);
+
+          // Generate the with statement
+          if (auto scope_slice_opt = exec_scope.as<tvm::tir::ExecScopeSlice>()) {
+            auto scope_slice = scope_slice_opt.value();
+            ExprDoc extents_doc =
+                d->AsDoc<ExprDoc>(scope_slice->extents, scope_p->Attr("extents"));
+            ExprDoc parent_doc =
+                LiteralDoc::Str(scope_slice->parent, scope_p->Attr("parent"));
+            ExprDoc call = TIR(d, exec_scope->name)->Call({extents_doc, parent_doc});
+            if (auto slices_opt = scope_slice->slices.as<ffi::Array<Range>>()) {
+              auto slices = slices_opt.value();
+              ffi::Array<Doc> slices_doc;
+              for (size_t i = 0; i < slices.size(); ++i) {
+                auto path = scope_p->Attr("slices")->ArrayItem(i);
+                auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));
+                auto stop =
+                    d->AsDoc<ExprDoc>(slices[i]->min + slices[i]->extent, path->Attr("extent"));
+                slices_doc.push_back(SliceDoc(start, stop, std::nullopt));
+              }
+              return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
+            } else {
+              auto cond = scope_slice->slices.as<PrimExpr>().value();
+              auto cond_doc =
+                  d->AsDoc<ExprDoc>(cond, scope_p->Attr("select_cond"));
+              return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
+            }
+          } else {
+            return ScopeDoc(std::nullopt, TIR(d, exec_scope->name)->Call({}), (*frame)->stmts);
+          }
+        });
+
+TVM_SCRIPT_REPR(tir::ExecScopeStmtNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::ExecScope>(

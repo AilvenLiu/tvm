@@ -901,15 +901,10 @@ class SBlockNode : public StmtNode {
   /*! \brief The body of the block. */
   Stmt body;
 
-  // TIRX signature
-  // The execution scope of the block.
-  ffi::Optional<ExecScope> exec_scope;
-
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockNode>()
         .def_ro("iter_vars", &SBlockNode::iter_vars, refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("reads", &SBlockNode::reads)
         .def_ro("writes", &SBlockNode::writes)
         .def_ro("name_hint", &SBlockNode::name_hint, refl::AttachFieldFlag::SEqHashIgnore())
@@ -935,10 +930,9 @@ class SBlock : public Stmt {
       ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
       ffi::Array<MatchBufferRegion> match_buffers = ffi::Array<MatchBufferRegion>(),
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
-      Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt);
+      Span span = Span());
 
   TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,
-                         ffi::Optional<ExecScope> exec_scope = std::nullopt,
                          ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
                          Span span = Span());
 
@@ -982,6 +976,47 @@ class SBlockRealize : public Stmt {
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlockRealize, Stmt, SBlockRealizeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockRealizeNode);
+};
+
+/*!
+ * \brief A statement that annotates the execution scope for its body.
+ *
+ *  ExecScopeStmt represents a hardware execution scope (e.g. cta, warp, thread)
+ *  that wraps a body statement. This decouples the execution scope concept from
+ *  SBlock, making the IR structure cleaner.
+ *
+ *  Example:
+ *  \code
+ *    with T.cta():
+ *      ...
+ *  \endcode
+ */
+class ExecScopeStmtNode : public StmtNode {
+ public:
+  /*! \brief The execution scope. */
+  ExecScope exec_scope;
+  /*! \brief The body statement under this execution scope. */
+  Stmt body;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ExecScopeStmtNode>()
+        .def_ro("exec_scope", &ExecScopeStmtNode::exec_scope)
+        .def_ro("body", &ExecScopeStmtNode::body);
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tir.ExecScopeStmt", ExecScopeStmtNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to ExecScopeStmtNode.
+ * \sa ExecScopeStmtNode
+ */
+class ExecScopeStmt : public Stmt {
+ public:
+  TVM_DLL ExecScopeStmt(ExecScope exec_scope, Stmt body, Span span = Span());
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ExecScopeStmt, Stmt, ExecScopeStmtNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeStmtNode);
 };
 
 /*! \brief namespace of possible attributes in AttrStmt.attr_key */

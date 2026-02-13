@@ -185,69 +185,80 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   n->iter_values.clear();
   n->predicate = std::nullopt;
   n->no_realize = no_realize;
-  if (exec_scope.empty()) {
-    n->exec_scope = std::nullopt;
-  } else {
-    n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope);
-  }
-  n->scope_slice_parent = scope_slice_parent;
-  n->scope_slice_extents = scope_slice_extents;
   return SBlockFrame(n);
 }
 
 void OpCall(tvm::tirx::tirx::OpCall op_call) { AddToParent(op_call); }
 
-SBlockFrame SBlockFrameSlice(SBlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice) {
-  TVM_FFI_ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
-  TVM_FFI_ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
-      << "InternalError: Block frame already has an execution scope slice";
-  block->exec_scope =
-      tvm::tirx::ExecScopeSlice(slice, block->scope_slice_extents, block->scope_slice_parent,
-                               block->exec_scope.value()->name);
-  return block;
+ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name,
+                              ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                              ffi::String scope_slice_parent) {
+  ObjectPtr<ExecScopeFrameNode> n = ffi::make_object<ExecScopeFrameNode>();
+  TVM_FFI_ICHECK(!exec_scope_name.empty()) << "InternalError: exec_scope_name must not be empty";
+  n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope_name);
+  n->scope_slice_parent = scope_slice_parent;
+  n->scope_slice_extents = scope_slice_extents;
+  return ExecScopeFrame(n);
 }
 
-SBlockFrame World() { return Block("", false, "world", std::nullopt, ""); }
-
-SBlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                  ffi::String scope_slice_parent) {
-  return Block("", false, "kernel", scope_slice_extents, scope_slice_parent);
+ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
+                                   ffi::Variant<ffi::Array<Range>, PrimExpr> slice) {
+  TVM_FFI_ICHECK(frame->exec_scope.defined())
+      << "InternalError: ExecScope frame must have an execution scope";
+  TVM_FFI_ICHECK(!frame->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
+      << "InternalError: ExecScope frame already has an execution scope slice";
+  frame->exec_scope =
+      tvm::tirx::ExecScopeSlice(slice, frame->scope_slice_extents, frame->scope_slice_parent,
+                               frame->exec_scope.value()->name);
+  return frame;
 }
 
-SBlockFrame Cluster(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+ExecScopeFrame World() { return ExecScopeBlock("world", std::nullopt, ""); }
+
+ExecScopeFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                      ffi::String scope_slice_parent) {
+  return ExecScopeBlock("kernel", scope_slice_extents, scope_slice_parent);
+}
+
+ExecScopeFrame Cluster(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                       ffi::String scope_slice_parent) {
+  return ExecScopeBlock("cluster", scope_slice_extents, scope_slice_parent);
+}
+
+ExecScopeFrame WarpGroup(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                         ffi::String scope_slice_parent) {
+  return ExecScopeBlock("warpgroup", scope_slice_extents, scope_slice_parent);
+}
+
+ExecScopeFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                    ffi::String scope_slice_parent) {
-  return Block("", false, "cluster", scope_slice_extents, scope_slice_parent);
+  return ExecScopeBlock("cta", scope_slice_extents, scope_slice_parent);
 }
 
-SBlockFrame WarpGroup(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                     ffi::String scope_slice_parent) {
-  return Block("", false, "warpgroup", scope_slice_extents, scope_slice_parent);
+ExecScopeFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                    ffi::String scope_slice_parent) {
+  return ExecScopeBlock("warp", scope_slice_extents, scope_slice_parent);
 }
 
-SBlockFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-               ffi::String scope_slice_parent) {
-  return Block("", false, "cta", scope_slice_extents, scope_slice_parent);
-}
-
-SBlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                ffi::String scope_slice_parent) {
-  return Block("", false, "warp", scope_slice_extents, scope_slice_parent);
-}
-
-SBlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                  ffi::String scope_slice_parent) {
-  return Block("", false, "thread", scope_slice_extents, scope_slice_parent);
+ExecScopeFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                      ffi::String scope_slice_parent) {
+  return ExecScopeBlock("thread", scope_slice_extents, scope_slice_parent);
 }
 
 ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
                                   ffi::String name, ffi::String cur) {
-  SBlockFrame frame = FindSBlockFrame(name);
-  TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
+  ffi::Optional<ExecScopeFrame> es_frame =
+      IRBuilder::Current()->FindFrame<ExecScopeFrame>();
+  TVM_FFI_ICHECK(es_frame.defined()) << "InternalError: " << name
+                              << " must be called inside an execution scope, "
+                              << "but no ExecScopeFrame was found";
+  auto exec_scope = es_frame.value()->exec_scope;
+  TVM_FFI_ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame has no exec_scope";
   ffi::Array<tvm::tirx::Var> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::Var(""));
   }
-  const_cast<tvm::tirx::ExecScopeNode*>(frame->exec_scope.as<tvm::tirx::ExecScopeNode>())
+  const_cast<tvm::tirx::ExecScopeNode*>(exec_scope.value().as<tvm::tirx::ExecScopeNode>())
       ->scope_id_def.push_back(
           tvm::tirx::ScopeIdDef(scope_ids, extents, tvm::tirx::ScopePair(parent, cur)));
   return scope_ids;
@@ -360,14 +371,31 @@ ffi::Map<ffi::String, Any> MergeAnnotations(const ffi::Map<ffi::String, Any>& ne
 }
 
 void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
-  SBlockFrame frame = FindSBlockFrame("T.sblock_attr");
-  // Case 1: the block has no annotations, set the new annotations
-  if (!frame->annotations.defined()) {
-    frame->annotations = attrs;
-  } else {
-    // Case 2: the block has annotations, merge the new annotations with the old ones
-    frame->annotations = MergeAnnotations(attrs, frame->annotations.value());
+  // First try to find an SBlockFrame
+  ffi::Optional<SBlockFrame> sblock_frame = IRBuilder::Current()->FindFrame<SBlockFrame>();
+  if (sblock_frame.defined()) {
+    if (!sblock_frame.value()->annotations.defined()) {
+      sblock_frame.value()->annotations = attrs;
+    } else {
+      sblock_frame.value()->annotations =
+          MergeAnnotations(attrs, sblock_frame.value()->annotations.value());
+    }
+    return;
   }
+  // If no SBlockFrame, try ExecScopeFrame
+  ffi::Optional<ExecScopeFrame> exec_scope_frame =
+      IRBuilder::Current()->FindFrame<ExecScopeFrame>();
+  if (exec_scope_frame.defined()) {
+    if (!exec_scope_frame.value()->annotations.defined()) {
+      exec_scope_frame.value()->annotations = attrs;
+    } else {
+      exec_scope_frame.value()->annotations =
+          MergeAnnotations(attrs, exec_scope_frame.value()->annotations.value());
+    }
+    return;
+  }
+  TVM_FFI_THROW(InternalError) << "ValueError: T.sblock_attr must be called at the top of a T.sblock() "
+             << "or scope frame, but T.sblock_attr occurred outside of any such frame";
 }
 
 ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
@@ -900,8 +928,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.FuncAttrs", FuncAttrs)
       .def("script.ir_builder.tir.FuncRet", FuncRet)
       .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
-      .def("script.ir_builder.tir.SBlockFrameSlice", SBlockFrameSlice)
+      .def("script.ir_builder.tir.ExecScopeFrameSlice", ExecScopeFrameSlice)
       .def("script.ir_builder.tir.Block", Block)
+      .def("script.ir_builder.tir.ExecScopeBlock", ExecScopeBlock)
       .def("script.ir_builder.tir.OpCall", OpCall)
       .def("script.ir_builder.tir.World", World)
       .def("script.ir_builder.tir.Kernel", Kernel)
@@ -1098,7 +1127,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 }
 
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

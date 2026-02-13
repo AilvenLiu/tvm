@@ -161,11 +161,6 @@ class SBlockFrameNode : public TIRFrameNode {
   /*! \brief The flag whether to construct BlockRealize or Block. */
   bool no_realize;
 
-  // TIRX signature
-  ffi::Optional<tvm::tirx::ExecScope> exec_scope;
-  ffi::String scope_slice_parent;
-  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents;
-
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockFrameNode>()
@@ -179,10 +174,7 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("annotations", &SBlockFrameNode::annotations)
         .def_ro("iter_values", &SBlockFrameNode::iter_values)
         .def_ro("predicate", &SBlockFrameNode::predicate)
-        .def_ro("no_realize", &SBlockFrameNode::no_realize)
-        .def_ro("exec_scope", &SBlockFrameNode::exec_scope)
-        .def_ro("scope_slice_parent", &SBlockFrameNode::scope_slice_parent)
-        .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents);
+        .def_ro("no_realize", &SBlockFrameNode::no_realize);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -249,6 +241,58 @@ class BlockInitFrame : public TIRFrame {
     data_ = std::move(data);
   }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(BlockInitFrame, TIRFrame, BlockInitFrameNode);
+};
+
+/*!
+ * \brief A frame that represents an execution scope (e.g. cta, warp, thread).
+ *
+ * When exiting this frame, it produces an ExecScopeStmt wrapping the body.
+ * This is the new IR pattern, replacing the old pattern of storing exec_scope on SBlock.
+ *
+ * \sa ExecScopeFrame
+ */
+class ExecScopeFrameNode : public TIRFrameNode {
+ public:
+  /*! \brief The execution scope object. */
+  ffi::Optional<tvm::tirx::ExecScope> exec_scope;
+  /*! \brief The parent scope name for scope slicing. */
+  ffi::String scope_slice_parent;
+  /*! \brief The extents for scope slicing. */
+  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents;
+  /*! \brief The annotations for the scope (e.g., tirx.scope_partition). */
+  ffi::Optional<ffi::Map<ffi::String, ffi::Any>> annotations;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ExecScopeFrameNode>()
+        .def_ro("exec_scope", &ExecScopeFrameNode::exec_scope)
+        .def_ro("scope_slice_parent", &ExecScopeFrameNode::scope_slice_parent)
+        .def_ro("scope_slice_extents", &ExecScopeFrameNode::scope_slice_extents)
+        .def_ro("annotations", &ExecScopeFrameNode::annotations);
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ExecScopeFrame", ExecScopeFrameNode,
+                                    TIRFrameNode);
+
+ public:
+  /*!
+   * \brief The method called when exiting RAII scope.
+   * \sa tvm::support::With
+   */
+  void ExitWithScope() final;
+};
+
+/*!
+ * \brief Managed reference to ExecScopeFrameNode.
+ *
+ * \sa ExecScopeFrameNode
+ */
+class ExecScopeFrame : public TIRFrame {
+ public:
+  explicit ExecScopeFrame(ObjectPtr<ExecScopeFrameNode> data) : TIRFrame(ffi::UnsafeInit{}) {
+    TVM_FFI_ICHECK(data != nullptr);
+    data_ = std::move(data);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ExecScopeFrame, TIRFrame, ExecScopeFrameNode);
 };
 
 /*!
@@ -695,7 +739,7 @@ class AllocBufferFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBufferFrame, TIRFrame, AllocBufferFrameNode);
 };
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

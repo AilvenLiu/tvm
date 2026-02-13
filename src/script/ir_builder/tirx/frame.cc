@@ -32,6 +32,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   TIRFrameNode::RegisterReflection();
   PrimFuncFrameNode::RegisterReflection();
   SBlockFrameNode::RegisterReflection();
+  ExecScopeFrameNode::RegisterReflection();
   BlockInitFrameNode::RegisterReflection();
   ForFrameNode::RegisterReflection();
   AssertFrameNode::RegisterReflection();
@@ -117,7 +118,7 @@ void SBlockFrameNode::ExitWithScope() {
   }
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
-                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span(), exec_scope);
+                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span());
   if (no_realize) {
     TVM_FFI_CHECK(iter_values.empty(), ValueError)
         << "Block bindings are not allowed when `no_realize=True`";
@@ -127,6 +128,19 @@ void SBlockFrameNode::ExitWithScope() {
   } else {
     AddToParent(tvm::tirx::SBlockRealize(iter_values, predicate.value_or(Bool(true)), block));
   }
+}
+
+void ExecScopeFrameNode::ExitWithScope() {
+  TIRFrameNode::ExitWithScope();
+  ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame must have an execution scope";
+  tvm::tirx::Stmt body = AsStmt(stmts);
+  if (annotations.defined() && !annotations.value().empty()) {
+    // If annotations are present (e.g., tirx.scope_partition), wrap the body in an SBlock
+    ffi::Map<ffi::String, ffi::Any> attrs = annotations.value();
+    tvm::tirx::SBlock block({}, {}, {}, "", body, std::nullopt, {}, {}, attrs, tvm::Span());
+    body = tvm::tirx::SBlockRealize({}, Bool(true), block);
+  }
+  AddToParent(tvm::tirx::ExecScopeStmt(exec_scope.value(), body));
 }
 
 void BlockInitFrameNode::EnterWithScope() {
@@ -250,7 +264,7 @@ void AllocBufferFrameNode::ExitWithScope() {
   AddToParent(tvm::tirx::AllocBuffer(buffer, AsStmt(stmts)));
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

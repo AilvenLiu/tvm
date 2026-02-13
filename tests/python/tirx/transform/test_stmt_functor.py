@@ -684,11 +684,15 @@ def create_test_statements():
     # DeclBuffer
     buffer_decl = tir.DeclBuffer(Tx.buffer((10,), "int32"), evaluate_stmt)
 
-    # OpCall
+    # OpCall — extract the OpCall from the kernel body, then wrap in an SBlock
     @Tx.prim_func
     def op_call(A: Tx.Buffer((10,), "int32"), B: Tx.Buffer((10,), "int32")):
         with Tx.kernel():
             Tx.add(A, B, 1.0)
+
+    # op_call.body is ExecScopeStmt, op_call.body.body is OpCall
+    op_call_stmt = op_call.body.body
+    op_call_block = tir.SBlock([], [], [], "op_call_block", op_call_stmt)
 
     return {
         "evaluate": evaluate_stmt,
@@ -701,7 +705,7 @@ def create_test_statements():
         "if_then_else": if_then_else,
         "for_with_break": func.body,
         "decl_buffer": buffer_decl,
-        "op_call": op_call.body.block,
+        "op_call": op_call_block,
     }
 
 

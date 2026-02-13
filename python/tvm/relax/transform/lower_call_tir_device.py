@@ -25,7 +25,7 @@ from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir import SBlock, PrimFunc
+from tvm.tir import SBlock, PrimFunc, ExecScopeStmt
 from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
@@ -75,7 +75,12 @@ class DeviceFuncToKernel(StmtExprVisitor):
                 Tx.tvm_kernel_replace_point()
 
         new_body = seek_kernel_replace_point(kernel_func.body, func.body)
-        added_vars = new_body.block.exec_scope.scope_id_def[0].def_ids
+        # Navigate through ExecScopeStmt to find the exec_scope with scope_id_def
+        if isinstance(new_body, ExecScopeStmt):
+            exec_scope = new_body.exec_scope
+        else:
+            raise ValueError("Expected ExecScopeStmt wrapping kernel body")
+        added_vars = exec_scope.scope_id_def[0].def_ids
         var_replace_map = {
             func.params[i + len(func.params) - len(tile_num)]: v for i, v in enumerate(added_vars)
         }
@@ -83,8 +88,9 @@ class DeviceFuncToKernel(StmtExprVisitor):
         new_params = func.params[: -len(tile_num)]
         return PrimFunc(new_params, new_body, func.ret_type, func.buffer_map, func.attrs)
 
-    def visit_block_(self, block: SBlock):
-        self.exec_scope = block.exec_scope
+    def visit_exec_scope_stmt_(self, stmt: ExecScopeStmt):
+        self.exec_scope = stmt.exec_scope
+        super().visit_exec_scope_stmt_(stmt)
 
 
 @mutator

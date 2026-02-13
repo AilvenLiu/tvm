@@ -559,8 +559,7 @@ class SBlock(Stmt):
     alloc_buffers: list[Buffer]
     match_buffers: list[MatchBufferRegion]
     annotations: Mapping[str, Object]
-    exec_scope: ExecScope | None
-    span: Span | None
+    span: Optional[Span]
 
     def __init__(
         self,
@@ -574,7 +573,6 @@ class SBlock(Stmt):
         match_buffers: list[MatchBufferRegion] | None = None,
         annotations: Mapping[str, Object] | None = None,
         span: Span | None = None,
-        exec_scope: ExecScope | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -594,7 +592,6 @@ class SBlock(Stmt):
             match_buffers,
             annotations,
             span,
-            exec_scope,
         )  # type: ignore
 
 
@@ -636,6 +633,43 @@ class SBlockRealize(Stmt):
             iter_values,
             predicate,
             block,
+            span,
+        )  # type: ignore
+
+
+@tvm_ffi.register_object("tir.ExecScopeStmt")
+class ExecScopeStmt(Stmt):
+    """ExecScopeStmt node.
+
+    A statement that annotates the execution scope (e.g. cta, warp, thread)
+    for its body. This decouples the execution scope concept from SBlock.
+
+    Parameters
+    ----------
+    exec_scope : ExecScope
+        The execution scope.
+
+    body : Stmt
+        The body statement under this execution scope.
+
+    span : Optional[Span]
+        The location of this statement in the source code.
+    """
+
+    exec_scope: ExecScope
+    body: Stmt
+    span: Optional[Span]
+
+    def __init__(
+        self,
+        exec_scope: ExecScope,
+        body: Stmt,
+        span: Optional[Span] = None,
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.ExecScopeStmt,  # type: ignore
+            exec_scope,
+            body,
             span,
         )  # type: ignore
 

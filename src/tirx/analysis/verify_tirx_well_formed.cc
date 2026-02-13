@@ -57,28 +57,27 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
     if (op->annotations.count(attr::tirx_scope_partition)) {
-      // scope partition is enabled, check if body is a list of SBlockRealize
+      // scope partition is enabled, check if body is a list of ExecScopeStmt
       if (auto seq = op->body.as<SeqStmt>()) {
         ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
         for (const auto& stmt : seq.value()->seq) {
-          auto block_realize = stmt.as<SBlockRealize>();
-          if (!block_realize.has_value()) {
+          // Handle ExecScopeStmt children
+          auto exec_scope_stmt = stmt.as<ExecScopeStmt>();
+          if (!exec_scope_stmt.has_value()) {
             Verify(false) << "TIRxError: Block with scope partition at " << path
                           << " has invalid body " << op->body;
           }
-          auto block = block_realize.value()->block;
-          Verifier::VisitStmt_(block.get(), path);
-          Verify(block->exec_scope.defined()) << "TIRxError: Block with scope partition at " << path
-                                              << " has invalid body " << op->body;
-          auto scope_slice = block->exec_scope.value().as<ExecScopeSlice>();
+          auto scope = exec_scope_stmt.value()->exec_scope;
+          Verifier::VisitStmt_(exec_scope_stmt.value().get(), path);
+          auto scope_slice = scope.as<ExecScopeSlice>();
           Verify(scope_slice.has_value())
-              << "TIRxError: Block with scope partition at " << path << " has invalid exec_scope "
-              << block->exec_scope.value();
+              << "TIRxError: Block with scope partition at " << path
+              << " has invalid exec_scope " << scope;
           if (scope_slice_chk.has_value()) {
             Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
                    scope_slice_chk.value()->parent == scope_slice.value()->parent)
-                << "TIRxError: Block with scope partition at " << path << " has invalid exec_scope "
-                << block->exec_scope.value();
+                << "TIRxError: Block with scope partition at " << path
+                << " has invalid exec_scope " << scope;
           }
           scope_slice_chk = scope_slice;
         }
@@ -88,33 +87,36 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       }
       return;
     }
-    // C0: exec_scope is defined
-    Verify(op->exec_scope != nullptr) << "TIRxError: Block at " << path << " has no exec_scope";
-    auto scope = op->exec_scope.value();
+    Verifier::VisitStmt_(op, path);
+  }
+
+  void VisitStmt_(const tirx::OpCallNode* op, ffi::reflection::AccessPath path) override {
+    static const tvm::OpAttrMap<Bool>& tirx_op_map_ = Op::GetAttrMap<Bool>("TIsTIRxOp");
+    Verify(tirx_op_map_.count(op->op))
+        << "TIRxError: OpCall at " << path << " has unknown TIRX op " << op->op;
+  }
+
+  void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    auto scope = op->exec_scope;
     // C1: exec_scope is valid
     Verify(ExecScope::Valid(scope->name))
-        << "TIRxError: Block at " << path << " has unknown exec_scope " << scope->name;
+        << "TIRxError: ExecScopeStmt at " << path << " has unknown exec_scope " << scope->name;
     bool is_root = false;
     if (!root_.has_value()) {
       root_ = scope;
       is_root = true;
     }
-    if (scope_stack_.empty()) {
-      // do nothing
-    } else {
+    if (!scope_stack_.empty()) {
       ICHECK(root_.has_value()) << "TIRxError: root scope should be the highest scope";
       Verify(!scope->Higher(root_.value()))
-          << "TIRxError: Block at " << path << " has invalid exec_scope " << scope->name
+          << "TIRxError: ExecScopeStmt at " << path << " has invalid exec_scope " << scope->name
           << " under " << root_.value()->name;
     }
-    // C4: exec_scope slice is consistent
+    // C4: exec_scope slice consistency
     bool erase_slices{false}, erase_select_cond{false}, pop_scope{false};
     arith::Analyzer ana;
     auto covered = [&](const Array<Range>& l, const Array<Range>& r) -> bool {
-      // r's range is covered by l's range
-      if (l.size() != r.size()) {
-        return false;
-      }
+      if (l.size() != r.size()) return false;
       for (size_t i = 0; i < l.size(); ++i) {
         if (!ana.CanProve(l[i]->min <= r[i]->min &&
                           l[i]->min + l[i]->extent >= r[i]->min + r[i]->extent)) {
@@ -127,7 +129,6 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       auto it_slices = scope_slices_.find(slice->name);
       auto it_select_cond = scope_select_cond_.find(slice->name);
       if (auto cond = slice->slices.as<PrimExpr>()) {
-        // current scope slice has select_cond, it should not have slices
         Verify(it_slices == scope_slices_.end())
             << "TIRxError: ExecScopeSlice at " << path << " has both slices and select_cond";
         if (it_select_cond == scope_select_cond_.end()) {
@@ -135,7 +136,6 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
           erase_select_cond = true;
         }
       } else {
-        // current scope slice has slices, it should not have select_cond
         Verify(it_select_cond == scope_select_cond_.end())
             << "TIRxError: ExecScopeSlice at " << path << " has both slices and select_cond";
         auto slices = slice->slices.as<Array<Range>>().value();
@@ -150,8 +150,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
               break;
             }
           }
-          Verify(consistent) << "TIRxError: ExecScopeSlice at " << path << " is inconsistent with "
-                             << it_slices->first;
+          Verify(consistent) << "TIRxError: ExecScopeSlice at " << path
+                             << " is inconsistent with " << it_slices->first;
           it_slices->second.push_back(slices);
           pop_scope = true;
         }
@@ -160,14 +160,9 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     scope_stack_.push_back(scope);
     Verifier::VisitStmt_(op, path);
     scope_stack_.pop_back();
-    // C5: cleanup scope slice when exiting scope
     if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
-      if (erase_slices) {
-        scope_slices_.erase(slice->name);
-      }
-      if (erase_select_cond) {
-        scope_select_cond_.erase(slice->name);
-      }
+      if (erase_slices) scope_slices_.erase(slice->name);
+      if (erase_select_cond) scope_select_cond_.erase(slice->name);
       if (pop_scope) {
         auto it_slices = scope_slices_.find(slice->name);
         ICHECK(it_slices != scope_slices_.end());
@@ -175,15 +170,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         it_slices->second.pop_back();
       }
     }
-    if (is_root) {
-      root_ = std::nullopt;
-    }
-  }
-
-  void VisitStmt_(const tirx::OpCallNode* op, ffi::reflection::AccessPath path) override {
-    static const tvm::OpAttrMap<Bool>& tirx_op_map_ = Op::GetAttrMap<Bool>("TIsTIRxOp");
-    Verify(tirx_op_map_.count(op->op))
-        << "TIRxError: OpCall at " << path << " has unknown TIRX op " << op->op;
+    if (is_root) root_ = std::nullopt;
   }
 
   ffi::Optional<ExecScope> root_ = std::nullopt;
@@ -199,10 +186,8 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(op->exec_scope.defined())
-        << "InternalError: exec_scope is not defined for block at " << path;
-    const auto& scope = op->exec_scope.value();
+  void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    const auto& scope = op->exec_scope;
     auto it = scope_id_def_.end();
     scope_id_def_.insert(it, scope->scope_id_def.begin(), scope->scope_id_def.end());
     Verifier::VisitStmt_(op, path);
@@ -250,9 +235,11 @@ class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(op->exec_scope != nullptr) << "TIRxError: Block at " << path << " has no exec_scope";
-    auto scope = op->exec_scope.value();
-    scope_stack_.push_back(scope);
+    Verifier::VisitStmt_(op, path);
+  }
+
+  void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    scope_stack_.push_back(op->exec_scope);
     Verifier::VisitStmt_(op, path);
     scope_stack_.pop_back();
   }
@@ -268,14 +255,29 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(!root_.has_value()) << "TIRxError: Only one root scope is allowed in device function";
-    root_ = op->exec_scope.value();
-    auto kernel_scope = ExecScope::Create("kernel");
-    Verify(kernel_scope->Higher(root_.value()))
-        << "TIRxError: Root scope of device function at " << path << " is higher than kernel scope";
+    Verifier::VisitStmt_(op, path);
+  }
+
+  void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    if (!inside_root_scope_) {
+      // At the top level: only one root scope is allowed
+      Verify(!root_.has_value()) << "TIRxError: Only one root scope is allowed in device function";
+      root_ = op->exec_scope;
+      auto kernel_scope = ExecScope::Create("kernel");
+      Verify(kernel_scope->Higher(root_.value()))
+          << "TIRxError: Root scope of device function at " << path
+          << " is higher than kernel scope";
+      inside_root_scope_ = true;
+      Verifier::VisitStmt_(op, path);
+      inside_root_scope_ = false;
+    } else {
+      // Already inside a root scope: nested scopes are allowed
+      Verifier::VisitStmt_(op, path);
+    }
   }
 
   ffi::Optional<ExecScope> root_ = std::nullopt;
+  bool inside_root_scope_ = false;
 };
 
 bool VerifyTIRxWellFormed(const PrimFunc& func, bool assert_mode, bool device_func) {

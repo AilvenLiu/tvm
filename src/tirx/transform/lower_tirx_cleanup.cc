@@ -25,19 +25,19 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_cleanup.cc
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirp_op.h>
-#include <tvm/tirx/transform.h>
-========
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_cleanup.cc
+=======
+#include <tvm/tirx/function.h>
+#include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt.h>
+#include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirx_op.h>
+#include <tvm/tirx/transform.h>
+>>>>>>> e003fe6cd1 ([Refactor] Decouple exec_scope from SBlock into independent ExecScopeStmt node (#469)):src/tir/transform/lower_tirx_cleanup.cc
 
 #include <tuple>
 #include <unordered_map>
@@ -359,13 +359,9 @@ Pass LowerTIRxCleanup() {
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;
   };
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_cleanup.cc
-  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRpCleanup", {});
-========
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxCleanup", {});
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_cleanup.cc
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

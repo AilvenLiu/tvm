@@ -61,8 +61,15 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, map_job_type
 from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase, SmemManager
 from tvm.tirx.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.tirx.operator import KernelReplacePoint
-from tvm.tir.exec_scope import ExecScope
+from tvm.tir.stmt import ExecScopeStmt
 from tvm.tirx.bench.utils import CudaProfiler
+
+
+def _find_outermost_exec_scope(stmt):
+    """Find the outermost ExecScope from a statement tree."""
+    if isinstance(stmt, ExecScopeStmt):
+        return stmt.exec_scope
+    raise ValueError("No ExecScopeStmt found in device function body")
 
 # FIXME: add decl_buffer for all newly generated buffers
 
@@ -418,7 +425,6 @@ class EventOpInserter(StmtExprMutator):
                 block.match_buffers,
                 block.annotations,
                 block.span,
-                block.exec_scope,
             )
         else:
             return super().visit_block_(block)
@@ -503,7 +509,6 @@ class PersistentVarCollector(StmtExprMutator):
             block.writes,
             block.name_hint,
             Evaluate(0),
-            exec_scope=ExecScope.create("cta")
         )
 
 class HostStmtCollector(StmtExprMutator):
@@ -511,9 +516,23 @@ class HostStmtCollector(StmtExprMutator):
         super().__init__()
         self.uppermost_block = None
 
+    def visit_exec_scope_stmt_(self, op):
+        """Capture the outermost ExecScopeStmt.
+
+        In the new IR, ExecScopeStmt replaces the old outermost SBlockRealize
+        as the top-level scope container for device function bodies.
+        """
+        if self.uppermost_block is None:
+            self.uppermost_block = op
+            return KernelReplacePoint()
+        return super().visit_exec_scope_stmt_(op)
+
     def visit_block_realize_(self, op: SBlockRealize):
-        self.uppermost_block = op
-        return KernelReplacePoint()
+        # Fallback: capture SBlockRealize if no ExecScopeStmt was found first
+        if self.uppermost_block is None:
+            self.uppermost_block = op
+            return KernelReplacePoint()
+        return super().visit_block_realize_(op)
 
 
     @staticmethod
@@ -748,7 +767,6 @@ class DependencyHandler(StmtExprMutator):
             name_hint="__mark_wrapper",
             body=new_stmt,
             annotations={"marks": T.StringImm("beg_mark")},
-            exec_scope=ExecScope.create("cta")
         )
         return new_stmt, self.cur_out_prim_expr
 
@@ -763,7 +781,6 @@ class DependencyHandler(StmtExprMutator):
                 name_hint="__mark_wrapper",
                 body=Evaluate(0),
                 annotations={"marks": T.StringImm("entry_mark")},
-                exec_scope=ExecScope.create("cta")
             )
             if isinstance(op.value, IntImm):
                 self.cur_out_prim_expr[self.cur_buf_set[op.buffer]] = op.value
@@ -802,7 +819,6 @@ class DependencyHandler(StmtExprMutator):
                         name_hint="__mark_wrapper",
                         body=Evaluate(0),
                         annotations={"marks": T.StringImm("entry_mark")},
-                        exec_scope=ExecScope.create("cta")
                     )
                     for var, value in reversed(out_var):
                         entry_mark = LetStmt(
@@ -820,7 +836,6 @@ class DependencyHandler(StmtExprMutator):
                 name_hint="__mark_wrapper",
                 body=Evaluate(0),
                 annotations={"marks": T.StringImm("entry_mark")},
-                exec_scope=ExecScope.create("cta")
             )
             for var, value in reversed(out_var):
                 entry_mark = LetStmt(
@@ -1016,7 +1031,7 @@ class _Rewriter(PyExprMutator):
             tile_idx = prim_func.params[-len(tile_num) :]
             body, host_template = HostStmtCollector.rewrite(prim_func.body)
             self.host_templates.append(host_template)
-            exec_scope = body.block.exec_scope
+            exec_scope = _find_outermost_exec_scope(prim_func.body)
             if self.device_func_exec_scope is None:
                 self.device_func_exec_scope = exec_scope.name
             else:

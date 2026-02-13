@@ -26,6 +26,7 @@
 #include <tvm/target/target.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
+#include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
@@ -35,10 +36,11 @@
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>> 7e7a455d25 ([LowerTIRx] Generate warp-uniform warp_id when lowering scope id (#467)):src/tir/transform/lower_tirx_scope_slices.cc
+>>>>>>> e003fe6cd1 ([Refactor] Decouple exec_scope from SBlock into independent ExecScopeStmt node (#469)):src/tir/transform/lower_tirx_scope_slices.cc
 
 namespace tvm {
 namespace tirx {
@@ -63,6 +65,77 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const LetStmtNode* op) final {
+    // Detect warp_id_in_cta LetStmt introduced by the scope ID resolver
+    if (op->var->name_hint == "warp_id_in_cta") {
+      warp_id_in_cta_var_ = op->var;
+      warp_id_in_cta_value_ = op->value;
+      IterVar warp_iv(Range::FromMinExtent(0, 1), op->var, kThreadIndex, "warp_id_in_cta");
+      launch_params_["warp_id_in_cta"] = warp_iv;
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
+  Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
+    auto exec_scope = op->exec_scope;
+    bool is_kernel = exec_scope->Is("kernel");
+    if (is_kernel) {
+      need_warp_id_in_cta_letstmt_ = false;
+      // Note: for ExecScopeStmt, warp_id_in_cta is not stored in annotations.
+      // It may already be available from the ScopeIdResolver pass via launch_params_.
+    }
+
+    // Check for scope_slice on the ExecScopeStmt
+    auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
+    if (!scope_slice_opt.has_value()) {
+      // No scope slice — just visit body
+      Stmt body = VisitStmt(op->body);
+      Stmt result = ExecScopeStmt(exec_scope, body);
+      if (is_kernel && need_warp_id_in_cta_letstmt_) {
+        // Wrap the body with the warp_id_in_cta LetStmt
+        auto exec_scope_stmt = result.as<ExecScopeStmtNode>();
+        result = ExecScopeStmt(exec_scope_stmt->exec_scope,
+                               LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(),
+                                       exec_scope_stmt->body));
+        need_warp_id_in_cta_letstmt_ = false;
+      }
+      return result;
+    }
+    // Has scope slice — resolve it
+    auto scope_slice = scope_slice_opt.value();
+    auto scope = ScopePair(scope_slice->parent, scope_slice->name);
+    int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
+                      ? 1
+                      : scope_slice->slices.as<Array<Range>>().value().size();
+    if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
+        launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
+      PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
+      warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
+      warp_id_in_cta_value_ = shuffled;
+      need_warp_id_in_cta_letstmt_ = true;
+      IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
+                      "warp_id_in_cta");
+      launch_params_["warp_id_in_cta"] = warp_iv;
+    }
+    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
+        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
+    ICHECK_EQ(resolved.size(), out_dim);
+    auto plain_scope = ExecScope::Create(scope_slice->name);
+    Stmt body = VisitStmt(op->body);
+    Stmt inner = ExecScopeStmt(plain_scope, body);
+    if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
+      return IfThenElse(select_cond.value(), inner);
+    } else {
+      auto slices = scope_slice->slices.as<Array<Range>>().value();
+      PrimExpr cond = Bool(true);
+      for (size_t i = 0; i < slices.size(); i++) {
+        cond = cond && resolved[i] >= slices[i]->min &&
+               resolved[i] < slices[i]->extent + slices[i]->min;
+      }
+      return IfThenElse(cond, inner);
+    }
+  }
+
   Stmt VisitStmt_(const SBlockRealizeNode* op) final {
     Stmt block = this->VisitStmt(op->block);
     if (block.same_as(op->block)) {
@@ -81,18 +154,6 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   Stmt VisitStmt_(const SBlockNode* op) final {
     SBlock block = ffi::GetRef<SBlock>(op);
     auto* n = block.CopyOnWrite();
-    bool is_kernel = op->exec_scope.defined() && op->exec_scope.value()->Is("kernel");
-    if (is_kernel) {
-      need_warp_id_in_cta_letstmt_ = false;
-      if (op->annotations.count("tirx.warp_id_in_cta")) {
-        warp_id_in_cta_var_ = Downcast<Var>(op->annotations.at("tirx.warp_id_in_cta"));
-        // Add warp_id_in_cta to launch params so resolve functions can access it
-        IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
-                        "warp_id_in_cta");
-        launch_params_["warp_id_in_cta"] = warp_iv;
-        n->annotations.erase("tirx.warp_id_in_cta");
-      }
-    }
     if (op->annotations.count("tirx.scope_partition")) {
       // scope partition is enabled, rewrite the body
       auto seq = block->body.as<SeqStmt>();
@@ -117,51 +178,15 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       // no scope partition, visit the body
       n->body = VisitStmt(n->body);
     }
-    if (is_kernel && need_warp_id_in_cta_letstmt_) {
-      n->body = LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(), n->body);
-      need_warp_id_in_cta_letstmt_ = false;
+    // If the block is a trivial wrapper (no iter_vars, no alloc_buffers,
+    // empty annotations), strip it and return just the body. This handles SBlocks that were
+    // created solely to carry annotations like tirx.scope_partition.
+    if (n->iter_vars.empty() && n->alloc_buffers.empty() &&
+        (n->annotations.empty() || !n->annotations.defined()) && n->match_buffers.empty() &&
+        !n->init.defined()) {
+      return n->body;
     }
-    // no scope partition, return the block as is
-    if (!op->exec_scope.defined()) {
-      return std::move(block);
-    }
-    auto exec_scope = op->exec_scope.value();
-    auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
-    if (!scope_slice_opt.has_value()) {
-      // no scope slice, return the block as is
-      return std::move(block);
-    }
-    auto scope_slice = scope_slice_opt.value();
-    auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-    int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
-                      ? 1
-                      : scope_slice->slices.as<Array<Range>>().value().size();
-    // If the scope needs warp_id_in_cta and it's not yet in launch_params_, compute it on-demand
-    if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
-        launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
-      PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
-      warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
-      warp_id_in_cta_value_ = shuffled;
-      need_warp_id_in_cta_letstmt_ = true;
-      IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
-                      "warp_id_in_cta");
-      launch_params_["warp_id_in_cta"] = warp_iv;
-    }
-    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
-        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
-    ICHECK_EQ(resolved.size(), out_dim);
-    n->exec_scope = ExecScope::Create(scope_slice->name);
-    if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
-      return IfThenElse(select_cond.value(), SBlockRealize({}, Bool(true), block));
-    } else {
-      auto slices = scope_slice->slices.as<Array<Range>>().value();
-      PrimExpr cond = Bool(true);
-      for (size_t i = 0; i < slices.size(); i++) {
-        cond = cond && resolved[i] >= slices[i]->min &&
-               resolved[i] < slices[i]->extent + slices[i]->min;
-      }
-      return IfThenElse(cond, SBlockRealize({}, Bool(true), block));
-    }
+    return std::move(block);
   }
 
   LaunchParams launch_params_;
@@ -194,5 +219,5 @@ Pass LowerTIRxResolveScopeSlices() {
 }
 
 }  // namespace transform
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

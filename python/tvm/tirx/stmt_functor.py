@@ -55,6 +55,7 @@ class StmtFunctor:
             "tir.Evaluate": self.visit_evaluate_,
             "tir.SBlock": self.visit_block_,
             "tir.SBlockRealize": self.visit_block_realize_,
+            "tir.ExecScopeStmt": self.visit_exec_scope_stmt_,
             "tir.OpCall": self.visit_op_call_,
             "tir.AllocBuffer": self.visit_alloc_buffer_,
         }
@@ -171,6 +172,10 @@ class StmtFunctor:
 
     def visit_block_realize_(self, op):
         """Visitor for BlockRealize nodes."""
+        return self.visit_stmt_default_(op)
+
+    def visit_exec_scope_stmt_(self, op):
+        """Visitor for ExecScopeStmt nodes."""
         return self.visit_stmt_default_(op)
 
     def visit_op_call_(self, op):
@@ -325,6 +330,10 @@ class StmtVisitor(StmtFunctor):
         _visit_array(op.iter_values, lambda x: self.visit_expr(x))
         self.visit_expr(op.predicate)
         self.visit_stmt(op.block)
+
+    def visit_exec_scope_stmt_(self, op):
+        """Visitor implementation for ExecScopeStmt."""
+        self.visit_stmt(op.body)
 
     def visit_op_call_(self, op):
         """Visitor implementation for OpCall."""
@@ -718,8 +727,6 @@ class StmtMutator(StmtFunctor):
             op.alloc_buffers,
             match_buffers,
             op.annotations,
-            None,
-            op.exec_scope,
         )
 
     def visit_block_realize_(self, op):
@@ -737,6 +744,15 @@ class StmtMutator(StmtFunctor):
             raise TypeError(f"Expected SBlock, but got {type(block)}")
 
         return tvm.tir.SBlockRealize(iter_values, predicate, block)
+
+    def visit_exec_scope_stmt_(self, op):
+        """Mutator implementation for ExecScopeStmt."""
+        body = self.visit_stmt(op.body)
+
+        if body is op.body:
+            return op
+
+        return tvm.tir.ExecScopeStmt(op.exec_scope, body, op.span)
 
     def visit_op_call_(self, op):
         """Mutator implementation for OpCall."""

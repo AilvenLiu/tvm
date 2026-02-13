@@ -145,6 +145,31 @@ void StmtVisitor::VisitStmt_(const SBlockRealizeNode* op) {
   this->VisitStmt(op->block);
 }
 
+void StmtVisitor::VisitStmt_(const ExecScopeStmtNode* op) {
+  // Visit expressions inside exec_scope (e.g., slices, extents, scope_id_def)
+  if (const auto* slice = op->exec_scope.as<ExecScopeSliceNode>()) {
+    if (auto cond = slice->slices.as<PrimExpr>()) {
+      this->VisitExpr(cond.value());
+    } else if (auto ranges = slice->slices.as<Array<Range>>()) {
+      for (const auto& range : ranges.value()) {
+        this->VisitExpr(range->min);
+        this->VisitExpr(range->extent);
+      }
+    }
+    if (slice->extents.defined()) {
+      for (const auto& e : slice->extents.value()) {
+        this->VisitExpr(e);
+      }
+    }
+  }
+  for (const auto& def : op->exec_scope->scope_id_def) {
+    for (const auto& e : def->extents) {
+      this->VisitExpr(e);
+    }
+  }
+  this->VisitStmt(op->body);
+}
+
 void StmtVisitor::VisitStmt_(const tirx::OpCallNode* op) {
   VisitArray(op->args, [this](const ffi::Any& e) {
     if (e == nullptr) return;
@@ -525,30 +550,6 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
   ffi::Array<BufferRegion> reads = Internal::Mutate(this, op->reads);
   ffi::Array<BufferRegion> writes = Internal::Mutate(this, op->writes);
   ffi::Array<MatchBufferRegion> match_buffers = Internal::Mutate(this, op->match_buffers);
-  ffi::Optional<ExecScope> scope = op->exec_scope;
-  {
-    if (scope.has_value()) {
-      // Visit the exec scope
-      auto scope_slice_opt = scope.value().as<ExecScopeSlice>();
-      if (scope_slice_opt.has_value()) {
-        auto scope_slice = scope_slice_opt.value();
-        ffi::Variant<ffi::Array<Range>, PrimExpr> slice = Array<Range>();
-        if (auto slices = scope_slice->slices.as<ffi::Array<Range>>()) {
-          slice = Internal::Mutate(this, slices.value());
-        } else {
-          slice = this->VisitExpr(scope_slice->slices.as<PrimExpr>().value());
-        }
-        ffi::Optional<ffi::Array<PrimExpr>> extents = std::nullopt;
-        if (scope_slice->extents.defined()) {
-          extents = Internal::Mutate(this, scope_slice->extents.value());
-        }
-        // TODO(@bohan): fix this
-        // if (!slice.same_as(scope_slice->slice) || !extents.same_as(scope_slice->extents)) {
-        scope = ExecScopeSlice(slice, extents, scope_slice->parent, scope_slice->name);
-        // }
-      }
-    }
-  }
   ffi::Optional<Stmt> init = std::nullopt;
   if (op->init.has_value()) {
     init = VisitStmt(op->init.value());
@@ -556,8 +557,7 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
   Stmt body = VisitStmt(op->body);
   if (iter_vars.same_as(op->iter_vars) && alloc_buffers.same_as(op->alloc_buffers) &&
       reads.same_as(op->reads) && writes.same_as(op->writes) && body.same_as(op->body) &&
-      init.same_as(op->init) && match_buffers.same_as(op->match_buffers) &&
-      scope.same_as(op->exec_scope)) {
+      init.same_as(op->init) && match_buffers.same_as(op->match_buffers)) {
     return ffi::GetRef<SBlock>(op);
   } else {
     auto n = CopyOnWrite(op);
@@ -568,7 +568,6 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
     n->body = std::move(body);
     n->init = std::move(init);
     n->match_buffers = std::move(match_buffers);
-    n->exec_scope = std::move(scope);
     return Stmt(n);
   }
 }
@@ -584,6 +583,111 @@ Stmt StmtMutator::VisitStmt_(const SBlockRealizeNode* op) {
     n->iter_values = std::move(v);
     n->predicate = std::move(pred);
     n->block = Downcast<SBlock>(block);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const ExecScopeStmtNode* op) {
+  Stmt body = this->VisitStmt(op->body);
+  // Mutate expressions inside exec_scope (slices, extents, scope_id_def)
+  ExecScope new_scope = op->exec_scope;
+  bool scope_changed = false;
+  if (const auto* slice = op->exec_scope.as<ExecScopeSliceNode>()) {
+    ffi::Variant<ffi::Array<Range>, PrimExpr> new_slices = slice->slices;
+    bool slices_changed = false;
+    if (auto cond = slice->slices.as<PrimExpr>()) {
+      PrimExpr new_cond = this->VisitExpr(cond.value());
+      if (!new_cond.same_as(cond.value())) {
+        new_slices = new_cond;
+        slices_changed = true;
+      }
+    } else if (auto ranges = slice->slices.as<ffi::Array<Range>>()) {
+      ffi::Array<Range> new_ranges;
+      bool ranges_changed = false;
+      for (const auto& range : ranges.value()) {
+        PrimExpr new_min = this->VisitExpr(range->min);
+        PrimExpr new_extent = this->VisitExpr(range->extent);
+        if (!new_min.same_as(range->min) || !new_extent.same_as(range->extent)) {
+          ranges_changed = true;
+        }
+        new_ranges.push_back(Range::FromMinExtent(new_min, new_extent));
+      }
+      if (ranges_changed) {
+        new_slices = new_ranges;
+        slices_changed = true;
+      }
+    }
+    ffi::Optional<ffi::Array<PrimExpr>> new_extents = slice->extents;
+    bool extents_changed = false;
+    if (slice->extents.defined()) {
+      ffi::Array<PrimExpr> ext_arr;
+      for (const auto& e : slice->extents.value()) {
+        PrimExpr new_e = this->VisitExpr(e);
+        if (!new_e.same_as(e)) extents_changed = true;
+        ext_arr.push_back(new_e);
+      }
+      if (extents_changed) new_extents = ext_arr;
+    }
+    // Mutate scope_id_def
+    ffi::Array<ScopeIdDef> new_scope_id_def;
+    bool sid_changed = false;
+    for (const auto& def : slice->scope_id_def) {
+      ffi::Array<PrimExpr> new_def_extents;
+      bool def_ext_changed = false;
+      for (const auto& e : def->extents) {
+        PrimExpr new_e = this->VisitExpr(e);
+        if (!new_e.same_as(e)) def_ext_changed = true;
+        new_def_extents.push_back(new_e);
+      }
+      if (def_ext_changed) {
+        sid_changed = true;
+        new_scope_id_def.push_back(ScopeIdDef(def->def_ids, new_def_extents, def->scope));
+      } else {
+        new_scope_id_def.push_back(def);
+      }
+    }
+    if (slices_changed || extents_changed || sid_changed) {
+      scope_changed = true;
+      auto new_slice = ExecScopeSlice(slices_changed ? new_slices : slice->slices,
+                                      extents_changed ? new_extents : slice->extents,
+                                      slice->parent, slice->name);
+      if (sid_changed) {
+        new_slice.CopyOnWrite()->scope_id_def = std::move(new_scope_id_def);
+      } else {
+        new_slice.CopyOnWrite()->scope_id_def = slice->scope_id_def;
+      }
+      new_scope = new_slice;
+    }
+  } else {
+    // Plain ExecScope — mutate scope_id_def extents
+    ffi::Array<ScopeIdDef> new_scope_id_def;
+    bool sid_changed = false;
+    for (const auto& def : op->exec_scope->scope_id_def) {
+      ffi::Array<PrimExpr> new_def_extents;
+      bool def_ext_changed = false;
+      for (const auto& e : def->extents) {
+        PrimExpr new_e = this->VisitExpr(e);
+        if (!new_e.same_as(e)) def_ext_changed = true;
+        new_def_extents.push_back(new_e);
+      }
+      if (def_ext_changed) {
+        sid_changed = true;
+        new_scope_id_def.push_back(ScopeIdDef(def->def_ids, new_def_extents, def->scope));
+      } else {
+        new_scope_id_def.push_back(def);
+      }
+    }
+    if (sid_changed) {
+      scope_changed = true;
+      new_scope = ExecScope(op->exec_scope->name, new_scope_id_def);
+    }
+  }
+  if (body.same_as(op->body) && !scope_changed) {
+    return ffi::GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
+    if (scope_changed) n->exec_scope = std::move(new_scope);
     return Stmt(n);
   }
 }
