@@ -121,7 +121,7 @@ def default_s_tir_pipeline():
         mod = tvm.ir.transform.Sequential(passes)(mod)
         return mod
 
-    return _pipeline
+    return _pipeline, finalize_host_passes, finalize_device_passes
 
 
 def finalize_host_passes():  # pylint: disable=unused-argument
@@ -132,6 +132,18 @@ def finalize_host_passes():  # pylint: disable=unused-argument
         tirx.transform.LowerIntrin(),
     ]
     return tvm.ir.transform.Sequential(host_pass_list)
+
+
+def finalize_device_passes():  # pylint: disable=unused-argument
+    """The default finalization passes for TIR backend."""
+    device_pass_list = [
+        tir.transform.LowerWarpMemory(),
+        tir.transform.Simplify(),
+        tir.transform.LowerCustomDatatypes(),
+        tir.transform.LowerDeviceStorageAccessInfo(),
+        tir.transform.LowerIntrin(),
+    ]
+    return tvm.ir.transform.Sequential(device_pass_list)
 
 
 tir_pipeline.PIPELINE_MAP["s_tir"] = default_s_tir_pipeline

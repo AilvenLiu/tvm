@@ -183,7 +183,7 @@ def test_print():
                     C[vi] = A[vi] + B[vi]
                 Tx.print_buffer(C.data, dtype_str, False, False, dim_num, (M,))
 
-        sch = tvm.tir.Schedule(add_func)
+        sch = tvm.s_tir.Schedule(add_func)
         blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 
@@ -220,7 +220,7 @@ def test_print():
                     C[vi, vj] = A[vi, vj] + B[vi, vj]
                 Tx.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N))
 
-        sch = tvm.tir.Schedule(add_func)
+        sch = tvm.s_tir.Schedule(add_func)
         blk = sch.get_sblock("C")
         i, j = sch.get_loops(blk)
 
@@ -262,7 +262,7 @@ def test_print():
                     C[vi, vj, vk] = A[vi, vj, vk] + B[vi, vj, vk]
                 Tx.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N, K))
 
-        sch = tvm.tir.Schedule(add_func)
+        sch = tvm.s_tir.Schedule(add_func)
         blk = sch.get_sblock("C")
         i, j, k = sch.get_loops(blk)
 
@@ -305,7 +305,7 @@ def test_print():
                     C[vi] = A[vi] + B[vi]
                 Tx.print_buffer(Ten, "int32", False, True, dim_num, ())
 
-        sch = tvm.tir.Schedule(add_func)
+        sch = tvm.s_tir.Schedule(add_func)
         blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 
@@ -342,7 +342,7 @@ def test_print():
                     C[vi] = A[vi] + B[vi]
                 Tx.print_buffer(string_var, "int8", True, False, dim_num, ())
 
-        sch = tvm.tir.Schedule(add_func)
+        sch = tvm.s_tir.Schedule(add_func)
         blk = sch.get_sblock("C")
         i = sch.get_loops(blk)[0]
 

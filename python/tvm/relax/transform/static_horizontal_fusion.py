@@ -28,7 +28,7 @@ import tvm
 from tvm import relax
 from tvm.ir import DictAttrs, load_json, save_json
 from tvm.ir.module import IRModule
-from tvm.meta_schedule.runner import config
+from tvm.s_tir.meta_schedule.runner import config
 from tvm.relax.expr import Expr, ShapeExpr
 from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo

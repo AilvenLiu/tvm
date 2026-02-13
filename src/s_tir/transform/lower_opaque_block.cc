@@ -70,9 +70,9 @@ class OpaqueBlockLower : public StmtExprMutator {
         }
         allocate_annotations.Set(s_tir::attr::buffer_dim_align, allocate_aligns);
       }
-      allocate_annotations.Set(attr::buffer_data_alignment,
+      allocate_annotations.Set(tir::attr::buffer_data_alignment,
                                IntImm(DataType::Int(32), buffer->data_alignment));
-      allocate_annotations.Set(attr::buffer_allocated_addr, buffer->allocated_addr);
+      allocate_annotations.Set(tir::attr::buffer_allocated_addr, buffer->allocated_addr);
       body = SeqStmt::Flatten(AllocBuffer(buffer, allocate_annotations), std::move(body));
     }
     // Step 4. Handle annotations, block annotations are not preserved by default.
@@ -89,9 +89,9 @@ class OpaqueBlockLower : public StmtExprMutator {
     ffi::Array<PrimExpr> allocation_shape = GetBufferAllocationShape(buffer);
     Stmt body = DeclBuffer(buffer, VisitStmt(op->body));
     ffi::Map<ffi::String, ffi::Any> allocate_annotations;
-    allocate_annotations.Set(attr::buffer_data_alignment,
+    allocate_annotations.Set(tir::attr::buffer_data_alignment,
                              IntImm(DataType::Int(32), buffer->data_alignment));
-    allocate_annotations.Set(attr::buffer_allocated_addr, buffer->allocated_addr);
+    allocate_annotations.Set(tir::attr::buffer_allocated_addr, buffer->allocated_addr);
     body = Allocate(buffer->data, buffer->dtype, allocation_shape, const_true(), std::move(body),
                     allocate_annotations);
     return body;
