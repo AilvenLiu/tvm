@@ -1,3 +1,8 @@
+# Untracked 3rdparty repos
+3rdparty/cnpy/
+3rdparty/zlib/
+3rdparty/flashinfer/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

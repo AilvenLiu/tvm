@@ -13,6 +13,3 @@
 [submodule "3rdparty/tvm-ffi"]
 	path = 3rdparty/tvm-ffi
 	url = https://github.com/apache/tvm-ffi
-[submodule "3rdparty/flashinfer"]
-	path = 3rdparty/flashinfer
-	url = https://github.com/Irfnfnkemed/flashinfer.git
