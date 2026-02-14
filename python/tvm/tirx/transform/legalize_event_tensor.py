@@ -19,7 +19,7 @@ from typing import Dict, Tuple
 
 from tvm import DataTypeCode
 from tvm.ir import PointerType, PrimType
-from tvm.tir import SBlock, Var
+from tvm.tir import AllocBuffer, Var
 from tvm.tir.buffer import Buffer
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform.function_pass import prim_func_pass
@@ -31,31 +31,15 @@ class EventTensorReplacer(BufferReplacer):
     def __init__(self, buffer_map: Dict[Buffer, Buffer], var_map: Dict[Var, Var]):
         super().__init__(buffer_map, var_map)
 
-    def visit_block_(self, op: SBlock):
-        changed = False
-        new_alloc_buffers = []
-        for buffer in op.alloc_buffers:
-            if buffer.is_event_tensor():
-                new_buffer = convert_event_tensor(buffer)
-                self.buffer_map[buffer] = new_buffer
-                new_alloc_buffers.append(new_buffer)
-                changed = True
-            else:
-                new_alloc_buffers.append(buffer)
-
-        op = super().visit_block_(op)
-        if changed:
-            return SBlock(
-                op.iter_vars,
-                op.reads,
-                op.writes,
-                op.name_hint,
-                body=op.body,
-                alloc_buffers=new_alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-            )
-        return op
+    def visit_alloc_buffer_(self, op: AllocBuffer):
+        buffer = op.buffer
+        if buffer.is_event_tensor():
+            new_buffer, new_data = convert_event_tensor(buffer)
+            self.buffer_map[buffer] = new_buffer
+            self.var_map[buffer.data] = new_data
+            body = self.visit_stmt(op.body)
+            return AllocBuffer(new_buffer, body)
+        return super().visit_alloc_buffer_(op)
 
 
 def convert_event_tensor(buffer: Buffer) -> Tuple[Buffer, Var]:

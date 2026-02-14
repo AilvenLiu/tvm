@@ -90,41 +90,25 @@ class TIRxOpScheduler : public StmtExprMutator {
     Stmt body_;
   };
 
-  Stmt VisitStmt_(const SBlockRealizeNode* op) final {
-    SBlockRealize block_realize = ffi::GetRef<SBlockRealize>(op);
-    auto* n = block_realize.CopyOnWrite();
-    Stmt body = VisitStmt(n->block);
-    if (auto block = body.as<SBlock>()) {
-      n->block = block.value();
-      return std::move(block_realize);
-    } else {
-      return body;
-    }
-  }
-
   Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
     exec_scope_stack_.push_back(op->exec_scope);
-    Stmt body = VisitStmt(op->body);
-    exec_scope_stack_.pop_back();
-    if (body.same_as(op->body)) {
-      return ffi::GetRef<Stmt>(op);
-    }
-    return ExecScopeStmt(op->exec_scope, body);
-  }
-
-  Stmt VisitStmt_(const SBlockNode* op) final {
+    bool is_kernel = op->exec_scope->Is("kernel");
     bool is_first_block = false;
-    std::swap(is_first_block, is_first_block_);
-    SBlock block = ffi::GetRef<SBlock>(op);
-    auto* n = block.CopyOnWrite();
-    n->body = VisitStmt(n->body);
-    if (is_first_block) {
-      // Insert device init stmts and alloc buffers
+    if (is_kernel) {
+      std::swap(is_first_block, is_first_block_);
+    }
+    Stmt body = VisitStmt(op->body);
+    if (is_kernel && is_first_block) {
+      // Insert device init stmts into kernel body
       for (const auto& stmt : device_init_stmts_) {
-        n->body = KernelReplacePointSearcher::Seek(stmt, n->body);
+        body = KernelReplacePointSearcher::Seek(stmt, body);
       }
-      n->alloc_buffers.insert(n->alloc_buffers.end(), alloc_buffers_.begin(), alloc_buffers_.end());
-      Stmt res = SBlockRealize({}, Bool(true), std::move(block));
+      // Insert alloc buffers as AllocBuffer stmts wrapping the body
+      for (auto it = alloc_buffers_.rbegin(); it != alloc_buffers_.rend(); ++it) {
+        body = tvm::tir::AllocBuffer(*it, body);
+      }
+      alloc_buffers_.clear();
+      Stmt res = ExecScopeStmt(op->exec_scope, body);
       if (is_first_thread_attr_) {
         // Insert host init stmts outside the outermost thread binding or block
         for (const auto& stmt : host_init_stmts_) {
@@ -133,9 +117,14 @@ class TIRxOpScheduler : public StmtExprMutator {
         host_init_stmts_.clear();
       }
       std::swap(is_first_block, is_first_block_);
+      exec_scope_stack_.pop_back();
       return res;
     }
-    return std::move(block);
+    exec_scope_stack_.pop_back();
+    if (body.same_as(op->body)) {
+      return ffi::GetRef<Stmt>(op);
+    }
+    return ExecScopeStmt(op->exec_scope, body);
   }
 
   Stmt VisitStmt_(const AttrStmtNode* op) final {

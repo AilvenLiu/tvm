@@ -691,7 +691,7 @@ def writes(*buffer_slices: list[BufferRegion | BufferLoad]) -> None:
 
 
 def sblock_attr(attrs: dict[str, Any]) -> None:
-    """The block annotation statement.
+    """The block annotation statement (for non-tirx SBlock usage).
 
     Parameters
     ----------
@@ -699,6 +699,45 @@ def sblock_attr(attrs: dict[str, Any]) -> None:
         The annotation of the block.
     """
     return _ffi_api.BlockAttrs(attrs)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def scope_attr(attrs: Dict[str, Any]) -> None:
+    """The execution scope annotation statement (for tirx=True).
+
+    Sets annotations on the current ExecScopeFrame. During ExitWithScope,
+    these annotations are wrapped around the body as AttrStmt nodes with
+    ``node=T.int32(0)``.
+
+    Parameters
+    ----------
+    attrs : Dict[str, Any]
+        The annotation of the execution scope. Each key-value pair becomes
+        an AttrStmt with ``node=T.int32(0)``.
+    """
+    from .frame import ExecScopeFrame  # pylint: disable=import-outside-toplevel
+    from ..base import IRBuilder  # pylint: disable=import-outside-toplevel
+
+    # Find the innermost ExecScopeFrame on the stack
+    exec_scope_frame = None
+    for f in reversed(IRBuilder.current().frames):
+        if isinstance(f, ExecScopeFrame):
+            exec_scope_frame = f
+            break
+    if exec_scope_frame is None:
+        raise ValueError("scope_attr must be called inside an ExecScope (tirx=True)")
+
+    # Convert values and accumulate annotations on the frame
+    converted = {}
+    for key, value in attrs.items():
+        if isinstance(value, bool):
+            value = IntImm("bool", value)
+        converted[key] = convert(value)
+
+    if exec_scope_frame.annotations is not None:
+        merged = dict(exec_scope_frame.annotations)
+        merged.update(converted)
+        converted = merged
+    exec_scope_frame.annotations = converted
 
 
 def alloc_buffer(
@@ -2951,6 +2990,7 @@ __all__ = float_types + [
     "reads",
     "writes",
     "sblock_attr",
+    "scope_attr",
     "alloc_buffer",
     "sblock_alloc_buffer",
     "axis",

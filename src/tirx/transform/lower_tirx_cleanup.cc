@@ -54,14 +54,27 @@ class ScheduleContextRemover : public StmtExprMutator {
   static Stmt Remove(const Stmt& stmt) { return ScheduleContextRemover()(stmt); }
 
  private:
-  Stmt VisitStmt_(const SBlockNode* op) final {
-    SBlock block = ffi::GetRef<SBlock>(op);
-    auto* n = block.CopyOnWrite();
-    n->annotations.erase("scope_id_extent_map");
-    n->annotations.erase("thread_var_map");
-    n->annotations.erase("tirx.warp_id_in_cta");
-    n->body = VisitStmt(n->body);
-    return std::move(block);
+  Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
+    Stmt body = VisitStmt(op->body);
+    // Strip TIRX scheduling AttrStmts from ExecScopeStmt body
+    // (These are dead-code annotations that were never written but the cleanup pass
+    //  historically erased: scope_id_extent_map, thread_var_map, tirx.warp_id_in_cta)
+    auto strip = [](Stmt stmt) {
+      while (auto attr = stmt.as<AttrStmtNode>()) {
+        if (attr->attr_key == "scope_id_extent_map" || attr->attr_key == "thread_var_map" ||
+            attr->attr_key == "tirx.warp_id_in_cta") {
+          stmt = attr->body;
+        } else {
+          break;
+        }
+      }
+      return stmt;
+    };
+    body = strip(body);
+    if (body.same_as(op->body)) {
+      return ffi::GetRef<Stmt>(op);
+    }
+    return ExecScopeStmt(op->exec_scope, body);
   }
 };
 

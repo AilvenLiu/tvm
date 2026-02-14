@@ -283,7 +283,7 @@ class GemmTile(Tile):
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             with T.cta():
-                T.sblock_attr({"tirx.scope_partition": True})
+                T.scope_attr({"tirx.scope_partition": True})
                 with T.warpgroup()[1:2]:
                     if warp_id == 3:
                         # GMEM -> SMEM  (tma)

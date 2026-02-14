@@ -237,7 +237,7 @@ def test_hgemm_1consumer():
                         epilogue1()
 
                 with Tx.cta():
-                    Tx.sblock_attr({"tirx.scope_partition": True})
+                    Tx.scope_attr({"tirx.scope_partition": True})
                     with Tx.warpgroup()[1:2]:
                         if warp_id == 3:
                             phase[0] = 0

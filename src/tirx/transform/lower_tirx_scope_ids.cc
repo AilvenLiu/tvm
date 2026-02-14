@@ -46,10 +46,6 @@ class ScopeIdDefGather : public StmtExprVisitor {
     return gather.scope_id_def;
   }
 
-  void VisitStmt_(const SBlockNode* op) override {
-    StmtExprVisitor::VisitStmt_(op);
-  }
-
   void VisitStmt_(const ExecScopeStmtNode* op) override {
     StmtExprVisitor::VisitStmt_(op);
     for (const auto& def : op->exec_scope->scope_id_def) {
@@ -63,14 +59,6 @@ class ScopeIdDefGather : public StmtExprVisitor {
 class ScopeIdDefRemover : public StmtExprMutator {
  public:
   static Stmt Remove(const Stmt& stmt) { return ScopeIdDefRemover()(stmt); }
-
-  Stmt VisitStmt_(const SBlockNode* op) override {
-    SBlock block = ffi::GetRef<SBlock>(op);
-    auto* n = block.CopyOnWrite();
-    Stmt body = StmtExprMutator::VisitStmt(op->body);
-    n->body = body;
-    return block;
-  }
 
   Stmt VisitStmt_(const ExecScopeStmtNode* op) override {
     Stmt body = StmtExprMutator::VisitStmt(op->body);
@@ -184,12 +172,6 @@ class ScopeIdDefResolver : public StmtExprMutator {
     }
     kernel_launch_params_ = std::nullopt;
     return ret;
-  }
-
-  Stmt VisitStmt_(const SBlockRealizeNode* op) override {
-    auto n_realize = CopyOnWrite(op);
-    n_realize->block = Downcast<SBlock>(StmtExprMutator::VisitStmt_(op->block.get()));
-    return Stmt(n_realize);
   }
 
   void ExtractKernelLaunchParams(const ScopeIdDefVerifier::ScopeIdSet& id_set, const Target& target,

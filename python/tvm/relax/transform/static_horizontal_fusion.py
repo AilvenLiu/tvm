@@ -37,7 +37,7 @@ from tvm.script import tirx as Tx
 from tvm.script import relax as R
 from tvm.script.ir_builder import IRBuilder
 from tvm.tir import (
-    SBlock,
+    AttrStmt,
     Buffer,
     BufferLoad,
     BufferStore,
@@ -48,6 +48,7 @@ from tvm.tir import (
     Stmt,
     Var,
     Evaluate,
+    ExecScopeStmt,
     SBlockRealize,
     AllocBuffer,
     DeclBuffer,
@@ -61,8 +62,30 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, map_job_type
 from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase, SmemManager
 from tvm.tirx.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.tirx.operator import KernelReplacePoint
-from tvm.tir.stmt import ExecScopeStmt
 from tvm.tirx.bench.utils import CudaProfiler
+
+
+def _get_exec_scope_body_attr(op: ExecScopeStmt, key: str):
+    """Check if the ExecScopeStmt body has an AttrStmt with the given key.
+
+    Returns the AttrStmt value if found, None otherwise.
+    Annotations on ExecScopeStmt are now represented as AttrStmt wrapping the body.
+    """
+    body = op.body
+    if isinstance(body, AttrStmt) and body.attr_key == key:
+        return body.value
+    return None
+
+
+def _strip_exec_scope_body_attr(body: Stmt, key: str):
+    """Strip an AttrStmt with the given key from the outermost level of body.
+
+    Returns the inner body with the AttrStmt removed. If the key is not found,
+    returns the original body unchanged.
+    """
+    if isinstance(body, AttrStmt) and body.attr_key == key:
+        return body.body
+    return body
 
 
 def _find_outermost_exec_scope(stmt):
@@ -295,13 +318,13 @@ class EventPrimFuncHelper(StmtExprMutator):
     def visit_seqstmt_(self, op):
         new_seq = []
         seq = [stmt for stmt in op.seq]
-        if isinstance(seq[-1], SBlock) and seq[-1].annotations.get("marks") is not None and seq[-1].annotations["marks"].value == "entry_mark":
+        if isinstance(seq[-1], AttrStmt) and seq[-1].attr_key == "marks" and seq[-1].value.value == "entry_mark":
             stmt_list = self.stmt_list
             self.stmt_list = []
             seq = seq[:-1] + stmt_list
         for stmt in reversed(seq):
-            if isinstance(stmt, SBlock) and stmt.annotations.get("marks") is not None and stmt.annotations["marks"].value == "beg_mark":
-                if isinstance(stmt.body, SBlock) and stmt.body.annotations.get("marks") is not None and stmt.body.annotations["marks"].value == "entry_mark":
+            if isinstance(stmt, AttrStmt) and stmt.attr_key == "marks" and stmt.value.value == "beg_mark":
+                if isinstance(stmt.body, AttrStmt) and stmt.body.attr_key == "marks" and stmt.body.value.value == "entry_mark":
                     continue
                 if not isinstance(stmt.body, LetStmt):
                     # TODO: Need more Robust way to handle other stmt types
@@ -318,7 +341,7 @@ class EventPrimFuncHelper(StmtExprMutator):
 
     def visit_let_stmt_(self, op):
         op = super().visit_let_stmt_(op)
-        if isinstance(op.body, SBlock) and op.body.annotations.get("marks") is not None and op.body.annotations["marks"].value == "entry_mark":
+        if isinstance(op.body, AttrStmt) and op.body.attr_key == "marks" and op.body.value.value == "entry_mark":
             stmt_list = self.stmt_list
             self.stmt_list = []
             if len(stmt_list) > 0:
@@ -357,10 +380,10 @@ class EventOpInserter(StmtExprMutator):
         inserter = EventOpInserter(strategy, func_info, tile_scheduler, semaphore_class)
         return inserter.visit_stmt(func_info.func_body)
 
-    def visit_block_(self, block: SBlock):
-        if block.annotations.get("tirx.tile_class.prefetch") is not None:
-            return block
-        elif block.annotations.get("tirx.tile_class.run") is not None:
+    def visit_exec_scope_stmt_(self, op: ExecScopeStmt):
+        if _get_exec_scope_body_attr(op, "tirx.tile_class.prefetch") is not None:
+            return op
+        elif _get_exec_scope_body_attr(op, "tirx.tile_class.run") is not None:
             def get_wait(idx):
                 @T.prim_func(tirx=True, check_well_formed=False)
                 def wait():
@@ -411,23 +434,20 @@ class EventOpInserter(StmtExprMutator):
                     if pre_notify_and_push is not None:
                         pushes.append(pre_notify_and_push)
 
-            body_list = pushes + waits + [block.body] + commits
+            # Strip the tirx.tile_class.run AttrStmt to get the actual body
+            inner_body = _strip_exec_scope_body_attr(op.body, "tirx.tile_class.run")
+            body_list = pushes + waits + [inner_body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
-            # Reconstruct the block with the new body, preserving all other attributes.
-            return SBlock(
-                block.iter_vars,
-                block.reads,
-                block.writes,
-                block.name_hint,
+            # Re-wrap with the tirx.tile_class.run AttrStmt
+            new_body = AttrStmt(IntImm("int32", 0), "tirx.tile_class.run", IntImm("bool", 1), new_body)
+            # Reconstruct the ExecScopeStmt with the new body.
+            return ExecScopeStmt(
+                op.exec_scope,
                 new_body,
-                block.init,
-                block.alloc_buffers,
-                block.match_buffers,
-                block.annotations,
-                block.span,
+                op.span,
             )
         else:
-            return super().visit_block_(block)
+            return super().visit_exec_scope_stmt_(op)
 
 
 @dataclass
@@ -485,12 +505,12 @@ class PersistentVarCollector(StmtExprMutator):
             return op.body
         return op
 
-    def visit_block_(self, block: SBlock):
-        if any(block.annotations.get(key) is not None for key in ["tirx.tile_class.persistent.init", "tirx.tile_class.persistent.finalize"]):
+    def visit_exec_scope_stmt_(self, op: ExecScopeStmt):
+        if any(_get_exec_scope_body_attr(op, key) is not None for key in ["tirx.tile_class.persistent.init", "tirx.tile_class.persistent.finalize"]):
             self.visit_tile_class = True
-        elif any(block.annotations.get(key) is not None for key in ["tirx.megakernel.persistent.init", "tirx.megakernel.persistent.finalize"]):
+        elif any(_get_exec_scope_body_attr(op, key) is not None for key in ["tirx.megakernel.persistent.init", "tirx.megakernel.persistent.finalize"]):
             self.visit_tile_class = False
-        block = super().visit_block_(block)
+        op = super().visit_exec_scope_stmt_(op)
         annotation_to_var = {
             "tirx.tile_class.persistent.init": "persistent_var_tile_class_init",
             "tirx.tile_class.persistent.finalize": "persistent_var_tile_class_finalize",
@@ -498,17 +518,17 @@ class PersistentVarCollector(StmtExprMutator):
             "tirx.megakernel.persistent.finalize": "persistent_var_megakernel_finalize",
         }
         for annotation, var_name in annotation_to_var.items():
-            if block.annotations.get(annotation) is not None:
-                setattr(self, var_name, block.body)
+            if _get_exec_scope_body_attr(op, annotation) is not None:
+                # The actual body is inside the AttrStmt
+                inner_body = _strip_exec_scope_body_attr(op.body, annotation)
+                setattr(self, var_name, inner_body)
                 break
-        if not any(block.annotations.get(key) for key in annotation_to_var.keys()):
-            return block
-        return SBlock(
-            block.iter_vars,
-            block.reads,
-            block.writes,
-            block.name_hint,
+        if not any(_get_exec_scope_body_attr(op, key) for key in annotation_to_var.keys()):
+            return op
+        return ExecScopeStmt(
+            op.exec_scope,
             Evaluate(0),
+            op.span,
         )
 
 class HostStmtCollector(StmtExprMutator):
@@ -760,13 +780,11 @@ class DependencyHandler(StmtExprMutator):
             assert prim_expr is not None, "dependency handling failed to set all output prim exprs"
         # warp the new_stmt into a block
         # it will be processed to fix the scope of the variables declared in the input dependencies in the post process step
-        new_stmt = SBlock(
-            iter_vars=[],
-            reads=[],
-            writes=[],
-            name_hint="__mark_wrapper",
-            body=new_stmt,
-            annotations={"marks": T.StringImm("beg_mark")},
+        new_stmt = AttrStmt(
+            T.StringImm("__mark_wrapper"),
+            "marks",
+            T.StringImm("beg_mark"),
+            new_stmt,
         )
         return new_stmt, self.cur_out_prim_expr
 
@@ -774,13 +792,11 @@ class DependencyHandler(StmtExprMutator):
     def visit_buffer_store_(self, op):
         if op.buffer in self.cur_buf_set:
             assert len(op.indices) == 1 and op.indices[0] == 0
-            entry_mark = SBlock(
-                iter_vars=[],
-                reads=[],
-                writes=[],
-                name_hint="__mark_wrapper",
-                body=Evaluate(0),
-                annotations={"marks": T.StringImm("entry_mark")},
+            entry_mark = AttrStmt(
+                T.StringImm("__mark_wrapper"),
+                "marks",
+                T.StringImm("entry_mark"),
+                Evaluate(0),
             )
             if isinstance(op.value, IntImm):
                 self.cur_out_prim_expr[self.cur_buf_set[op.buffer]] = op.value
@@ -795,8 +811,8 @@ class DependencyHandler(StmtExprMutator):
         return super().visit_buffer_store_(op)
 
     def _is_entry_mark(self, stmt: Stmt) -> bool:
-        return (isinstance(stmt, SBlock) and stmt.annotations.get("marks") is not None
-                and stmt.annotations["marks"].value == "entry_mark")
+        return (isinstance(stmt, AttrStmt) and stmt.attr_key == "marks"
+                and stmt.value.value == "entry_mark")
 
     def visit_seqstmt_(self, op):
         op = super().visit_seqstmt_(op)
@@ -812,13 +828,11 @@ class DependencyHandler(StmtExprMutator):
             else:
                 if flag:
                     flag = False
-                    entry_mark = SBlock(
-                        iter_vars=[],
-                        reads=[],
-                        writes=[],
-                        name_hint="__mark_wrapper",
-                        body=Evaluate(0),
-                        annotations={"marks": T.StringImm("entry_mark")},
+                    entry_mark = AttrStmt(
+                        T.StringImm("__mark_wrapper"),
+                        "marks",
+                        T.StringImm("entry_mark"),
+                        Evaluate(0),
                     )
                     for var, value in reversed(out_var):
                         entry_mark = LetStmt(
@@ -829,13 +843,11 @@ class DependencyHandler(StmtExprMutator):
                     inv_seq.append(entry_mark)
                 inv_seq.append(stmt)
         if flag:
-            entry_mark = SBlock(
-                iter_vars=[],
-                reads=[],
-                writes=[],
-                name_hint="__mark_wrapper",
-                body=Evaluate(0),
-                annotations={"marks": T.StringImm("entry_mark")},
+            entry_mark = AttrStmt(
+                T.StringImm("__mark_wrapper"),
+                "marks",
+                T.StringImm("entry_mark"),
+                Evaluate(0),
             )
             for var, value in reversed(out_var):
                 entry_mark = LetStmt(

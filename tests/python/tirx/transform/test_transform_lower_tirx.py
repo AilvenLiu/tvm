@@ -844,7 +844,7 @@ def test_lower_scope_partition1():
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.cta():
-                Tx.sblock_attr({"tirx.scope_partition": True})
+                Tx.scope_attr({"tirx.scope_partition": True})
                 with Tx.thread()[0:32]:
                     Tx.evaluate(tx)
                 with Tx.thread()[32:64]:
@@ -899,9 +899,9 @@ def test_lower_scope_partition2():
             warp_id = Tx.warp_id([4], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             with Tx.cta():
-                Tx.sblock_attr({"tirx.scope_partition": True})
+                Tx.scope_attr({"tirx.scope_partition": True})
                 with Tx.warpgroup()[1:2]:
-                    Tx.sblock_attr({"tirx.scope_partition": True})
+                    Tx.scope_attr({"tirx.scope_partition": True})
                     with Tx.warp(parent="warpgroup")[3:4]:
                         Tx.evaluate(warp_id)
                     with Tx.warp(parent="warpgroup")[2:3]:

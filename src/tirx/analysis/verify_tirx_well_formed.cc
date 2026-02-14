@@ -56,38 +56,15 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    if (op->annotations.count(attr::tirx_scope_partition)) {
-      // scope partition is enabled, check if body is a list of ExecScopeStmt
-      if (auto seq = op->body.as<SeqStmt>()) {
-        ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
-        for (const auto& stmt : seq.value()->seq) {
-          // Handle ExecScopeStmt children
-          auto exec_scope_stmt = stmt.as<ExecScopeStmt>();
-          if (!exec_scope_stmt.has_value()) {
-            Verify(false) << "TIRxError: Block with scope partition at " << path
-                          << " has invalid body " << op->body;
-          }
-          auto scope = exec_scope_stmt.value()->exec_scope;
-          Verifier::VisitStmt_(exec_scope_stmt.value().get(), path);
-          auto scope_slice = scope.as<ExecScopeSlice>();
-          Verify(scope_slice.has_value())
-              << "TIRxError: Block with scope partition at " << path
-              << " has invalid exec_scope " << scope;
-          if (scope_slice_chk.has_value()) {
-            Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
-                   scope_slice_chk.value()->parent == scope_slice.value()->parent)
-                << "TIRxError: Block with scope partition at " << path
-                << " has invalid exec_scope " << scope;
-          }
-          scope_slice_chk = scope_slice;
-        }
-      } else {
-        Verify(false) << "TIRxError: Block with scope partition at " << path << " has invalid body "
-                      << op->body;
-      }
-      return;
-    }
-    Verifier::VisitStmt_(op, path);
+    Verify(false)
+        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path
+        << ". Use ExecScopeStmt with T.attr() instead.";
+  }
+
+  void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
+    Verify(false)
+        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path
+        << ". Use ExecScopeStmt with T.attr() instead.";
   }
 
   void VisitStmt_(const tirx::OpCallNode* op, ffi::reflection::AccessPath path) override {
@@ -97,6 +74,46 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    // Check for scope_partition AttrStmt wrapping the body
+    Stmt check_body = op->body;
+    bool has_scope_partition = false;
+    if (auto attr = check_body.as<AttrStmtNode>()) {
+      if (attr->attr_key == attr::tirx_scope_partition) {
+        has_scope_partition = true;
+        check_body = attr->body;
+      }
+    }
+    if (has_scope_partition) {
+      // scope partition is enabled, check if body is a list of ExecScopeStmt
+      if (auto seq = check_body.as<SeqStmt>()) {
+        ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
+        for (const auto& stmt : seq.value()->seq) {
+          // Handle ExecScopeStmt children
+          auto exec_scope_stmt = stmt.as<ExecScopeStmt>();
+          if (!exec_scope_stmt.has_value()) {
+            Verify(false) << "TIRxError: ExecScopeStmt with scope partition at " << path
+                          << " has invalid body " << op->body;
+          }
+          auto scope = exec_scope_stmt.value()->exec_scope;
+          Verifier::VisitStmt_(exec_scope_stmt.value().get(), path);
+          auto scope_slice = scope.as<ExecScopeSlice>();
+          Verify(scope_slice.has_value())
+              << "TIRxError: ExecScopeStmt with scope partition at " << path
+              << " has invalid exec_scope " << scope;
+          if (scope_slice_chk.has_value()) {
+            Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
+                   scope_slice_chk.value()->parent == scope_slice.value()->parent)
+                << "TIRxError: ExecScopeStmt with scope partition at " << path
+                << " has invalid exec_scope " << scope;
+          }
+          scope_slice_chk = scope_slice;
+        }
+      } else {
+        Verify(false) << "TIRxError: ExecScopeStmt with scope partition at " << path
+                      << " has invalid body " << op->body;
+      }
+      return;
+    }
     auto scope = op->exec_scope;
     // C1: exec_scope is valid
     Verify(ExecScope::Valid(scope->name))
@@ -211,18 +228,17 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    auto verify = [&](const Buffer& buffer) {
-      if (buffer->layout.defined()) {
-        Verify(buffer->layout.value()->VerifyWellFormed())
-            << "TIRxError: Buffer at " << path << " has invalid layout " << buffer->layout;
-        ICHECK(buffer->layout.value()->CompatibleWithShape(buffer->shape))
-            << "TIRxError: Buffer at " << path << " has layout " << buffer->layout
-            << " that is not compatible with shape " << buffer->shape;
-      }
-    };
-    for (const auto& alloc : op->alloc_buffers) {
-      verify(alloc);
-    }
+    Verify(false)
+        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+  }
+
+  void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
+    Verify(false)
+        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
+  }
+
+  void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
+    // Check buffer layouts in alloc_buffers that appear as AllocBuffer stmts
     Verifier::VisitStmt_(op, path);
   }
 };
@@ -235,7 +251,13 @@ class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verifier::VisitStmt_(op, path);
+    Verify(false)
+        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+  }
+
+  void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
+    Verify(false)
+        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
@@ -255,7 +277,13 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verifier::VisitStmt_(op, path);
+    Verify(false)
+        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+  }
+
+  void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
+    Verify(false)
+        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {

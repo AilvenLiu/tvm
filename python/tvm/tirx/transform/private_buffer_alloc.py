@@ -20,7 +20,7 @@ from typing import Dict, List
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tir.buffer import Buffer
-from tvm.tir.stmt import AllocBuffer, AttrStmt, SBlock, ExecScopeStmt, For, OpCall, Stmt
+from tvm.tir.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, Stmt
 from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
@@ -36,9 +36,6 @@ class PrivateAllocCollector(StmtVisitor):
         self.var_range_map = {}
         self.buffer_dict = {}
         self.private_buf_refs = {}
-
-    def visit_block_(self, op: SBlock):
-        super().visit_block_(op)
 
     def visit_exec_scope_stmt_(self, op: ExecScopeStmt):
         self.exec_scope_stack_.append(op.exec_scope)
@@ -91,29 +88,6 @@ class PrivateAllocMutator(StmtMutator):
             for buffer in reversed(self.alloc_buffers):
                 body = AllocBuffer(buffer, body)
             return ExecScopeStmt(op.exec_scope, body)
-        return op
-
-    def visit_block_(self, op: SBlock):
-        is_outer_block = self.is_outer_block
-        self.is_outer_block = False
-        op = super().visit_block_(op)
-        if is_outer_block:
-            body = op.body
-            for stmt in self.init_stmts:
-                body = seek_kernel_replace_point(stmt, body)
-            for buffer in reversed(self.alloc_buffers):
-                body = AllocBuffer(buffer, body)
-            block = SBlock(
-                [],
-                [],
-                [],
-                name_hint=op.name_hint,
-                body=body,
-                alloc_buffers=op.alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-            )
-            return block
         return op
 
     def visit_op_call_(self, op):

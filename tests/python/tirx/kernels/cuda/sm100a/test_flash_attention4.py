@@ -474,7 +474,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                     # m_start refers to SEQ_Q positions (not BLK_M rows)
                     m_start = Tx.meta_var(m_block_idx * SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q)
                     with Tx.cta():
-                        # Tx.sblock_attr({"tirx.scope_partition": True})
+                        # Tx.scope_attr({"tirx.scope_partition": True})
 
                         if wg_id == 3:
                             Tx.ptx.setmaxnreg(False, 48)

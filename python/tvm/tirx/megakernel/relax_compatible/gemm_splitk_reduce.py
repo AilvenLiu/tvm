@@ -21,6 +21,6 @@ class FuseSplitKReduceTile(SplitKReduceTile):
             with T.cta():
                 split_k_reduce_tile.init(None)
                 with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                    T.scope_attr({"tirx.tile_class.run": True})
                     split_k_reduce_tile.run(m_idx, n_idx, k_idx, input, output)
         return split_k_reduce_func, num_tiles, tile_size

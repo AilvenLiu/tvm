@@ -56,6 +56,21 @@ class ExecScopeSliceResolver : public StmtExprMutator {
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
+  /*!
+   * \brief Check whether the body of an ExecScopeStmt contains an AttrStmt
+   *        with the given key (used to detect tirx.scope_partition).
+   *        If found, return the inner body (with the AttrStmt stripped).
+   */
+  static ffi::Optional<Stmt> StripBodyAttr(const Stmt& body, const char* attr_key) {
+    // The AttrStmt may be at the outermost level of body
+    if (auto attr = body.as<AttrStmtNode>()) {
+      if (attr->attr_key == attr_key) {
+        return attr->body;
+      }
+    }
+    return ffi::Optional<Stmt>(std::nullopt);
+  }
+
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     if (op->attr_key == tirx::attr::thread_extent) {
       auto iv = op->node.as<IterVar>();
@@ -81,8 +96,85 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     bool is_kernel = exec_scope->Is("kernel");
     if (is_kernel) {
       need_warp_id_in_cta_letstmt_ = false;
-      // Note: for ExecScopeStmt, warp_id_in_cta is not stored in annotations.
-      // It may already be available from the ScopeIdResolver pass via launch_params_.
+    }
+
+    // Check for scope_partition AttrStmt wrapping the body
+    auto stripped_body = StripBodyAttr(op->body, attr::tirx_scope_partition);
+    if (stripped_body.defined()) {
+      // Peel off any LetStmts wrapping the body (e.g., from scope_id resolution)
+      Stmt inner_body = stripped_body.value();
+      std::vector<std::pair<Var, PrimExpr>> let_stmts;
+      while (auto let_node = inner_body.as<LetStmtNode>()) {
+        let_stmts.push_back({let_node->var, let_node->value});
+        inner_body = let_node->body;
+      }
+
+      auto seq = inner_body.as<SeqStmt>();
+      CHECK(seq.has_value())
+          << "TIRxError: ExecScopeStmt with scope partition has invalid body " << op->body;
+      Array<Stmt> new_seq;
+      for (const auto& stmt : seq.value()->seq) {
+        new_seq.push_back(VisitStmt(stmt));
+      }
+      // Connect the IfThenElse stmts into a single IfThenElse
+      Stmt body = new_seq[new_seq.size() - 1];
+      for (int i = new_seq.size() - 2; i >= 0; i--) {
+        auto if_then = new_seq[i].as<IfThenElse>();
+        CHECK(if_then.has_value() && !if_then.value()->else_case.defined())
+            << "TIRxError: ExecScopeStmt with scope partition has invalid body " << op->body;
+        body = IfThenElse(if_then.value()->condition, if_then.value()->then_case, body);
+      }
+      // Re-wrap with peeled LetStmts (in reverse order)
+      for (int i = let_stmts.size() - 1; i >= 0; i--) {
+        body = LetStmt(let_stmts[i].first, let_stmts[i].second, body);
+      }
+
+      // If this node is also a scope_slice, continue to resolve the slice
+      // (don't return yet — fall through to scope_slice handling below)
+      auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
+      if (scope_slice_opt.has_value()) {
+        auto scope_slice = scope_slice_opt.value();
+        auto scope = ScopePair(scope_slice->parent, scope_slice->name);
+        int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
+                          ? 1
+                          : scope_slice->slices.as<Array<Range>>().value().size();
+        if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
+            launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
+          PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
+          warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
+          warp_id_in_cta_value_ = shuffled;
+          need_warp_id_in_cta_letstmt_ = true;
+          IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
+                          "warp_id_in_cta");
+          launch_params_["warp_id_in_cta"] = warp_iv;
+        }
+        Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
+            scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
+        ICHECK_EQ(resolved.size(), out_dim);
+        auto plain_scope = ExecScope::Create(scope_slice->name);
+        Stmt inner = ExecScopeStmt(plain_scope, body);
+        if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
+          return IfThenElse(select_cond.value(), inner);
+        } else {
+          auto slices = scope_slice->slices.as<Array<Range>>().value();
+          PrimExpr cond = Bool(true);
+          for (size_t i = 0; i < slices.size(); i++) {
+            cond = cond && resolved[i] >= slices[i]->min &&
+                   resolved[i] < slices[i]->extent + slices[i]->min;
+          }
+          return IfThenElse(cond, inner);
+        }
+      }
+
+      Stmt result = ExecScopeStmt(exec_scope, body);
+      if (is_kernel && need_warp_id_in_cta_letstmt_) {
+        auto exec_scope_stmt = result.as<ExecScopeStmtNode>();
+        result = ExecScopeStmt(exec_scope_stmt->exec_scope,
+                               LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(),
+                                       exec_scope_stmt->body));
+        need_warp_id_in_cta_letstmt_ = false;
+      }
+      return result;
     }
 
     // Check for scope_slice on the ExecScopeStmt
@@ -134,59 +226,6 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       }
       return IfThenElse(cond, inner);
     }
-  }
-
-  Stmt VisitStmt_(const SBlockRealizeNode* op) final {
-    Stmt block = this->VisitStmt(op->block);
-    if (block.same_as(op->block)) {
-      return ffi::GetRef<Stmt>(op);
-    } else {
-      if (auto* block_ptr = block.as<SBlockNode>()) {
-        auto n = CopyOnWrite(op);
-        n->block = ffi::GetRef<SBlock>(block_ptr);
-        return Stmt(n);
-      } else {
-        return block;
-      }
-    }
-  }
-
-  Stmt VisitStmt_(const SBlockNode* op) final {
-    SBlock block = ffi::GetRef<SBlock>(op);
-    auto* n = block.CopyOnWrite();
-    if (op->annotations.count("tirx.scope_partition")) {
-      // scope partition is enabled, rewrite the body
-      auto seq = block->body.as<SeqStmt>();
-      if (!seq.has_value()) {
-        CHECK(false) << "TIRxError: Block with scope partition at has invalid body " << block->body;
-      }
-      Array<Stmt> new_seq;
-      for (const auto& stmt : seq.value()->seq) {
-        new_seq.push_back(VisitStmt(stmt));
-      }
-      // Connect the IfThenElse stmts into a single IfThenElse
-      Stmt body = new_seq[new_seq.size() - 1];
-      for (int i = new_seq.size() - 2; i >= 0; i--) {
-        auto if_then = new_seq[i].as<IfThenElse>();
-        CHECK(if_then.has_value() && !if_then.value()->else_case.defined())
-            << "TIRxError: Block with scope partition has invalid body " << block->body;
-        body = IfThenElse(if_then.value()->condition, if_then.value()->then_case, body);
-      }
-      n->body = body;
-      n->annotations.erase("tirx.scope_partition");
-    } else {
-      // no scope partition, visit the body
-      n->body = VisitStmt(n->body);
-    }
-    // If the block is a trivial wrapper (no iter_vars, no alloc_buffers,
-    // empty annotations), strip it and return just the body. This handles SBlocks that were
-    // created solely to carry annotations like tirx.scope_partition.
-    if (n->iter_vars.empty() && n->alloc_buffers.empty() &&
-        (n->annotations.empty() || !n->annotations.defined()) && n->match_buffers.empty() &&
-        !n->init.defined()) {
-      return n->body;
-    }
-    return std::move(block);
   }
 
   LaunchParams launch_params_;

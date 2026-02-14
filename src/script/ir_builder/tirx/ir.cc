@@ -374,6 +374,12 @@ void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
   // First try to find an SBlockFrame
   ffi::Optional<SBlockFrame> sblock_frame = IRBuilder::Current()->FindFrame<SBlockFrame>();
   if (sblock_frame.defined()) {
+    // In tirx=True context, SBlock is not allowed — this should be caught by SBlockFrame
+    // exit, but guard here for clarity.
+    ffi::Optional<PrimFuncFrame> func_frame = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
+    TVM_FFI_CHECK(!(func_frame.defined() && func_frame.value()->is_tirx))
+        << "ValueError: `T.sblock_attr()` / `Tx.sblock_attr()` is not allowed in tirx=True mode. "
+           "Use `T.attr(...)` for execution scope annotations instead.";
     if (!sblock_frame.value()->annotations.defined()) {
       sblock_frame.value()->annotations = attrs;
     } else {
@@ -382,20 +388,8 @@ void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
     }
     return;
   }
-  // If no SBlockFrame, try ExecScopeFrame
-  ffi::Optional<ExecScopeFrame> exec_scope_frame =
-      IRBuilder::Current()->FindFrame<ExecScopeFrame>();
-  if (exec_scope_frame.defined()) {
-    if (!exec_scope_frame.value()->annotations.defined()) {
-      exec_scope_frame.value()->annotations = attrs;
-    } else {
-      exec_scope_frame.value()->annotations =
-          MergeAnnotations(attrs, exec_scope_frame.value()->annotations.value());
-    }
-    return;
-  }
   TVM_FFI_THROW(InternalError) << "ValueError: T.sblock_attr must be called at the top of a T.sblock() "
-             << "or scope frame, but T.sblock_attr occurred outside of any such frame";
+             << "frame, but T.sblock_attr occurred outside of any such frame";
 }
 
 ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(

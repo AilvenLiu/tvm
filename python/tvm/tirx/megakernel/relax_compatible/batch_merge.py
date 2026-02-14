@@ -30,9 +30,9 @@ class FuseBatchMergeTile(BatchMergeTile):
                 smem_manager.set_tile(batch_merge_tile)
                 batch_merge_tile.init(smem_manager)
                 with T.cta():
-                    T.sblock_attr({"tirx.megakernel.persistent.init": True})
+                    T.scope_attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with T.cta():
-                    T.sblock_attr({"tirx.tile_class.run": True})
+                    T.scope_attr({"tirx.tile_class.run": True})
                     batch_merge_tile.run(m_idx, n_idx, k_idx, partial_o, final_o, partial_lse, num_qo_len, merge_indptr, merge_o_indices)     
         return batch_merge_func, num_tiles, tile_size

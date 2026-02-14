@@ -850,6 +850,22 @@ def LowerTIRx():
     return _ffi_api.LowerTIRx()  # type: ignore
 
 
+def LowerTIRxOpaque():
+    """Lower opaque constructs in TIRX programs.
+
+    Handles AllocBuffer lowering, For(thread_binding) to AttrStmt(thread_extent)
+    conversion, unit loop elimination, and pragma annotation handling.
+    This is the tirx-specific counterpart of s_tir.LowerOpaqueBlock,
+    without any SBlock/SBlockRealize handling.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.LowerTIRxOpaque()  # type: ignore
+
+
 def UseAssumeToReduceBranches():
     """This pass attempts to eliminates layout specific pad branch by overcomputing the values
     for padded region. Eliminating the branch will help to vectorize code,

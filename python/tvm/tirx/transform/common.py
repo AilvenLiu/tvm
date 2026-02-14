@@ -22,7 +22,6 @@ from tvm.tir import (
     BufferLoad,
     BufferRegion,
     BufferStore,
-    SBlock,
     DeclBuffer,
     OpCall,
     PrimExpr,
