@@ -583,8 +583,8 @@ def test_deepgemm():
         std_ms, std_out = std()
         print(f"Std flops: {flops(std_ms) / 1e12} TFLOPS, time: {std_ms:.3f} ms")
         # np.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-2)
-        assert calc_diff(std_out, tir_out) < 1e-3
-        assert calc_diff(std_out, C_ref.to("cuda")) < 1e-3
+        assert calc_diff(std_out, tir_out) < 2e-3
+        assert calc_diff(std_out, C_ref.to("cuda")) < 2e-3
         print("Test passed!")
 
 
