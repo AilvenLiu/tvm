@@ -330,6 +330,14 @@ ExprDoc DocsifyLaunchThread(const tirx::AttrStmt& attr_stmt, const AccessPath& a
       });
 }
 
+/*! \brief Check whether an AttrStmt has node=IntImm(int32, 0) (the dict-attr pattern). */
+static bool IsDictAttrPattern(const tir::AttrStmt& stmt) {
+  if (auto int_imm = stmt->node.as<IntImmNode>()) {
+    return int_imm->dtype == DataType::Int(32) && int_imm->value == 0;
+  }
+  return false;
+}
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::AttrStmt>(  //
         "", [](tirx::AttrStmt stmt, AccessPath stmt_p, IRDocsifier d) -> Doc {
@@ -345,11 +353,34 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             }
           }
           if (!rhs.defined()) {
-            rhs = TIR(d, "attr")->Call({
-                d->AsDoc<ExprDoc>(stmt->node, stmt_p->Attr("node")),
-                LiteralDoc::Str(stmt->attr_key, stmt_p->Attr("attr_key")),
-                d->AsDoc<ExprDoc>(stmt->value, stmt_p->Attr("value")),
-            });
+            // Try to collapse consecutive dict-attr-pattern AttrStmts into T.attr({...})
+            if (IsDictAttrPattern(stmt)) {
+              ffi::Array<ExprDoc> keys;
+              ffi::Array<ExprDoc> values;
+              tir::AttrStmt cur = stmt;
+              AccessPath cur_p = stmt_p;
+              while (true) {
+                keys.push_back(LiteralDoc::Str(cur->attr_key, cur_p->Attr("attr_key")));
+                values.push_back(d->AsDoc<ExprDoc>(cur->value, cur_p->Attr("value")));
+                if (auto next = cur->body.as<tir::AttrStmt>()) {
+                  if (IsDictAttrPattern(next.value())) {
+                    cur = next.value();
+                    cur_p = cur_p->Attr("body");
+                    continue;
+                  }
+                }
+                body = cur->body;
+                body_p = cur_p->Attr("body");
+                break;
+              }
+              rhs = TIR(d, "attr")->Call({DictDoc(keys, values)});
+            } else {
+              rhs = TIR(d, "attr")->Call({
+                  d->AsDoc<ExprDoc>(stmt->node, stmt_p->Attr("node")),
+                  LiteralDoc::Str(stmt->attr_key, stmt_p->Attr("attr_key")),
+                  d->AsDoc<ExprDoc>(stmt->value, stmt_p->Attr("value")),
+              });
+            }
           }
           With<TIRFrame> f(d, stmt);
           if (define_var.defined()) {

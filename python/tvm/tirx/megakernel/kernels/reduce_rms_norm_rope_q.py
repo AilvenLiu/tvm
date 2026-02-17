@@ -1,4 +1,3 @@
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile
@@ -35,46 +34,46 @@ class SplitKReduceRMSnormRopeQTile(Tile):
 
 
     def _alloc_local(self):
-        self.idx = T.alloc_local([1], "int32", name="idx")
-        self.pos = T.alloc_local([1], "int32", name="pos")
-        self.mask = T.alloc_local([1], "uint32", name="mask")
-        self.weight_vec = T.alloc_local([self.vec_size], "float16", name="weight_vec")
-        self.weight_vec_f32 = T.alloc_local([self.vec_size], "float32", name="weight_vec_f32")
-        self.sum_sq = T.alloc_local([1], "float32", name="sum_sq")
-        self.rms_norm = T.alloc_local([1], "float32", name="rms_norm")
-        self.cos = T.alloc_local([self.vec_size], "float32", name="cos")
-        self.sin = T.alloc_local([self.vec_size], "float32", name="sin")
-        self.q_vec = T.alloc_local([self.vec_size], "float16", name="q_vec")
-        self.q_vec32 = T.alloc_local([self.vec_size], "float32", name="q_vec32")
-        self.q_vec32_other = T.alloc_local([self.vec_size], "float32", name="q_vec32_other")
+        self.idx = Tx.alloc_local([1], "int32", name="idx")
+        self.pos = Tx.alloc_local([1], "int32", name="pos")
+        self.mask = Tx.alloc_local([1], "uint32", name="mask")
+        self.weight_vec = Tx.alloc_local([self.vec_size], "float16", name="weight_vec")
+        self.weight_vec_f32 = Tx.alloc_local([self.vec_size], "float32", name="weight_vec_f32")
+        self.sum_sq = Tx.alloc_local([1], "float32", name="sum_sq")
+        self.rms_norm = Tx.alloc_local([1], "float32", name="rms_norm")
+        self.cos = Tx.alloc_local([self.vec_size], "float32", name="cos")
+        self.sin = Tx.alloc_local([self.vec_size], "float32", name="sin")
+        self.q_vec = Tx.alloc_local([self.vec_size], "float16", name="q_vec")
+        self.q_vec32 = Tx.alloc_local([self.vec_size], "float32", name="q_vec32")
+        self.q_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="q_vec32_other")
 
 
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, partial, qkv, q_weight, rope_pos, cos_sin_cache):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tx = T.meta_var(tid % self.bdx)
-            ty = T.meta_var(tid // self.bdx)
+        with Tx.cta():
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tx = Tx.meta_var(tid % self.bdx)
+            ty = Tx.meta_var(tid // self.bdx)
             self._alloc_local()
-            with T.thread():
-                batch_idx = T.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
-                head_idx = T.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
-                st = T.meta_var(tx * self.vec_size)
-                half_dim = T.meta_var(self.head_dim // 2)
-                group_in_warp = T.meta_var(32 // self.bdx)
-                cache_stx = T.meta_var(st % half_dim)
-                handle_num = T.meta_var(T.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
+            with Tx.thread():
+                batch_idx = Tx.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
+                head_idx = Tx.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
+                st = Tx.meta_var(tx * self.vec_size)
+                half_dim = Tx.meta_var(self.head_dim // 2)
+                group_in_warp = Tx.meta_var(32 // self.bdx)
+                cache_stx = Tx.meta_var(st % half_dim)
+                handle_num = Tx.meta_var(Tx.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
                 self.idx[0] = ty
                 while self.idx[0] < handle_num:
                     self.pos[0] = rope_pos[batch_idx]
                     self.sum_sq[0] = 0.0
                     # reduce
-                    qkv_stx = T.meta_var(head_idx * self.head_dim + tx * self.vec_size)
-                    for kv in T.unroll(self.vec_size):
+                    qkv_stx = Tx.meta_var(head_idx * self.head_dim + tx * self.vec_size)
+                    for kv in Tx.unroll(self.vec_size):
                         self.q_vec32[kv] = 0.0
-                    for kt in T.serial(self.split_k_factor):
+                    for kt in Tx.serial(self.split_k_factor):
                         Tx.copy(self.q_vec32_other[:], partial[kt, batch_idx, qkv_stx:qkv_stx + self.vec_size])
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.q_vec32[kv] += self.q_vec32_other[kv]
                     remain = handle_num - self.idx[0] // group_in_warp * group_in_warp
                     if remain >= group_in_warp:
@@ -83,11 +82,11 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                         self.mask[0] = (1 << (remain * self.bdx)) - 1
                     if self.use_rms_norm:
                         # sum square
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.sum_sq[0] += self.q_vec32[kv] * self.q_vec32[kv]
                         # warp reduce sum
-                        for kr in T.unroll(find_power_of_two(self.bdx // 2) + 1):
-                            self.sum_sq[0] = self.sum_sq[0] + T.tvm_warp_shuffle_xor(
+                        for kr in Tx.unroll(find_power_of_two(self.bdx // 2) + 1):
+                            self.sum_sq[0] = self.sum_sq[0] + Tx.tvm_warp_shuffle_xor(
                                 self.mask[0], self.sum_sq[0], (self.bdx // 2) >> kr, 32, 32
                             )
                         # rms norm
@@ -95,22 +94,22 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                         # handle the weight
                         Tx.copy(self.weight_vec[:], q_weight[st:st + self.vec_size])
                         Tx.cast(self.weight_vec_f32[:], self.weight_vec[:])
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.q_vec32[kv] = self.q_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
                     # load cache
                     Tx.copy(self.cos[:], cos_sin_cache[self.pos[0], cache_stx:cache_stx + self.vec_size])
                     Tx.copy(self.sin[:], cos_sin_cache[self.pos[0], half_dim + cache_stx:half_dim + cache_stx + self.vec_size])
                     # shuffle q value
-                    for kv in T.serial(self.vec_size):
-                        self.q_vec32_other[kv] = T.tvm_warp_shuffle_xor(
+                    for kv in Tx.serial(self.vec_size):
+                        self.q_vec32_other[kv] = Tx.tvm_warp_shuffle_xor(
                             self.mask[0], self.q_vec32[kv], self.bdx // 2, 32, 32
                         )
                     # compute rope
                     if st < half_dim:
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] - self.q_vec32_other[kv] * self.sin[kv]
                     else:
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] + self.q_vec32_other[kv] * self.sin[kv]
                     # store q
                     Tx.cast(self.q_vec[:], self.q_vec32[:])

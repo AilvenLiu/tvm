@@ -1,5 +1,4 @@
 from typing import Literal
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
@@ -79,11 +78,11 @@ class GroupGEMMTile(GemmTile):
 
     def _alloc_local(self, m_idx):
         super()._alloc_local(m_idx)
-        self.num_tokens_in_block = T.local_cell("int32", name="num_tokens_in_block")
-        self.eid = T.local_cell("int32", name="eid")
-        T.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
+        self.num_tokens_in_block = Tx.local_cell("int32", name="num_tokens_in_block")
+        self.eid = Tx.local_cell("int32", name="eid")
+        Tx.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
     
-    @T.macro
+    @Tx.macro
     def _tma(self, ks, buf, buf_name: Literal["A", "B"], mn_st, k_st, tma_config, predicate=True):
         if predicate:          
             if buf_name == "A":
@@ -91,7 +90,7 @@ class GroupGEMMTile(GemmTile):
             elif buf_name == "B":
                 Tx.copy_async(self.B_smem[ks, 0 : self.BLK_N, :], buf[self.eid, mn_st : mn_st + self.BLK_N, k_st : k_st + self.BLK_K], **tma_config)
             else:
-                T.cuda.trap_when_assert_failed(False)
+                Tx.cuda.trap_when_assert_failed(False)
 
     @classmethod
     def class_init(cls, smem_manager: SmemManager):
@@ -100,24 +99,24 @@ class GroupGEMMTile(GemmTile):
         cls.smem_routing_weights = smem_manager.alloc([cls.MAX_BLK_M], "float32", name="smem_routing_weights", method="persistent")
 
 
-    @T.macro
+    @Tx.macro
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         if not self.acc_output:
             GemmTile._consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler)
         else:
-            with T.cta():
-                tid_in_wg = T.thread_id([128], parent="warpgroup")
-                warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-                lane_id = T.thread_id([32], parent="warp")
-                T.cuda.trap_when_assert_failed(self.tmem_addr[0] == 0)
+            with Tx.cta():
+                tid_in_wg = Tx.thread_id([128], parent="warpgroup")
+                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
+                lane_id = Tx.thread_id([32], parent="warp")
+                Tx.cuda.trap_when_assert_failed(self.tmem_addr[0] == 0)
                 if tid_in_wg < self.M_pad_size:
                     idx = self.sorted_token_ids[m_idx * self.M_pad_size + tid_in_wg]
                     self.smem_sorted_token_ids[tid_in_wg] = idx
-                    self.smem_routing_weights[tid_in_wg] = T.if_then_else(idx < self.numel, self.routing_weights[idx], 0.0)
-                T.cuda.warpgroup_sync(10)
+                    self.smem_routing_weights[tid_in_wg] = Tx.if_then_else(idx < self.numel, self.routing_weights[idx], 0.0)
+                Tx.cuda.warpgroup_sync(10)
                 if warp_id == 0:
                     self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
-                T.cuda.warpgroup_sync(10)
+                Tx.cuda.warpgroup_sync(10)
                 self.phase[0] = 0
                 self.tmem_idx = self.tile_idx % self.TMEM_PIPE_DEPTH
                 self.tmem_phase = (self.tile_idx // self.TMEM_PIPE_DEPTH) & 1
@@ -125,26 +124,26 @@ class GroupGEMMTile(GemmTile):
                 # flush previous tma
                 # wait for the completion of all the mma of the same tile
                 self.mma2ld_bar.wait(self.tmem_idx, self.tmem_phase)
-                T.ptx.tcgen05.fence.after_thread_sync()
+                Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                for ko in T.unroll(self.MMA_M // self.EPI_TILE):
+                for ko in Tx.unroll(self.MMA_M // self.EPI_TILE):
                     self.stage = (self.tile_idx * self.MMA_M // self.EPI_TILE + ko) % self.TMEM_PIPE_DEPTH
                     # tmem -> rf (ld) -> smem
-                    for ki in T.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
-                        with T.warpgroup():
+                    for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
+                        with Tx.warpgroup():
                             reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(([128, self.TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
-                            col_st = T.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
+                            col_st = Tx.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
                             Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
-                        with T.thread():
-                            st = T.meta_var(ki * self.TMEM_LD_SIZE)
+                        with Tx.thread():
+                            st = Tx.meta_var(ki * self.TMEM_LD_SIZE)
                             Tx.copy(self.output_smem[self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg], self.reg[:])
                     # the tmem can be overwritten
                     if ko == self.MMA_M // self.EPI_TILE - 1:
-                        T.ptx.tcgen05.fence.before_thread_sync()
+                        Tx.ptx.tcgen05.fence.before_thread_sync()
                         self.ld2mma_bar.arrive(self.tmem_idx)
 
-                    T.ptx.fence.proxy(scope="shared")
-                    T.cuda.warpgroup_sync(10)
+                    Tx.ptx.fence.proxy(scope="shared")
+                    Tx.cuda.warpgroup_sync(10)
                     # smem -> gmem
                     for i in range(self.EPI_TILE * self.BLK_N // (128 * self.VEC_LEN)):
                         row_idx = (i * 128 + tid_in_wg) * self.VEC_LEN // self.BLK_N
@@ -155,21 +154,21 @@ class GroupGEMMTile(GemmTile):
                         routing_weight = self.smem_routing_weights[ko * self.EPI_TILE + row_idx]
                         # TODO: vectorize this
                         if output.dtype == "float16":
-                            o_reg_f32 = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
-                            o_reg_f16 = T.alloc_buffer([self.VEC_LEN], "float16", scope="local")
+                            o_reg_f32 = Tx.alloc_buffer([self.VEC_LEN], "float32", scope="local")
+                            o_reg_f16 = Tx.alloc_buffer([self.VEC_LEN], "float16", scope="local")
                             for v in range(self.VEC_LEN):
                                 o_reg_f32[v] = self.output_smem[self.stage, row_idx, col_idx + v]
-                            for v in T.unroll(self.VEC_LEN):
-                                o_reg_f16[v] = T.cast(o_reg_f32[v] * routing_weight, "float16")
-                            T.cuda.func_call("red_f16_v4", T.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg_f16[0]), source_code=red_f16)
+                            for v in Tx.unroll(self.VEC_LEN):
+                                o_reg_f16[v] = Tx.cast(o_reg_f32[v] * routing_weight, "float16")
+                            Tx.cuda.func_call("red_f16_v4", Tx.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), Tx.address_of(o_reg_f16[0]), source_code=red_f16)
                         else:
-                            o_reg = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
+                            o_reg = Tx.alloc_buffer([self.VEC_LEN], "float32", scope="local")
                             for v in range(self.VEC_LEN):
                                 o_reg[v] = self.output_smem[self.stage, row_idx, col_idx + v]
-                            for v in T.unroll(self.VEC_LEN):
+                            for v in Tx.unroll(self.VEC_LEN):
                                 o_reg[v] = o_reg[v] * routing_weight
-                            T.cuda.func_call("red_f32_v4", T.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg[0]), source_code=red_f32)
-                T.cuda.warpgroup_sync(10)
+                            Tx.cuda.func_call("red_f32_v4", Tx.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), Tx.address_of(o_reg[0]), source_code=red_f32)
+                Tx.cuda.warpgroup_sync(10)
                 self.tile_idx += 1
                 if warp_id == 0:
                     self.smem_manager.arrive_specific(lane_id, self.output_smem, 0)
@@ -179,15 +178,15 @@ class GroupGEMMTile(GemmTile):
         self.BLK_M = BLK_M
         self.MMA_M = BLK_M
 
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, A, B, output, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, profiler = None):
         self.set_moe_info(expert_ids, routing_weights, sorted_token_ids)
         self._alloc_local(m_idx)
         if valid_num_tokens is not None:
             self.num_tokens_in_block = valid_num_tokens[m_idx]
-        num_tokens_in_block = T.meta_var(self.num_tokens_in_block if valid_num_tokens is not None else 32 if self.low_batch else self.M_pad_size)
-        with T.cta():
-            tid = T.thread_id([256], parent="cta")
+        num_tokens_in_block = Tx.meta_var(self.num_tokens_in_block if valid_num_tokens is not None else 32 if self.low_batch else self.M_pad_size)
+        with Tx.cta():
+            tid = Tx.thread_id([256], parent="cta")
             if num_tokens_in_block <= 32:
                 self.set_BLK_M(32)
                 GemmTile._run(self, m_idx, n_idx, k_idx, A, B, output, profiler)
@@ -227,7 +226,7 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
             name="B_smem",
             method="exclusive",
         )
-        self.D_layout = T.TileLayout(
+        self.D_layout = Tx.TileLayout(
             shard=(
                 (GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2),
                 (GemmTile.EPI_TILE * GemmTile.MMA_N // 2, GemmTile.MMA_N // 2, 1)
@@ -242,6 +241,6 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
             method="exclusive",
         )
 
-    @T.macro
+    @Tx.macro
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         GateUpSiluTile._consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler)

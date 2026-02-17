@@ -21,7 +21,7 @@ from typing import Optional
 import operator
 import functools
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.ir import assert_structural_equal
 from tvm.tirx.op_schedule import (
@@ -196,12 +196,12 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr = inst_gen.find_max_inst_size_from_one_region(B_buffer_region, [rhs_f_dim])
     inst_repr = inst_gen.fit_inst_tile_to_region(inst_repr, C_buffer_region, [acc_f_dim])
     inst_repr.bound_inst_size(512, analyzer)
-    rhs_f = T.Var("rhs_f", "int32")
-    lhs_f = T.Var("lhs_f", "int32")
-    p = T.Var("p", "int32")
-    reduction_b = T.Var("reduction_b", "int32")
-    lhs_b = T.Var("lhs_b", "int32")
-    rhs_b = T.Var("rhs_b", "int32")
+    rhs_f = Tx.Var("rhs_f", "int32")
+    lhs_f = Tx.Var("lhs_f", "int32")
+    p = Tx.Var("p", "int32")
+    reduction_b = Tx.Var("reduction_b", "int32")
+    lhs_b = Tx.Var("lhs_b", "int32")
+    rhs_b = Tx.Var("rhs_b", "int32")
     lhs_f_size = C.layout.size("P")
     inst_gen.bind_inst_iter(
         B_buffer_region, rhs_f, inst_repr.size, inst_repr.stride, is_free_dim=True
@@ -215,29 +215,29 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # FIXME: we need to lower the guard to things like matmul(lhs[...][lhs_guard], rhs[...][rhs_guard], mask=p_guard)
     # so we need to separate the guard for lhs_f, rhs_f and p
     # fmt: off
-    @T.macro
+    @Tx.macro
     def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc, C_as_output, max_psum_slots):
-        with T.attr(0, "tensorized_nki_instruction", 1):
-            for p_loop in T.serial(0, p_size, annotations={"nki_dim": "P"}):
-                for lhs_f_loop in T.serial(0, lhs_f_size, annotations={"nki_dim": "lhs_F"}):
-                    for rhs_f_loop in T.serial(0, inst_repr.size, annotations={"nki_dim": "rhs_F"}):
-                        b_idx = T.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
+        with Tx.attr(0, "tensorized_nki_instruction", 1):
+            for p_loop in Tx.serial(0, p_size, annotations={"nki_dim": "P"}):
+                for lhs_f_loop in Tx.serial(0, lhs_f_size, annotations={"nki_dim": "lhs_F"}):
+                    for rhs_f_loop in Tx.serial(0, inst_repr.size, annotations={"nki_dim": "rhs_F"}):
+                        b_idx = Tx.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
                         inst_gen.set_bind_map(A_buffer_region, {lhs_b: lhs_b_loop, lhs_f: lhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})
                         inst_gen.set_bind_map(B_buffer_region, {rhs_b: rhs_b_loop, rhs_f: rhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})
                         inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})
-                        lhs_indices = T.meta_var(inst_gen.generate_indices(A_buffer_region))
-                        rhs_indices = T.meta_var(inst_gen.generate_indices(B_buffer_region))
-                        C_indices = T.meta_var(inst_gen.generate_indices(C_buffer_region))
+                        lhs_indices = Tx.meta_var(inst_gen.generate_indices(A_buffer_region))
+                        rhs_indices = Tx.meta_var(inst_gen.generate_indices(B_buffer_region))
+                        C_indices = Tx.meta_var(inst_gen.generate_indices(C_buffer_region))
                         if inst_gen.make_guard(A_buffer_region) and inst_gen.make_guard(B_buffer_region):
                             if C_as_output:
-                                T.evaluate(T.nki.matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))
+                                Tx.evaluate(Tx.nki.matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))
                             else:
-                                T.evaluate(T.nki.matmul(acc[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop], A[lhs_indices], B[rhs_indices]))
+                                Tx.evaluate(Tx.nki.matmul(acc[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop], A[lhs_indices], B[rhs_indices]))
 
     if C.scope() == "trn.psum":
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def impl_C_psum():
-            for lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent):
+            for lhs_b_loop, rhs_b_loop, reduction_b_loop in Tx.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent):
                 matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, C, True, None)
         return impl_C_psum
 
@@ -250,7 +250,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     acc_psum_shape = (max_psum_banks, p_size, largest_psum_per_bank)
     if "acc_psum" not in op.workspace:
         assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
-        acc_psum = T.buffer(
+        acc_psum = Tx.buffer(
                 acc_psum_shape,
                 "float32",
                 scope="trn.psum",
@@ -264,19 +264,19 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         check_workspace_buffer(acc_psum, (p_size, largest_psum_per_bank), "trn.psum")
         max_psum_slots = acc_psum.shape[0]
 
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl_C_sbuf():
-        for lhs_b_loop, rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent):
-            for reduction_b_loop in T.serial(0, reduction_b_extent):
+        for lhs_b_loop, rhs_b_loop in Tx.grid(lhs_b_extent, rhs_b_extent):
+            for reduction_b_loop in Tx.serial(0, reduction_b_extent):
                 matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc_psum, False, max_psum_slots)
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for lhs_f_loop in T.serial(0, lhs_f_size, annotations={"nki_dim": "P"}):
-                    for rhs_f_loop in T.serial(0, inst_repr.size, annotations={"nki_dim": "F"}):
-                        b_idx = T.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
+            with Tx.attr(0, "tensorized_nki_instruction", 1):
+                for lhs_f_loop in Tx.serial(0, lhs_f_size, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in Tx.serial(0, inst_repr.size, annotations={"nki_dim": "F"}):
+                        b_idx = Tx.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
                         inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})
                         if inst_gen.make_guard(C_buffer_region):
-                            acc_indices = T.meta_var(inst_gen.generate_indices(C_buffer_region))
-                            T.evaluate(T.nki.tensor_copy(C[acc_indices], acc_psum[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop]))
+                            acc_indices = Tx.meta_var(inst_gen.generate_indices(C_buffer_region))
+                            Tx.evaluate(Tx.nki.tensor_copy(C[acc_indices], acc_psum[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop]))
     # fmt: on
     return impl_C_sbuf
 

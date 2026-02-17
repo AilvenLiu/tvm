@@ -1,4 +1,3 @@
-import tvm.script.tir as T
 import tvm.script.tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile
@@ -31,47 +30,47 @@ class RopeTile(Tile):
 
 
     def _alloc_local(self):
-        self.idx = T.alloc_local([1], "int32", name="idx")
-        self.cos = T.alloc_local([self.vec_size], "float32", name="cos")
-        self.sin = T.alloc_local([self.vec_size], "float32", name="sin")
-        self.qk_vec = T.alloc_local([self.vec_size], "float16", name="qk_vec")
-        self.qk_vec32 = T.alloc_local([self.vec_size], "float32", name="qk_vec32")
-        self.qk_vec32_other = T.alloc_local([self.vec_size], "float32", name="qk_vec32_other")
-        self.mask = T.alloc_local([1], "uint32", name="mask")
+        self.idx = Tx.alloc_local([1], "int32", name="idx")
+        self.cos = Tx.alloc_local([self.vec_size], "float32", name="cos")
+        self.sin = Tx.alloc_local([self.vec_size], "float32", name="sin")
+        self.qk_vec = Tx.alloc_local([self.vec_size], "float16", name="qk_vec")
+        self.qk_vec32 = Tx.alloc_local([self.vec_size], "float32", name="qk_vec32")
+        self.qk_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="qk_vec32_other")
+        self.mask = Tx.alloc_local([1], "uint32", name="mask")
 
 
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, qkv, cos_sin_cache, rope_pos):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tx = T.meta_var(tid % self.bdx)
-            ty = T.meta_var(tid // self.bdx)
+        with Tx.cta():
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tx = Tx.meta_var(tid % self.bdx)
+            ty = Tx.meta_var(tid // self.bdx)
             half_dim = self.head_dim // 2
 
             self._alloc_local()
 
-            with T.thread():
+            with Tx.thread():
                 self.idx[0] = ty
 
                 while (
                     self.idx[0] < self.m_tile * self.h_tile
                     and m_idx * self.m_tile + self.idx[0] // self.h_tile < self.batch_size
                 ):
-                    batch_idx = T.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
-                    head_idx = T.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
-                    stx = T.meta_var(tx * self.vec_size)
-                    cache_stx = T.meta_var(stx % half_dim)
-                    pos = T.meta_var(rope_pos[batch_idx])
+                    batch_idx = Tx.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
+                    head_idx = Tx.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
+                    stx = Tx.meta_var(tx * self.vec_size)
+                    cache_stx = Tx.meta_var(stx % half_dim)
+                    pos = Tx.meta_var(rope_pos[batch_idx])
 
                     if batch_idx < self.batch_size and head_idx < self.qo_heads + self.kv_heads:
                         # load cache
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.cos[kv] = cos_sin_cache[pos, cache_stx + kv]
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.sin[kv] = cos_sin_cache[pos, half_dim + cache_stx + kv]
 
                         # load qk
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             self.qk_vec[kv] = qkv[batch_idx, head_idx, stx + kv]
                         Tx.cast(self.qk_vec32[:], self.qk_vec[:], vec_len=self.vec_size)
 
@@ -83,20 +82,20 @@ class RopeTile(Tile):
                             self.mask[0] = 0xFFFF
                         else:
                             self.mask[0] = 0xFFFFFFFF
-                        for kv in T.serial(self.vec_size):
-                            self.qk_vec32_other[kv] = T.tvm_warp_shuffle_xor(
+                        for kv in Tx.serial(self.vec_size):
+                            self.qk_vec32_other[kv] = Tx.tvm_warp_shuffle_xor(
                                 self.mask[0], self.qk_vec32[kv], self.bdx // 2, 32, 32
                             )
 
                         # compute rope
                         if stx < half_dim:
-                            for kv in T.unroll(self.vec_size):
+                            for kv in Tx.unroll(self.vec_size):
                                 self.qk_vec32[kv] = (
                                     self.qk_vec32[kv] * self.cos[kv]
                                     - self.qk_vec32_other[kv] * self.sin[kv]
                                 )
                         else:
-                            for kv in T.unroll(self.vec_size):
+                            for kv in Tx.unroll(self.vec_size):
                                 self.qk_vec32[kv] = (
                                     self.qk_vec32[kv] * self.cos[kv]
                                     + self.qk_vec32_other[kv] * self.sin[kv]
@@ -104,7 +103,7 @@ class RopeTile(Tile):
 
                         # store qk
                         Tx.cast(self.qk_vec[:], self.qk_vec32[:], vec_len=self.vec_size)
-                        for kv in T.unroll(self.vec_size):
+                        for kv in Tx.unroll(self.vec_size):
                             qkv[batch_idx, head_idx, stx + kv] = self.qk_vec[kv]
 
                     self.idx[0] += self.bdy

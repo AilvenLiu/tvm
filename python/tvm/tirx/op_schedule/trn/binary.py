@@ -22,7 +22,7 @@ import operator
 import functools
 from enum import Enum
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
@@ -262,9 +262,9 @@ def binary_trn(
     dst, src1 = _dst.buffer, _src1.buffer
     src2 = None if CONST is not None else _src2.buffer
 
-    p_var = T.Var("P", "int32")
-    b_var = T.Var("B", "int32")
-    f_var = T.Var("F", "int32")
+    p_var = Tx.Var("P", "int32")
+    b_var = Tx.Var("B", "int32")
+    f_var = Tx.Var("F", "int32")
     p_size = dst.layout.size("P")
     inst_size_limit = op.config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
@@ -275,26 +275,26 @@ def binary_trn(
     opcode = binary_map_ops[binary_op]
 
     # Select appropriate NKI function based on instruction type
-    _func = T.nki.tensortensor if inst_types[0] == InstType.TENSOR_TENSOR else T.nki.tensorscalar
+    _func = Tx.nki.tensortensor if inst_types[0] == InstType.TENSOR_TENSOR else Tx.nki.tensorscalar
     func = lambda *args: (
         _func(*args, reverse[0]) if inst_types[0] == InstType.TENSOR_SCALAR else _func(*args)
     )
 
     # Define the implementation function
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl():
-        for b_loop in T.serial(0, b_extent):
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+        for b_loop in Tx.serial(0, b_extent):
+            with Tx.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
                         inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, b_var: b_loop})
 
                         if inst_gen.make_guard(_dst):
-                            dst_indices = T.meta_var(inst_gen.generate_indices(_dst))
-                            src1_indices = T.meta_var(inst_gen.generate_indices(_src1))
+                            dst_indices = Tx.meta_var(inst_gen.generate_indices(_dst))
+                            src1_indices = Tx.meta_var(inst_gen.generate_indices(_src1))
                             if CONST is None:
-                                src2_indices = T.meta_var(inst_gen.generate_indices(_src2))
-                                T.evaluate(
+                                src2_indices = Tx.meta_var(inst_gen.generate_indices(_src2))
+                                Tx.evaluate(
                                     func(
                                         dst[*dst_indices],
                                         src1[*src1_indices],
@@ -303,7 +303,7 @@ def binary_trn(
                                     )
                                 )
                             else:
-                                T.evaluate(
+                                Tx.evaluate(
                                     func(dst[*dst_indices], src1[*src1_indices], CONST, opcode)
                                 )
 

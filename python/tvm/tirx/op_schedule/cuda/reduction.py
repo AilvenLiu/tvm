@@ -23,7 +23,7 @@ import re
 from typing import Any, Dict, Optional
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.stmt import OpCall
@@ -33,14 +33,14 @@ from ..common import ReduceOpType
 
 reduce_op_table = {
     ReduceOpType.SUM: lambda a, b: a + b,
-    ReduceOpType.MAX: T.max,
-    ReduceOpType.MIN: T.min,
+    ReduceOpType.MAX: Tx.max,
+    ReduceOpType.MIN: Tx.min,
 }
 
 reduce_default_value_table = lambda dtype: {
     ReduceOpType.SUM: 0.0,
-    ReduceOpType.MAX: T.min_value(dtype),
-    ReduceOpType.MIN: T.max_value(dtype),
+    ReduceOpType.MAX: Tx.min_value(dtype),
+    ReduceOpType.MIN: Tx.max_value(dtype),
 }
 
 
@@ -202,38 +202,38 @@ def reduction_cuda_shared_nd_sync_cta_impl(
         return [r + s for r, s in zip(reversed(relative_idx), st)]
 
     # fmt: off
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl():
-        warp_cnt = T.meta_var(T.ceildiv(thread_cnt, threads_per_warp))
-        for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
-            thread_buffer = T.allocate([1], dtype=dtype, scope="local")
-            thread_data = T.Buffer(1, data=thread_buffer, dtype=dtype, scope="local")
-            for step in T.serial(T.ceildiv(spatial_len, warp_cnt)):
+        warp_cnt = Tx.meta_var(Tx.ceildiv(thread_cnt, threads_per_warp))
+        for tid_x in Tx.thread_binding(thread_cnt, "threadIdx.x"):
+            thread_buffer = Tx.allocate([1], dtype=dtype, scope="local")
+            thread_data = Tx.Buffer(1, data=thread_buffer, dtype=dtype, scope="local")
+            for step in Tx.serial(Tx.ceildiv(spatial_len, warp_cnt)):
                 # reduction on dst_indices
-                spa_fused = T.meta_var(step * warp_cnt + T.floordiv(tid_x, threads_per_warp))
+                spa_fused = Tx.meta_var(step * warp_cnt + Tx.floordiv(tid_x, threads_per_warp))
                 if spa_fused < spatial_len:
-                    src_indices_1 = T.meta_var(get_indices(spa_fused, src_st[:spatial_dims], src_extent[:spatial_dims]))
+                    src_indices_1 = Tx.meta_var(get_indices(spa_fused, src_st[:spatial_dims], src_extent[:spatial_dims]))
                     thread_data[0] = init_value
                     # load from src
-                    for t in T.serial(T.ceildiv(reduction_len, threads_per_warp)):
-                        red_fused = T.meta_var(t * threads_per_warp + tid_x % threads_per_warp)
+                    for t in Tx.serial(Tx.ceildiv(reduction_len, threads_per_warp)):
+                        red_fused = Tx.meta_var(t * threads_per_warp + tid_x % threads_per_warp)
                         if red_fused < reduction_len:
-                            src_indices_2 = T.meta_var(get_indices(red_fused, src_st[spatial_dims:], src_extent[spatial_dims:]))
+                            src_indices_2 = Tx.meta_var(get_indices(red_fused, src_st[spatial_dims:], src_extent[spatial_dims:]))
                             thread_data[0] = op_func(thread_data[0], src[*(src_indices_1 + src_indices_2)])
                     # warp reduce
-                    mask = T.tvm_warp_activemask()
-                    thread_data[0] = op_func(thread_data[0], T.tvm_warp_shuffle_xor(mask, thread_data[0], 1, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], T.tvm_warp_shuffle_xor(mask, thread_data[0], 2, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], T.tvm_warp_shuffle_xor(mask, thread_data[0], 4, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], T.tvm_warp_shuffle_xor(mask, thread_data[0], 8, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], T.tvm_warp_shuffle_xor(mask, thread_data[0], 16, 32, 32))
+                    mask = Tx.tvm_warp_activemask()
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 1, 32, 32))
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 2, 32, 32))
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 4, 32, 32))
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 8, 32, 32))
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 16, 32, 32))
 
                     # write result to dst_indices
                     if tid_x % threads_per_warp == 0:
-                        dst_indices = T.meta_var(get_indices(spa_fused, dst_st, dst_extent))
-                        dst[*dst_indices] = T.if_then_else(T.bool(accum), op_func(dst[*dst_indices], thread_data[0]), thread_data[0])
+                        dst_indices = Tx.meta_var(get_indices(spa_fused, dst_st, dst_extent))
+                        dst[*dst_indices] = Tx.if_then_else(Tx.bool(accum), op_func(dst[*dst_indices], thread_data[0]), thread_data[0])
 
-        T.tvm_storage_sync("shared")
+        Tx.tvm_storage_sync("shared")
     # fmt: on
 
     return impl
@@ -279,12 +279,12 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
     remainder_base = num_full_chunks * 8
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
-            local_sum = T.alloc_buffer([8], dtype, scope="local")
+        with Tx.thread():
+            local_sum = Tx.alloc_buffer([8], dtype, scope="local")
             # First pass: copy first 8 elements (with optional accumulator)
-            for i in T.unroll(8):
+            for i in Tx.unroll(8):
                 if accum and i == 0:
                     # Include accumulator in first element
                     local_sum[i] = src[src_base + i] + dst[*dst_st]
@@ -292,35 +292,35 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
                     local_sum[i] = src[src_base + i]
 
             # Process remaining full chunks of 8
-            for outer in T.serial(num_full_chunks - 1):
-                for j in T.unroll(4):
-                    T.ptx.add_packed_f32x2(
+            for outer in Tx.serial(num_full_chunks - 1):
+                for j in Tx.unroll(4):
+                    Tx.ptx.add_packed_f32x2(
                         local_sum[2 * j],
                         local_sum[2 * j + 1],
                         src[src_base + 8 * (outer + 1) + 2 * j],
                         src[src_base + 8 * (outer + 1) + 2 * j + 1],
-                        T.address_of(local_sum[2 * j]),
+                        Tx.address_of(local_sum[2 * j]),
                     )
 
             # Handle remainder elements (0 to 7)
-            for i in T.serial(remainder):
+            for i in Tx.serial(remainder):
                 local_sum[0] = local_sum[0] + src[src_base + remainder_base + i]
 
             # Final packed add sum: 8 -> 4 -> 2 -> 1
-            T.ptx.add_packed_f32x2(
+            Tx.ptx.add_packed_f32x2(
                 local_sum[0], local_sum[1],
                 local_sum[2], local_sum[3],
-                T.address_of(local_sum[0]),
+                Tx.address_of(local_sum[0]),
             )
-            T.ptx.add_packed_f32x2(
+            Tx.ptx.add_packed_f32x2(
                 local_sum[4], local_sum[5],
                 local_sum[6], local_sum[7],
-                T.address_of(local_sum[4]),
+                Tx.address_of(local_sum[4]),
             )
-            T.ptx.add_packed_f32x2(
+            Tx.ptx.add_packed_f32x2(
                 local_sum[0], local_sum[1],
                 local_sum[4], local_sum[5],
-                T.address_of(local_sum[0]),
+                Tx.address_of(local_sum[0]),
             )
             dst[*dst_st] = local_sum[0] + local_sum[1]
     # fmt: on
@@ -362,7 +362,7 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
     reduction_len = functools.reduce(operator.mul, src_extent, 1)
 
     op_func = reduce_op_table[reduce_op]
-    reduce3_func = T.ptx.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else T.ptx.reduce3_min_f32
+    reduce3_func = Tx.ptx.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else Tx.ptx.reduce3_min_f32
 
     src_base = src_st[0]
     num_full_chunks = reduction_len // 8
@@ -370,12 +370,12 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
     remainder_base = num_full_chunks * 8
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
-            temp = T.alloc_buffer([4], dtype, scope="local")
+        with Tx.thread():
+            temp = Tx.alloc_buffer([4], dtype, scope="local")
             # First pass: process first 8 elements into 4 temps
-            for i in T.unroll(4):
+            for i in Tx.unroll(4):
                 if accum and i == 0:
                     # Include accumulator in first temp
                     temp[i] = reduce3_func(src[src_base + 2 * i], src[src_base + 2 * i + 1], dst[*dst_st])
@@ -383,8 +383,8 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
                     temp[i] = op_func(src[src_base + 2 * i], src[src_base + 2 * i + 1])
 
             # Process remaining full chunks of 8
-            for outer in T.serial(num_full_chunks - 1):
-                for i in T.unroll(4):
+            for outer in Tx.serial(num_full_chunks - 1):
+                for i in Tx.unroll(4):
                     temp[i] = reduce3_func(
                         temp[i],
                         src[src_base + 8 * (outer + 1) + 2 * i],
@@ -392,7 +392,7 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
                     )
 
             # Process remainder elements (0 to 7 elements)
-            for i in T.serial(remainder):
+            for i in Tx.serial(remainder):
                 temp[0] = op_func(temp[0], src[src_base + remainder_base + i])
 
             # Final merge: combine 4 temps into result
@@ -468,13 +468,13 @@ def reduction_cuda_local_thread_impl(
         return [r + s for r, s in zip(reversed(relative_idx), st)]
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl_simple():
-        with T.thread():
+        with Tx.thread():
             if not accum:
                 dst[*dst_st] = init_value
-            for i in T.serial(reduction_len):
-                src_indices = T.meta_var(get_src_indices(i, src_st, src_extent))
+            for i in Tx.serial(reduction_len):
+                src_indices = Tx.meta_var(get_src_indices(i, src_st, src_extent))
                 dst[*dst_st] = op_func(dst[*dst_st], src[*src_indices])
     # fmt: on
 
@@ -548,13 +548,13 @@ def reduction_cuda_warp_logical_view_impl(
     if src.layout.is_swizzle() or dst.layout.is_swizzle():
         fail("swizzle layout unsupported for local reduction")
 
-    atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+    atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
+    warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-    red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+    red_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
-    shuffle = T.bool(config.get("thread_reduce", False))
+    shuffle = Tx.bool(config.get("thread_reduce", False))
 
     # get reduce op
     op_func = reduce_op_table.get(reduce_op)
@@ -579,17 +579,17 @@ def reduction_cuda_warp_logical_view_impl(
         is_same_buffer = src.same_as(dst)
 
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl_shuffle_only():
-            with T.thread():
+            with Tx.thread():
                 src_local = src.storage(*local_shape)
                 dst_local = dst.storage(*local_shape)
-                for i in T.serial(num_rows):
+                for i in Tx.serial(num_rows):
                     if not is_same_buffer:
                         dst_local[i] = src_local[i]
-                    row_var = T.meta_var(dst_local[i])
-                    dst_local[i] = op_func(row_var, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
-                    dst_local[i] = op_func(row_var, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
+                    row_var = Tx.meta_var(dst_local[i])
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
         # fmt: on
 
         return impl_shuffle_only
@@ -607,22 +607,22 @@ def reduction_cuda_warp_logical_view_impl(
     dst_local_shape = (num_rows,)
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
+        with Tx.thread():
             src_local = src.storage(*src_local_shape)
             dst_local = dst.storage(*dst_local_shape)
-            for i in T.serial(num_rows):
+            for i in Tx.serial(num_rows):
                 # reduce within threads
                 if not accum:
                     dst_local[i] = init_value
-                row_var = T.meta_var(dst_local[i])
-                for j in T.serial(src_local_shape[1]):
+                row_var = Tx.meta_var(dst_local[i])
+                for j in Tx.serial(src_local_shape[1]):
                     dst_local[i] = op_func(row_var, src_local[i, j])
                 # if shuffle is True, perform shuffling among threads of 4
                 if shuffle:
-                    dst_local[i] = op_func(row_var, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
-                    dst_local[i] = op_func(row_var, T.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
     # fmt: on
 
     return impl

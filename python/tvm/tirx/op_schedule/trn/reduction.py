@@ -22,7 +22,7 @@ import operator
 from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirx.op_schedule import ScheduleContext, fail
 from tvm.tir.stmt import OpCall
@@ -63,7 +63,7 @@ def generate_intermediate_buffer(
         assert (
             sctx.alloc_only
         ), "Partial reduce buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
-        intermediate_buffer = T.buffer(
+        intermediate_buffer = Tx.buffer(
             intermediate_shape,
             dtype=dst_buffer_region.buffer.dtype,
             scope="trn.sbuf",
@@ -127,10 +127,10 @@ def reduction_trn(
 
     # Get partition size and extents
     p_size = src.layout.size("P")
-    f_var = T.Var("F", "int32")
-    p_var = T.Var("P", "int32")
-    spatial_b_var = T.Var("sB", "int32")
-    reduction_b_var = T.Var("rB", "int32")
+    f_var = Tx.Var("F", "int32")
+    p_var = Tx.Var("P", "int32")
+    spatial_b_var = Tx.Var("sB", "int32")
+    reduction_b_var = Tx.Var("rB", "int32")
     inst_gen.bind_inst_iter(src_buffer_region, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(src_buffer_region, p_var, p_size, 1, False)
     reduction_b_extent = inst_gen.fill_in_block_dim(src_buffer_region, reduction_b_var, axes)
@@ -150,39 +150,39 @@ def reduction_trn(
     # fmt: off
     # Single-stage reduction implementation
     if reduction_b_extent == 1:
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def impl():
-            for b_loop in T.serial(0, spatial_b_extent):
-                with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+            for b_loop in Tx.serial(0, spatial_b_extent):
+                with Tx.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
                             inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
                             if inst_gen.make_guard(src_buffer_region):
-                                src_indices = T.meta_var(inst_gen.generate_indices(src_buffer_region))
-                                dst_indices = T.meta_var(inst_gen.generate_indices(dst_buffer_region))
-                                T.evaluate(T.nki.tensorreduce(dst[*dst_indices], src[*src_indices], opcode, negate, -1))
+                                src_indices = Tx.meta_var(inst_gen.generate_indices(src_buffer_region))
+                                dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_buffer_region))
+                                Tx.evaluate(Tx.nki.tensorreduce(dst[*dst_indices], src[*src_indices], opcode, negate, -1))
         return impl
     # Two-stage reduction implementation
     else:
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def two_stage_reduction():
-            for b_loop in T.serial(0, spatial_b_extent):
-                for reduction_b_loop in T.serial(0, reduction_b_extent):
-                    with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+            for b_loop in Tx.serial(0, spatial_b_extent):
+                for reduction_b_loop in Tx.serial(0, reduction_b_extent):
+                    with Tx.attr(0, "tensorized_nki_instruction", 1):
+                        for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
+                            for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
                                 inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
                                 if inst_gen.make_guard(src_buffer_region):
-                                    src_indices = T.meta_var(inst_gen.generate_indices(src_buffer_region))
-                                    T.evaluate(T.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
-                with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                                    src_indices = Tx.meta_var(inst_gen.generate_indices(src_buffer_region))
+                                    Tx.evaluate(Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
+                with Tx.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in Tx.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
                             inst_gen.set_bind_map(src_buffer_region, {p_var: p_loop, f_var: 0, spatial_b_var: b_loop, reduction_b_var: f_loop})
                             inst_gen.set_bind_map(dst_buffer_region, {p_var: p_loop, spatial_b_var: b_loop})
                             if inst_gen.make_guard(src_buffer_region):
-                                dst_indices = T.meta_var(inst_gen.generate_indices(dst_buffer_region))
-                                T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
+                                dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_buffer_region))
+                                Tx.evaluate(Tx.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
         return two_stage_reduction
     # fmt: on
 

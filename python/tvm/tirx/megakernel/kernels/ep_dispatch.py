@@ -1,4 +1,4 @@
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile, SmemManager
 from tvm.tirx.megakernel.utils.config import KernelConfig
@@ -15,14 +15,14 @@ class EPDispatchPrecomputeTile(Tile):
 
     def __init__(
         self,
-        num_tokens: T.int32,
-        total_num_experts: T.int32,
-        topk: T.int32,
-        hidden_dim: T.int32,
+        num_tokens: Tx.int32,
+        total_num_experts: Tx.int32,
+        topk: Tx.int32,
+        hidden_dim: Tx.int32,
         in_dtype,
         out_dtype,
-        world_size: T.int32,
-        n_dp_groups: T.int32,
+        world_size: Tx.int32,
+        n_dp_groups: Tx.int32,
     ):
         super().__init__()
         self.num_tokens = num_tokens
@@ -42,15 +42,15 @@ class EPDispatchPrecomputeTile(Tile):
 
     def _alloc_local(self):
         # alloc local memory
-        self.count = T.alloc_local([1], "uint32", name="count")
+        self.count = Tx.alloc_local([1], "uint32", name="count")
 
-    @T.macro
+    @Tx.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
         self._alloc_local()
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def run(
         self,
 
@@ -62,45 +62,45 @@ class EPDispatchPrecomputeTile(Tile):
         target_wait, # (local_num_experts, world_size)
         rank,
     ):
-        with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+        with Tx.cta():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # TODO: tune number of CTAs for precompute based on profiling results
             # for now, each warp in a CTA is responsible for one expert; total CTA: 16
-            with T.thread():
+            with Tx.thread():
                 self.smem_manager.wait_all("cta")
 
-                dst_expert = T.meta_var(T.uint32(dst_expert_st + warp_id))
+                dst_expert = Tx.meta_var(Tx.uint32(dst_expert_st + warp_id))
                 if dst_expert < self.total_num_experts:
                     # load from global to shared
                     vec_size = 4
-                    row_idx = T.meta_var(T.int32(tid // 2))
-                    col_idx = T.meta_var(T.int32((tid % 2) * 4))
+                    row_idx = Tx.meta_var(Tx.int32(tid // 2))
+                    col_idx = Tx.meta_var(Tx.int32((tid % 2) * 4))
                     if row_idx < self.num_tokens:
-                        for vec in T.vectorized(vec_size):
+                        for vec in Tx.vectorized(vec_size):
                             self.smem_buf[tid * vec_size + vec] = route_experts[row_idx, col_idx + vec]
-                    T.tvm_storage_sync("shared")
+                    Tx.tvm_storage_sync("shared")
 
                     # thread count
                     self.count[0] = 0
-                    for k in T.serial(T.ceildiv(self.num_tokens * self.topk, 32)):
-                        idx = T.meta_var(k * 32 + lane_id)
+                    for k in Tx.serial(Tx.ceildiv(self.num_tokens * self.topk, 32)):
+                        idx = Tx.meta_var(k * 32 + lane_id)
                         if idx < self.num_tokens * self.topk:
                             if self.smem_buf[idx] == dst_expert:
                                 self.count[0] += 1
 
                     # warp scan
-                    for kr in T.unroll(5):
-                        self.count[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, self.count[0], 16 >> kr, 32, 32)
+                    for kr in Tx.unroll(5):
+                        self.count[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.count[0], 16 >> kr, 32, 32)
 
                     # a single thread in warp signal the count
-                    dst_local_expert = T.meta_var(T.int32(dst_expert % self.local_num_experts))
-                    dst_rank = T.meta_var(T.int32(dst_expert // self.local_num_experts))
+                    dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % self.local_num_experts))
+                    dst_rank = Tx.meta_var(Tx.int32(dst_expert // self.local_num_experts))
                     if lane_id == 0:
-                        T.nvshmem.signal_op(
+                        Tx.nvshmem.signal_op(
                             sig_addr=target_wait.access_ptr("w", offset=target_wait.elem_offset_of([dst_local_expert, rank])),
                             signal=self.count[0] + 1,
                             sig_op="set",
@@ -123,14 +123,14 @@ class EPDispatchSendTile(Tile):
 
     def __init__(
         self,
-        num_tokens: T.int32,
-        total_num_experts: T.int32,
-        topk: T.int32,
-        hidden_dim: T.int32,
+        num_tokens: Tx.int32,
+        total_num_experts: Tx.int32,
+        topk: Tx.int32,
+        hidden_dim: Tx.int32,
         in_dtype,
         out_dtype,
-        world_size: T.int32,
-        n_dp_groups: T.int32,
+        world_size: Tx.int32,
+        n_dp_groups: Tx.int32,
     ):
         super().__init__()
         self.num_tokens = num_tokens
@@ -151,14 +151,14 @@ class EPDispatchSendTile(Tile):
 
     def _alloc_local(self):
         # alloc local memory
-        self.dst_index = T.alloc_local([1], "int32", name="dst_index")
+        self.dst_index = Tx.alloc_local([1], "int32", name="dst_index")
 
-    @T.macro
+    @Tx.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def run(
         self,
 
@@ -174,22 +174,22 @@ class EPDispatchSendTile(Tile):
         dst_token_idx, # (total_num_experts,), the token_idx that the CTA is sending to in recv_tokens
         rank,
     ):
-        with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+        with Tx.cta():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # each warp sends to one dest expert
             if warp_id < self.topk:
                 dst_expert = route_experts[src_token_idx, warp_id]
-                dst_local_expert = T.meta_var(T.int32(dst_expert % self.local_num_experts))
-                dst_rank = T.meta_var(T.int32(dst_expert // self.local_num_experts))
+                dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % self.local_num_experts))
+                dst_rank = Tx.meta_var(Tx.int32(dst_expert // self.local_num_experts))
                 if lane_id == 0:
-                    self.dst_index[0] = T.cuda.atomic_add(dst_token_idx.access_ptr("rw", offset=dst_expert), 1)
+                    self.dst_index[0] = Tx.cuda.atomic_add(dst_token_idx.access_ptr("rw", offset=dst_expert), 1)
                     dst_token_indices[src_token_idx, warp_id] = self.dst_index[0]
-                self.dst_index[0] = T.tvm_warp_shuffle(0xffffffff, self.dst_index[0], 0, 32, 32)
-                T.nvshmem.putmem_signal_nbi.warp(
+                self.dst_index[0] = Tx.tvm_warp_shuffle(0xffffffff, self.dst_index[0], 0, 32, 32)
+                Tx.nvshmem.putmem_signal_nbi.warp(
                     dst=recv_tokens.access_ptr("w", offset=recv_tokens.elem_offset_of([dst_local_expert, rank, self.dst_index[0], 0])),
                     src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([src_token_idx, 0])),
                     nelems=self.hidden_dim * self.nbytes,
@@ -212,14 +212,14 @@ class EPDispatchRecvTile(Tile):
 
     def __init__(
         self,
-        num_tokens: T.int32,
-        total_num_experts: T.int32,
-        topk: T.int32,
-        hidden_dim: T.int32,
+        num_tokens: Tx.int32,
+        total_num_experts: Tx.int32,
+        topk: Tx.int32,
+        hidden_dim: Tx.int32,
         in_dtype,
         out_dtype,
-        world_size: T.int32,
-        n_dp_groups: T.int32,
+        world_size: Tx.int32,
+        n_dp_groups: Tx.int32,
     ):
         super().__init__()
         self.num_tokens = num_tokens
@@ -242,12 +242,12 @@ class EPDispatchRecvTile(Tile):
         # alloc local memory
         pass
 
-    @T.macro
+    @Tx.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def run(
         self,
 
@@ -261,21 +261,21 @@ class EPDispatchRecvTile(Tile):
         actual_wait, # (local_num_experts, world_size)
         rank,
     ):
-        with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+        with Tx.cta():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # TODO: can adjust the granularity of tile when fusing with GEMM
             # for now, each CTA is responsible for one expert and one source GPU
-            T.nvshmem.wait_until(
+            Tx.nvshmem.wait_until(
                 ivar=target_wait.access_ptr("r", offset=target_wait.elem_offset_of([local_expert_idx, src_rank_idx])),
                 cmp="ne",
                 cmp_value=0,
             )
             recv_num = target_wait[local_expert_idx, src_rank_idx] - 1
-            T.nvshmem.wait_until(
+            Tx.nvshmem.wait_until(
                 ivar=actual_wait.access_ptr("r", offset=actual_wait.elem_offset_of([local_expert_idx, src_rank_idx])),
                 cmp="eq",
                 cmp_value=recv_num,

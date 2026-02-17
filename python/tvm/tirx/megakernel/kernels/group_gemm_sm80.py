@@ -1,5 +1,4 @@
 import tvm
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
 
@@ -9,9 +8,9 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 def int_cell(value):
-    buf = T.local_cell("int32")
+    buf = Tx.local_cell("int32")
     if value is not None:
-        T.buffer_store(buf.buffer, value, 0)
+        Tx.buffer_store(buf.buffer, value, 0)
     return buf
 
 def get_permuted_offset(stride, i, j):
@@ -42,24 +41,24 @@ __device__ __forceinline__ float {func_name}(half x) {{
 return __half2float(x);
 }}
 """
-    return T.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+    return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 # fmt: off
-@T.macro
+@Tx.macro
 def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
-    with T.thread():
-        C_mma = T.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
-        A_mma = T.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
-        B_mma = T.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
+    with Tx.thread():
+        C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
+        A_mma = Tx.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
+        B_mma = Tx.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
         if init:
-            T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+            Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                     C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]))
-            T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+            Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                     C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]))
         else:
-            T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+            Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                     C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]), C_mma.ptr_to([0]))
-            T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
+            Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                     C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]), C_mma.ptr_to([4]))
 # fmt: on
 
@@ -136,9 +135,9 @@ class GroupGEMMTile(Tile):
         smem_manager.pool_allocator.move_base_to(start_offset)
         C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
 
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, A, B, C, topk_weights, topk_ids, sorted_tok_ids, expert_ids, num_tokens_post_pad):
-        with T.cta():
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-            lane_id = T.thread_id([32], parent="warp")
+        with Tx.cta():
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")

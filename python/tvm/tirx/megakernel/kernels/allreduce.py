@@ -1,4 +1,4 @@
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile, KernelConfig
 
@@ -32,16 +32,16 @@ class AllreduceTile(Tile):
         super().__init__()
         self.world_size = world_size
 
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, input, output):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            rank = T.nvshmem.my_pe()
+        with Tx.cta():
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            rank = Tx.nvshmem.my_pe()
             # restrict tile size so that this will not be iterated over
             if tid < self.M_TILE * self.N_TILE // 8 and (m_idx * self.M_TILE +  (tid // (self.N_TILE // 8))) < input.shape[0]:
-                m_start = T.meta_var(m_idx * self.M_TILE +  (tid // (self.N_TILE // 8)))
-                n_start = T.meta_var(n_idx * self.N_TILE * self.world_size + rank * self.N_TILE + tid % (self.N_TILE // 8) * 8)
-                T.cuda.func_call(
+                m_start = Tx.meta_var(m_idx * self.M_TILE +  (tid // (self.N_TILE // 8)))
+                n_start = Tx.meta_var(n_idx * self.N_TILE * self.world_size + rank * self.N_TILE + tid % (self.N_TILE // 8) * 8)
+                Tx.cuda.func_call(
                     "ld_reduce_8_fp16",
                     input.ptr_to([m_start, n_start]),
                     output.ptr_to([m_start, n_start]),

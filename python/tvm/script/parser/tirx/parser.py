@@ -450,7 +450,9 @@ def visit_with(self: Parser, node: doc.With) -> None:
         stack.enter_context(self.var_table.with_frame())
         for item in node.items:
             frame = self.eval_expr(item.context_expr)
-            if not isinstance(frame, Frame):
+            if not isinstance(frame, Frame) and not (
+                hasattr(frame, "__enter__") and hasattr(frame, "__exit__")
+            ):
                 self.report_error(
                     item.context_expr,
                     "Invalid context expression in the with-statement.",
@@ -606,6 +608,11 @@ def visit_expr_stmt(self: Parser, node: doc.Expr) -> None:
     elif isinstance(res, Frame):
         res.add_callback(partial(res.__exit__, None, None, None))
         res.__enter__()
+    elif hasattr(res, "frames") and hasattr(res, "__enter__"):
+        # _FrameScope from T.attr({...}) — enter each inner frame for concise scoping
+        for f in res.frames:
+            f.add_callback(partial(f.__exit__, None, None, None))
+            f.__enter__()
     elif isinstance(res, Var):
         # Standalone Var expression (e.g. from T.bind(value, var=v)) --
         # the Bind statement was already emitted to the parent frame by the FFI call,

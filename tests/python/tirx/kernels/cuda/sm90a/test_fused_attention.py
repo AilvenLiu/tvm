@@ -525,7 +525,7 @@ def test_fp16_fused_attn():
 
                     P_reg_fp16 = Tx.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
                     with Tx.cta():
-                        Tx.scope_attr({"tirx.scope_partition": True})
+                        Tx.attr({"tirx.scope_partition": True})
                         with Tx.warpgroup()[0:1]:
                             ############################################################################## PRODUCER
                             # deallocate registers

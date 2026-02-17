@@ -24,7 +24,7 @@ from pathlib import Path
 
 import tvm_ffi
 import tvm
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import export_to_perfetto_trace
 
 from tvm.tirx.megakernel.utils.utils import ceildiv, pack_into_32bit
@@ -269,7 +269,7 @@ def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
         else:
             return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
     else:
-        return T.if_then_else(batch_size * topk < num_experts, batch_size * topk * moe_blk_m, (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m)
+        return Tx.if_then_else(batch_size * topk < num_experts, batch_size * topk * moe_blk_m, (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m)
 
 
 def get_max_blocks_padded_relaxed(batch_size, topk, num_experts, moe_blk_m):

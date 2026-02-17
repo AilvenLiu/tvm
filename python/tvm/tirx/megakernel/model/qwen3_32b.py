@@ -2,7 +2,7 @@ from typing import Literal
 
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
 
@@ -85,116 +85,116 @@ def get_qwen3_megakernel_relax_mod(
 
         @I.ir_module
         class Module:
-            @T.prim_func
-            def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
+            @Tx.prim_func
+            def rms_norm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
                 pass
 
-            @T.prim_func(private=True)
-            def cast(var_lv4: T.handle, var_compute: T.handle):
-                T.func_attr({"op_pattern": 0, "tir.noalias": True})
-                batch_size = T.int64()
-                lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)), "float16")
-                compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)))
-                # with T.sblock("root"):
-                for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)):
-                    with T.sblock("compute"):
-                        v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
-                        T.reads(lv4[v_i0, v_i1, v_i2])
-                        T.writes(compute[v_i0, v_i1, v_i2])
-                        compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+            @Tx.prim_func(private=True)
+            def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
+                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = Tx.int64()
+                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))
+                # with Tx.sblock("root"):
+                for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)):
+                    with Tx.sblock("compute"):
+                        v_i0, v_i1, v_i2 = Tx.axis.remap("SSS", [i0, i1, i2])
+                        Tx.reads(lv4[v_i0, v_i1, v_i2])
+                        Tx.writes(compute[v_i0, v_i1, v_i2])
+                        compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
                         
-            @T.prim_func(private=True)
-            def cast_res(var_res: T.handle, var_compute: T.handle):
-                T.func_attr({"op_pattern": 0, "tir.noalias": True})
-                batch_size = T.int64()
-                res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
-                compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
-                # with T.sblock("root"):
-                for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
-                    with T.sblock("compute"):
-                        v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
-                        T.reads(res[v_i0, v_i1])
-                        T.writes(compute[v_i0, v_i1])
-                        compute[v_i0, v_i1] = T.Cast("float32", res[v_i0, v_i1])
+            @Tx.prim_func(private=True)
+            def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
+                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = Tx.int64()
+                res = Tx.match_buffer(var_res, (batch_size, Tx.int64(mk.HIDDEN_SIZE)), "float16")
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(mk.HIDDEN_SIZE)))
+                # with Tx.sblock("root"):
+                for i0, i1 in Tx.grid(batch_size, Tx.int64(mk.HIDDEN_SIZE)):
+                    with Tx.sblock("compute"):
+                        v_i0, v_i1 = Tx.axis.remap("SS", [i0, i1])
+                        Tx.reads(res[v_i0, v_i1])
+                        Tx.writes(compute[v_i0, v_i1])
+                        compute[v_i0, v_i1] = Tx.Cast("float32", res[v_i0, v_i1])
 
-            @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
+            @Tx.prim_func(private=True)
+            def hgemm(A_ptr: Tx.handle, B_ptr: Tx.handle, out_ptr: Tx.handle):
                 pass
 
-            @T.prim_func(private=True)
-            def cos_sin_cache(cos_sin_cache: T.handle):
+            @Tx.prim_func(private=True)
+            def cos_sin_cache(cos_sin_cache: Tx.handle):
                 pass
 
             @R.function
             def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
-                max_seq_len = T.int64()
+                max_seq_len = Tx.int64()
                 cls = Module
                 with R.dataflow():
                     cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )
                     R.output(cache)
                 return cache
 
-            @T.prim_func(private=True)
+            @Tx.prim_func(private=True)
             def layer_kernel(
                 # input and output
-                hidden_state_ptr: T.handle, # input: read-only
-                residual_ptr: T.handle, # input & output: inplace update
-                output_ptr: T.handle, # output
+                hidden_state_ptr: Tx.handle, # input: read-only
+                residual_ptr: Tx.handle, # input & output: inplace update
+                output_ptr: Tx.handle, # output
 
                 # weight
-                qkv_proj_weight_ptr: T.handle, # read-only
-                o_proj_weight_ptr: T.handle, # read-only
-                q_rms_weight_ptr: T.handle, # read-only
-                k_rms_weight_ptr: T.handle, # read-only
-                gate_up_weight_ptr: T.handle, # read-only
-                down_weight_ptr: T.handle, # read-only
-                attn_add_rms_weight_ptr: T.handle, # read-only
-                mlp_add_rms_weight_ptr: T.handle, # read-only
+                qkv_proj_weight_ptr: Tx.handle, # read-only
+                o_proj_weight_ptr: Tx.handle, # read-only
+                q_rms_weight_ptr: Tx.handle, # read-only
+                k_rms_weight_ptr: Tx.handle, # read-only
+                gate_up_weight_ptr: Tx.handle, # read-only
+                down_weight_ptr: Tx.handle, # read-only
+                attn_add_rms_weight_ptr: Tx.handle, # read-only
+                mlp_add_rms_weight_ptr: Tx.handle, # read-only
 
                 # page cache, cos_sin cache and plan info
-                cos_sin_cache_ptr: T.handle, # read-only
-                rope_pos_ptr: T.handle, # read-only
-                kv_cache_ptr: T.handle, # inplace update
-                append_pos_ptr: T.handle, # read-only
-                q_indptr_ptr : T.handle, # read-only
-                kv_indptr_ptr : T.handle, # read-only
-                partial_indptr_ptr : T.handle, # read-only
-                kv_indices_ptr : T.handle, # read-only
-                q_len_ptr : T.handle, # read-only
-                kv_len_ptr : T.handle, # read-only
-                q_start_ptr : T.handle, # read-only
-                kv_start_ptr : T.handle, # read-only
-                kv_end_ptr : T.handle, # read-only
-                kv_head_idx_ptr : T.handle, # read-only
-                work_indptr_ptr : T.handle, # read-only
-                len_kv_chunk_ptr : T.handle, # read-only
-                num_qo_len_ptr: T.handle, # read-only
-                merge_indptr_ptr: T.handle, # read-only
-                merge_o_indices_ptr: T.handle, # read-only
-                inverse_indptr_ptr: T.handle, # read-only
-                inverse_indices_ptr: T.handle, # read-only
+                cos_sin_cache_ptr: Tx.handle, # read-only
+                rope_pos_ptr: Tx.handle, # read-only
+                kv_cache_ptr: Tx.handle, # inplace update
+                append_pos_ptr: Tx.handle, # read-only
+                q_indptr_ptr : Tx.handle, # read-only
+                kv_indptr_ptr : Tx.handle, # read-only
+                partial_indptr_ptr : Tx.handle, # read-only
+                kv_indices_ptr : Tx.handle, # read-only
+                q_len_ptr : Tx.handle, # read-only
+                kv_len_ptr : Tx.handle, # read-only
+                q_start_ptr : Tx.handle, # read-only
+                kv_start_ptr : Tx.handle, # read-only
+                kv_end_ptr : Tx.handle, # read-only
+                kv_head_idx_ptr : Tx.handle, # read-only
+                work_indptr_ptr : Tx.handle, # read-only
+                len_kv_chunk_ptr : Tx.handle, # read-only
+                num_qo_len_ptr: Tx.handle, # read-only
+                merge_indptr_ptr: Tx.handle, # read-only
+                merge_o_indices_ptr: Tx.handle, # read-only
+                inverse_indptr_ptr: Tx.handle, # read-only
+                inverse_indices_ptr: Tx.handle, # read-only
 
                 # intermediate buffer
-                partital_qkv_ptr: T.handle, # intermediate
-                qkv_ptr: T.handle,  # intermediate
-                o_ptr: T.handle, # intermediate
-                o_partial_attn_ptr: T.handle, # intermediate
-                lse_partial_attn_ptr: T.handle, # intermediate
-                partial_o_ptr: T.handle, # intermediate
-                before_o_allreduce_ptr: T.handle, # intermediate
-                hidden_state_attn_mlp_ptr: T.handle, # intermediate
-                partial_out_gate_up_proj_ptr: T.handle, # intermediate
-                out_gate_up_proj_ptr: T.handle, # intermediate
-                out_silu_multiply_ptr: T.handle, # intermediate
-                partial_sum_down_proj_ptr: T.handle, # intermediate
-                before_down_proj_allreduce_ptr: T.handle, # intermediate
+                partital_qkv_ptr: Tx.handle, # intermediate
+                qkv_ptr: Tx.handle,  # intermediate
+                o_ptr: Tx.handle, # intermediate
+                o_partial_attn_ptr: Tx.handle, # intermediate
+                lse_partial_attn_ptr: Tx.handle, # intermediate
+                partial_o_ptr: Tx.handle, # intermediate
+                before_o_allreduce_ptr: Tx.handle, # intermediate
+                hidden_state_attn_mlp_ptr: Tx.handle, # intermediate
+                partial_out_gate_up_proj_ptr: Tx.handle, # intermediate
+                out_gate_up_proj_ptr: Tx.handle, # intermediate
+                out_silu_multiply_ptr: Tx.handle, # intermediate
+                partial_sum_down_proj_ptr: Tx.handle, # intermediate
+                before_down_proj_allreduce_ptr: Tx.handle, # intermediate
 
                 # event tensor
-                etensor_workspace_ptr: T.handle,
+                etensor_workspace_ptr: Tx.handle,
 
                 # execution queue
-                exec_queue_ptr: T.handle,
-                profiler_buffer: T.Buffer((mk.PROFILER_BUFFER_SIZE,), "uint64")
+                exec_queue_ptr: Tx.handle,
+                profiler_buffer: Tx.Buffer((mk.PROFILER_BUFFER_SIZE,), "uint64")
             ):
                 pass
 
@@ -220,10 +220,10 @@ def get_qwen3_megakernel_relax_mod(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                 ),
             ):
-                batch_size = T.int64()
-                total_page_num = T.int64()
-                max_page_num = T.int64()
-                page_size = T.int64()
+                batch_size = Tx.int64()
+                total_page_num = Tx.int64()
+                max_page_num = Tx.int64()
+                page_size = Tx.int64()
 
                 cls = Module
                 with R.dataflow():
@@ -523,118 +523,118 @@ def get_qwen3_megakernel_relax_mod(
 
         @I.ir_module
         class Module:
-            @T.prim_func
-            def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
+            @Tx.prim_func
+            def rms_norm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
                 pass
 
-            @T.prim_func(private=True)
-            def cast(var_lv4: T.handle, var_compute: T.handle):
-                T.func_attr({"op_pattern": 0, "tir.noalias": True})
-                batch_size = T.int64()
-                lv4 = T.match_buffer(var_lv4, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)), "float16")
-                compute = T.match_buffer(var_compute, (batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)))
-                # with T.sblock("root"):
-                for i0, i1, i2 in T.grid(batch_size, T.int64(1), T.int64(mk.VOCAB_SIZE)):
-                    with T.sblock("compute"):
-                        v_i0, v_i1, v_i2 = T.axis.remap("SSS", [i0, i1, i2])
-                        T.reads(lv4[v_i0, v_i1, v_i2])
-                        T.writes(compute[v_i0, v_i1, v_i2])
-                        compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+            @Tx.prim_func(private=True)
+            def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
+                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = Tx.int64()
+                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))
+                # with Tx.sblock("root"):
+                for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)):
+                    with Tx.sblock("compute"):
+                        v_i0, v_i1, v_i2 = Tx.axis.remap("SSS", [i0, i1, i2])
+                        Tx.reads(lv4[v_i0, v_i1, v_i2])
+                        Tx.writes(compute[v_i0, v_i1, v_i2])
+                        compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
                         
-            @T.prim_func(private=True)
-            def cast_res(var_res: T.handle, var_compute: T.handle):
-                T.func_attr({"op_pattern": 0, "tir.noalias": True})
-                batch_size = T.int64()
-                res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
-                compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
-                # with T.sblock("root"):
-                for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
-                    with T.sblock("compute"):
-                        v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
-                        T.reads(res[v_i0, v_i1])
-                        T.writes(compute[v_i0, v_i1])
-                        compute[v_i0, v_i1] = T.Cast("float32", res[v_i0, v_i1])
+            @Tx.prim_func(private=True)
+            def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
+                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = Tx.int64()
+                res = Tx.match_buffer(var_res, (batch_size, Tx.int64(mk.HIDDEN_SIZE)), "float16")
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(mk.HIDDEN_SIZE)))
+                # with Tx.sblock("root"):
+                for i0, i1 in Tx.grid(batch_size, Tx.int64(mk.HIDDEN_SIZE)):
+                    with Tx.sblock("compute"):
+                        v_i0, v_i1 = Tx.axis.remap("SS", [i0, i1])
+                        Tx.reads(res[v_i0, v_i1])
+                        Tx.writes(compute[v_i0, v_i1])
+                        compute[v_i0, v_i1] = Tx.Cast("float32", res[v_i0, v_i1])
 
-            @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
+            @Tx.prim_func(private=True)
+            def hgemm(A_ptr: Tx.handle, B_ptr: Tx.handle, out_ptr: Tx.handle):
                 pass
 
-            @T.prim_func(private=True)
-            def cos_sin_cache(cos_sin_cache: T.handle):
+            @Tx.prim_func(private=True)
+            def cos_sin_cache(cos_sin_cache: Tx.handle):
                 pass
 
             @R.function
             def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
-                max_seq_len = T.int64()
+                max_seq_len = Tx.int64()
                 cls = Module
                 with R.dataflow():
                     cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )
                     R.output(cache)
                 return cache
 
-            @T.prim_func(private=True)
+            @Tx.prim_func(private=True)
             def layer_kernel(
                 # input and output
-                hidden_state_ptr: T.handle, # input: read-only
-                residual_ptr: T.handle, # input & output: inplace update
-                output_ptr: T.handle, # output
+                hidden_state_ptr: Tx.handle, # input: read-only
+                residual_ptr: Tx.handle, # input & output: inplace update
+                output_ptr: Tx.handle, # output
 
                 # weight
-                qkv_proj_weight_ptr: T.handle, # read-only
-                o_proj_weight_ptr: T.handle, # read-only
-                q_rms_weight_ptr: T.handle, # read-only
-                k_rms_weight_ptr: T.handle, # read-only
-                gate_up_weight_ptr: T.handle, # read-only
-                down_weight_ptr: T.handle, # read-only
-                attn_add_rms_weight_ptr: T.handle, # read-only
-                mlp_add_rms_weight_ptr: T.handle, # read-only
+                qkv_proj_weight_ptr: Tx.handle, # read-only
+                o_proj_weight_ptr: Tx.handle, # read-only
+                q_rms_weight_ptr: Tx.handle, # read-only
+                k_rms_weight_ptr: Tx.handle, # read-only
+                gate_up_weight_ptr: Tx.handle, # read-only
+                down_weight_ptr: Tx.handle, # read-only
+                attn_add_rms_weight_ptr: Tx.handle, # read-only
+                mlp_add_rms_weight_ptr: Tx.handle, # read-only
 
                 # page cache, cos_sin cache and plan info
-                cos_sin_cache_ptr: T.handle, # read-only
-                rope_pos_ptr: T.handle, # read-only
-                kv_cache_ptr: T.handle, # inplace update
-                append_pos_ptr: T.handle, # read-only
-                q_indptr_ptr : T.handle, # read-only
-                kv_indptr_ptr : T.handle, # read-only
-                partial_indptr_ptr : T.handle, # read-only
-                kv_indices_ptr : T.handle, # read-only
-                q_len_ptr : T.handle, # read-only
-                kv_len_ptr : T.handle, # read-only
-                q_start_ptr : T.handle, # read-only
-                kv_start_ptr : T.handle, # read-only
-                kv_end_ptr : T.handle, # read-only
-                kv_head_idx_ptr : T.handle, # read-only
-                work_indptr_ptr : T.handle, # read-only
-                len_kv_chunk_ptr : T.handle, # read-only
-                num_qo_len_ptr: T.handle, # read-only
-                merge_indptr_ptr: T.handle, # read-only
-                merge_o_indices_ptr: T.handle, # read-only
-                inverse_indptr_ptr: T.handle, # read-only
-                inverse_indices_ptr: T.handle, # read-only
+                cos_sin_cache_ptr: Tx.handle, # read-only
+                rope_pos_ptr: Tx.handle, # read-only
+                kv_cache_ptr: Tx.handle, # inplace update
+                append_pos_ptr: Tx.handle, # read-only
+                q_indptr_ptr : Tx.handle, # read-only
+                kv_indptr_ptr : Tx.handle, # read-only
+                partial_indptr_ptr : Tx.handle, # read-only
+                kv_indices_ptr : Tx.handle, # read-only
+                q_len_ptr : Tx.handle, # read-only
+                kv_len_ptr : Tx.handle, # read-only
+                q_start_ptr : Tx.handle, # read-only
+                kv_start_ptr : Tx.handle, # read-only
+                kv_end_ptr : Tx.handle, # read-only
+                kv_head_idx_ptr : Tx.handle, # read-only
+                work_indptr_ptr : Tx.handle, # read-only
+                len_kv_chunk_ptr : Tx.handle, # read-only
+                num_qo_len_ptr: Tx.handle, # read-only
+                merge_indptr_ptr: Tx.handle, # read-only
+                merge_o_indices_ptr: Tx.handle, # read-only
+                inverse_indptr_ptr: Tx.handle, # read-only
+                inverse_indices_ptr: Tx.handle, # read-only
 
                 # intermediate buffer
-                partital_qkv_ptr: T.handle, # intermediate
-                qkv_ptr: T.handle,  # intermediate
-                o_ptr: T.handle, # intermediate
-                o_partial_attn_ptr: T.handle, # intermediate
-                lse_partial_attn_ptr: T.handle, # intermediate
-                partial_o_ptr: T.handle, # intermediate
-                before_o_allreduce_ptr: T.handle, # intermediate
-                hidden_state_attn_mlp_ptr: T.handle, # intermediate
-                partial_out_gate_up_proj_ptr: T.handle, # intermediate
-                out_gate_up_proj_ptr: T.handle, # intermediate
-                out_silu_multiply_ptr: T.handle, # intermediate
-                partial_sum_down_proj_ptr: T.handle, # intermediate
-                before_down_proj_allreduce_ptr: T.handle, # intermediate
+                partital_qkv_ptr: Tx.handle, # intermediate
+                qkv_ptr: Tx.handle,  # intermediate
+                o_ptr: Tx.handle, # intermediate
+                o_partial_attn_ptr: Tx.handle, # intermediate
+                lse_partial_attn_ptr: Tx.handle, # intermediate
+                partial_o_ptr: Tx.handle, # intermediate
+                before_o_allreduce_ptr: Tx.handle, # intermediate
+                hidden_state_attn_mlp_ptr: Tx.handle, # intermediate
+                partial_out_gate_up_proj_ptr: Tx.handle, # intermediate
+                out_gate_up_proj_ptr: Tx.handle, # intermediate
+                out_silu_multiply_ptr: Tx.handle, # intermediate
+                partial_sum_down_proj_ptr: Tx.handle, # intermediate
+                before_down_proj_allreduce_ptr: Tx.handle, # intermediate
 
                 # event tensor
-                etensor_workspace_ptr: T.handle,
+                etensor_workspace_ptr: Tx.handle,
 
                 # execution queue
-                queue_task_ptr: T.handle,
-                queue_head_ptr: T.handle,
-                queue_tail_ptr: T.handle,
-                profiler_buffer: T.Buffer((mk.PROFILER_BUFFER_SIZE,), "uint64")
+                queue_task_ptr: Tx.handle,
+                queue_head_ptr: Tx.handle,
+                queue_tail_ptr: Tx.handle,
+                profiler_buffer: Tx.Buffer((mk.PROFILER_BUFFER_SIZE,), "uint64")
             ):
                 pass
 
@@ -660,10 +660,10 @@ def get_qwen3_megakernel_relax_mod(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                 ),
             ):
-                batch_size = T.int64()
-                total_page_num = T.int64()
-                max_page_num = T.int64()
-                page_size = T.int64()
+                batch_size = Tx.int64()
+                total_page_num = Tx.int64()
+                max_page_num = Tx.int64()
+                page_size = Tx.int64()
 
                 cls = Module
                 with R.dataflow():

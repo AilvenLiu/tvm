@@ -140,13 +140,6 @@ void ExecScopeFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame must have an execution scope";
   tvm::tirx::Stmt body = AsStmt(stmts);
-  // Wrap body with AttrStmt nodes for each annotation (set by scope_attr)
-  if (annotations.defined()) {
-    for (const auto& kv : annotations.value()) {
-      PrimExpr val = kv.second.cast<PrimExpr>();
-      body = tvm::tirx::AttrStmt(tvm::IntImm(DataType::Int(32), 0), kv.first, val, body);
-    }
-  }
   AddToParent(tvm::tirx::ExecScopeStmt(exec_scope.value(), body));
 }
 
@@ -271,7 +264,7 @@ void AllocBufferFrameNode::ExitWithScope() {
   AddToParent(tvm::tirx::AllocBuffer(buffer, AsStmt(stmts)));
 }
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

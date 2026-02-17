@@ -25,7 +25,7 @@ from typing import Callable, List, Optional
 
 from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, PrimExpr, PrimFunc
 from tvm.tir.exec_scope import ExecScopeSlice
 from tvm.tir.stmt import OpCall
@@ -79,7 +79,7 @@ def macro_or_prim_func(macro: Callable, need_macro: bool = False) -> Callable:
     if need_macro:
         return macro
 
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def func():
         macro()
 
@@ -98,7 +98,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
     sctx : ScheduleContext
         The schedule context.
 
-    inner_impl : T.macro
+    inner_impl : Tx.macro
         The inner implementation.
 
     macro : bool
@@ -121,9 +121,9 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
     if exec_scope.name == "cta":
         assert not isinstance(exec_scope, ExecScopeSlice)
 
-        @T.macro()
+        @Tx.macro()
         def impl():
-            with T.thread()[0:1]:
+            with Tx.thread()[0:1]:
                 inner_impl()
 
         return macro_or_prim_func(impl, need_macro=macro)
@@ -133,18 +133,18 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             # slice of multiple warps
             warp_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
 
-            @T.macro()
+            @Tx.macro()
             def impl():
-                with T.warp()[*warp_selector]:
-                    with T.thread(parent="warp")[T.ptx.elect_sync()]:
+                with Tx.warp()[*warp_selector]:
+                    with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                         inner_impl()
 
             return macro_or_prim_func(impl, need_macro=macro)
         else:
             # a single warp
-            @T.macro()
+            @Tx.macro()
             def impl():
-                with T.thread(parent="warp")[T.ptx.elect_sync()]:
+                with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                     inner_impl()
 
             return macro_or_prim_func(impl, need_macro=macro)
@@ -153,20 +153,20 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             # slice of multiple warpgroups
             warpgroup_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
 
-            @T.macro()
+            @Tx.macro()
             def impl():
-                with T.warpgroup()[*warpgroup_selector]:
-                    with T.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
-                        with T.thread(parent="warp")[T.ptx.elect_sync()]:
+                with Tx.warpgroup()[*warpgroup_selector]:
+                    with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
+                        with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                             inner_impl()
 
             return macro_or_prim_func(impl, need_macro=macro)
         else:
             # a single warpgroup
-            @T.macro()
+            @Tx.macro()
             def impl():
-                with T.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
-                    with T.thread(parent="warp")[T.ptx.elect_sync()]:
+                with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
+                    with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                         inner_impl()
 
             return macro_or_prim_func(impl, need_macro=macro)
@@ -369,41 +369,41 @@ def copy_vec_load_impl(
 
     if sctx.exec_scope.name == "cta":
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def impl():
             """Implement copy operation with vectorized loads/stores."""
-            for s in T.serial(0, n_elements // (tx * vec_len)):
-                for tid_x in T.thread_binding(tx, "threadIdx.x"):
+            for s in Tx.serial(0, n_elements // (tx * vec_len)):
+                for tid_x in Tx.thread_binding(tx, "threadIdx.x"):
                     if inst_type == CopyInstType.NORMAL:
-                        for vec in T.vectorized(vec_len):
-                            fused = T.meta_var((s * tx + tid_x) * vec_len + vec)
-                            dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
-                            src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+                        for vec in Tx.vectorized(vec_len):
+                            fused = Tx.meta_var((s * tx + tid_x) * vec_len + vec)
+                            dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                            src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
                             dst[*dst_indices] = src[*src_indices]
                     elif inst_type == CopyInstType.CP_ASYNC:
-                        fused = T.meta_var((s * tx + tid_x) * vec_len)
-                        dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
-                        src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                        T.evaluate(T.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
+                        fused = Tx.meta_var((s * tx + tid_x) * vec_len)
+                        dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                        src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
+                        Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
             if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
-                T.tvm_storage_sync("shared")
+                Tx.tvm_storage_sync("shared")
         # fmt: on
     elif sctx.exec_scope.name == "thread":
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            for s in T.serial(0, n_elements // (vec_len)):
+            for s in Tx.serial(0, n_elements // (vec_len)):
                 if inst_type == CopyInstType.NORMAL:
-                    for vec in T.vectorized(vec_len):
-                        fused = T.meta_var(s * vec_len + vec)
-                        dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
-                        src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+                    for vec in Tx.vectorized(vec_len):
+                        fused = Tx.meta_var(s * vec_len + vec)
+                        dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                        src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
                         dst[*dst_indices] = src[*src_indices]
                 elif inst_type == CopyInstType.CP_ASYNC:
-                    fused = T.meta_var(s * vec_len)
-                    dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
-                    src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                    T.evaluate(T.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
+                    fused = Tx.meta_var(s * vec_len)
+                    dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                    src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
+                    Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
         # fmt: on
     else:
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")

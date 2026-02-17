@@ -22,7 +22,6 @@ import functools
 import tvm
 
 from tvm.arith import Analyzer
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
@@ -646,7 +645,7 @@ def copy_tma_impl(
     else:
         cta_mask = 0
 
-    tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
+    tensor_map = Tx.Var(g_buf.data.name + "_tensormap", dtype=Tx.handle("tensormap").type_annotation)
 
     if direction == "g2s":
         # get mbar from config
@@ -705,7 +704,7 @@ def copy_tma_impl(
         """Compute s_offset and tma_coords from loop variables.
 
         Args:
-            loop_vars: Loop variables from T.grid (single var if 1D, tuple if multi-D)
+            loop_vars: Loop variables from Tx.grid (single var if 1D, tuple if multi-D)
 
         Returns:
             Tuple of (s_offset, reversed tma_coords)
@@ -757,15 +756,15 @@ def copy_tma_impl(
         return s_offset, reversed(tma_coords)
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        for loop_vars in T.grid(*loop_extents):
-            s_offset, tma_coords = T.meta_var(compute_offsets_and_tma_coords(loop_vars))
-            s_buf_w_offset = T.decl_buffer(s_buf.shape, s_buf.dtype, s_buf.data, elem_offset=s_buf.elem_offset + s_offset, scope=s_buf.scope(), layout=to_tile_layout(s_buf.layout, s_buf.shape))
+        for loop_vars in Tx.grid(*loop_extents):
+            s_offset, tma_coords = Tx.meta_var(compute_offsets_and_tma_coords(loop_vars))
+            s_buf_w_offset = Tx.decl_buffer(s_buf.shape, s_buf.dtype, s_buf.data, elem_offset=s_buf.elem_offset + s_offset, scope=s_buf.scope(), layout=to_tile_layout(s_buf.layout, s_buf.shape))
 
             # Emit TMA copy with computed offsets and coordinates
             if direction == "g2s":
-                T.ptx.cp_async.bulk.tensor.g2c(
+                Tx.ptx.cp_async.bulk.tensor.g2c(
                     tma_rank,
                     s_buf_w_offset.ptr_to(s_st),
                     mbar,
@@ -777,7 +776,7 @@ def copy_tma_impl(
                 )
             else:
                 if use_tma_reduce is None:
-                    T.ptx.cp_async.bulk.tensor.s2g(
+                    Tx.ptx.cp_async.bulk.tensor.s2g(
                         tma_rank,
                         s_buf_w_offset.ptr_to(s_st),
                         tensor_map,
@@ -785,7 +784,7 @@ def copy_tma_impl(
                         cache_hint=op_call.config.get("cache_hint", ""),
                     )
                 else:
-                    T.ptx.cp_async.bulk.tensor.s2g_reduce(
+                    Tx.ptx.cp_async.bulk.tensor.s2g_reduce(
                         tma_rank,
                         s_buf_w_offset.ptr_to(s_st),
                         tensor_map,
@@ -808,10 +807,10 @@ def copy_tma_impl(
     )  # Exclude innermost stride
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def create_tensor_map():
-        with T.LetStmt(T.tvm_stack_alloca("tensormap", 1), var=tensor_map):
-            T.call_packed(
+        with Tx.LetStmt(Tx.tvm_stack_alloca("tensormap", 1), var=tensor_map):
+            Tx.call_packed(
                 "runtime.cuTensorMapEncodeTiled",
                 tensor_map,
                 g_buf.dtype,

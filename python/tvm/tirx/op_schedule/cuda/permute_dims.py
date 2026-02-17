@@ -17,7 +17,7 @@
 import math
 from typing import Optional
 
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc, Buffer, BufferRegion
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import (
@@ -86,23 +86,23 @@ def vectorized_permute_dims_last_2d_impl(
         tid_x = sctx.launch_params["threadIdx.x"]
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
         # fmt: off
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def impl():
-            warp_size = T.meta_var(32)
-            lane_id = T.meta_var(tid_x % warp_size)
-            reg_trans = T.alloc_buffer((N // warp_size, M // vec_len, vec_len), buffer.dtype, scope="local")
-            for wi in T.unroll(0, N // warp_size):
-                for vi in T.unroll(0, M // vec_len):
-                    for vec in T.unroll(vec_len):
-                        old_index = T.meta_var(get_indices((vi * vec_len + vec) * N + wi * warp_size + lane_id, st, extent))
+            warp_size = Tx.meta_var(32)
+            lane_id = Tx.meta_var(tid_x % warp_size)
+            reg_trans = Tx.alloc_buffer((N // warp_size, M // vec_len, vec_len), buffer.dtype, scope="local")
+            for wi in Tx.unroll(0, N // warp_size):
+                for vi in Tx.unroll(0, M // vec_len):
+                    for vec in Tx.unroll(vec_len):
+                        old_index = Tx.meta_var(get_indices((vi * vec_len + vec) * N + wi * warp_size + lane_id, st, extent))
                         reg_trans[wi, vi, vec] = buffer[*old_index]
-            T.cuda.warp_sync()
-            for wi in T.unroll(0, N // warp_size):
-                for vi in T.unroll(0, M // vec_len):
-                    for vec in T.vectorized(vec_len):
-                        new_index = T.meta_var(get_indices((wi * warp_size + lane_id) * M + vi * vec_len + vec, st, extent))
+            Tx.cuda.warp_sync()
+            for wi in Tx.unroll(0, N // warp_size):
+                for vi in Tx.unroll(0, M // vec_len):
+                    for vec in Tx.vectorized(vec_len):
+                        new_index = Tx.meta_var(get_indices((wi * warp_size + lane_id) * M + vi * vec_len + vec, st, extent))
                         buffer[*new_index] = reg_trans[wi, vi, vec]
-            T.cuda.warp_sync()
+            Tx.cuda.warp_sync()
         # fmt: on
     else:
         raise NotImplementedError

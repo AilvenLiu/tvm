@@ -23,7 +23,7 @@ from typing import Optional, Union
 
 from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.expr import FloatImm
@@ -158,34 +158,34 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
 
     if CONST is not None:
 
-        @T.prim_func(tirx=True)
+        @Tx.prim_func(tirx=True)
         def impl():
-            for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
-                for itr in T.serial(T.ceildiv(num_elements, thread_cnt)):
-                    fused_idx = T.meta_var(itr * thread_cnt + tid_x)
+            for tid_x in Tx.thread_binding(thread_cnt, "threadIdx.x"):
+                for itr in Tx.serial(Tx.ceildiv(num_elements, thread_cnt)):
+                    fused_idx = Tx.meta_var(itr * thread_cnt + tid_x)
                     if fused_idx < num_elements:
-                        idx_dst = T.meta_var(get_indices(fused_idx, dst_start, dst_extent))
-                        idx_src1 = T.meta_var(get_indices(fused_idx, src1_start, src1_extent))
+                        idx_dst = Tx.meta_var(get_indices(fused_idx, dst_start, dst_extent))
+                        idx_src1 = Tx.meta_var(get_indices(fused_idx, src1_start, src1_extent))
                         dst[*idx_dst] = op_func(src1[*idx_src1], CONST)
-            T.tvm_storage_sync("shared")
+            Tx.tvm_storage_sync("shared")
 
         return impl
 
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl():  # pylint: disable=function-redefined
-        for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
-            for itr in T.serial(T.ceildiv(num_elements, thread_cnt)):
-                fused_idx = T.meta_var(itr * thread_cnt + tid_x)
+        for tid_x in Tx.thread_binding(thread_cnt, "threadIdx.x"):
+            for itr in Tx.serial(Tx.ceildiv(num_elements, thread_cnt)):
+                fused_idx = Tx.meta_var(itr * thread_cnt + tid_x)
                 if fused_idx < num_elements:
-                    idx_dst = T.meta_var(get_indices(fused_idx, dst_start, dst_extent))
-                    idx_src1 = T.meta_var(get_indices(fused_idx, src1_start, src1_extent))
-                    idx_src2 = T.meta_var(
+                    idx_dst = Tx.meta_var(get_indices(fused_idx, dst_start, dst_extent))
+                    idx_src1 = Tx.meta_var(get_indices(fused_idx, src1_start, src1_extent))
+                    idx_src2 = Tx.meta_var(
                         get_indices_zero_out(
                             idx_src1, src1_start, src1_extent, src2_start, src2_extent
                         )
                     )
                     dst[*idx_dst] = op_func(src1[*idx_src1], src2[*idx_src2])
-        T.tvm_storage_sync("shared")
+        Tx.tvm_storage_sync("shared")
 
     return impl
 
@@ -349,8 +349,8 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     # 5. (ROW_RED, ROW_RED, const)
 
     # WGMMA layout check
-    atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+    atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
+    warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
     def check_wgmma(buf):
@@ -360,7 +360,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             return None
 
     # ROW_RED layout check
-    red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+    red_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     def check_row_red(buf):
@@ -382,13 +382,13 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         src1_local_shape = dst_local_shape = (num_rows, num_cols)
 
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl_const():
-            with T.thread():
+            with Tx.thread():
                 src1_local = src1.storage(*src1_local_shape)
                 dst_local = dst.storage(*dst_local_shape)
-                for i in T.serial(num_rows):
-                    for j in T.serial(num_cols):
+                for i in Tx.serial(num_rows):
+                    for j in Tx.serial(num_cols):
                         dst_local[i, j] = op_func(src1_local[i, j], CONST)
         # fmt: on
 
@@ -404,14 +404,14 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         src2_local_shape = (num_rows, 1)
 
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl_broadcast():
-            with T.thread():
+            with Tx.thread():
                 src1_local = src1.storage(*src1_local_shape)
                 src2_local = src2.storage(*src2_local_shape)
                 dst_local = dst.storage(*dst_local_shape)
-                for i in T.serial(num_rows):
-                    for j in T.serial(dst_local_shape[1]):
+                for i in Tx.serial(num_rows):
+                    for j in Tx.serial(dst_local_shape[1]):
                         dst_local[i, j] = op_func(src1_local[i, j], src2_local[i, 0])
         # fmt: on
 
@@ -429,14 +429,14 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     src1_local_shape = src2_local_shape = dst_local_shape = (num_rows, num_cols)
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
+        with Tx.thread():
             src1_local = src1.storage(*src1_local_shape)
             src2_local = src2.storage(*src2_local_shape)
             dst_local = dst.storage(*dst_local_shape)
-            for i in T.serial(num_rows):
-                for j in T.serial(num_cols):
+            for i in Tx.serial(num_rows):
+                for j in Tx.serial(num_cols):
                     dst_local[i, j] = op_func(src1_local[i, j], src2_local[i, j])
     # fmt: on
 

@@ -25,7 +25,7 @@ import itertools
 import tvm
 from dataclasses import dataclass
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.ir import Range
 from tvm.tir import BufferRegion, Buffer, PrimFunc, Var, PrimExpr
 from tvm.tir.stmt import OpCall
@@ -50,14 +50,14 @@ def normalize_and_group(layout, shape):
 
     Parameters
     ----------
-    layout : Union[T.TrainiumLayout, T.TileLayout]
+    layout : Union[Tx.TrainiumLayout, Tx.TileLayout]
         The layout to normalize
     shape : List[int]
         The shape to normalize with
 
     Returns
     -------
-    Tuple[Union[T.TrainiumLayout, T.TileLayout], List[int]] :
+    Tuple[Union[Tx.TrainiumLayout, Tx.TileLayout], List[int]] :
         Normalized layout and separators
 
     Raises
@@ -65,7 +65,7 @@ def normalize_and_group(layout, shape):
     ValueError :
         If layout is not a valid layout type
     """
-    if isinstance(layout, T.TileLayout):
+    if isinstance(layout, Tx.TileLayout):
         return layout.canonicalize().group(shape)
     else:
         raise ValueError("Invalid layout")
@@ -370,13 +370,13 @@ class LogicalIterDim:
 
     @staticmethod
     def default():
-        return LogicalIterDim(1, 1, T.int32(0))
+        return LogicalIterDim(1, 1, Tx.int32(0))
 
 
 LogicalIterList = Tuple[Tuple[Tuple[LogicalIterDim]]]
 
 
-def to_int_list(intimm_list: List[T.IntImm]):
+def to_int_list(intimm_list: List[Tx.IntImm]):
     return [int(i) for i in intimm_list]
 
 
@@ -864,7 +864,7 @@ class InstructionGenerator:
         ]
         axes = self.generate_axes(buffer_region)
         guard = reduce(
-            T.And,
+            Tx.And,
             [axes[i] < r.extent for i, r in enumerate(buffer_region.region) if i in relaxed_dims],
             True,
         )

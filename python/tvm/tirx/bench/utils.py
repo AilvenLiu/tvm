@@ -29,7 +29,7 @@ import subprocess
 from tvm.contrib import nvcc
 import tvm
 import triton.runtime as runtime
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
 
 def is_running_under_pytest():
@@ -206,7 +206,7 @@ def export_to_perfetto_trace(
 
 
 class CudaProfiler:
-    """A lightweight wrapper around T.timer_* CUDA intrinsics.
+    """A lightweight wrapper around Tx.timer_* CUDA intrinsics.
 
     Stores repeated arguments used by timer_init/start/end/finalize so users can
     call concise methods in kernels. Intended to mirror Pipeline/TileScheduler helpers.
@@ -218,7 +218,7 @@ class CudaProfiler:
 
     def __init__(
         self,
-        profiler_buffer: T.Buffer,
+        profiler_buffer: Tx.Buffer,
         write_stride: int,
         num_groups: int,
         default_leader: Union[None, tvm.tir.PrimExpr, bool] = None,
@@ -228,34 +228,34 @@ class CudaProfiler:
         self.write_stride = write_stride
         self.num_groups = num_groups
         self.default_leader = default_leader
-        # Accept either a Python bool or a PrimExpr; normalize simple bools to T.bool
+        # Accept either a Python bool or a PrimExpr; normalize simple bools to Tx.bool
         # so we can use it uniformly inside macros for conditional emission.
         if isinstance(profiler_enabled, (bool, np.bool_)):
-            self.profiler_enabled = T.bool(bool(profiler_enabled))
+            self.profiler_enabled = Tx.bool(bool(profiler_enabled))
         else:
             # Assume PrimExpr-like input; use as-is
             self.profiler_enabled = profiler_enabled  # type: ignore[assignment]
 
-        self.profiler_tag = T.alloc_buffer(
+        self.profiler_tag = Tx.alloc_buffer(
             [1], "uint64", scope="local", align=8, name="profiler_tag"
         )
-        self.profiler_write_offset = T.alloc_buffer(
+        self.profiler_write_offset = Tx.alloc_buffer(
             [1], "uint32", scope="local", align=8, name="profiler_write_offset"
         )
 
     def _leader(self, leader: Union[None, tvm.tir.PrimExpr, bool]):
         if leader is not None:
             if isinstance(leader, (bool, np.bool_)):
-                return T.bool(bool(leader))
+                return Tx.bool(bool(leader))
             return leader
         if self.default_leader is not None:
             return self.default_leader
-        return T.bool(True)
+        return Tx.bool(True)
 
-    @T.macro
+    @Tx.macro
     def init(self, group_id: tvm.tir.PrimExpr):
         if self.profiler_enabled:
-            T.timer_init_cuda(
+            Tx.timer_init_cuda(
                 self.buffer.data,
                 self.profiler_tag.data,
                 self.profiler_write_offset.data,
@@ -263,10 +263,10 @@ class CudaProfiler:
                 group_id,
             )
 
-    @T.macro
+    @Tx.macro
     def start(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
-            T.timer_start_cuda(
+            Tx.timer_start_cuda(
                 event_type,
                 self.buffer.data,
                 self.profiler_tag.data,
@@ -275,10 +275,10 @@ class CudaProfiler:
                 self._leader(leader),
             )
 
-    @T.macro
+    @Tx.macro
     def end(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
-            T.timer_end_cuda(
+            Tx.timer_end_cuda(
                 event_type,
                 self.buffer.data,
                 self.profiler_tag.data,
@@ -287,10 +287,10 @@ class CudaProfiler:
                 self._leader(leader),
             )
 
-    @T.macro
+    @Tx.macro
     def finalize(self, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
-            T.timer_finalize_cuda(
+            Tx.timer_finalize_cuda(
                 self.buffer.data,
                 self.profiler_tag.data,
                 self.profiler_write_offset.data,

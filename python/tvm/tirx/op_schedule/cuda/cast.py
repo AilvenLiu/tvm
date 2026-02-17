@@ -22,7 +22,7 @@ import operator
 from typing import Optional
 
 from tvm.arith import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, IntImm, PrimFunc
 from tvm.tir.layout import TileLayout
 from tvm.tir.stmt import OpCall
@@ -434,33 +434,33 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
         source_code = None
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
-            base_src = T.decl_buffer((local_total,), src.dtype, src.data, scope=src.scope())
-            base_dst = T.decl_buffer((local_total,), dst.dtype, dst.data, scope=dst.scope())
+        with Tx.thread():
+            base_src = Tx.decl_buffer((local_total,), src.dtype, src.data, scope=src.scope())
+            base_dst = Tx.decl_buffer((local_total,), dst.dtype, dst.data, scope=dst.scope())
 
             if use_vec2 and (local_total_imm is not None):
                 # vec2 loop + tail scalar (odd case)
-                n2 = T.meta_var(local_total_imm // 2)
-                tail = T.meta_var(local_total_imm % 2)
+                n2 = Tx.meta_var(local_total_imm // 2)
+                tail = Tx.meta_var(local_total_imm % 2)
 
-                for s in T.serial(0, n2):
-                    local_idx = T.meta_var(s * 2)
-                    T.cuda.func_call(
+                for s in Tx.serial(0, n2):
+                    local_idx = Tx.meta_var(s * 2)
+                    Tx.cuda.func_call(
                         func_name,
-                        T.address_of(base_dst[local_idx]),
-                        T.address_of(base_src[local_idx]),
+                        Tx.address_of(base_dst[local_idx]),
+                        Tx.address_of(base_src[local_idx]),
                         source_code=source_code,
                     )
 
                 if tail == 1:
-                    local_idx = T.meta_var(n2 * 2)
-                    base_dst[local_idx] = T.cast(base_src[local_idx], dst.dtype)
+                    local_idx = Tx.meta_var(n2 * 2)
+                    base_dst[local_idx] = Tx.cast(base_src[local_idx], dst.dtype)
             else:
-                for s in T.serial(0, local_total):
-                    local_idx = T.meta_var(s)
-                    base_dst[local_idx] = T.cast(base_src[local_idx], dst.dtype)
+                for s in Tx.serial(0, local_total):
+                    local_idx = Tx.meta_var(s)
+                    base_dst[local_idx] = Tx.cast(base_src[local_idx], dst.dtype)
     # fmt: on
 
     return impl
@@ -508,21 +508,21 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
 """
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        for s in T.serial(0, n_elements // (vec_len)):
-            fused = T.meta_var(s * vec_len)
-            dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
-            src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+        for s in Tx.serial(0, n_elements // (vec_len)):
+            fused = Tx.meta_var(s * vec_len)
+            dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+            src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
             if vec_len == 2:
-                T.cuda.func_call(
+                Tx.cuda.func_call(
                     func_name,
                     dst.ptr_to(dst_indices),
                     src.ptr_to(src_indices),
                     source_code=source_code,
                 )
             else:
-                dst[*dst_indices] = T.cast(src[*src_indices], dst.dtype)
+                dst[*dst_indices] = Tx.cast(src[*src_indices], dst.dtype)
     # fmt: on
     return impl
 

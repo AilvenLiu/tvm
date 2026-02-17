@@ -22,7 +22,7 @@ import operator
 from typing import Optional, Union
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
 from tvm.tirx.op_schedule import ScheduleContext, fail
@@ -33,9 +33,9 @@ from .common import get_indices
 unary_op_table = {
     MapOpType.ZERO: lambda x: 0.0,
     MapOpType.FILL: lambda x: x,
-    MapOpType.SQRT: lambda x: T.sqrt(x),
+    MapOpType.SQRT: lambda x: Tx.sqrt(x),
     MapOpType.RECIPROCAL: lambda x: 1.0 / x,
-    MapOpType.EXP: T.exp2,
+    MapOpType.EXP: Tx.exp2,
 }
 
 
@@ -91,16 +91,16 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     if op_func is None:
         fail(f"unsupported unary op: {unary_op}")
 
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl():
-        for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
-            for itr in T.serial(T.ceildiv(num_elements, thread_cnt)):
-                fused_idx = T.meta_var(itr * thread_cnt + tid_x)
+        for tid_x in Tx.thread_binding(thread_cnt, "threadIdx.x"):
+            for itr in Tx.serial(Tx.ceildiv(num_elements, thread_cnt)):
+                fused_idx = Tx.meta_var(itr * thread_cnt + tid_x)
                 if fused_idx < num_elements:
-                    idx_dst = T.meta_var(get_indices(fused_idx, dst_start, dst_extent))
-                    idx_src = T.meta_var(get_indices(fused_idx, src_start, src_extent))
-                    dst[*idx_dst] = T.Cast(dtype, op_func(src[*idx_src]))
-        T.tvm_storage_sync("shared")
+                    idx_dst = Tx.meta_var(get_indices(fused_idx, dst_start, dst_extent))
+                    idx_src = Tx.meta_var(get_indices(fused_idx, src_start, src_extent))
+                    dst[*idx_dst] = Tx.Cast(dtype, op_func(src[*idx_src]))
+        Tx.tvm_storage_sync("shared")
 
     return impl
 
@@ -193,13 +193,13 @@ def unary_map_cuda_warp_logical_view_nd_impl(
     src_local_shape = dst_local_shape = (LOCAL_LEN,)
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.thread():
+        with Tx.thread():
             src_local = src.storage(*src_local_shape)
             dst_local = dst.storage(*dst_local_shape)
-            for idx in T.serial(LOCAL_LEN):
-                dst_local[idx] = T.Cast(dtype, op_func(src_local[idx]))
+            for idx in Tx.serial(LOCAL_LEN):
+                dst_local[idx] = Tx.Cast(dtype, op_func(src_local[idx]))
     # fmt: on
 
     return impl

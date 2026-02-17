@@ -259,16 +259,13 @@ class ExecScopeFrameNode : public TIRFrameNode {
   ffi::String scope_slice_parent;
   /*! \brief The extents for scope slicing. */
   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents;
-  /*! \brief The annotations to wrap the body with AttrStmt nodes. Set by scope_attr(). */
-  ffi::Optional<ffi::Map<ffi::String, ffi::Any>> annotations;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ExecScopeFrameNode>()
         .def_ro("exec_scope", &ExecScopeFrameNode::exec_scope)
         .def_ro("scope_slice_parent", &ExecScopeFrameNode::scope_slice_parent)
-        .def_ro("scope_slice_extents", &ExecScopeFrameNode::scope_slice_extents)
-        .def_rw("annotations", &ExecScopeFrameNode::annotations);
+        .def_ro("scope_slice_extents", &ExecScopeFrameNode::scope_slice_extents);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ExecScopeFrame", ExecScopeFrameNode,
                                     TIRFrameNode);

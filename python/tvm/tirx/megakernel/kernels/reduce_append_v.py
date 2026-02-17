@@ -1,4 +1,3 @@
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile
@@ -30,41 +29,41 @@ class SplitKReduceAppendVTile(Tile):
         assert KernelConfig.NUM_THREADS % self.bdx == 0
 
     def _alloc_local(self):
-        self.idx = T.local_cell("int32", name="idx")
-        self.pos = T.local_cell("int32", name="pos")
-        self.vec_32 = T.alloc_local([self.VEC_SIZE_16], "float32", name="vec_32")
-        self.tmp = T.alloc_local([self.VEC_SIZE_16], "float32", name="tmp")
-        self.vec_16 = T.alloc_local([self.VEC_SIZE_16], "float16", name="vec_16")
+        self.idx = Tx.local_cell("int32", name="idx")
+        self.pos = Tx.local_cell("int32", name="pos")
+        self.vec_32 = Tx.alloc_local([self.VEC_SIZE_16], "float32", name="vec_32")
+        self.tmp = Tx.alloc_local([self.VEC_SIZE_16], "float32", name="tmp")
+        self.vec_16 = Tx.alloc_local([self.VEC_SIZE_16], "float16", name="vec_16")
 
 
     # handle: [batch_size, h_tile * head_dim]
     # bdx, bdy = head_dim // VEC_SIZE_16, NUM_THREADS // bdx
-    @T.macro
+    @Tx.macro
     def run(self, m_idx, n_idx, k_idx, partial, kv_cache, pos_map):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tx = T.meta_var(tid % self.bdx)
-            ty = T.meta_var(tid // self.bdx)
-            stx = T.meta_var(tx * self.VEC_SIZE_16)
-            handle_num = T.meta_var(T.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
+        with Tx.cta():
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tx = Tx.meta_var(tid % self.bdx)
+            ty = Tx.meta_var(tid // self.bdx)
+            stx = Tx.meta_var(tx * self.VEC_SIZE_16)
+            handle_num = Tx.meta_var(Tx.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
             self._alloc_local()
-            with T.thread():
-                batch_idx = T.meta_var(m_idx * self.m_tile + self.idx // self.h_tile)
-                head_idx = T.meta_var(n_idx * self.h_tile + self.idx % self.h_tile)
+            with Tx.thread():
+                batch_idx = Tx.meta_var(m_idx * self.m_tile + self.idx // self.h_tile)
+                head_idx = Tx.meta_var(n_idx * self.h_tile + self.idx % self.h_tile)
                 self.idx = ty
                 while self.idx < handle_num:
                     # reduce
-                    qkv_stx = T.meta_var((self.qo_heads + self.kv_heads + head_idx) * self.head_dim + tx * self.VEC_SIZE_16)
-                    for kv in T.unroll(self.VEC_SIZE_16):
+                    qkv_stx = Tx.meta_var((self.qo_heads + self.kv_heads + head_idx) * self.head_dim + tx * self.VEC_SIZE_16)
+                    for kv in Tx.unroll(self.VEC_SIZE_16):
                         self.vec_32[kv] = 0.0
-                    for kt in T.serial(self.split_k_factor):
+                    for kt in Tx.serial(self.split_k_factor):
                         Tx.copy(self.tmp[:], partial[kt, batch_idx, qkv_stx:qkv_stx + self.VEC_SIZE_16])
-                        for kv in T.unroll(self.VEC_SIZE_16):
+                        for kv in Tx.unroll(self.VEC_SIZE_16):
                             self.vec_32[kv] += self.tmp[kv]
                     Tx.cast(self.vec_16[:], self.vec_32[:])
                     # append
-                    self.pos = T.cuda.ldg(T.address_of(pos_map[batch_idx]), "int32")
-                    page_id = T.meta_var(self.pos // self.page_size)
-                    offset = T.meta_var(self.pos % self.page_size)
+                    self.pos = Tx.cuda.ldg(Tx.address_of(pos_map[batch_idx]), "int32")
+                    page_id = Tx.meta_var(self.pos // self.page_size)
+                    offset = Tx.meta_var(self.pos % self.page_size)
                     Tx.copy(kv_cache[page_id, 1, head_idx, offset, stx:stx + self.VEC_SIZE_16], self.vec_16[:])
                     self.idx += self.bdy

@@ -266,9 +266,9 @@ def deepgemm(
                     epilogue1()
 
             with Tx.cta():
-                Tx.scope_attr({"tirx.scope_partition": True})
+                Tx.attr({"tirx.scope_partition": True})
                 with Tx.warpgroup()[wg_id == 1]:
-                    Tx.scope_attr({"tirx.scope_partition": True})
+                    Tx.attr({"tirx.scope_partition": True})
                     with Tx.warp(parent="warpgroup")[warp_id == 3]:
                         phase = 0
                         while tile_scheduler.valid():

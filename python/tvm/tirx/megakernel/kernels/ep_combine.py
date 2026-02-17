@@ -1,4 +1,4 @@
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile, SmemManager
 from tvm.tirx.megakernel.utils.config import KernelConfig
@@ -15,14 +15,14 @@ class EPCombineSendTile(Tile):
 
     def __init__(
         self,
-        num_tokens: T.int32,
-        total_num_experts: T.int32,
-        topk: T.int32,
-        hidden_dim: T.int32,
+        num_tokens: Tx.int32,
+        total_num_experts: Tx.int32,
+        topk: Tx.int32,
+        hidden_dim: Tx.int32,
         in_dtype,
         out_dtype,
-        world_size: T.int32,
-        n_dp_groups: T.int32,
+        world_size: Tx.int32,
+        n_dp_groups: Tx.int32,
     ):
         super().__init__()
         self.num_tokens = num_tokens
@@ -44,12 +44,12 @@ class EPCombineSendTile(Tile):
         # alloc local memory
         pass
 
-    @T.macro
+    @Tx.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def run(
         self,
 
@@ -64,16 +64,16 @@ class EPCombineSendTile(Tile):
         num_recv_tokens, # (local_num_experts, world_size)
         rank,
     ):
-        with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+        with Tx.cta():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # each CTA is responsible for one expert and one source GPU
-            dst_expert = T.meta_var(T.int32(self.local_num_experts * rank + local_expert_idx))
-            num_recv = T.meta_var(num_recv_tokens[local_expert_idx, src_rank_idx])
-            T.nvshmem.putmem_signal_nbi.block(
+            dst_expert = Tx.meta_var(Tx.int32(self.local_num_experts * rank + local_expert_idx))
+            num_recv = Tx.meta_var(num_recv_tokens[local_expert_idx, src_rank_idx])
+            Tx.nvshmem.putmem_signal_nbi.block(
                 dst=buf_recv.access_ptr("w", offset=buf_recv.elem_offset_of([dst_expert, 0, 0])),
                 src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([local_expert_idx, src_rank_idx, 0, 0])),
                 nelems=num_recv * self.hidden_dim * self.nbytes,
@@ -96,14 +96,14 @@ class EPCombineRecvTile(Tile):
 
     def __init__(
         self,
-        num_tokens: T.int32,
-        total_num_experts: T.int32,
-        topk: T.int32,
-        hidden_dim: T.int32,
+        num_tokens: Tx.int32,
+        total_num_experts: Tx.int32,
+        topk: Tx.int32,
+        hidden_dim: Tx.int32,
         in_dtype,
         out_dtype,
-        world_size: T.int32,
-        n_dp_groups: T.int32,
+        world_size: Tx.int32,
+        n_dp_groups: Tx.int32,
     ):
         super().__init__()
         self.num_tokens = num_tokens
@@ -126,15 +126,15 @@ class EPCombineRecvTile(Tile):
 
     def _alloc_local(self):
         # alloc local memory
-        self.sum = T.alloc_local([1], self.out_dtype, name="sum")
+        self.sum = Tx.alloc_local([1], self.out_dtype, name="sum")
 
-    @T.macro
+    @Tx.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
         self._alloc_local()
 
     # fmt: off
-    @T.macro
+    @Tx.macro
     def run(
         self,
 
@@ -150,33 +150,33 @@ class EPCombineRecvTile(Tile):
         dst_token_indices, # (num_tokens, topk)
         rank,
     ):
-        with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+        with Tx.cta():
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # each CTA is responsible for one token
             if token_idx < self.num_tokens:
                 if tid == 0:
-                    for k in T.serial(self.topk):
+                    for k in Tx.serial(self.topk):
                         self.weights_buf[k] = route_weights[token_idx, k]
-                        self.experts_buf[k] = T.int32(route_experts[token_idx, k])
-                T.tvm_storage_sync("shared")
+                        self.experts_buf[k] = Tx.int32(route_experts[token_idx, k])
+                Tx.tvm_storage_sync("shared")
 
-                for k in T.serial(self.topk):
+                for k in Tx.serial(self.topk):
                     dst_expert = self.experts_buf[k]
-                    T.nvshmem.wait_until(
+                    Tx.nvshmem.wait_until(
                         ivar=buf_wait.access_ptr("r", offset=buf_wait.elem_offset_of([dst_expert])),
                         cmp="eq",
                         cmp_value=1,
                     )
 
-                for ii in T.serial(T.ceildiv(self.hidden_dim, self.num_threads_per_cta)):
-                    idx = T.meta_var(ii * self.num_threads_per_cta + tid)
+                for ii in Tx.serial(Tx.ceildiv(self.hidden_dim, self.num_threads_per_cta)):
+                    idx = Tx.meta_var(ii * self.num_threads_per_cta + tid)
                     if idx < self.hidden_dim:
                         self.sum[0] = 0
-                        for kk in T.serial(self.topk):
+                        for kk in Tx.serial(self.topk):
                             expert = self.experts_buf[kk]
                             weight = self.weights_buf[kk]
                             dst_token_idx = dst_token_indices[token_idx, kk]

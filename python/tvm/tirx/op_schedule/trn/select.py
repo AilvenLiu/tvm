@@ -21,7 +21,7 @@ from functools import reduce
 from typing import Optional
 import operator
 
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc, OpCall, FloatImm
 from tvm.tirx.op_schedule import (
     ScheduleContext,
@@ -100,9 +100,9 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr = inst_gen.restrict_inst_to_one_dim(inst_repr)
     inst_repr.bound_inst_size(op.config.get("max_inst_size", 512), analyzer)
 
-    p_var = T.Var("p", "int32")
-    b_var = T.Var("b", "int32")
-    f_var = T.Var("f", "int32")
+    p_var = Tx.Var("p", "int32")
+    b_var = Tx.Var("b", "int32")
+    f_var = Tx.Var("f", "int32")
     p_size = dst.buffer.layout.size("P")
     inst_gen.bind_inst_iter(dst, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(dst, p_var, p_size, 1, False)
@@ -112,18 +112,18 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     dst_buffer = dst.buffer
     true_value_buffer = true_value.buffer
     # fmt: off
-    @T.prim_func(tirx=True)
+    @Tx.prim_func(tirx=True)
     def impl():
-        for b_loop in T.serial(0, b_extent):
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+        for b_loop in Tx.serial(0, b_extent):
+            with Tx.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
                         inst_gen.set_bind_map_all({f_var: f_loop, p_var: p_loop, b_var: b_loop})
                         if inst_gen.make_guard(dst):
-                            dst_indices = T.meta_var(inst_gen.generate_indices(dst))
-                            true_value_indices = T.meta_var(inst_gen.generate_indices(true_value))
-                            pred = T.meta_var(analyzer.simplify(op.predicate.apply(inst_gen.generate_axes(dst))))
-                            T.evaluate(T.nki.affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
+                            dst_indices = Tx.meta_var(inst_gen.generate_indices(dst))
+                            true_value_indices = Tx.meta_var(inst_gen.generate_indices(true_value))
+                            pred = Tx.meta_var(analyzer.simplify(op.predicate.apply(inst_gen.generate_axes(dst))))
+                            Tx.evaluate(Tx.nki.affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
     # fmt: on
 
     return impl

@@ -760,7 +760,7 @@ def test_hgemm_rs():
                                 m_idx = Tx.meta_var(tile_scheduler.fetched_task_idx0[0])
                                 n_idx = Tx.meta_var(tile_scheduler.fetched_task_idx1[0])
 
-                                Tx.scope_attr({"tirx.scope_partition": True})
+                                Tx.attr({"tirx.scope_partition": True})
                                 with Tx.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                                     Tx.ptx.setmaxnreg(False, 56)
                                     if warp_id == 3:

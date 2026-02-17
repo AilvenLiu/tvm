@@ -20,7 +20,7 @@ from typing import Optional, Tuple, Iterable
 
 from tvm.arith import Analyzer
 import tvm
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
 from tvm.tir.stmt import OpCall
@@ -81,26 +81,26 @@ def copy_default_impl(
                 coord[src_indices[i]] += lv
             return coord
 
-        with T.grid(*copy_extents) as lvs:
-            T.buffer_store(dst, src[*get_src_coord(lvs)], get_dst_coord(lvs))
+        with Tx.grid(*copy_extents) as lvs:
+            Tx.buffer_store(dst, src[*get_src_coord(lvs)], get_dst_coord(lvs))
 
     if sctx.exec_scope.name == "cta":
         tx = sctx.launch_params["threadIdx.x"].dom.extent
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            for tid_x in T.thread_binding(tx, "threadIdx.x"):
-                with T.thread()[tid_x == 0]:
+            for tid_x in Tx.thread_binding(tx, "threadIdx.x"):
+                with Tx.thread()[tid_x == 0]:
                     copy(dst, src)
 
             if dst.scope().startswith("shared"):
-                T.tvm_storage_sync("shared")
+                Tx.tvm_storage_sync("shared")
         # fmt: on
     elif sctx.exec_scope.name == "thread":
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             copy(dst, src)
         # fmt: on
@@ -290,13 +290,13 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     # assert analyzer.can_prove_equal(local_st[1], 0)
     assert analyzer.can_prove_equal(local_extent[1], width)
 
-    op = T.ptx.tcgen05.ld if direction == "tmem2local" else T.ptx.tcgen05.st
-    wait_op = T.ptx.tcgen05.wait.ld if direction == "tmem2local" else T.ptx.tcgen05.wait.st
+    op = Tx.ptx.tcgen05.ld if direction == "tmem2local" else Tx.ptx.tcgen05.st
+    wait_op = Tx.ptx.tcgen05.wait.ld if direction == "tmem2local" else Tx.ptx.tcgen05.wait.st
 
     # fmt: off
-    @T.prim_func(tirx=True, check_well_formed=False)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
-        with T.warp():
+        with Tx.warp():
             local_storage = local_buf.view(local_buf.shape[1] * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
             local_32b = local_storage.view("uint32")
             op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[local_st[1] // elem_per_32b+i] for i in range(num)])

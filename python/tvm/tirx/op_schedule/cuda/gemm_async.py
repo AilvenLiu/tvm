@@ -20,7 +20,7 @@ import operator
 from typing import List, Optional, Tuple
 
 import tvm
-from tvm.script import tir as T
+from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc
 from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
@@ -395,7 +395,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
     return desc.desc_;
 }}
 """
-        return T.cuda.func_call(
+        return Tx.cuda.func_call(
             func_name, desc_cell, offset, source_code=source_code, return_type="uint64"
         )
 
@@ -451,70 +451,70 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         needs_sf_id = sfa_sf_mma_k < SFA_elem_per_col and sfa_elems_per_ki > 0 and descI is None
 
         # fmt: off
-        @T.macro
+        @Tx.macro
         def main_impl(descA_in, descB_in, descI_in):
-            for ki in T.serial(tvm.tir.floordiv(K, MMA_K)):
-                A_ki_linear = T.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
-                B_ki_linear = T.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
-                A_offset = T.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
-                B_offset = T.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
-                descA_val = T.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
-                descB_val = T.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
-                should_accum = T.meta_var(tvm.tir.any(ki != 0, accum_expr))
-                sfa_k_pos = T.meta_var(ki * sfa_elems_per_ki)
-                sfb_k_pos = T.meta_var(ki * sfb_elems_per_ki)
+            for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
+                A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
+                B_ki_linear = Tx.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
+                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
+                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
+                descA_val = Tx.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
+                descB_val = Tx.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
+                should_accum = Tx.meta_var(tvm.tir.any(ki != 0, accum_expr))
+                sfa_k_pos = Tx.meta_var(ki * sfa_elems_per_ki)
+                sfb_k_pos = Tx.meta_var(ki * sfb_elems_per_ki)
                 # apply(k_pos)["TCol"] at row 0 gives physical TCol offset
-                sfa_tcol = T.meta_var(SFA_slice_layout.apply(sfa_k_pos).get("TCol", 0))
-                sfb_tcol = T.meta_var(SFB_slice_layout.apply(sfb_k_pos).get("TCol", 0))
-                sfa_addr = T.meta_var(sfa_base + tvm.tir.floordiv(sfa_tcol, SFA_elem_per_col))
-                sfb_addr = T.meta_var(sfb_base + tvm.tir.floordiv(sfb_tcol, SFB_elem_per_col))
+                sfa_tcol = Tx.meta_var(SFA_slice_layout.apply(sfa_k_pos).get("TCol", 0))
+                sfb_tcol = Tx.meta_var(SFB_slice_layout.apply(sfb_k_pos).get("TCol", 0))
+                sfa_addr = Tx.meta_var(sfa_base + tvm.tir.floordiv(sfa_tcol, SFA_elem_per_col))
+                sfb_addr = Tx.meta_var(sfb_base + tvm.tir.floordiv(sfb_tcol, SFB_elem_per_col))
                 if needs_sf_id:
-                    sf_id = T.meta_var(analyzer.simplify(tvm.tir.floormod(sfa_tcol, SFA_elem_per_col)))
-                    T.cuda.runtime_instr_desc(T.address_of(descI_in), sf_id)
-                T.ptx.tcgen05.mma.block_scale(C_type, A_type, B_type, SFA_type, SFB_type,
-                                              T.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
+                    sf_id = Tx.meta_var(analyzer.simplify(tvm.tir.floormod(sfa_tcol, SFA_elem_per_col)))
+                    Tx.cuda.runtime_instr_desc(Tx.address_of(descI_in), sf_id)
+                Tx.ptx.tcgen05.mma.block_scale(C_type, A_type, B_type, SFA_type, SFB_type,
+                                              Tx.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
                                               descA_val, descB_val,
                                               sfa_addr, sfb_addr,
                                               descI_in, False, cta_group, should_accum)
         # fmt: on
     else:
         # fmt: off
-        @T.macro
+        @Tx.macro
         def main_impl(descA_in, descB_in, descI_in):
-            for ki in T.serial(tvm.tir.floordiv(K, MMA_K)):
-                A_ki_linear = T.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
-                B_ki_linear = T.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
-                A_offset = T.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
-                B_offset = T.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
-                descA_val = T.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
-                descB_val = T.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
-                should_accum = T.meta_var(tvm.tir.any(ki != 0, accum_expr))
-                T.ptx.tcgen05.mma("float32", A_type, B_type, T.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
+            for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
+                A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
+                B_ki_linear = Tx.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
+                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
+                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
+                descA_val = Tx.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
+                descB_val = Tx.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
+                should_accum = Tx.meta_var(tvm.tir.any(ki != 0, accum_expr))
+                Tx.ptx.tcgen05.mma("float32", A_type, B_type, Tx.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
                                   descA_val, descB_val, descI_in, False, cta_group, should_accum)
         # fmt: on
 
     if descI is not None:
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             main_impl(descA_buf[0], descB_buf[0], descI)
         # fmt: on
     elif is_block_scaled:
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            descI_local = T.local_cell("uint32")
-            T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,
+            descI_local = Tx.local_cell("uint32")
+            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,
                                                                SFA_init_addr, SFB_init_addr,
                                                                M * cta_group, N, MMA_K, transA, transB, cta_group)
             main_impl(descA_buf[0], descB_buf[0], descI_local)
         # fmt: on
     else:
         # fmt: off
-        @T.prim_func(tirx=True, check_well_formed=False)
+        @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            descI_local = T.local_cell("uint32")
-            T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI_local), C_type, A_type, B_type,
+            descI_local = Tx.local_cell("uint32")
+            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,
                                                   M * cta_group, N, MMA_K, transA, transB, cta_group)
             main_impl(descA_buf[0], descB_buf[0], descI_local)
         # fmt: on

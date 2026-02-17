@@ -91,8 +91,8 @@ from tvm.tirx.expr import (
 )
 from tvm.tirx.generic import cast
 
-from . import _ffi_api, frame
 from .. import IRBuilder
+from . import _ffi_api, frame, utils
 from .external_kernel import call_kernel
 
 # pylint: enable=unused-import
@@ -699,45 +699,6 @@ def sblock_attr(attrs: dict[str, Any]) -> None:
         The annotation of the block.
     """
     return _ffi_api.BlockAttrs(attrs)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def scope_attr(attrs: Dict[str, Any]) -> None:
-    """The execution scope annotation statement (for tirx=True).
-
-    Sets annotations on the current ExecScopeFrame. During ExitWithScope,
-    these annotations are wrapped around the body as AttrStmt nodes with
-    ``node=T.int32(0)``.
-
-    Parameters
-    ----------
-    attrs : Dict[str, Any]
-        The annotation of the execution scope. Each key-value pair becomes
-        an AttrStmt with ``node=T.int32(0)``.
-    """
-    from .frame import ExecScopeFrame  # pylint: disable=import-outside-toplevel
-    from ..base import IRBuilder  # pylint: disable=import-outside-toplevel
-
-    # Find the innermost ExecScopeFrame on the stack
-    exec_scope_frame = None
-    for f in reversed(IRBuilder.current().frames):
-        if isinstance(f, ExecScopeFrame):
-            exec_scope_frame = f
-            break
-    if exec_scope_frame is None:
-        raise ValueError("scope_attr must be called inside an ExecScope (tirx=True)")
-
-    # Convert values and accumulate annotations on the frame
-    converted = {}
-    for key, value in attrs.items():
-        if isinstance(value, bool):
-            value = IntImm("bool", value)
-        converted[key] = convert(value)
-
-    if exec_scope_frame.annotations is not None:
-        merged = dict(exec_scope_frame.annotations)
-        merged.update(converted)
-        converted = merged
-    exec_scope_frame.annotations = converted
 
 
 def alloc_buffer(
@@ -1378,28 +1339,92 @@ def let(
         return let_expr(v, value, body)
 
 
-def attr(node: Any, attr_key: str, value: PrimExpr | str) -> frame.AttrFrame:
-    """Create an attribute node.
+def allocate(
+    extents: list[PrimExpr],
+    dtype: str,
+    scope: str = "global",
+    condition: PrimExpr = None,
+    annotations=None,
+) -> frame.AllocateFrame:
+    """Allocate node.
 
     Parameters
     ----------
-    node : Any
-        The node to annotate the attribute.
+    extents : List[PrimExpr]
+        The extents of the allocate.
 
-    attr_key : str
-        Attribute type key.
+    dtype : str
+        The data type of the buffer.
 
-    value : Union[PrimExpr, str]
-        The value of the attribute.
+    scope : str
+        The storage scope.
+
+    condition : PrimExpr
+        The condition.
+
+    annotations: Optional[Mapping[str, Object]]
+        Additional annotation hints.
+    """
+    if isinstance(condition, bool):
+        condition = IntImm("bool", condition)
+    return _ffi_api.Allocate(  # type: ignore[attr-defined] # pylint: disable=no-member
+        extents, dtype, scope, condition, annotations
+    )
+
+
+def attr(
+    node_or_dict: Any,
+    attr_key: Optional[str] = None,
+    value: Optional[Union[PrimExpr, str]] = None,
+) -> Union[frame.AttrFrame, "utils._FrameScope"]:
+    """Create an attribute node, or multiple attribute nodes from a dict.
+
+    Usage 1 — single attr::
+
+        with T.attr(node, key, value):
+            ...
+
+    Usage 2 — dict sugar (node defaults to ``T.int32(0)``)::
+
+        with T.attr({"key1": value1, "key2": value2}):
+            ...
+
+    Parameters
+    ----------
+    node_or_dict : Any
+        If a dict, each key-value pair becomes an AttrStmt with
+        ``node=T.int32(0)``.  Otherwise the node to annotate.
+
+    attr_key : str, optional
+        Attribute type key (required when ``node_or_dict`` is not a dict).
+
+    value : Union[PrimExpr, str], optional
+        The attribute value (required when ``node_or_dict`` is not a dict).
 
     Returns
     -------
-    res : frame.AttrFrame
-        The result AttrFrame.
+    res : Union[frame.AttrFrame, _FrameScope]
+        A single AttrFrame, or a _FrameScope wrapping multiple AttrFrames.
     """
-    node = convert(node)
-    value = convert(value)
-    return _ffi_api.Attr(node, attr_key, value)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if isinstance(node_or_dict, dict):
+        frames = []
+        for k, v in node_or_dict.items():
+            if isinstance(v, bool):
+                v = IntImm("bool", v)
+            frames.append(
+                _ffi_api.Attr(  # type: ignore[attr-defined]
+                    convert(IntImm("int32", 0)), k, convert(v)
+                )
+            )
+        if len(frames) == 1:
+            return frames[0]
+        return utils._FrameScope(frames)
+    else:
+        if attr_key is None or value is None:
+            raise ValueError("T.attr(node, attr_key, value) requires all three arguments")
+        node_or_dict = convert(node_or_dict)
+        value = convert(value)
+        return _ffi_api.Attr(node_or_dict, attr_key, value)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def While(condition: PrimExpr) -> frame.WhileFrame:  # pylint: disable=invalid-name
@@ -2990,7 +3015,6 @@ __all__ = float_types + [
     "reads",
     "writes",
     "sblock_attr",
-    "scope_attr",
     "alloc_buffer",
     "sblock_alloc_buffer",
     "axis",
