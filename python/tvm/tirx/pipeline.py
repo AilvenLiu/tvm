@@ -61,22 +61,22 @@ def default_tir_pipeline():
         if not bool(config.get("tir.disable_storage_rewrite", False)):
             passes.append(tir.transform.StorageRewrite())
         if config.get("tir.use_async_copy", False):
-            passes.append(tir.transform.LowerAsyncDMA())
+            passes.append(tvm.s_tir.transform.LowerAsyncDMA())
         passes.extend(
             [
-                tir.transform.HoistIfThenElse(),
+                tvm.s_tir.transform.HoistIfThenElse(),
                 tir.transform.UnrollLoop(),
-                tir.transform.RenormalizeSplitPattern(),
+                tvm.s_tir.transform.RenormalizeSplitPattern(),
                 tir.transform.Simplify(),
                 tir.transform.RemoveNoOp(),
-                tir.transform.RewriteUnsafeSelect(),
+                tvm.s_tir.transform.RewriteUnsafeSelect(),
             ]
         )
         # Additional passes based on configuration.
         if bool(config.get("tir.instrument_bound_checkers", False)):
-            passes.append(tir.transform.InstrumentBoundCheckers())
+            passes.append(tvm.s_tir.transform.InstrumentBoundCheckers())
         if bool(config.get("tir.ptx_ldg32", False)):
-            passes.append(tir.transform.InjectPTXLDG32(True))
+            passes.append(tvm.s_tir.transform.InjectPTXLDG32(True))
         passes.append(
             tir.transform.CommonSubexprElimTIR(
                 not bool(config.get("tir.disable_cse_tir", False)),
@@ -84,39 +84,39 @@ def default_tir_pipeline():
             )
         )
         if bool(config.get("tir.instrument_lwp", False)):
-            passes.append(tir.transform.InstrumentProfileIntrinsics())
+            passes.append(tvm.s_tir.transform.InstrumentProfileIntrinsics())
         passes.extend(
             [
                 # Bind the target first so that target-specific attributes are available.
                 tir.transform.FP8ComputeLegalize(),
                 # VerifyVTCMLimit must occur before LowerVtcmAlloc.
-                tir.transform.VerifyVTCMLimit(),
-                tir.transform.LowerVtcmAlloc(),
+                tvm.s_tir.transform.VerifyVTCMLimit(),
+                tvm.s_tir.transform.LowerVtcmAlloc(),
                 tir.transform.VerifyMemory(),
                 tir.transform.AnnotateEntryFunc(),
             ]
         )
         if bool(config.get("tir.detect_global_barrier", False)):
-            passes.append(tir.transform.ThreadSync("global"))
+            passes.append(tvm.s_tir.transform.ThreadSync("global"))
         passes.extend(
             [
-                tir.transform.ThreadSync("shared"),
-                tir.transform.ThreadSync("shared.dyn"),
-                tir.transform.ThreadSync("warp"),
-                tir.transform.InferFragment(),
-                tir.transform.LowerThreadAllreduce(),
+                tvm.s_tir.transform.ThreadSync("shared"),
+                tvm.s_tir.transform.ThreadSync("shared.dyn"),
+                tvm.s_tir.transform.ThreadSync("warp"),
+                tvm.s_tir.transform.InferFragment(),
+                tvm.s_tir.transform.LowerThreadAllreduce(),
             ]
         )
         if bool(config.get("tir.use_async_copy", False)):
-            passes.append(tir.transform.InjectPTXAsyncCopy())
+            passes.append(tvm.s_tir.transform.InjectPTXAsyncCopy())
         if bool(config.get("tir.ptx_ldg32", False)):
-            passes.append(tir.transform.InjectPTXLDG32())
+            passes.append(tvm.s_tir.transform.InjectPTXLDG32())
         passes.extend(
             [
                 tir.transform.AnnotateDeviceRegions(),
                 tir.transform.SplitHostDevice(),
                 # MergeSharedMemoryAllocations must follow SplitHostDevice.
-                tir.transform.MergeSharedMemoryAllocations(),
+                tvm.s_tir.transform.MergeSharedMemoryAllocations(),
                 tir.transform.MakePackedAPI(),
                 tir.transform.FP8StorageLegalize(),
                 tir.transform.BF16StorageLegalize(),
@@ -181,11 +181,11 @@ def trn_pipeline():
             tirx.transform.PrivateBufferAlloc(),
             tirx.transform.NaiveAllocator(),
             tir.transform.LowerTIRx(),
-            tir.transform.DecorateDeviceScope(),
+            tvm.s_tir.transform.DecorateDeviceScope(),
             tir.transform.Simplify(),
             tir.transform.LowerTIRxOpaque(),
             tvm.s_tir.transform.LoopPartition(),
-            tir.transform.HoistIfThenElse(),
+            tvm.s_tir.transform.HoistIfThenElse(),
             tir.transform.Simplify(),
             tir.transform.RemoveNoOp(),
             tir.transform.AnnotateEntryFunc(),

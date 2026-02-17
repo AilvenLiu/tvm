@@ -140,7 +140,6 @@ def finalize_device_passes():  # pylint: disable=unused-argument
         tir.transform.LowerWarpMemory(),
         tir.transform.Simplify(),
         tir.transform.LowerCustomDatatypes(),
-        tir.transform.LowerDeviceStorageAccessInfo(),
         tir.transform.LowerIntrin(),
     ]
     return tvm.ir.transform.Sequential(device_pass_list)
