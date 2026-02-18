@@ -704,6 +704,13 @@ ElseFrame Else() {
   return ElseFrame(n);
 }
 
+HintFrame Hint(ffi::String message, ffi::Map<ffi::String, ffi::Any> attrs) {
+  ObjectPtr<HintFrameNode> n = ffi::make_object<HintFrameNode>();
+  n->message = message;
+  n->attrs = attrs;
+  return HintFrame(n);
+}
+
 ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
                          ffi::Map<ffi::String, ffi::Any> config,
                          ffi::Optional<ffi::String> dispatch) {
@@ -982,6 +989,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              }
            })
       .def("script.ir_builder.tir.EnvThread", EnvThread)
+      .def("script.ir_builder.tir.Hint", Hint)
       .def("script.ir_builder.tir.ComposeOp", ComposeOp)
       .def("script.ir_builder.tir.BufferStore", BufferStore)
       .def("script.ir_builder.tir.Evaluate", Evaluate)

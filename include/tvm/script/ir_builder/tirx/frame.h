@@ -736,7 +736,45 @@ class AllocBufferFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBufferFrame, TIRFrame, AllocBufferFrameNode);
 };
 
-}  // namespace tirxxx
+/*!
+ * \brief A frame that represents a hint directive for the sketch language.
+ *
+ * \sa HintFrame
+ */
+class HintFrameNode : public TIRFrameNode {
+ public:
+  /*! \brief The free-form hint message string. */
+  ffi::String message;
+  /*! \brief Optional structured key-value attributes. */
+  ffi::Map<ffi::String, ffi::Any> attrs;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<HintFrameNode>()
+        .def_ro("message", &HintFrameNode::message)
+        .def_ro("attrs", &HintFrameNode::attrs);
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.HintFrame", HintFrameNode, TIRFrameNode);
+
+ public:
+  void ExitWithScope() final;
+};
+
+/*!
+ * \brief Managed reference to HintFrameNode.
+ *
+ * \sa HintFrameNode
+ */
+class HintFrame : public TIRFrame {
+ public:
+  explicit HintFrame(ObjectPtr<HintFrameNode> data) : TIRFrame(ffi::UnsafeInit{}) {
+    TVM_FFI_ICHECK(data != nullptr);
+    data_ = std::move(data);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(HintFrame, TIRFrame, HintFrameNode);
+};
+
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -1427,6 +1427,24 @@ def attr(
         return _ffi_api.Attr(node_or_dict, attr_key, value)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def hint(message: str = "", **attrs) -> frame.HintFrame:
+    """Universal directive primitive for the sketch language.
+
+    Parameters
+    ----------
+    message : str
+        Free-form directive string that the agent interprets.
+    **attrs
+        Optional structured key-value attributes for known patterns.
+
+    Returns
+    -------
+    res : frame.HintFrame
+        Usable as context manager (with T.hint("msg"):) or bare statement (T.hint("msg")).
+    """
+    return _ffi_api.Hint(message, attrs or {})  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 def While(condition: PrimExpr) -> frame.WhileFrame:  # pylint: disable=invalid-name
     """Create a while node.
 
@@ -3026,6 +3044,7 @@ __all__ = float_types + [
     "grid",
     "Assert",
     "attr",
+    "hint",
     "While",
     "Break",
     "Continue",
