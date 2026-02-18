@@ -81,3 +81,23 @@ globals()["exp"] = exp
 for _name in dir(_tir):
     if not _name.startswith("_") and _name not in globals():
         globals()[_name] = getattr(_tir, _name)
+
+
+def __getattr__(name):
+    if name.startswith("_"):
+        raise AttributeError(f"module 'tvm.script.tirx' has no attribute {name!r}")
+
+    from .ir_builder.tir.tirx import _to_region, f_insert
+    from tvm.tir import Buffer
+    from tvm.tirx.operator.op import GenericOp
+
+    def _generic_op(*args, workspace=None, dispatch=None, **kwargs):
+        workspace = workspace or {}
+        config = kwargs or {}
+        converted = [_to_region(a) if isinstance(a, Buffer) else a for a in args]
+        return f_insert(
+            GenericOp(*converted, op_name=name, workspace=workspace,
+                      config=config, dispatch=dispatch)
+        )
+    _generic_op.__name__ = name
+    return _generic_op

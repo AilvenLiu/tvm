@@ -806,7 +806,7 @@ class OpCall(Stmt):
     def downcast(cls, instance: "OpCall") -> "OpCall":
         subclass = cls._registry.get(instance.op)
         if subclass is None:
-            raise ValueError(f"No subclass registered for op: {instance.op}")
+            return instance  # Unknown op: return as-is
         new_instance = subclass.__new__(subclass)
         new_instance.__init_handle_by_constructor__(
             _ffi_api.OpCallCopyHandle, instance  # pylint: disable=no-member

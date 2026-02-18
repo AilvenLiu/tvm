@@ -19,7 +19,8 @@
 
 from typing import List
 
-from tvm.tir.stmt import OpCall
+from tvm.tir.stmt import OpCall, normalize_const_arg
+from tvm.tir.stmt import _ffi_api
 from tvm.tir import PrimExpr, BufferRegion, FloatImm, IntImm
 from tvm.ir import Op
 from tvm.tir.predicate import Predicate
@@ -685,3 +686,26 @@ class PermuteDims(OpCall):
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         pass
+
+
+class GenericOp(OpCall):
+    """Generic operator for dynamically-resolved TIRx ops."""
+
+    def __init__(self, *args, op_name=None, workspace=None, config=None, dispatch=None):
+        workspace = workspace or {}
+        config = config or {}
+        tirx_name = f"tirx.{op_name}"
+        try:
+            resolved_op = Op.get(tirx_name)
+        except Exception:
+            from tvm.ir import _ffi_api as ir_ffi
+            from tvm.ir.op import register_op_attr
+
+            ir_ffi.RegisterOp(tirx_name, f"Dynamic tirx op: {op_name}")
+            register_op_attr(tirx_name, "TIsTIRxOp", True)
+            resolved_op = Op.get(tirx_name)
+        args = list(map(normalize_const_arg, args))
+        self.__init_handle_by_constructor__(
+            _ffi_api.OpCall, resolved_op, args, workspace, config, dispatch
+        )
+
