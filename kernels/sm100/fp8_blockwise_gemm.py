@@ -292,9 +292,9 @@ def tir_kernel(M: int, N: int, K: int):
                         epilogue1()
 
                 with T.cta():
-                    T.scope_attr({"tirx.scope_partition": True})
+                    T.attr({"tirx.scope_partition": True})
                     with T.warpgroup()[wg_id == 1]:
-                        T.scope_attr({"tirx.scope_partition": True})
+                        T.attr({"tirx.scope_partition": True})
                         with T.warp(parent="warpgroup")[warp_id == 3]:
                             phase = 0
                             while tile_scheduler.valid():
