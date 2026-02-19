@@ -421,34 +421,31 @@ def tir_gemm(A_fp8, B_fp8, sfa_pack, sfb_pack, C, kernel, warmup, repeat):
     return C_tvm
 
 
-def deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, A_origin, B_origin):
+def deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, warmup, repeat, A_origin, B_origin):
+    # A_fp8, B_fp8, sfa, sfb = A_fp8.clone(), B_fp8.clone(), sfa.clone(), sfb.clone()
+    a = per_token_cast_to_fp8(A_origin, use_ue8m0=True)
+    b = per_block_cast_to_fp8(B_origin, use_ue8m0=True)
     out = torch.zeros_like(C_ref).to(torch.bfloat16).to("cuda")
-    # fp8_gemm_nt has a non-deterministic bug: "Cannot access data pointer of Tensor that
-    # doesn't have storage". Unlike cublaslt_gemm_nt/bf16_gemm_nt, it caches internal tensor
-    # references that get invalidated by torch.cuda.synchronize() or L2 cache flushes,
-    # making it incompatible with bench()/do_bench(). Only do a correctness check here.
-    try:
-        deep_gemm.fp8_gemm_nt((A_fp8, sfa), (B_fp8, sfb), out)
-        torch.cuda.synchronize()
-    except RuntimeError as e:
-        print(f"WARNING: deep_gemm fp8_gemm_nt failed (known bug): {e}")
-        return None
+    func = lambda: deep_gemm.fp8_gemm_nt(
+        a,
+        b,
+        out,
+        disable_ue8m0_cast=False,
+        recipe=None,
+    )
+    bench(func, warmup=warmup, repeat=repeat, proton_name="deepgemm")
     return out
 
 
 def profile_gemm(M: int, N: int, K: int, kernel, warmup: int, repeat: int):
     A_fp8, B_fp8, sfa, sfb, sfa_pack, sfb_pack, C_ref, A_origin, B_origin = prepare_data(M, N, K)
 
-    # Run deepgemm correctness check BEFORE proton — proton hooks worsen the
-    # non-deterministic fp8_gemm_nt failure rate.
-    C_deepgemm = deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, A_origin, B_origin)
-
     with ProtonContext("fp8-blockwise-gemm"):
         C_tir = tir_gemm(A_fp8, B_fp8, sfa_pack, sfb_pack, C_ref, kernel, warmup, repeat)
+        C_deepgemm = deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, warmup, repeat, A_origin, B_origin)
 
     assert calc_diff(C_tir, C_ref.to("cuda")) < 1e-3
-    if C_deepgemm is not None:
-        assert calc_diff(C_deepgemm, C_ref.to("cuda")) < 1e-3
+    assert calc_diff(C_deepgemm, C_ref.to("cuda")) < 1e-3
 
 
 if __name__ == "__main__":
