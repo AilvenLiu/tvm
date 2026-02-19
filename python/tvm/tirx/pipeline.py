@@ -14,251 +14,96 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Reusable pipeline state and mbarrier helpers for SM100 kernels.
 
-# pylint: disable=invalid-name
-"""The TIR backend compilation pipeline."""
+These classes emit TIR via @Tx.macro. Construct them with Tx.meta_var(...)
+inside a PrimFunc and call their macros.
+"""
 
-import tvm
-from tvm import tir, tirx
-
-from . import backend
-
-
-def default_tir_pipeline():
-    """The default tir pipeline used in tvm.tirx.build"""
-
-    @tvm.transform.module_pass(opt_level=0)
-    def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
-        """The default lowering passes for TIR backend."""
-        pass_ctx = tvm.transform.PassContext.current()
-        config = pass_ctx.config
-        passes = [
-            tvm.s_tir.transform.CanonicalizeLoop(),
-            tvm.s_tir.transform.LowerCrossThreadReduction(),
-            tvm.s_tir.transform.LowerInitBlock(),
-            tvm.s_tir.transform.PlanAndUpdateBufferAllocationLocation(),
-            tvm.s_tir.transform.ConvertBlocksToOpaque(),
-            tvm.s_tir.transform.LiftThreadBinding(),
-            tvm.s_tir.transform.ManifestSharedMemoryLocalStage(),
-            tvm.s_tir.transform.CompactBufferAllocation(),
-            tvm.s_tir.transform.LowerAutoCopy(),
-            tvm.s_tir.transform.UnifyThreadBinding(),
-            tvm.s_tir.transform.LowerMatchBuffer(),
-            tir.transform.Simplify(),
-            tvm.s_tir.transform.InjectPermutedLayout(),
-            tvm.s_tir.transform.AnnotateIrregularLoop(),
-            tvm.s_tir.transform.InjectSoftwarePipeline(),
-            tvm.s_tir.transform.TransformMmaBufferLayout(),
-            tvm.s_tir.transform.LowerOpaqueBlock(),
-            tir.transform.FlattenBuffer(),
-            tir.transform.BF16ComputeLegalize(),
-            tir.transform.NarrowDataType(32),
-            tvm.s_tir.transform.LoopPartition(),
-            tir.transform.VectorizeLoop(not bool(config.get("tir.disable_vectorize", False))),
-            tvm.s_tir.transform.InjectVirtualThread(),
-            tvm.s_tir.transform.InjectDoubleBuffer(),
-        ]
-        if not bool(config.get("tir.disable_storage_rewrite", False)):
-            passes.append(tir.transform.StorageRewrite())
-        if config.get("tir.use_async_copy", False):
-            passes.append(tvm.s_tir.transform.LowerAsyncDMA())
-        passes.extend(
-            [
-                tvm.s_tir.transform.HoistIfThenElse(),
-                tir.transform.UnrollLoop(),
-                tvm.s_tir.transform.RenormalizeSplitPattern(),
-                tir.transform.Simplify(),
-                tir.transform.RemoveNoOp(),
-                tvm.s_tir.transform.RewriteUnsafeSelect(),
-            ]
-        )
-        # Additional passes based on configuration.
-        if bool(config.get("tir.instrument_bound_checkers", False)):
-            passes.append(tvm.s_tir.transform.InstrumentBoundCheckers())
-        if bool(config.get("tir.ptx_ldg32", False)):
-            passes.append(tvm.s_tir.transform.InjectPTXLDG32(True))
-        passes.append(
-            tir.transform.CommonSubexprElimTIR(
-                not bool(config.get("tir.disable_cse_tir", False)),
-                bool(config.get("tir.enable_equiv_terms_in_cse_tir", False)),
-            )
-        )
-        if bool(config.get("tir.instrument_lwp", False)):
-            passes.append(tvm.s_tir.transform.InstrumentProfileIntrinsics())
-        passes.extend(
-            [
-                # Bind the target first so that target-specific attributes are available.
-                tir.transform.FP8ComputeLegalize(),
-                # VerifyVTCMLimit must occur before LowerVtcmAlloc.
-                tvm.s_tir.transform.VerifyVTCMLimit(),
-                tvm.s_tir.transform.LowerVtcmAlloc(),
-                tir.transform.VerifyMemory(),
-                tir.transform.AnnotateEntryFunc(),
-            ]
-        )
-        if bool(config.get("tir.detect_global_barrier", False)):
-            passes.append(tvm.s_tir.transform.ThreadSync("global"))
-        passes.extend(
-            [
-                tvm.s_tir.transform.ThreadSync("shared"),
-                tvm.s_tir.transform.ThreadSync("shared.dyn"),
-                tvm.s_tir.transform.ThreadSync("warp"),
-                tvm.s_tir.transform.InferFragment(),
-                tvm.s_tir.transform.LowerThreadAllreduce(),
-            ]
-        )
-        if bool(config.get("tir.use_async_copy", False)):
-            passes.append(tvm.s_tir.transform.InjectPTXAsyncCopy())
-        if bool(config.get("tir.ptx_ldg32", False)):
-            passes.append(tvm.s_tir.transform.InjectPTXLDG32())
-        passes.extend(
-            [
-                tir.transform.AnnotateDeviceRegions(),
-                tir.transform.SplitHostDevice(),
-                # MergeSharedMemoryAllocations must follow SplitHostDevice.
-                tvm.s_tir.transform.MergeSharedMemoryAllocations(),
-                tir.transform.MakePackedAPI(),
-                tir.transform.FP8StorageLegalize(),
-                tir.transform.BF16StorageLegalize(),
-                tir.transform.LowerDeviceKernelLaunch(),
-            ]
-        )
-        mod = tvm.ir.transform.Sequential(passes)(mod)
-        return mod
-
-    return _pipeline, finalize_host_passes, finalize_device_passes
+from tvm.script import tirx as Tx
 
 
-def tirx_pipeline():
-    """The TIRX pipeline used in tvm.tirx.build"""
-
-    @tvm.transform.module_pass(opt_level=0)
-    def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
-        """The default lowering passes for TIR backend."""
-        pass_ctx = tvm.transform.PassContext.current()
-        config = pass_ctx.config
-        passes = [
-            tvm.tirx.transform.PrivateBufferAlloc(),
-            tir.transform.LowerTIRx(),
-            tvm.s_tir.transform.UnifyThreadBinding(),
-            tir.transform.Simplify(),
-            tir.transform.LowerTIRxOpaque(),
-            tir.transform.FlattenBuffer(),
-            tir.transform.BF16ComputeLegalize(),
-            tir.transform.NarrowDataType(32),
-            tir.transform.VectorizeLoop(not bool(config.get("tir.disable_vectorize", False))),
-            tir.transform.UnrollLoop(),
-            tir.transform.CommonSubexprElimTIR(
-                not bool(config.get("tir.disable_cse_tir", False)),
-                bool(config.get("tir.enable_equiv_terms_in_cse_tir", False)),
-            ),
-            tir.transform.Simplify(),
-            tir.transform.FP8ComputeLegalize(),
-            tir.transform.VerifyMemory(),
-            tir.transform.AnnotateEntryFunc(),
-            tir.transform.AnnotateDeviceRegions(),
-            tir.transform.SplitHostDevice(),
-            tir.transform.MakePackedAPI(),
-            tir.transform.FP8StorageLegalize(),
-            tir.transform.BF16StorageLegalize(),
-            tir.transform.LowerDeviceKernelLaunch(),
-        ]
-        mod = tvm.ir.transform.Sequential(passes)(mod)
-        return mod
-
-    return _pipeline, finalize_host_passes, finalize_device_passes
-
-
-def trn_pipeline():
-    """The Trainium pipeline used in tvm.tirx.build"""
-
-    @tvm.transform.module_pass(opt_level=0)
-    def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
-        """The default lowering passes for TRN backend."""
-        pass_ctx = tvm.transform.PassContext.current()
-        config = pass_ctx.config
-        passes = [
-            tirx.transform.PrivateBufferAlloc(),
-            tirx.transform.NaiveAllocator(),
-            tir.transform.LowerTIRx(),
-            tvm.s_tir.transform.DecorateDeviceScope(),
-            tir.transform.Simplify(),
-            tir.transform.LowerTIRxOpaque(),
-            tvm.s_tir.transform.LoopPartition(),
-            tvm.s_tir.transform.HoistIfThenElse(),
-            tir.transform.Simplify(),
-            tir.transform.RemoveNoOp(),
-            tir.transform.AnnotateEntryFunc(),
-            tir.transform.AnnotateDeviceRegions(),
-            tir.transform.SplitHostDevice(),
-            tir.transform.MakePackedAPI(),
-            tir.transform.LowerDeviceKernelLaunch(),
-        ]
-        return tvm.ir.transform.Sequential(passes)(mod)
-
-    return _pipeline, finalize_host_passes, finalize_device_passes_trn
-
-
-def finalize_host_passes():  # pylint: disable=unused-argument
-    """The default finalization passes for TIR backend."""
-    host_pass_list = [
-        tirx.transform.LowerTVMBuiltin(),
-        tirx.transform.LowerCustomDatatypes(),
-        tirx.transform.LowerIntrin(),
-    ]
-    return tvm.ir.transform.Sequential(host_pass_list)
-
-
-def finalize_device_passes():  # pylint: disable=unused-argument
-    """The default finalization passes for TIR backend."""
-    device_pass_list = [
-        tirx.transform.LowerWarpMemory(),
-        tirx.transform.Simplify(),
-        tirx.transform.LowerCustomDatatypes(),
-        tirx.transform.LowerIntrin(),
-    ]
-    return tvm.ir.transform.Sequential(device_pass_list)
-
-
-def finalize_device_passes_trn():  # pylint: disable=unused-argument
-    """The default finalization passes for TRN backend."""
-    device_pass_list = [
-        tir.transform.Simplify(),
-    ]
-    return tvm.ir.transform.Sequential(device_pass_list)
-
-
-# global map of pre-built pipelines
-PIPELINE_MAP = {
-    "default": default_tir_pipeline,
-    "tirx": tirx_pipeline,
-    "trn": trn_pipeline,
-}
-
-
-def get_tir_pipeline(name: str | None = None, **kwargs) -> tvm.transform.Pass:
-    """Get pre-build pipeline by name
+class PipelineState:
+    """Tracks pipeline stage and phase for software-pipelined loops.
 
     Parameters
     ----------
-    name : Optional[str]
-        Name of the pipeline
+    prefix : str
+        Name prefix for the generated local cells (stage/phase).
+    pipe_depth : int
+        Number of pipeline stages.
     """
-    if name == "default":
-        # for now, defualt to s_tir pipeline
-        name = "s_tir"
-    if name not in PIPELINE_MAP:
-        raise ValueError(
-            f"Unknown pre-built pipeline {name}," f"candidates are {list(PIPELINE_MAP.keys())}"
-        )
-    return PIPELINE_MAP[name](**kwargs)
+
+    def __init__(self, prefix: str, pipe_depth: int):
+        self.stage = Tx.local_cell("int32", name=prefix + "_stage")
+        self.phase = Tx.local_cell("int32", name=prefix + "_phase")
+        self.pipe_depth = pipe_depth
+
+    @Tx.macro
+    def init(self, is_producer):
+        self.stage = 0
+        if is_producer:
+            self.phase = 1
+        else:
+            self.phase = 0
+
+    @Tx.macro
+    def move_to_next_stage(self):
+        if self.pipe_depth > 1:
+            self.stage = self.stage + 1
+            if self.stage == self.pipe_depth:
+                self.stage = 0
+                self.phase = self.phase ^ 1
+        else:
+            self.phase = self.phase ^ 1
 
 
-def get_default_tir_pipeline(
-    target: tvm.target.Target,  # pylint: disable=unused-argument
-) -> tvm.transform.Pass:
-    """Get the default TIR pipeline for the given target."""
-    if target.kind.name == "opencl" and "adreno" in target.keys:
-        return get_tir_pipeline("adreno")
-    else:
-        return get_tir_pipeline("s_tir")
+class MBarrier:
+    """Mbarrier wrapper with regular mbarrier.arrive.
+
+    Parameters
+    ----------
+    pool : PoolAllocator (meta_var)
+        Shared memory pool allocator.
+    depth : int
+        Number of barrier slots (one per pipeline stage).
+    name : str
+        Descriptive name (unused at runtime, for readability).
+    """
+
+    def __init__(self, pool, depth, name="mbar"):
+        self.buf = pool.alloc((depth,), "uint64", align=8).buffer
+        self.depth = depth
+
+    @Tx.macro
+    def init(self, count):
+        with Tx.thread()[0:1]:
+            for i in Tx.unroll(self.depth):
+                Tx.ptx.mbarrier.init(self.buf.ptr_to([i]), count)
+
+    @Tx.macro
+    def wait(self, stage, phase):
+        Tx.ptx.mbarrier.try_wait(self.buf.ptr_to([stage]), phase)
+
+    @Tx.macro
+    def arrive(self, stage, cta_id=0, pred=True):
+        Tx.ptx.mbarrier.arrive(self.buf.ptr_to([stage]), cta_id=cta_id, pred=pred)
+
+    def ptr_to(self, idx):
+        return self.buf.ptr_to(idx)
+
+
+class TMABar(MBarrier):
+    """Barrier signaled by TMA (mbarrier.arrive.expect_tx)."""
+
+    @Tx.macro
+    def arrive(self, stage, tx_count):
+        Tx.ptx.mbarrier.arrive.expect_tx(self.buf.ptr_to([stage]), tx_count)
+
+
+class TCGen05Bar(MBarrier):
+    """Barrier signaled by tcgen05 commit."""
+
+    @Tx.macro
+    def arrive(self, stage, cta_group, cta_mask):
+        Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)
