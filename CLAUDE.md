@@ -61,13 +61,17 @@ make -j$(nproc)
 
 ## Testing
 
+**GPU selection**: Before running GPU tests, check if this is a multi-GPU machine (`nvidia-smi --query-gpu=index --format=csv,noheader | wc -l`). If so, select the least busy GPU to avoid conflicts:
+```bash
+export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
+```
+
 Run TIRX tests:
 ```bash
-pytest tests/python/tirx/ -n 16 -x \
-  --timeout=60 -o timeout_method=signal \
-  --session-timeout=140 \
-  -o faulthandler_timeout=120
+pytest tests/python/tirx/ -n 16 -x
 ```
+
+**Kernel performance**: When modifying anything that affects code generation (kernels, op schedules, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 
 ## Code Style
 
@@ -96,6 +100,8 @@ Types: feat, fix, refactor, perf, test, docs, chore, ci, build
 Scopes: layout, kernel, op, op-schedule, lower-tirx, tvmscript, megakernel, infra
 ```
 
+Default branch: **`tirx`** (not `main`). Always use `--base tirx` when creating PRs.
+
 Branch naming: `<type>/<kebab-case-description>`, e.g. `feat/direct-sum`, `fix/slice-swizzle`.
 
 ## Common Gotchas
@@ -104,3 +110,4 @@ Branch naming: `<type>/<kebab-case-description>`, e.g. `feat/direct-sum`, `fix/s
 - **Printer ↔ Parser sync**: Modifications to IR printing (`src/script/printer/tir/`) must have corresponding parser changes (`python/tvm/script/parser/tir/`) and vice versa. Run `test_parser_printer.py` to verify round-trip.
 - **New op checklist**: Adding a TIRX operator requires registration in `operator/op.py`, a schedule in `op_schedule/cuda/` (and/or `trn/`), a DSL entry in `ir_builder/tir/tirx.py`, and tests.
 - Keep documentation in sync with code changes: when modifying code that is referenced in this document or in `.claude/skills/`, update the corresponding documentation immediately.
+- **Flaky tests**: If tests fail intermittently, first check `nvidia-smi` to see if the GPU is occupied by other workloads. Switch to an idle GPU before re-running.
