@@ -32,7 +32,6 @@ from tvm.tirx.op_schedule.cuda.gemm_async import sf_tmem_layout
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
-from tvm.ir import PointerType, PrimType
 
 
 def parse_args():
@@ -336,15 +335,11 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             Tx.cuda.cluster_sync()
 
             # Get pointer to pair leader's mbar_tma array for TMA arrive
-            tma_full_cta0_ptr: Tx.Var(name="tma_full_cta0_ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_full.ptr_to([0]), pair_leader_rank))
-            tma_full_cta0 = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=tma_full_cta0_ptr, scope="shared")
+            tma_full_cta0 = Tx.meta_var(tma_full.remote_view(pair_leader_rank))
 
             # descriptor cells
-            descI = Tx.local_cell("uint32")
             descSFA = Tx.meta_var(SmemDescriptor("SFA"))
             descSFB = Tx.meta_var(SmemDescriptor("SFB"))
-
-            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", "float4_e2m1fn", "float4_e2m1fn", "float8_e4m3fn", "float8_e4m3fn", TMEM_SFA, TMEM_SFB, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
 
             # The mask containing the pair leader and follower in the cluster
             pair_mask = Tx.local_cell("int32")
@@ -401,7 +396,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                             # signal tma is issued to pair leader
                             if id_in_pair == 0:
                                 total_bytes = Tx.meta_var(A_BYTES + B_BYTES + SFA_BYTES + SFB_BYTES)
-                                Tx.ptx.mbarrier.arrive.expect_tx(tma_full_cta0.ptr_to([stage]), total_bytes)
+                                tma_full_cta0.arrive(stage, total_bytes)
 
                     for k_tile in Tx.serial(K_TILES):
                         issue_tma_load(tma_state.stage, tma_state.phase, k_tile)
@@ -431,7 +426,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
 
                             # issue mma
                             tmem_acc = Tx.meta_var(acc_state.stage * MMA_N if MMA_N == 128 else (acc_state.phase ^ 1) * (MMA_N - EPI_TILE))
-                            Tx.gemm_async(tmem[:, tmem_acc: tmem_acc + MMA_N], A_smem[stage, :, :], B_smem[stage, :, :], SFA=SFA_tmem[:, :], SFB=SFB_tmem[:, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
+                            Tx.gemm_async(tmem[:, tmem_acc: tmem_acc + MMA_N], A_smem[stage, :, :], B_smem[stage, :, :], SFA=SFA_tmem[:, :], SFB=SFB_tmem[:, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP)
                             accum = 1
 
                             # signal mma is issued to both CTAs in the pair

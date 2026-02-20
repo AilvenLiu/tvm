@@ -27,7 +27,6 @@ from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
-from tvm.ir import PointerType, PrimType
 
 
 def parse_args():
@@ -140,8 +139,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             ld2mma.init(128 * CTA_GROUP)  # signaled by warpgroup1(2) of both CTAs
 
             # CTA-0 is responsible for receiving signals of the finish of TMA of both 2 CTAs
-            ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.ptr_to([0]), 0))
-            tma2mma_cta0 = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
+            tma2mma_cta0 = Tx.meta_var(tma2mma.remote_view(0))
 
             # tmem allocation
             if wg_id == 0 and warp_id == 0:
@@ -177,7 +175,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                         Tx.copy_async(Asmem[stage, 1, :, :], A[m_st + CTA_GROUP * BLK_M : m_st + (CTA_GROUP + 1) * BLK_M, k_st : k_st + BLK_K], **tma_config)
                         Tx.copy_async(Bsmem[stage, :, :], B[n_st : n_st + BLK_N, k_st : k_st + BLK_K], **tma_config)
                         if cbx == 0:
-                            Tx.ptx.mbarrier.arrive.expect_tx(tma2mma_cta0.ptr_to([stage]), CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * F16_SIZE) # signal CTA-0 the issue of tma
+                            tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * F16_SIZE) # signal CTA-0 the issue of tma
 
                     @Tx.macro
                     def tma_load():
@@ -197,15 +195,12 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     ld_phase = Tx.meta_var(PipelineState("ld", 1))
                     ld_phase.init(is_producer=True)
 
-                    descI = Tx.local_cell("uint32")
-                    Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), acc_type, a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
-                    Tx.ptx.tcgen05.fence.after_thread_sync()
                     accum = Tx.local_cell("int32")
 
                     @Tx.macro
                     def mma_stage(stage):
                         tma2mma.wait(stage, mma_phase.phase) # wait for the tma to finish
-                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
+                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP)
                         accum = 1
                         mma2tma.arrive(stage, cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma
 
