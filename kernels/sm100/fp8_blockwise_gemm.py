@@ -122,16 +122,7 @@ def tir_kernel(M: int, N: int, K: int):
     CTA_GROUP = 2
     QUANT_SIZE = BLK_K
     SWIZZLE = 3
-    SMEM_SIZE = (
-        SMEM_PIPE_DEPTH * BLK_M * BLK_K * F8_BYTES
-        + SMEM_PIPE_DEPTH * BLK_N * BLK_K * F8_BYTES
-        + TMEM_PIPE_DEPTH * BLK_M * EPI_TILE * F16_BYTES
-        + SMEM_PIPE_DEPTH * BLK_SFA * F32_BYTES
-        + SMEM_PIPE_DEPTH * BLK_SFB * F32_BYTES
-        + 1024
-    )
 
-    assert SMEM_SIZE <= 232448
     assert TMEM_PIPE_DEPTH * (MMA_N + BLK_SFA // 32 + BLK_SFB // 32) <= 512
 
     TILE_GROUPS_ROW_SIZE = 16
@@ -172,8 +163,7 @@ def tir_kernel(M: int, N: int, K: int):
             lane_id = Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 # alloc shared memory
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                pool = Tx.meta_var(Tx.PoolAllocator())
                 tmem_addr = pool.alloc([1], "uint32", align=4)
                 # Pipeline mbarriers
                 tma2trans = Tx.meta_var(TMABar(pool, SMEM_PIPE_DEPTH, "tma2trans"))
@@ -189,6 +179,7 @@ def tir_kernel(M: int, N: int, K: int):
                 SFB_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", layout=SFB_layout)
                 SFA_smem_2d = SFA_smem.view(SMEM_PIPE_DEPTH, BLK_SFA)
                 SFB_smem_2d = SFB_smem.view(SMEM_PIPE_DEPTH, BLK_SFB)
+                pool.commit()
 
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")

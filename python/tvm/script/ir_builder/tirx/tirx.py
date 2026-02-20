@@ -26,7 +26,7 @@ from tvm.tirx.expr import FloatImm
 from tvm.tirx.predicate import Predicate
 
 from . import _ffi_api, frame
-from .ir import decl_buffer
+from .ir import alloc_buffer, attr, decl_buffer
 
 
 def _to_region(buffer: Union[BufferRegion, Buffer]):
@@ -1156,10 +1156,41 @@ def select(
     return f_insert(tirx_op.Select(dst, true_value, false_value, pred))
 
 
+_POOL_UNSET = object()
+
+
 class PoolAllocator:
-    def __init__(self, ptr: Var):
-        self.ptr = ptr
+    """Bump allocator over a contiguous shared memory region.
+
+    Parameters
+    ----------
+    ptr : Var or None, optional
+        If omitted, an ``alloc_buffer([0], "uint8", scope="shared.dyn")`` is
+        created automatically and ``commit()`` must be called after all
+        allocations to emit the size annotation.
+        If a ``Var`` (or ``None`` for megakernel fusion mode) is provided,
+        the caller manages the backing buffer and ``commit()`` is a no-op.
+    """
+
+    def __init__(self, ptr=_POOL_UNSET):
+        if ptr is _POOL_UNSET:
+            buf_or_frame = alloc_buffer([0], "uint8", scope="shared.dyn")
+            if isinstance(buf_or_frame, frame.AllocBufferFrame):
+                from functools import partial
+
+                buf_or_frame.add_callback(
+                    partial(buf_or_frame.__exit__, None, None, None)
+                )
+                buf = buf_or_frame.__enter__()
+            else:
+                buf = buf_or_frame
+            self.ptr = buf.data
+            self._owns_buffer = True
+        else:
+            self.ptr = ptr
+            self._owns_buffer = False
         self.offset = 0
+        self.max_offset = 0
 
     def alloc(
         self,
@@ -1191,10 +1222,41 @@ class PoolAllocator:
             name,
         )
         self.offset += functools.reduce(lambda x, y: x * y, shape) * (DataType(dtype).bits // 8)
+        if self._owns_buffer:
+            self.max_offset = self.offset if self.offset > self.max_offset else self.max_offset
         return res
 
     def move_base_to(self, offset):
         self.offset = offset
+        if self._owns_buffer:
+            self.max_offset = self.offset if self.offset > self.max_offset else self.max_offset
+
+    def commit(self, size=None):
+        """Emit pool size annotation into the IR.
+
+        Must be called after all ``alloc()`` / ``move_base_to()`` calls.
+
+        Parameters
+        ----------
+        size : int, optional
+            Explicit shared memory size in bytes.  When *None* (the default),
+            the high-water mark ``max_offset`` tracked by the allocator is used.
+        """
+        if not self._owns_buffer:
+            return
+        resolved = size if size is not None else self.max_offset
+        assert resolved >= self.max_offset, (
+            f"Specified smem size ({resolved}) is smaller than "
+            f"the pool high-water mark ({self.max_offset})"
+        )
+        attr_frame = attr(self.ptr, "tirx.pool_max_bytes", resolved)
+        if isinstance(attr_frame, frame.AttrFrame):
+            from functools import partial
+
+            attr_frame.add_callback(
+                partial(attr_frame.__exit__, None, None, None)
+            )
+            attr_frame.__enter__()
 
 
 def reshape(buffer: Buffer, shape: List[PrimExpr]):

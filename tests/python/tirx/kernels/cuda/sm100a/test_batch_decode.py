@@ -278,13 +278,13 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                 with Tx.cta():
                     # allocate the memory
-                    buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                    pool = Tx.meta_var(Tx.PoolAllocator())
                     k_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     v_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     kv_offset = pool.alloc([BDZ, BDX, BDY, TILE_PER_BDX], "int32")
                     epi_o = pool.alloc([BDZ, BDY, BDX, HEAD_PER_CTA, VEC_SIZE], "float32")
                     epi_md = pool.alloc([BDZ, BDY, HEAD_PER_CTA, 2], "float32")
+                    pool.commit()
 
                     with Tx.thread():
 
@@ -535,14 +535,14 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                 with Tx.cta():
                     # allocate the memory
-                    buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                    pool = Tx.meta_var(Tx.PoolAllocator())
                     o_tmp_smem = pool.alloc([PIPE_DEPTH, BDY, HEAD_DIM], "float32")
                     lse_tmp_smem_load = pool.alloc([BDY, BDX], "float32")
                     lse_tmp_smem_use = lse_tmp_smem_load.view(BDX, BDY)
                     pool.move_base_to(0)
                     o_epi_smem = pool.alloc([BDY, HEAD_DIM], "float32")
                     lse_epi_smem = pool.alloc([BDY], "float32")
+                    pool.commit()
 
                     with Tx.thread():
                         idx = Tx.alloc_local([1], "int32")

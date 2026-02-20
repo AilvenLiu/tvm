@@ -214,8 +214,6 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
         KV_THR_LAYOUT_ROW = 4
         NUM_STAGES = 1
         WG_COUNT = 2
-        # SMEM_SIZE = 69632 * WG_COUNT
-        SMEM_SIZE = 214016
         assert NUM_WARPS == 4  # total warps in a cta
         assert NUM_MMA_KV * 4 % NUM_WARPS_Q == 0
         assert (
@@ -356,8 +354,7 @@ __device__ __forceinline__ float {func_name}() {{
                 warp_id = Tx.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
                 lane_id = Tx.thread_id([32], parent="warp")
 
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                pool = Tx.meta_var(Tx.PoolAllocator())
                 q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
                 k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
                 v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
@@ -366,6 +363,7 @@ __device__ __forceinline__ float {func_name}() {{
                 cta_sync_md_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, 16, 2], "float32", align=16)
                 # pool.move_base_to(0)
                 smem_o = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
+                pool.commit()
                 print(pool.offset)
 
                 with Tx.thread():

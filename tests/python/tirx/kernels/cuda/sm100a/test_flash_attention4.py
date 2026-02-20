@@ -131,21 +131,13 @@ def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads,
         n_idx = m_idx_min + SEQ_LEN_KV - SEQ_LEN_Q
         return Tx.max(0, n_idx // BLK_N)
 
-    SMEM_SIZE_Q_BYTES = SMEM_PIPE_DEPTH_Q * BLK_M * HEAD_DIM * F16_BYTES
-    SMEM_SIZE_KV_BYTES = SMEM_PIPE_DEPTH_KV * BLK_N * HEAD_DIM * F16_BYTES
-    SMEM_SIZE_O_BYTES = TMEM_PIPE_DEPTH * BLK_M * HEAD_DIM * F16_BYTES
-    SMEM_SIZE_SCALE = 2 * SMEM_PIPE_DEPTH_Q * BLK_M * F32_BYTES
-    SMEM_SIZE_MBAR = 35 * 8
 
     # L2 cache optimization for LPT scheduling (causal attention)
     L2_SIZE = 50 * 1024 * 1024  # 50MB L2 cache
     SIZE_ONE_KV_HEAD = SEQ_LEN_KV * HEAD_DIM * 2 * F16_BYTES  # K+V size per head
     L2_SWIZZLE = 1 if L2_SIZE < SIZE_ONE_KV_HEAD else (1 << int(math.log2(L2_SIZE // SIZE_ONE_KV_HEAD)))
 
-    SMEM_SIZE = 232448
-    assert (
-        SMEM_SIZE <= 232448
-    ), f"SMEM size {SMEM_SIZE} exceeds limit (Q:{SMEM_SIZE_Q_BYTES}, KV:{SMEM_SIZE_KV_BYTES}, O:{SMEM_SIZE_O_BYTES}, Scale:{SMEM_SIZE_SCALE}, Mbar:{SMEM_SIZE_MBAR}, Total:{SMEM_SIZE})"
+    SSCALE_TOTAL_SIZE = 2 * SMEM_PIPE_DEPTH_Q * BLK_M
     assert TMEM_PIPE_DEPTH * MMA_N <= N_COLS_TMEM, "TMEM columns exceeded"
 
     def ceildiv(a, b):
@@ -325,8 +317,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             Tx.attr(0, "tirx.persistent_kernel", True)
             with Tx.cta():
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                pool = Tx.meta_var(Tx.PoolAllocator())
                 # Allocate Q buffer with alignment
                 Q_smem = pool.alloc((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), "float16", layout=Q_layout, align=1024)
                 # Allocate K and V buffers (they share the same offset)
@@ -335,8 +326,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 # Allocate O buffer
                 O_smem = pool.alloc((TMEM_PIPE_DEPTH, BLK_M, HEAD_DIM), "float16", layout=O_layout, align=1024)
                 # Allocate sScale buffer (ACC_SCALE/ROW_SUM shared + ROW_MAX)
-                sScale_total_size = 2 * SMEM_PIPE_DEPTH_Q * BLK_M
-                sScale = pool.alloc((sScale_total_size,), "float32", align=1024)
+                sScale = pool.alloc((SSCALE_TOTAL_SIZE,), "float32", align=1024)
                 tmem_addr = pool.alloc([1], "uint32")
 
                 ACC_SCALE_BASE = 0
@@ -381,6 +371,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 bar_s0_s1_sequence = Tx.meta_var(BarrierWithArrive(pool, 8, True))
 
                 bar_tmem_dealloc = Tx.meta_var(BarrierWithArrive(pool, 1, True))
+                pool.commit()
 
                 profiler = Tx.meta_var(CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON))
 

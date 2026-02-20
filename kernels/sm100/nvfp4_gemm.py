@@ -127,15 +127,6 @@ def tir_ws_kernel(M: int, N: int, K: int):
     assert M % 128 == 0 and N % 128 == 0 and SF_CTA_K % 4 == 0
     assert CTA_M % 128 == 0 and SFB_N % 128 == 0 and SF_CTA_K % 4 == 0
 
-    # SMEM sizes with pipeline depth
-    SMEM_A_SIZE = PIPE_DEPTH * CTA_M * CTA_K // 2
-    SMEM_B_SIZE = PIPE_DEPTH * CTA_N * CTA_K // 2
-    SMEM_SFA_SIZE = PIPE_DEPTH * CTA_M * SF_CTA_K
-    SMEM_SFB_SIZE = PIPE_DEPTH * SFB_N * SF_CTA_K
-    SMEM_D_SIZE = WB_PIPE_DEPTH * CTA_M * EPI_TILE * F16_BYTES
-    SMEM_SIZE = 1024 + SMEM_A_SIZE + SMEM_B_SIZE + SMEM_SFA_SIZE + SMEM_SFB_SIZE + SMEM_D_SIZE
-    assert SMEM_SIZE <= 232448
-
     NUM_WARPS = 8
 
     # layouts
@@ -294,8 +285,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             n_idx = Tx.meta_var(tile_scheduler.n_idx)
 
             ############################ SMEM allocation #################################
-            buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-            pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+            pool = Tx.meta_var(Tx.PoolAllocator())
             tmem_addr = pool.alloc([1], "uint32", align=4)
             # Pipeline mbarriers: one per stage
             tma_full = Tx.meta_var(TMABar(pool, PIPE_DEPTH, "tma_full"))
@@ -308,6 +298,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             SFA_smem = pool.alloc((PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 256), "uint16", layout=SFA_layout_pipe, align=1024)
             SFB_smem = pool.alloc((PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 256), "uint16", layout=SFB_layout_pipe, align=1024)
             output_smem = pool.alloc((WB_PIPE_DEPTH, CTA_M, EPI_TILE), "bfloat16", layout=D_layout_wb, align=1024)
+            pool.commit()
             tma_full.init(1)
             tma_empty.init(1)
             acc_full.init(1)

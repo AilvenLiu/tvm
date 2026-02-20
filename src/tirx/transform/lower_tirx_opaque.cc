@@ -48,16 +48,37 @@ class TIRxOpaqueLower : public StmtExprMutator {
   }
 
  private:
+  Stmt VisitStmt_(const AttrStmtNode* op) final {
+    if (op->attr_key == "tirx.pool_max_bytes") {
+      // Record the pool size annotation and strip the AttrStmt.
+      Var var = Downcast<Var>(op->node);
+      pool_sizes_[var] = op->value.as<IntImmNode>()->value;
+      return VisitStmt(op->body);
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
   Stmt VisitStmt_(const AllocBufferNode* op) final {
     const Buffer& buffer = op->buffer;
-    ffi::Array<PrimExpr> allocation_shape = GetBufferAllocationShape(buffer);
+    // Visit body first so that any "tirx.pool_max_bytes" AttrStmt inside
+    // is consumed and recorded in pool_sizes_ before we read the shape.
     Stmt body = DeclBuffer(buffer, VisitStmt(op->body));
+
+    // If the pool annotated a size for this buffer, patch the shape.
+    Buffer alloc_buf = buffer;
+    auto it = pool_sizes_.find(buffer->data);
+    if (it != pool_sizes_.end()) {
+      auto* n = alloc_buf.CopyOnWrite();
+      n->shape = {IntImm(DataType::Int(64), it->second)};
+    }
+
+    ffi::Array<PrimExpr> allocation_shape = GetBufferAllocationShape(alloc_buf);
     ffi::Map<ffi::String, ffi::Any> allocate_annotations;
     allocate_annotations.Set(tirx::attr::buffer_data_alignment,
-                             IntImm(DataType::Int(32), buffer->data_alignment));
-    allocate_annotations.Set(tirx::attr::buffer_allocated_addr, buffer->allocated_addr);
-    body = Allocate(buffer->data, buffer->dtype, allocation_shape, const_true(), std::move(body),
-                    allocate_annotations);
+                             IntImm(DataType::Int(32), alloc_buf->data_alignment));
+    allocate_annotations.Set(tirx::attr::buffer_allocated_addr, alloc_buf->allocated_addr);
+    body = Allocate(alloc_buf->data, alloc_buf->dtype, allocation_shape, const_true(),
+                    std::move(body), allocate_annotations);
     return body;
   }
 
@@ -172,6 +193,8 @@ class TIRxOpaqueLower : public StmtExprMutator {
 
   /*! \brief Record the loop_var and loop start value of unit loops, whose extent is one. */
   std::unordered_map<Var, PrimExpr> unit_loop_vars_;
+  /*! \brief Pool size annotations: buffer data var → size in bytes. */
+  std::unordered_map<Var, int64_t> pool_sizes_;
 };
 
 namespace transform {
@@ -191,5 +214,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

@@ -93,14 +93,6 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
         d_type, SwizzleMode.SWIZZLE_128B_ATOM, (NUM_CONSUMER, BLK_M, EPI_N)
     )
 
-    F16_SIZE = 2
-    SMEM_SIZE = (
-        1024
-        + PIPE_DEPTH * NUM_CONSUMER * BLK_M * BLK_K * F16_SIZE
-        + PIPE_DEPTH * BLK_N * BLK_K * F16_SIZE
-        + NUM_CONSUMER * BLK_M * EPI_N * F16_SIZE
-    )
-
     SM_COUNT = 148  # number of Stream Multiprocessors for B200
     WG_NUMBER = 3  # WG2 (warp0: mma, warp1: mma, warp3: load), WG0 (LD_TMEM + writeback), WG1 (LD_TMEM + writeback)
 
@@ -119,8 +111,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             lane_id = Tx.thread_id([32], parent="warp")
 
             # smem allocation
-            buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-            pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+            pool = Tx.meta_var(Tx.PoolAllocator())
             tmem_addr = pool.alloc((1,), "uint32")
 
             tma2mma = Tx.meta_var(TMABar(pool, PIPE_DEPTH, "tma2mma"))
@@ -131,6 +122,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             Asmem = pool.alloc((PIPE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, layout=A_layout)
             Bsmem = pool.alloc((PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
             Dsmem = pool.alloc((NUM_CONSUMER, BLK_M, EPI_N), d_type, layout=D_layout)
+            pool.commit()
 
             # mbarrier initialization
             tma2mma.init(1)   # signaled by warp3 of CTA-0

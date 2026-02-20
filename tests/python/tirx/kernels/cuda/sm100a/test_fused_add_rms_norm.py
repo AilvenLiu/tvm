@@ -11,7 +11,7 @@ EPS = 1e-6
 F16_BYTES = 2
 F32_BYTES = 4
 SM_COUNT = 148
-SMEM_SIZE = 232448
+
 
 
 def ceildiv(a, b):
@@ -52,12 +52,11 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
             thread_id = Tx.meta_var(ty * bdx + tx)
 
             with Tx.cta():
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
-
+                pool = Tx.meta_var(Tx.PoolAllocator())
                 x_smem = pool.alloc([hidden_size], "float32")
                 sum_sq_smem = pool.alloc([bdy], "float32")
                 residual_smem = pool.alloc([hidden_size], "float16")
+                pool.commit()
 
                 with Tx.thread():
                     input_vec = Tx.alloc_local([vec_size], "float16")
