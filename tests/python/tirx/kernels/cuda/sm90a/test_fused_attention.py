@@ -135,7 +135,7 @@ def test_fp16_fused_attn():
             self.empty = empty
             self.bytes = bytes
 
-        @Tx.macro
+        @Tx.inline
         def init(self, tid):
             with Tx.thread()[tid == 0]:
                 for i in Tx.serial(KV_STAGES):
@@ -144,7 +144,7 @@ def test_fp16_fused_attn():
             # fence the barrier init, the memory ordering is visible across the whole block
             Tx.ptx.fence.mbarrier_init()
 
-        @Tx.macro
+        @Tx.inline
         def producer_acquire(self, state, profiler, leader_cond):
             stage = Tx.meta_var(state.index)
             cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
@@ -153,7 +153,7 @@ def test_fp16_fused_attn():
             profiler.start(ProfileEventType.IssueLoadKV, leader_cond)
             Tx.ptx.mbarrier.arrive.expect_tx(cur_full, self.bytes)
 
-        @Tx.macro
+        @Tx.inline
         def producer_tail(self, state):
             stage = Tx.meta_var(state.index)
             cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
@@ -161,19 +161,19 @@ def test_fp16_fused_attn():
                 Tx.ptx.mbarrier.try_wait(cur_empty, state.phase)
                 state.advance()
 
-        @Tx.macro
+        @Tx.inline
         def consumer_wait(self, state):
             stage = Tx.meta_var(state.index)
             cur_full = Tx.meta_var(self.full.ptr_to([stage]))
             Tx.ptx.mbarrier.try_wait(cur_full, state.phase)
 
-        @Tx.macro
+        @Tx.inline
         def consumer_release(self, state):
             stage = Tx.meta_var(state.index)
             cur_empty = Tx.meta_var(self.empty.ptr_to([stage]))
             Tx.ptx.mbarrier.arrive(cur_empty)
 
-        @Tx.macro
+        @Tx.inline
         def copy(self, state, smem, tmap, *coord):
             # copy [HEAD_DIM, BLK_KV/BLK_Q] from global [HAED_DIM, hidx, BLK_KV/BLK_Q * idx, bidx] to smem
             # copy at most [TMA_TILE, BLK_KV/BLK_Q] elements per iteration due to the restriction of swizzle
@@ -188,29 +188,29 @@ def test_fp16_fused_attn():
             self.index = Tx.local_cell("int32", name=prefix + "_index")
             self.phase = Tx.local_cell("int32", name=prefix + "_phase")
 
-        @Tx.macro
+        @Tx.inline
         def init(self, index, phase):
             self.index = index
             self.phase = phase
 
-        @Tx.macro
+        @Tx.inline
         def copy(self, other):
             self.index = other.index
             self.phase = other.phase
 
-        @Tx.macro
+        @Tx.inline
         def advance(self):
             self.index = self.index + 1
             if self.index == KV_STAGES:
                 self.index = 0
                 self.phase = self.phase ^ 1
 
-    @Tx.macro
+    @Tx.inline
     def ptx_wgmma_noop_barrier(accum, accum_count):
         for i in Tx.serial(accum_count):
             Tx.ptx.wgmma.noop_barrier(accum[i])
 
-    @Tx.macro
+    @Tx.inline
     def mask(S_reg, consumer_id, warp_id_in_wg, lane_id, q_row_base, kv_col_base, QO_LEN, KV_LEN):
         quad_id = Tx.meta_var(lane_id // 4)
         quad_lane = Tx.meta_var(lane_id % 4)
@@ -255,14 +255,14 @@ def test_fp16_fused_attn():
             IRBuilder.current().name(prefix + "_row_sum", self.row_sum)
             IRBuilder.current().name(prefix + "_scores_scale", self.scores_scale)
 
-        @Tx.macro
+        @Tx.inline
         def init(self):
             for i in Tx.serial(self.row):
                 self.row_max[i] = -INF
                 self.row_sum[i] = 0
                 self.scores_scale[i] = 1.0
 
-        @Tx.macro
+        @Tx.inline
         def scale_o(self, O_regs):
             for i in Tx.serial(self.row):
                 scale = Tx.meta_var(self.scores_scale[i])
@@ -270,7 +270,7 @@ def test_fp16_fused_attn():
                     O_regs[i * 2 + j * 4] = O_regs[i * 2 + j * 4] * scale
                     O_regs[i * 2 + j * 4 + 1] = O_regs[i * 2 + j * 4 + 1] * scale
 
-        @Tx.macro
+        @Tx.inline
         def reduce_m(self, S_regs):
             for i in Tx.serial(self.row):
                 row_max = Tx.meta_var(self.row_max[i])
@@ -282,7 +282,7 @@ def test_fp16_fused_attn():
                 self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 2, 32, 32))
                 self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 1, 32, 32))
 
-        @Tx.macro
+        @Tx.inline
         def scale_apply_exp2(self, S_regs):
             for i in Tx.serial(self.row):
                 row_max = Tx.meta_var(self.row_max[i])
@@ -290,7 +290,7 @@ def test_fp16_fused_attn():
                     S_regs[i * 2 + j * 4] = Tx.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
                     S_regs[i * 2 + j * 4 + 1] = Tx.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
 
-        @Tx.macro
+        @Tx.inline
         def reduce_l(self, S_regs):
             for i in Tx.serial(self.row):
                 row_sum = Tx.meta_var(self.row_sum[i])
@@ -300,13 +300,13 @@ def test_fp16_fused_attn():
                     self.row_sum[i] = row_sum + S_regs[i * 2 + j * 4]
                     self.row_sum[i] = row_sum + S_regs[i * 2 + j * 4 + 1]
 
-        @Tx.macro
+        @Tx.inline
         def init_m_P_l(self, S_regs):
             self.reduce_m(S_regs)
             self.scale_apply_exp2(S_regs)
             self.reduce_l(S_regs)
 
-        @Tx.macro
+        @Tx.inline
         def update_m_P_l(self, S_regs):
             for i in Tx.serial(self.row):
                 self.row_max_old[i] = self.row_max[i]
@@ -316,7 +316,7 @@ def test_fp16_fused_attn():
             self.scale_apply_exp2(S_regs)
             self.reduce_l(S_regs)
 
-        @Tx.macro
+        @Tx.inline
         def finalize(self):
             # quad reduce, (T0, T1, T2, T3), (T4, T5, T6, T7) ...
             for i in Tx.serial(self.row):
@@ -324,7 +324,7 @@ def test_fp16_fused_attn():
                 self.row_sum[i] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.row_sum[i], 1, 32, 32)
                 self.scores_scale[i] = 1.0 / self.row_sum[i]
 
-    @Tx.macro
+    @Tx.inline
     def gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, consumer_id, consumer_k):
         ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
         Tx.ptx.wgmma.fence()
@@ -350,7 +350,7 @@ def test_fp16_fused_attn():
         Tx.ptx.wgmma.commit_group()
         ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
 
-    @Tx.macro
+    @Tx.inline
     def gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v):
         ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
         ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
@@ -370,7 +370,7 @@ def test_fp16_fused_attn():
         ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
         ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
 
-    @Tx.macro
+    @Tx.inline
     def r2S(warp_id, lane_id, smem_o, O_reg, n_tile):
         Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with Tx.thread():
@@ -383,7 +383,7 @@ def test_fp16_fused_attn():
                 row = Tx.meta_var(warp_id * 16 + lane_id % 16)
                 Tx.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))
 
-    @Tx.macro
+    @Tx.inline
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
         Tx.ptx.fence.proxy("shared")
         Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
@@ -392,7 +392,7 @@ def test_fp16_fused_attn():
             Tx.ptx.cp_async.bulk.commit_group()
             Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
-    @Tx.macro
+    @Tx.inline
     def write_epilogue(warp_id, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg):
         for n_tile in Tx.serial(HEAD_DIM // TMA_TILE):
             if n_tile != 0:
@@ -634,7 +634,7 @@ def test_fp16_fused_attn():
                                     kv_tile_idx_read = kv_tile_idx_read - 1
                                     # split out tiles of K and V that require masking
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def consumer_body(do_masking):
                                         pipeline_k.consumer_wait(consumer_k)
                                         profiler.start(ProfileEventType.GemmQK, leader_cond)

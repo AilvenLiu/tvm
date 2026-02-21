@@ -47,12 +47,12 @@ class AddRMSNormTile(Tile):
         self.sum_sq = Tx.alloc_local([self.loop_inner, 1], "float32", name="sum_sq")
         self.rms_norm = Tx.alloc_local([1], "float32", name="rms_norm")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, residual, weight, output=None, out_residual=None):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -187,12 +187,12 @@ class RMSNormTile(Tile):
         self.sum_sq = Tx.alloc_local([self.loop_inner, 1], "float32", name="sum_sq")
         self.rms_norm = Tx.alloc_local([1], "float32", name="rms_norm")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, output, input, weight):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

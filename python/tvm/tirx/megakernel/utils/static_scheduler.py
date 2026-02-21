@@ -29,7 +29,7 @@ class Semaphore(SemaphoreBase):
         self.sem = buffer
         self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
         if level == "cta":
             with Tx.thread():
@@ -58,7 +58,7 @@ class Semaphore(SemaphoreBase):
         else:
             assert False
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_notify(self, *coord, rank=-1, release=False):
         # wg is synced
         self.state[0] = atomic_add_int32(
@@ -93,7 +93,7 @@ class StaticTileScheduler(TileSchedulerBase):
         self.prefix = prefix
         self.smem_manager = smem_manager
 
-    @Tx.macro
+    @Tx.inline
     def _update_current_m_n_idx(self):
         unpack_from_32bit(self.queue_smem[self.tile_idx], Tx.address_of(self.task_type), Tx.address_of(self.m_idx), Tx.address_of(self.n_idx), Tx.address_of(self.k_idx))
 
@@ -105,7 +105,7 @@ class StaticTileScheduler(TileSchedulerBase):
         self.tile_idx = Tx.local_cell("int32", name=self.prefix + "_tile_idx")
         self.queue_smem = self.smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent")
 
-    @Tx.macro
+    @Tx.inline
     def init(self):
         self._alloc()
         with Tx.cta():
@@ -123,16 +123,16 @@ class StaticTileScheduler(TileSchedulerBase):
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
-    @Tx.macro
+    @Tx.inline
     def next_tile(self):
         self.tile_idx += 1
         self._update_current_m_n_idx()
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
-    @Tx.macro
+    @Tx.inline
     def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
@@ -142,7 +142,7 @@ class StaticTileScheduler(TileSchedulerBase):
         max_notify_num_map = Tx.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = Tx.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
 
-        @Tx.macro
+        @Tx.inline
         def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
             if scope == "thread":
                 pass

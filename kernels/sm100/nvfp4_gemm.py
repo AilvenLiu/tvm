@@ -171,7 +171,7 @@ def tir_ws_kernel(M: int, N: int, K: int):
         def __init__(self, prefix: str):
             self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
 
-        @Tx.macro
+        @Tx.inline
         def init(self, smem_ptr, ldo, sdo, swizzle):
             Tx.ptx.tcgen05.encode_matrix_descriptor(
                 Tx.address_of(self.desc), smem_ptr, ldo, sdo, swizzle
@@ -213,7 +213,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
 """
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def copy_128b(src, dst):
         Tx.cuda.func_call(
             "tvm_builtin_copy_128b", src, dst, source_code=copy_128b_source_code, return_type="void"
@@ -239,7 +239,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             self.shape = [2] * self.n_dim
             self.shape[-1] = 1 << self.per_element
 
-        @Tx.macro
+        @Tx.inline
         def init(self):
             for i in Tx.unroll(self.swizzle_len):
                 y_i = Tx.meta_var(self.row_base & (1 << i))
@@ -365,7 +365,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                     n_st = cta_n * MMA_N + id_in_pair * CTA_N
                     out_n_st = cta_n * MMA_N
 
-                    @Tx.macro
+                    @Tx.inline
                     def issue_tma_load(stage, phase, k_tile: Tx.int32):
                         k_st = Tx.meta_var(k_tile * CTA_K // 2)
                         sfk_st = Tx.meta_var(k_tile * SF_CTA_K)
@@ -402,7 +402,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                 descSFB.init(smem_ptr=SFB_smem.ptr_to([0, 0, 0, 0]), ldo=1, sdo=8, swizzle=0)
 
                 while tile_scheduler.valid():
-                    @Tx.macro
+                    @Tx.inline
                     def execute_mma(stage, phase):
                         # wait for tma to finish
                         tma_full.wait(stage, phase)
@@ -447,7 +447,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                     m_st = cta_m * CTA_M
                     out_n_st = cta_n * MMA_N
                     
-                    @Tx.macro
+                    @Tx.inline
                     def epilogue(stage, phase):
                         # wait for accumulator to finish
                         acc_full.wait(stage, phase)

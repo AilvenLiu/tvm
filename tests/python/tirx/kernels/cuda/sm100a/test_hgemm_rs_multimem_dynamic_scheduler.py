@@ -236,46 +236,46 @@ class Barriers:
         self.pipe_depth = pipe_depth
         self.pipe_width = pipe_width
 
-    @Tx.macro
+    @Tx.inline
     def init(self, threads_num_wait):
         with Tx.thread()[0:1]:
             for i in Tx.serial(self.pipe_depth):
                 for j in Tx.serial(self.pipe_width):
                     Tx.ptx.mbarrier.init(self.mbar.ptr_to([i, j]), threads_num_wait)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, idx_d, idx_w, phase):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx_d, idx_w]), self.init_phase ^ phase)
 
 
 class BarTMA2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx, 0]), expected_bytes)
 
-    @Tx.macro
+    @Tx.inline
     def arrive_only(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx, 0]))
 
 
 class BarMMA2LD(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([0, idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarMMA2TMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx, 0]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarLD2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0, idx]), cta_id=0, pred=True)
 
@@ -308,7 +308,7 @@ class Pipeline:
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
-    @Tx.macro
+    @Tx.inline
     def init(self, p2c_thread_count: int = 1, c2p_thread_count: int = 1):
         self.idx = 0
         self.p2c_phase = 0
@@ -323,14 +323,14 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
         Tx.ptx.fence.proxy("shared")
 
-    @Tx.macro
+    @Tx.inline
     def advance(self):
         self.idx = (self.idx + 1) % self.pipeline_depth
         if self.idx == 0:
             self.p2c_phase = self.p2c_phase ^ 1
             self.c2p_phase = self.c2p_phase ^ 1
 
-    @Tx.macro
+    @Tx.inline
     def producer_wait(self, pipeline_idx):
         for cbx in Tx.thread_binding(M_CLUSTER, "clusterCtaIdx.x"):
             if not self.p_single_cta or cbx == 0:
@@ -338,7 +338,7 @@ class Pipeline:
                     self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), self.c2p_phase
                 )
 
-    @Tx.macro
+    @Tx.inline
     def consumer_wait(self, pipeline_idx):
         for cbx in Tx.thread_binding(M_CLUSTER, "clusterCtaIdx.x"):
             if not self.c_single_cta or cbx == 0:
@@ -377,7 +377,7 @@ class MPMCQueue:
         self.masked_pos = int_var("masked_pos")
         self.num_tot_tasks = num_tot_tasks
 
-    @Tx.macro
+    @Tx.inline
     def enqueue(self, signal_rank: int, task_type: int, *task_idx: int):
         Tx.cuda.func_call(
             "enqueue_remote",
@@ -394,7 +394,7 @@ class MPMCQueue:
 
 class GEMMMPMCQueue(MPMCQueue):
 
-    @Tx.macro
+    @Tx.inline
     def dequeue(
         self,
         fetched_task_type: Tx.Buffer,
@@ -427,7 +427,7 @@ class GEMMMPMCQueue(MPMCQueue):
 
 class RSMPMCQueue(MPMCQueue):
 
-    @Tx.macro
+    @Tx.inline
     def dequeue(
         self,
         fetched_task_type: Tx.Buffer,
@@ -467,7 +467,7 @@ class RSMPMCQueue(MPMCQueue):
             fetched_task_type[0] = -1
 
 
-@Tx.macro
+@Tx.inline
 def consumer_fetch(
     sch_pipe, packed_value, rs_rem, fetched_task_type, fetched_task_idx0, fetched_task_idx1
 ):
@@ -507,7 +507,7 @@ class MixedDynamicTileScheduler:
         self.rs_rem = int_var("rs_rem")
         self.packed_value = packed_value
 
-    @Tx.macro
+    @Tx.inline
     def _fetch_from_queue(self, cbx, bx, rank, warp_id_in_cta, lane_id):
         if warp_id_in_cta == 11 and lane_id == 0:
             if cbx == 0:
@@ -582,12 +582,12 @@ class MixedDynamicTileScheduler:
                 self.fetched_task_idx1,
             )
 
-    @Tx.macro
+    @Tx.inline
     def init(self, cbx, bx, rank, warp_id_in_cta, lane_id):
         self.rs_rem[0] = -1
         self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
 
-    @Tx.macro
+    @Tx.inline
     def next_tile(self, cbx, bx, rank, warp_id_in_cta, lane_id):
         self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
 
@@ -602,7 +602,7 @@ class Semaphore:
         self.sem = buffer
         self.state = Tx.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_notify(self, signal_rank, tid, m_idx, n_idx, rs_queue):
         # wg is synced
         with Tx.thread():

@@ -69,7 +69,7 @@ def flops(ms):
     return M * N * K * 2 / (ms * 1e-3)
 
 
-@Tx.macro
+@Tx.inline
 def skip():
     pass
 
@@ -91,45 +91,45 @@ class Barriers:
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
 
-    @Tx.macro
+    @Tx.inline
     def init(self, threads_num_wait):
         with Tx.thread()[0:1]:
             for i in Tx.serial(self.pipe_depth):
                 Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, idx, phase):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
 
 class BarTMA2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
 
-    @Tx.macro
+    @Tx.inline
     def arrive_only(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
 
 class BarMMA2LD(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarMMA2TMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarLD2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
@@ -217,7 +217,7 @@ def test_hgemm_1consumer():
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
 
-                @Tx.macro
+                @Tx.inline
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
                     for ko in Tx.serial(PIPE_CIRCLE_NUM):
                         for ks in Tx.unroll(SMEM_PIPE_DEPTH):
@@ -250,7 +250,7 @@ def test_hgemm_1consumer():
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
                                     k_start = Tx.meta_var(stage * BLK_K)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def tma_load(is_remain, ks):
                                         # GMEM -> SMEM  (tma)
                                         mma2tma_bar.wait(ks, phase[0])
@@ -260,7 +260,7 @@ def test_hgemm_1consumer():
                                         if cbx == 0:
                                             tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def tma_load_epilogue(ks):
                                         mma2tma_bar.wait(ks, phase[0])
                                         if cbx == 0:
@@ -286,7 +286,7 @@ def test_hgemm_1consumer():
                                         ld2mma_bar.wait(tmem_idx, tmem_phase)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        @Tx.macro
+                                        @Tx.inline
                                         def mma(is_remain, ks):
                                             # wait tma and sf-transpose arrival
                                             tma2mma_bar.wait(ks, phase[0])
@@ -303,12 +303,12 @@ def test_hgemm_1consumer():
                                                     Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, True)
                                             mma2tma_bar.arrive(ks)
 
-                                        @Tx.macro
+                                        @Tx.inline
                                         def mma_epilogue1():
                                             # ensure that all mma is issued
                                             mma2ld_bar.arrive(tmem_idx)
 
-                                        @Tx.macro
+                                        @Tx.inline
                                         def mma_epilogue2(ks):
                                             tma2mma_bar.wait(ks, phase[0])
                                             mma2tma_bar.arrive(ks)

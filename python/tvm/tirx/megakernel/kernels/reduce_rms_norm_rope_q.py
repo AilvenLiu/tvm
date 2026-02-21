@@ -48,7 +48,7 @@ class SplitKReduceRMSnormRopeQTile(Tile):
         self.q_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="q_vec32_other")
 
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, partial, qkv, q_weight, rope_pos, cos_sin_cache):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

@@ -448,7 +448,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         needs_sf_id = sfa_sf_mma_k < SFA_elem_per_col and sfa_elems_per_ki > 0 and descI is None
 
         # fmt: off
-        @Tx.macro
+        @Tx.inline
         def main_impl(descA_in, descB_in, descI_in):
             for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
                 A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
@@ -476,7 +476,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         # fmt: on
     else:
         # fmt: off
-        @Tx.macro
+        @Tx.inline
         def main_impl(descA_in, descB_in, descI_in):
             for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
                 A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)

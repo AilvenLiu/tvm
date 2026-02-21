@@ -165,11 +165,11 @@ class DecodeTile(Tile):
         IRBuilder.current().name("d_tmp", self.d_tmp)
         IRBuilder.current().name("o_tmp", self.o_tmp)
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self.alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, split_kv):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -181,7 +181,7 @@ class DecodeTile(Tile):
 
             tx_start = Tx.meta_var(tx * self.vec_size)
 
-            @Tx.macro
+            @Tx.inline
             def _fetch_kv_offset(kt, kv_head_id_beg, offset):
                 token_id = Tx.meta_var(self.chunk_start_logical[0] + offset)
                 if token_id < self.chunk_end_logical[0]:
@@ -196,7 +196,7 @@ class DecodeTile(Tile):
                 else:
                     self.kv_offset[tz, tx, ty, kt] = 0
 
-            @Tx.macro
+            @Tx.inline
             def _sync_blk():
                 if self.bdz <= 4:
                     Tx.ptx.bar.sync(1 + tz, self.bdx * self.bdy)

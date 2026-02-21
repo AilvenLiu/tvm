@@ -38,7 +38,7 @@ class SplitKReduceAppendVTile(Tile):
 
     # handle: [batch_size, h_tile * head_dim]
     # bdx, bdy = head_dim // VEC_SIZE_16, NUM_THREADS // bdx
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, partial, kv_cache, pos_map):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

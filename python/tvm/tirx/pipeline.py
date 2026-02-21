@@ -16,7 +16,7 @@
 # under the License.
 """Reusable pipeline state and mbarrier helpers for SM100 kernels.
 
-These classes emit TIR via @Tx.macro. Decorate with @Tx.meta_class so that
+These classes emit TIR via @Tx.inline. Decorate with @Tx.meta_class so that
 instances are automatically treated as meta values inside @Tx.prim_func.
 """
 
@@ -40,7 +40,7 @@ class PipelineState:
         self.phase = Tx.local_cell("int32", name=prefix + "_phase")
         self.pipe_depth = pipe_depth
 
-    @Tx.macro
+    @Tx.inline
     def init(self, is_producer):
         self.stage = 0
         if is_producer:
@@ -48,7 +48,7 @@ class PipelineState:
         else:
             self.phase = 0
 
-    @Tx.macro
+    @Tx.inline
     def move_to_next_stage(self):
         if self.pipe_depth > 1:
             self.stage = self.stage + 1
@@ -77,17 +77,17 @@ class MBarrier:
         self.buf = pool.alloc((depth,), "uint64", align=8)
         self.depth = depth
 
-    @Tx.macro
+    @Tx.inline
     def init(self, count):
         with Tx.thread()[0:1]:
             for i in Tx.unroll(self.depth):
                 Tx.ptx.mbarrier.init(self.buf.ptr_to([i]), count)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, stage, phase):
         Tx.ptx.mbarrier.try_wait(self.buf.ptr_to([stage]), phase)
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, stage, cta_id=0, pred=True):
         Tx.ptx.mbarrier.arrive(self.buf.ptr_to([stage]), cta_id=cta_id, pred=pred)
 
@@ -115,7 +115,7 @@ class MBarrier:
 class TMABar(MBarrier):
     """Barrier signaled by TMA (mbarrier.arrive.expect_tx)."""
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, stage, tx_count):
         Tx.ptx.mbarrier.arrive.expect_tx(self.buf.ptr_to([stage]), tx_count)
 
@@ -123,6 +123,6 @@ class TMABar(MBarrier):
 class TCGen05Bar(MBarrier):
     """Barrier signaled by tcgen05 commit."""
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, stage, cta_group, cta_mask):
         Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)

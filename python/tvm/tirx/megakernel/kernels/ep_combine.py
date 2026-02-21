@@ -44,12 +44,12 @@ class EPCombineSendTile(Tile):
         # alloc local memory
         pass
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
 
@@ -128,13 +128,13 @@ class EPCombineRecvTile(Tile):
         # alloc local memory
         self.sum = Tx.alloc_local([1], self.out_dtype, name="sum")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
 

@@ -57,7 +57,7 @@ __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* ta
 """
 
 
-@Tx.macro
+@Tx.inline
 def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr):
     Tx.cuda.func_call(
         "unpack_from_32bit",
@@ -290,7 +290,7 @@ def stg(v, dst_addr, pe):
         return stg_remote(v, dst_addr, pe)
 
 
-@Tx.macro
+@Tx.inline
 def while_ld_global_acquire(addr, task_info): 
     Tx.cuda.func_call(
         "while_ld_global_acquire",
@@ -308,7 +308,7 @@ __forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* 
     )   
   
 
-@Tx.macro
+@Tx.inline
 def sts(value, dst_addr):
     Tx.cuda.func_call(
         "sts",

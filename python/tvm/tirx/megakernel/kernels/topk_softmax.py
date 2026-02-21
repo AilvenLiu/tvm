@@ -104,12 +104,12 @@ class TopkSoftmaxTile(Tile):
         self.expert = Tx.alloc_local([1], "int32", name="expert")
         self.token_idx = Tx.alloc_local([1], "int32", name="token_idx")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager = None):
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, gating_output, topk_weights, topk_indices, renormalize=False):
         with Tx.cta():
             warp_id_in_cta = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")

@@ -58,7 +58,7 @@ assert PIPELINE_DEPTH == 4
 DEBUG = False
 
 
-@Tx.macro
+@Tx.inline
 def skip():
     pass
 
@@ -97,46 +97,46 @@ class Barriers:
         self.pipe_depth = pipe_depth
         self.pipe_width = pipe_width
 
-    @Tx.macro
+    @Tx.inline
     def init(self, threads_num_wait):
         with Tx.thread()[0:1]:
             for i in Tx.serial(self.pipe_depth):
                 for j in Tx.serial(self.pipe_width):
                     Tx.ptx.mbarrier.init(self.mbar.ptr_to([i, j]), threads_num_wait)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, idx_d, idx_w, phase):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx_d, idx_w]), self.init_phase ^ phase)
 
 
 class BarTMA2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx, 0]), expected_bytes)
 
-    @Tx.macro
+    @Tx.inline
     def arrive_only(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx, 0]))
 
 
 class BarMMA2LD(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([0, idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarMMA2TMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx, 0]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarLD2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0, idx]), cta_id=0, pred=True)
 
@@ -226,7 +226,7 @@ def test_hgemm():
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
 
-                @Tx.macro
+                @Tx.inline
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
                     for ko in Tx.serial(PIPE_CYCLE):
                         for ks in Tx.unroll(PIPELINE_DEPTH):
@@ -261,7 +261,7 @@ def test_hgemm():
                                     n_start = Tx.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
                                     k_start = Tx.meta_var(stage * BLK_K)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def tma_load(is_remain, ks):
                                         tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([ks]), "cta_group": CTA_GROUP})
                                         mma2tma.wait(ks, 0, phase[0])
@@ -271,7 +271,7 @@ def test_hgemm():
                                         if cbx == 0:
                                             tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def tma_load_epilogue(ks):
                                         mma2tma.wait(ks, 0, phase[0])
                                         if cbx == 0:
@@ -294,7 +294,7 @@ def test_hgemm():
                                     ld2mma.wait(0, warp_id, phase_tmem)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma(is_remain, ks):
                                         # wait tma
                                         tma2mma.wait(ks, 0, phase[0])
@@ -302,11 +302,11 @@ def test_hgemm():
                                                         accum=tvm.tir.Not(stage == 0 and ((not is_remain) or (is_remain and PIPE_CYCLE == 0))))
                                         mma2tma.arrive(ks)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma_epilogue1():
                                         mma2ld.arrive(warp_id)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma_epilogue2(ks):
                                         tma2mma.wait(ks, 0, phase[0])
                                         mma2tma.arrive(ks)

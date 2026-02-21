@@ -24,7 +24,7 @@ class TopkSoftmaxKernel:
             ProfileEventType.TOPK_SOFTMAX,
         )
 
-    @Tx.macro
+    @Tx.inline
     def run_tile(self, tile, *args):
         with Tx.cta():
             tile.run(*args)

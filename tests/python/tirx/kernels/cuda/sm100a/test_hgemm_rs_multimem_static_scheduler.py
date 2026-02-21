@@ -115,7 +115,7 @@ class Semaphore:
         self.sem = buffer
         self.state = Tx.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_wait(self, *coord):
         with Tx.thread():
             while 1:
@@ -126,7 +126,7 @@ class Semaphore:
                     break
                 Tx.cuda.nano_sleep(40)
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_notify(self, tid, m_idx, n_idx):
         # wg is synced
         with Tx.thread():
@@ -190,7 +190,7 @@ class Pipeline:
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
-    @Tx.macro
+    @Tx.inline
     def init(self, p2c_thread_count: int = 1, c2p_thread_count: int = 1):
         self.idx = 0
         self.p2c_phase = 0
@@ -205,14 +205,14 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
         Tx.ptx.fence.proxy("shared")
 
-    @Tx.macro
+    @Tx.inline
     def advance(self):
         self.idx = (self.idx + 1) % self.pipeline_depth
         if self.idx == 0:
             self.p2c_phase = self.p2c_phase ^ 1
             self.c2p_phase = self.c2p_phase ^ 1
 
-    @Tx.macro
+    @Tx.inline
     def producer_wait(self, pipeline_idx):
         for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.p_single_cta or cbx == 0:
@@ -220,7 +220,7 @@ class Pipeline:
                     self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), self.c2p_phase
                 )
 
-    @Tx.macro
+    @Tx.inline
     def consumer_wait(self, pipeline_idx):
         for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.c_single_cta or cbx == 0:
@@ -231,7 +231,7 @@ class Pipeline:
 
 class TMA2MMAPipeline(Pipeline):
 
-    @Tx.macro
+    @Tx.inline
     def consumer_release(self, pipeline_idx):
         for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             for tx in Tx.thread_binding(NUM_THREADS, "threadIdx.x"):
@@ -245,7 +245,7 @@ class TMA2MMAPipeline(Pipeline):
 
 
 class MMA2LDpipeline(Pipeline):
-    @Tx.macro
+    @Tx.inline
     def consumer_release(self, pipeline_idx):
         for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
             if not self.c_single_cta or cbx == 0:

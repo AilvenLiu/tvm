@@ -197,7 +197,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         self.num_etensors[is_dynamic_sch] = len(self.etensor_and_f_init_pairs)
 
     # Override attn_add_rms_norm to trigger MoE instead of MLP
-    @Tx.macro
+    @Tx.inline
     def task_impl_attn_add_rms_norm(
         self,
         batch_size,
@@ -243,7 +243,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     output_global[self.tile_scheduler.m_idx, tid * 8 + vec] = 0
             self.tile_scheduler.notify(self.evt_attn_mlp, lambda notify_idx: (1, -1, 0), scope="cta")
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_gating(self, A, B, output, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
@@ -266,7 +266,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             )
             self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_group_gemm_down(
         self,
         A, B, output,
@@ -309,7 +309,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     )
             self.tile_scheduler.notify(self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_mlp_add_rms_norm(
         self,
         output_global,
@@ -341,7 +341,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
     # - MoE tasks from MegaKernelMOE
 
     # We need to implement the combined fused_body
-    @Tx.macro
+    @Tx.inline
     def fused_body(
         self,
         batch_size,
@@ -826,7 +826,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
             queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
             
-            @Tx.macro
+            @Tx.inline
             def run(BLK_M, low_batch, down_proj_task_size):
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global,
@@ -1014,7 +1014,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             # Execution queue
             exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
             
-            @Tx.macro
+            @Tx.inline
             def run(BLK_M, low_batch):
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global,

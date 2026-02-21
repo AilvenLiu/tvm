@@ -29,19 +29,19 @@ class LMHeadLayer:
         def _alloc_buffer(self):
             self.idx = Tx.alloc_local([1], "int32", name="idx")
 
-        @Tx.macro
+        @Tx.inline
         def init(self, bx):
             self._alloc_buffer()
             self.idx[0] = bx
 
-        @Tx.macro
+        @Tx.inline
         def next(self):
             self.idx[0] += KernelConfig.SM_NUMBER
 
         def valid(self):
             return self.idx[0] < self.task_num
 
-    @Tx.macro
+    @Tx.inline
     def body(self, A, B, out, blk_m):
         gemm_tile = GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m)
         gemm_tile.host_init()

@@ -68,7 +68,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self._set_events(Semaphore, etensor_workspace_global)
         self.set_events_complete(False, Semaphore, etensor_workspace_global)
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_gemm(self, A, B, partial, output, output32):
         with Tx.cta():
             if self.use_tma_reduce:
@@ -93,7 +93,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
                     scope="warpgroup", scope_id=0,
                 )
 
-    @Tx.macro
+    @Tx.inline
     def task_reduce(self, partial_global, output_global):
         with Tx.cta():
             self.tile_scheduler.wait(self.evt, self.tile_scheduler.n_idx, wait_level="warp")
@@ -103,7 +103,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
             )
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def fused_body(
         self,
         A_global,

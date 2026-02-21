@@ -41,7 +41,7 @@ class Semaphore:
         self.sem = buffer
         self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_wait(self, *coord):
         with Tx.thread():
             while 1:
@@ -50,7 +50,7 @@ class Semaphore:
                     break
                 Tx.cuda.nano_sleep(40)
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_notify(self, *coord):
         with Tx.thread():
             Tx.cuda.cta_sync()
@@ -110,13 +110,13 @@ class SpatialTileScheduler:
         col = linear_idx % self.tile_num[1]
         return row, col
 
-    @Tx.macro
+    @Tx.inline
     def init(self, linear_init):
         self.linear_idx[0] = linear_init
         self.m_idx[0] = self.get_current_m_n_idx(linear_init)[0]
         self.n_idx[0] = self.get_current_m_n_idx(linear_init)[1]
 
-    @Tx.macro
+    @Tx.inline
     def next_tile(self):
         self.linear_idx[0] = self.linear_idx[0] + self.sm_cnt
         self.m_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[0]

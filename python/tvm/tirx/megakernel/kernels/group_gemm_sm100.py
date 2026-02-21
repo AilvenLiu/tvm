@@ -82,7 +82,7 @@ class GroupGEMMTile(GemmTile):
         self.eid = Tx.local_cell("int32", name="eid")
         Tx.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
     
-    @Tx.macro
+    @Tx.inline
     def _tma(self, ks, buf, buf_name: Literal["A", "B"], mn_st, k_st, tma_config, predicate=True):
         if predicate:          
             if buf_name == "A":
@@ -99,7 +99,7 @@ class GroupGEMMTile(GemmTile):
         cls.smem_routing_weights = smem_manager.alloc([cls.MAX_BLK_M], "float32", name="smem_routing_weights", method="persistent")
 
 
-    @Tx.macro
+    @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         if not self.acc_output:
             GemmTile._consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler)
@@ -178,7 +178,7 @@ class GroupGEMMTile(GemmTile):
         self.BLK_M = BLK_M
         self.MMA_M = BLK_M
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, A, B, output, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, profiler = None):
         self.set_moe_info(expert_ids, routing_weights, sorted_token_ids)
         self._alloc_local(m_idx)
@@ -238,6 +238,6 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
             method="exclusive",
         )
 
-    @Tx.macro
+    @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         GateUpSiluTile._consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler)

@@ -1346,7 +1346,7 @@ class _Rewriter(PyExprMutator):
                             evt_etensor_init_complete = self.semaphore_class(evt_etensor_init_complete_buf)
                             tile_scheduler.notify(evt_etensor_init_complete, lambda notify_idx: (1, -1, 0), scope="cta", release=True)
 
-        @T.macro
+        @T.inline
         def wait_etensor_init_impl(evt_etensor_init_complete_buf: Buffer):
             with T.thread():
                 warp_id = T.warp_id(
@@ -1393,7 +1393,7 @@ class _Rewriter(PyExprMutator):
             if self.profiler_on:
                 profiler.init(warp_id)
 
-        @T.macro
+        @T.inline
         def persistent_body(queue, tasks, head, tail, profiler_buf):
             with T.kernel():
                 bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)

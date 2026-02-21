@@ -230,7 +230,7 @@ def tir_kernel(M: int, N: int, K: int):
                                 n_start = Tx.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
                                 n_start_sf = Tx.meta_var(n_idx * CTA_GROUP * BLK_N)
 
-                                @Tx.macro
+                                @Tx.inline
                                 def tma_load(ks, k_tile):
                                     k_start = Tx.meta_var(k_tile * BLK_K)
                                     mma2tma.wait(ks, tma_state.phase)
@@ -258,7 +258,7 @@ def tir_kernel(M: int, N: int, K: int):
                                 m_idx = Tx.meta_var(tile_scheduler.m_idx)
                                 n_idx = Tx.meta_var(tile_scheduler.n_idx)
 
-                                @Tx.macro
+                                @Tx.inline
                                 def transpose(ks, k_tile):
                                     # wait for sf has been prepared
                                     tma2trans.wait(ks, trans_state.phase)
@@ -294,7 +294,7 @@ def tir_kernel(M: int, N: int, K: int):
                                         ld2mma.wait(tmem_idx, tmem_phase ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        @Tx.macro
+                                        @Tx.inline
                                         def mma(ks, k_tile):
                                             # wait tma and sf-transpose arrival
                                             trans2mma.wait(ks, mma_state.phase)

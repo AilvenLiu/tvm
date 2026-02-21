@@ -45,7 +45,7 @@ def test_gemm2(ssh_client):
     dtype = "float16"
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def mm(iter_id, a_sbuf, b_sbuf, c_psum, result_tiles):
         n = Tx.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
         k = Tx.meta_var(iter_id % NUM_BLOCK_K)
@@ -75,7 +75,7 @@ def test_gemm2(ssh_client):
                     c_psum[psum_bank],
                 )
 
-    @Tx.macro
+    @Tx.inline
     def load_A(iter_id, a_sbuf, A):
         m = Tx.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
         k = Tx.meta_var(iter_id % NUM_BLOCK_K)
@@ -83,7 +83,7 @@ def test_gemm2(ssh_client):
             a_sbuf[iter_id % 3], A[ k * BLOCK_K : (k + 1) * BLOCK_K, (m) * BLOCK_M : (m + 1) * BLOCK_M]
         )
 
-    @Tx.macro
+    @Tx.inline
     def load_B(iter_id, b_sbuf, B):
         n = Tx.meta_var(iter_id // (NUM_BLOCK_M * NUM_BLOCK_K))
         k = Tx.meta_var(iter_id % NUM_BLOCK_K)

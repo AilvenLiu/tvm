@@ -159,7 +159,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     tma_phase = PipelineState("tma", PIPE_DEPTH)
                     tma_phase.init(is_producer=True)
 
-                    @Tx.macro
+                    @Tx.inline
                     def tma_load_stage(stage, k_st):
                         mma2tma.wait(stage, tma_phase.phase) # both CTAs wait for the mma (issued by warp0/1 of CTA-0) to finish]
                         tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma2mma_cta0.ptr_to([stage])})
@@ -169,7 +169,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                         if cbx == 0:
                             tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * F16_SIZE) # signal CTA-0 the issue of tma
 
-                    @Tx.macro
+                    @Tx.inline
                     def tma_load():
                         for k_tile in Tx.serial(K_TILES):
                             tma_load_stage(tma_phase.stage, k_tile * BLK_K)
@@ -189,14 +189,14 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
                     accum = Tx.local_cell("int32")
 
-                    @Tx.macro
+                    @Tx.inline
                     def mma_stage(stage):
                         tma2mma.wait(stage, mma_phase.phase) # wait for the tma to finish
                         Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP)
                         accum = 1
                         mma2tma.arrive(stage, cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma
 
-                    @Tx.macro
+                    @Tx.inline
                     def mma():
                         ld2mma.wait(warp_id, ld_phase.phase)
                         ld_phase.move_to_next_stage()
@@ -215,7 +215,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                 wb_phase = PipelineState("wb", 1)
                 wb_phase.init(is_producer=False)
 
-                @Tx.macro
+                @Tx.inline
                 def writeback():
                     mma2ld.wait(wg_id, wb_phase.phase) # wait for the issues of all mmas issued by CTA-0 (warp0(1)) to finish
                     wb_phase.move_to_next_stage()

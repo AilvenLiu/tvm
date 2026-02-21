@@ -13,32 +13,32 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType, F16
 
 class BarTMA2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
 
-    @Tx.macro
+    @Tx.inline
     def arrive_only(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
 
 class BarMMA2LD(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=KernelConfig.CTA_GROUP)
 
 
 class BarMMA2TMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=KernelConfig.CTA_GROUP)
 
 
 class BarLD2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
@@ -155,7 +155,7 @@ class GemmTile(Tile):
         GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
 
     @classmethod
-    @Tx.macro
+    @Tx.inline
     def class_init(cls, smem_manager: SmemManager):
         cls._alloc_buffer_class_member(smem_manager)
         cls.tile_idx = 0
@@ -176,7 +176,7 @@ class GemmTile(Tile):
         Tx.tvm_storage_sync("shared")
 
     @classmethod
-    @Tx.macro
+    @Tx.inline
     def class_finalize(cls):
         Tx.tvm_storage_sync("shared")
         # dealloc TMEM
@@ -185,16 +185,16 @@ class GemmTile(Tile):
             Tx.ptx.tcgen05.dealloc(cls.tmem_addr[0], n_cols=cls.N_COLS, cta_group=1)
         Tx.tvm_storage_sync("shared")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def host_init(self):
         # Notes: cuTensorMap initialization will be insert when lowering Tx.gemm_async
         pass
 
-    @Tx.macro
+    @Tx.inline
     def _tma(self, ks, buf, buf_name: Literal["A", "B"], mn_st, k_st, tma_config, predicate=True):
         if predicate:          
             if buf_name == "A":
@@ -204,7 +204,7 @@ class GemmTile(Tile):
             else:
                 Tx.cuda.trap_when_assert_failed(False)
 
-    @Tx.macro
+    @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with Tx.cta():
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
@@ -274,7 +274,7 @@ class GemmTile(Tile):
             if warp_id == 0:
                 self.smem_manager.arrive_specific(lane_id, self.output_smem, 0)
 
-    @Tx.macro
+    @Tx.inline
     def _run(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with Tx.cta():
             wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
@@ -286,7 +286,7 @@ class GemmTile(Tile):
                 with Tx.warpgroup()[1:2]:
                     if warp_id == 3:
                         # GMEM -> SMEM  (tma)
-                        @Tx.macro
+                        @Tx.inline
                         def tma_stage(ks, k_st, first_stage):
                             self.mma2tma_bar.wait(ks, self.phase[0])
                             B_tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP, 
@@ -340,14 +340,14 @@ class GemmTile(Tile):
                             False, False, KernelConfig.CTA_GROUP,
                         )
 
-                        @Tx.macro
+                        @Tx.inline
                         def mbar_try_wait(idx, phase):
                             self.wait_complete = mbarrier_try_wait(
                                 self.tma2mma_bar.mbar.ptr_to([idx]),
                                 self.tma2mma_bar.init_phase ^ phase,
                             )
 
-                        @Tx.macro
+                        @Tx.inline
                         def mma_stage(ks, acc):
                             if self.profiler_on:
                                 profiler.start(ProfileEventType.MMA, lane_id == 0)
@@ -422,7 +422,7 @@ class GemmTile(Tile):
                     self._consumer_wg(m_idx, n_idx, k_idx, A, B, output, profiler)
 
     # call by warp 7 (tmp load warp)
-    @Tx.macro
+    @Tx.inline
     def prefetch(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         self._alloc_local(m_idx)
         with Tx.cta():
@@ -446,7 +446,7 @@ class GemmTile(Tile):
                         if self.profiler_on:
                             profiler.end(ProfileEventType.TMA, lane_id == 0)
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler = None):
         self._alloc_local(m_idx)
         self._run(m_idx, n_idx, k_idx, A, B, output, profiler)

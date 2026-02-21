@@ -29,7 +29,7 @@ class MOEAlignTile(Tile):
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def warp_exclusive_scan(self, v, output, mask=0xFFFFFFFF):
         # offset = Tx.alloc_cell("int32", name="offset")
         # original = Tx.alloc_cell("int32", name="original")
@@ -62,7 +62,7 @@ class MOEAlignTile(Tile):
             return_type="int32",
         )
 
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
         m_idx,
@@ -185,7 +185,7 @@ class CountAndSortExpertTokens(Tile):
         self._alloc_buffer(smem_manager)
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer, data, reordered_data):
         idx = Tx.alloc_local([1], "int32", name="idx")
         cnt = Tx.alloc_local([1], "int32", name="cnt")

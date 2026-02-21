@@ -48,7 +48,7 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
         self.k_vec32 = Tx.alloc_local([self.vec_size], "float32", name="k_vec32")
         self.k_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="k_vec32_other")
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, partial, k_weight, rope_pos, cos_sin_cache, append_pos, kv_cache):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

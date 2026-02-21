@@ -49,7 +49,7 @@ def test_flash_attn(ssh_client, causal=True):
     running_max_layout = "PF"
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, block_q, block_kv):
         mm1_dot_psum = Tx.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",layout="FPF", allocated_addr=(0,0))
         for i in Tx.serial(0, NUM_MM1_PER_BLOCK):
@@ -78,11 +78,11 @@ def test_flash_attn(ssh_client, causal=True):
         else:
             return BLOCK_KV
 
-    @Tx.macro
+    @Tx.inline
     def load_q(q_loaded, q, block_q, head):
         Tx.copy(q_loaded[block_q % 2], q[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, head, :])
 
-    @Tx.macro
+    @Tx.inline
     def update_running_max(
         running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q, block_kv
     ):
@@ -107,7 +107,7 @@ def test_flash_attn(ssh_client, causal=True):
                 bias=running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
             )
 
-    @Tx.macro
+    @Tx.inline
     def exp(p, qk, running_max, partial_rowsum_p, rowsum_p, block_q, block_kv):
         # p = exp(Q@K.T + running_max)
         # FIXME: this still fails to be simplified. Try to use explicit mask later
@@ -149,17 +149,17 @@ def test_flash_attn(ssh_client, causal=True):
                 reduce_axes=-1,
             )
 
-    @Tx.macro
+    @Tx.inline
     def transpose(p, p_transposed, block_q, block_kv):
         kv_range = Tx.meta_var(get_kv_range(block_q, block_kv, causal))
         Tx.copy(p_transposed[:, 0:kv_range], p[:, 0:kv_range])
 
-    @Tx.macro
+    @Tx.inline
     def pv(mm2_out, p_transposed, v_loaded, block_q, block_kv):
         kv_range = Tx.meta_var(get_kv_range(block_q, block_kv, causal))
         Tx.gemm(mm2_out, p_transposed[:, 0:kv_range], v_loaded[0:kv_range, :], mm2_out)
 
-    @Tx.macro
+    @Tx.inline
     def write_back(
         l,
         l_reciprocal,

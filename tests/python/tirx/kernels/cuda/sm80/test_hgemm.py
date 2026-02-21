@@ -38,7 +38,7 @@ def test_hgemm_ampere():
     VEC = 8
     DEPTH = 2
 
-    @Tx.macro
+    @Tx.inline
     def load_global_to_shared_A(
         tz: int,
         ty: int,
@@ -66,7 +66,7 @@ def test_hgemm_ampere():
                 cp_size=16,
             )
 
-    @Tx.macro
+    @Tx.inline
     def load_global_to_shared_B(
         tz: int,
         ty: int,
@@ -94,7 +94,7 @@ def test_hgemm_ampere():
                 cp_size=16,
             )
 
-    @Tx.macro
+    @Tx.inline
     def loadFragA(
         frag: Tx.Buffer, slice_frag: int, SA: Tx.Buffer, slice_idx: int, ki: int, tx: int, tz: int
     ):
@@ -125,7 +125,7 @@ def test_hgemm_ampere():
             frag[slice_frag, i * 4 + 1] = frag[slice_frag, i * 4 + 2]
             frag[slice_frag, i * 4 + 2] = tmp
 
-    @Tx.macro
+    @Tx.inline
     def loadFragB(
         frag: Tx.Buffer, slice_frag: int, SB: Tx.Buffer, slice_idx: int, ki: int, tx: int, ty: int
     ):
@@ -151,7 +151,7 @@ def test_hgemm_ampere():
                 smem_offset=smem_offset,
             )
 
-    @Tx.macro
+    @Tx.inline
     def store_accum_to_shared(tz, ty, tx, C_smem: tvm.tir.Buffer, Accum):
         """Helper for storing accumulator results to shared memory with optimized indexing"""
         for i in Tx.serial(4):
@@ -177,7 +177,7 @@ def test_hgemm_ampere():
                             C_smem[row, scol] = Accum[acc_offset]
                             C_smem[row, scol + 1] = Accum[acc_offset + 1]
 
-    @Tx.macro
+    @Tx.inline
     def store_shared_to_global(tz, ty, tx, bx, by, C: tvm.tir.Buffer, C_smem: tvm.tir.Buffer):
         """Helper for storing shared memory results to global memory"""
         tid = Tx.meta_var(tz * 64 + ty * 32 + tx)
@@ -193,7 +193,7 @@ def test_hgemm_ampere():
 
             C[global_row, global_col] = Tx.Cast("float16", C_smem[row, scol])
 
-    @Tx.macro
+    @Tx.inline
     def mmaSync(
         fragA: tvm.tir.Buffer,
         fragA_offset: int,

@@ -219,7 +219,7 @@ __device__ __forceinline__ float {func_name}(half x) {{
         return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
         with Tx.thread():
             C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
@@ -285,12 +285,12 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
             A_gmem_1d = A.view(-1)
             B_gmem_1d = B.view(-1)
 
-            @Tx.macro
+            @Tx.inline
             def scope_sync():
                 Tx.cuda.warpgroup_sync(wg_id)
 
             with Tx.thread():
-                @Tx.macro
+                @Tx.inline
                 def compute_tile(m_idx, n_idx):
                     # init states
                     s_frag = Tx.alloc_local([NUM_MMA_M, NUM_MMA_N, 8], "float32")
@@ -313,14 +313,14 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     thr_local_A_offset = Tx.alloc_local([M_rows_per_thread], "int32")
                     thr_local_B_offset = Tx.alloc_local([N_rows_per_thread], "int32")
 
-                    @Tx.macro
+                    @Tx.inline
                     def prefetch_A_offset():
                         for i in range(M_rows_per_thread):
                             row = Tx.meta_var(rmap[i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL] // top_k)
                             col = Tx.meta_var((lane_id % AB_THR_LAYOUT_COL) * VEC_LEN)
                             thr_local_A_offset[i] = A.elem_offset_of([row, col])
 
-                    @Tx.macro
+                    @Tx.inline
                     def prefetch_B_offset():
                         for i in range(N_rows_per_thread):
                             row = Tx.meta_var(n_idx * BLK_N + i * AB_THR_LAYOUT_ROW * WARP_COUNT + warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL)
@@ -342,7 +342,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     smem_offset_A_r += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
                     smem_offset_B_r += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
 
-                    @Tx.macro
+                    @Tx.inline
                     def async_load_A_to_smem(stage):
                         row_in_blk = int_cell(warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL)
                         for i in range(M_rows_per_thread):
@@ -353,7 +353,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                             smem_offset_A_w = advance_offset_by_row(AB_THR_LAYOUT_ROW * WARP_COUNT, UPCAST_STRIDE_K, smem_offset_A_w)
                         smem_offset_A_w -= M_rows_per_thread * AB_THR_LAYOUT_ROW * WARP_COUNT * UPCAST_STRIDE_K
 
-                    @Tx.macro
+                    @Tx.inline
                     def async_load_B_to_smem(stage):
                         for i in range(N_rows_per_thread):
                             Tx.ptx.cp_async(B_smem.ptr_to([stage * BLK_N * BLK_K + smem_offset_B_w * VEC_LEN]), B_gmem_1d.ptr_to([thr_local_B_offset[i]]), cp_size=16, prefetch_size=128)
@@ -361,7 +361,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                             smem_offset_B_w = advance_offset_by_row(AB_THR_LAYOUT_ROW * WARP_COUNT, UPCAST_STRIDE_K, smem_offset_B_w)
                         smem_offset_B_w -= N_rows_per_thread * AB_THR_LAYOUT_ROW * WARP_COUNT * UPCAST_STRIDE_K
 
-                    @Tx.macro
+                    @Tx.inline
                     def compute_gemm(stage):
                         a_frag = Tx.alloc_local([NUM_MMA_M, 8], "float16")
                         b_frag = Tx.alloc_local([8], "float16")
@@ -411,7 +411,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     scope_sync()
 
                     # write back
-                    @Tx.macro
+                    @Tx.inline
                     def store_C_to_smem():
                         for mma_m in range(NUM_MMA_M):
                             for mma_n in range(NUM_MMA_N):
@@ -421,7 +421,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                                 c_smem_offset_w += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
                                 Tx.ptx.stmatrix(4, False, C_smem.ptr_to([c_smem_offset_w * VEC_LEN]), s_frag_f16.ptr_to([0]))
 
-                    @Tx.macro
+                    @Tx.inline
                     def write_C_to_gmem():
                         C_gmem_1d = C.view(-1)
                         C_gmem_2d = C.view(-1, N)

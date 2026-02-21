@@ -215,7 +215,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # FIXME: we need to lower the guard to things like matmul(lhs[...][lhs_guard], rhs[...][rhs_guard], mask=p_guard)
     # so we need to separate the guard for lhs_f, rhs_f and p
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc, C_as_output, max_psum_slots):
         with Tx.attr(0, "tensorized_nki_instruction", 1):
             for p_loop in Tx.serial(0, p_size, annotations={"nki_dim": "P"}):

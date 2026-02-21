@@ -80,7 +80,7 @@ __device__ __forceinline__ float {func_name}(float x, float y) {{
     return Tx.cuda.func_call(func_name, x, y, source_code=source_code, return_type="float32")
 
 
-@Tx.macro
+@Tx.inline
 def cast_load(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
@@ -89,7 +89,7 @@ def cast_load(v, vec_len, buf, *indices):
             v_tmp[i] = buffer_load
         Tx.cast(v[:], v_tmp[:])
 
-@Tx.macro
+@Tx.inline
 def cast_store(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
@@ -112,7 +112,7 @@ class BatchMergeTile(Tile):
             self.d = Tx.alloc_local([1], "float32", name="state_d")
             self.INF = 5e4
 
-        @Tx.macro
+        @Tx.inline
         def init(self):
             with Tx.thread():
                 for i in Tx.unroll(self.vec_size):
@@ -121,7 +121,7 @@ class BatchMergeTile(Tile):
                 self.d[0] = 1.0
 
         # fmt: off
-        @Tx.macro
+        @Tx.inline
         def merge(self, other_o, other_m, other_d):
             with Tx.thread():
                 m_prev = float_var(name="m_prev", val=self.m[0])
@@ -133,7 +133,7 @@ class BatchMergeTile(Tile):
         # fmt: on
 
         # fmt: off
-        @Tx.macro
+        @Tx.inline
         def normalize(self):
             with Tx.thread():
                 for i in Tx.unroll(self.vec_size):
@@ -170,11 +170,11 @@ __syncwarp();
         self.v_smem = smem_manager.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16", name="v_smem")
         self.s_smem = smem_manager.alloc([self.num_warps, 32], "float32", name="s_smem")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
         m_idx,
@@ -255,7 +255,7 @@ __syncwarp();
                         Tx.ptx.cp_async.wait_group(0)
                         self._warp_sync()
 
-                        @Tx.macro
+                        @Tx.inline
                         def warp_sync_state():
                             cast_store(state.o, self.vec_size, self.v_smem, warp_id, 0, ty[0], tx[0] * self.vec_size)
                             self.s_smem[warp_id, ty[0]] = state.get_lse()

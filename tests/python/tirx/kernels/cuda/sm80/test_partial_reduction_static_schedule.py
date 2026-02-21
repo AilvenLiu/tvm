@@ -91,19 +91,19 @@ def test_partial_reduction():
            self.task_type = int_var("task_type")
            self.task_idx = Tx.alloc_buffer([2], "int32", scope="local", name="task_idx")
 
-        @Tx.macro
+        @Tx.inline
         def get_block_coord(self):
             self.task_type[0] = self.task_types[self.linear_idx[0]]
             self.task_idx[0] = self.task_indices[self.linear_idx[0], 0]
             self.task_idx[1] = self.task_indices[self.linear_idx[0], 1]
 
-        @Tx.macro
+        @Tx.inline
         def init(self, linear_init):
             self.linear_idx[0] = self.tasks_indptr[linear_init]
             self.linear_lim[0] = self.tasks_indptr[linear_init + 1]
             self.get_block_coord()
 
-        @Tx.macro
+        @Tx.inline
         def next_tile(self):
             self.linear_idx[0] = self.linear_idx[0] + 1
             self.get_block_coord()
@@ -118,7 +118,7 @@ def test_partial_reduction():
             self.sem = buffer
             self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
 
-        @Tx.macro
+        @Tx.inline
         def semaphore_wait(self, *coord):
             with Tx.thread():
                 while 1:
@@ -127,7 +127,7 @@ def test_partial_reduction():
                         break
                     Tx.cuda.nano_sleep(40)
 
-        @Tx.macro
+        @Tx.inline
         def semaphore_notify(self, *coord):
             with Tx.thread():
                 Tx.cuda.cta_sync()

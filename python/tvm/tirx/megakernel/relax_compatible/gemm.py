@@ -28,7 +28,7 @@ class FuseGemmTile(GemmTile):
         num_tiles = (1, symbolic_tile.N // symbolic_tile.BLK_N, split_k_factor)
         tile_size = (None, symbolic_tile.BLK_N, symbolic_tile.TILE_K)
         
-        @Tx.macro
+        @Tx.inline
         def gemm_body(A, B, output, m_idx, n_idx, k_idx):
             gemm_tile = FuseGemmTile(N, K, ab_dtype, ab_dtype, split_k_factor, BLK_M, BLK_M, prefetch_on=prefetch_on, use_tma_reduce=use_tma_reduce, profiler_on=False)
             gemm_tile.host_init()

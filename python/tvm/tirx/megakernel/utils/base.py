@@ -79,7 +79,7 @@ class Barriers:
     def _alloc(self):
         self.mbar = self.smem_manager.alloc((self.pipe_depth,), "uint64", method="persistent" if self.persistent else "shared", name="mbarrier")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, threads_num_wait):
         self._alloc()
         if self.pipe_depth == 1:
@@ -90,7 +90,7 @@ class Barriers:
                 for i in Tx.serial(self.pipe_depth):
                     Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, idx, phase):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
@@ -128,7 +128,7 @@ class SmemManager:
             self.reg_count = Tx.alloc_local([1], "int32", name="reg_count")
 
 
-    @Tx.macro
+    @Tx.inline
     def init(self):
         self.check_smem_well_formed(debug=False)
         self._inner_alloc()
@@ -251,7 +251,7 @@ class SmemManager:
     def _assert_cond(self, cond):
         assert cond
 
-    @Tx.macro
+    @Tx.inline
     def advance(self):
         self.cur_phase[0] = self.cur_phase[0] ^ 1
 
@@ -266,7 +266,7 @@ class SmemManager:
         pass # TODO: not support now
 
     # wait all the chunks, call at the beginning of the task, cta level interface
-    @Tx.macro
+    @Tx.inline
     def wait_all(self, level: Literal["cta", "warpgroup"] = "cta"):
         # self._assert_cond(len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0)
         # wait the mbarrier
@@ -286,7 +286,7 @@ class SmemManager:
                 Tx.ptx.bar.sync(6 + wg_id, 128)
 
     # wait the specific chunk, call before use the corresponding smem, warp-level interface
-    @Tx.macro
+    @Tx.inline
     def wait_specific(self, lane_id, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
         self._assert_cond(self.bufs[buffer][3] == "exclusive") # must be exclusive
@@ -297,7 +297,7 @@ class SmemManager:
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
 
     # wait the unused chunk, warp-level interface
-    @Tx.macro
+    @Tx.inline
     def wait_unused(self, lane_id, cur_tile: Tile):
         self._assert_cond(len(self.tiles[self.cur_tile_name][1]["shared"]) == 0) # must be exclusive
         # wait the mbarrier
@@ -305,12 +305,12 @@ class SmemManager:
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
 
     # wait the specific chunk, thread-level interface
-    @Tx.macro
+    @Tx.inline
     def wait_chunk(self, chunk_id):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([chunk_id]), self.cur_phase[0])
 
     # wait the specific chunk, call before use the corresponding smem, thread-level interface
-    @Tx.macro
+    @Tx.inline
     def wait_specific_one_thread(self, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
         self._assert_cond(self.bufs[buffer][3] == "exclusive") # must be exclusive
@@ -321,7 +321,7 @@ class SmemManager:
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([beg_chunk_id + idx]), self.cur_phase[0])
 
     # arrive all the chunks, call at the end of the task, cta level interface
-    @Tx.macro
+    @Tx.inline
     def arrive_all(self, level: Literal["cta", "warpgroup"] = "cta"):
         # self._assert_cond(len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0)
         # arrive the mbarrier
@@ -348,7 +348,7 @@ class SmemManager:
                             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
     # arrive the specific chunk, call after the buffer can ben released, warp level interface
-    @Tx.macro
+    @Tx.inline
     def arrive_specific(self, lane_id, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
         self._assert_cond(self.bufs[buffer][3] == "exclusive") # must be exclusive
@@ -359,14 +359,14 @@ class SmemManager:
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
     # arrive the unused chunk, call at the end of the task, warp level interface
-    @Tx.macro
+    @Tx.inline
     def arrive_unused(self, lane_id, cur_tile: Tile):
         self._assert_cond(len(self.tiles[self.cur_tile_name][1]["shared"]) == 0) # must be exclusive
         if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
     # arrive the specific chunk, thread-level interface
-    @Tx.macro
+    @Tx.inline
     def arrive_chunk(self, chunk_id):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
 
@@ -397,23 +397,23 @@ class TileSchedulerBase:
     def get_idx_and_task_type(self) -> Tuple[List[PrimExpr], PrimExpr]:
         raise NotImplementedError
 
-    @Tx.macro
+    @Tx.inline
     def init(self):
         raise NotImplementedError
 
-    @Tx.macro
+    @Tx.inline
     def next_tile(self):
         raise NotImplementedError
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, evt, *coord, wait_level, mask):
         raise NotImplementedError
 
-    @Tx.macro
+    @Tx.inline
     def notify(self, evt, func_notify, scope, scope_id, release):
         raise NotImplementedError
 
-    @Tx.macro
+    @Tx.inline
     def pre_notify_and_push(self, evt, func_notify, func_trigger_list, push_level, scope, scope_id):
         # for dynamic scheduler
         pass
@@ -507,7 +507,7 @@ class MegaKernelWrapper:
         self.class_list.add(tile.__class__)
         return tile
         
-    @Tx.macro
+    @Tx.inline
     def init_profiler(self, profiler_buffer):
         self._init_profiler(profiler_buffer)
         with Tx.cta():
@@ -518,7 +518,7 @@ class MegaKernelWrapper:
     def set_smem_manager(self, smem_max_bytes, chunk_size, ptr: Var):
         self.smem_manager = SmemManager(smem_max_bytes, chunk_size, ptr)
 
-    @Tx.macro
+    @Tx.inline
     def init_tile_scheduler(self, is_dynamic_sch, scheduler_class, *args):
         self._init_tile_scheduler(scheduler_class, *args)
         with Tx.cta():
@@ -526,7 +526,7 @@ class MegaKernelWrapper:
             if is_dynamic_sch:
                 self.tile_scheduler.next_tile()
 
-    @Tx.macro
+    @Tx.inline
     def run_tile(self, tile: Tile, *args, **kwargs):
         event_type = Tx.meta_var(self.tile_attr[tile][0])
         self.smem_manager.enter_tile_runtime(tile)
@@ -538,7 +538,7 @@ class MegaKernelWrapper:
             if self.profiler_on:
                 self.profiler.end(event_type, lane_id == 0)
 
-    @Tx.macro
+    @Tx.inline
     def run_tile_prefetch(self, tile: Tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
         with Tx.cta():
@@ -569,7 +569,7 @@ class MegaKernelWrapper:
         self.init_etensor_tile = self._add_tile(InitETensorTile(self.etensor_and_f_init_pairs), ProfileEventType.INIT_ETENSOR)
 
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_init_etensor(self, is_dynamic_sch):
         # TODO: add wait, notify and push
         self.run_tile(self.init_etensor_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx)
@@ -579,7 +579,7 @@ class MegaKernelWrapper:
                     self.evt_etensor_init_complete, lambda notify_idx: (1, -1, 0), scope="cta", release=True
                 )
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_wait_etensor_init_complete(self, is_dynamic_sch):
         if not is_dynamic_sch:
             with Tx.thread():

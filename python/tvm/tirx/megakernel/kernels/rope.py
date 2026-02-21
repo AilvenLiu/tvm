@@ -39,7 +39,7 @@ class RopeTile(Tile):
         self.mask = Tx.alloc_local([1], "uint32", name="mask")
 
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, qkv, cos_sin_cache, rope_pos):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

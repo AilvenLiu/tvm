@@ -49,7 +49,7 @@ class Semaphore(SemaphoreBase):
 
         # cta-level interface
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
         if level == "cta":
             with Tx.thread():
@@ -78,7 +78,7 @@ class Semaphore(SemaphoreBase):
         else:
             assert False
 
-    @Tx.macro
+    @Tx.inline
     def semaphore_notify(self, *coord, pre_notify=False, rank=-1, release=False):
         number = Tx.meta_var(1 if pre_notify else self.base)
         # the old value will be stored in self.state
@@ -100,7 +100,7 @@ class SchedulerBarrier(Barriers):
     def __init__(self, smem_manager, is_p2c):
         super().__init__(smem_manager, 1, is_p2c)
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0]))
 
@@ -135,11 +135,11 @@ class MPMCQueue:
         self.idx = Tx.local_cell(dtype="int32", name="idx")
         self.tail_smem = self.smem_manager.alloc((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER,), "int32", name="tail_smem", method="persistent")
 
-    @Tx.macro
+    @Tx.inline
     def init(self):
         self._alloc()
 
-    @Tx.macro
+    @Tx.inline
     def enqueue(self, rank, func_push, level:Literal["thread", "warp", "warpgroup", "cta"]):
         if level == "thread":
             with Tx.thread():
@@ -182,7 +182,7 @@ class MPMCQueue:
                     stg(task_info, self.tasks.access_ptr("rw", offset=self.tasks.elem_offset_of([self.masked_pos])), rank)
                     self.idx += tid_stride
 
-    @Tx.macro
+    @Tx.inline
     def dequeue(
         self,
         fetched_task_info,
@@ -237,12 +237,12 @@ class DynamicTileScheduler(TileSchedulerBase):
         self.packed_value = self.smem_manager.alloc((1,), "int32", align=16, name="packed_value", method="persistent")
         self.semaphore_state = self.smem_manager.alloc((KernelConfig.NUM_THREADS,), "int32", name="semaphore_state", method="persistent")
 
-    @Tx.macro
+    @Tx.inline
     def _dequeue_and_store_packed(self):
         self.queue.dequeue(self.task_info)
         sts(self.task_info, self.packed_value.ptr_to([0]))
 
-    @Tx.macro
+    @Tx.inline
     def _fetch_from_queue(self):
         with Tx.cta():
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -257,7 +257,7 @@ class DynamicTileScheduler(TileSchedulerBase):
             self.c2p_dequeue_barrier.arrive()
             self.dequeue_phase = self.dequeue_phase ^ 1
 
-    @Tx.macro
+    @Tx.inline
     def init(self):
         self._alloc()
         self.queue.init()
@@ -269,7 +269,7 @@ class DynamicTileScheduler(TileSchedulerBase):
         Tx.ptx.fence.proxy("shared")
         Tx.ptx.fence.mbarrier_init()
 
-    @Tx.macro
+    @Tx.inline
     def next_tile(self):
         with Tx.cta():
             lane_id = Tx.thread_id([32], parent="warp")
@@ -282,11 +282,11 @@ class DynamicTileScheduler(TileSchedulerBase):
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
-    @Tx.macro
+    @Tx.inline
     def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, pre_notify=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
@@ -296,7 +296,7 @@ class DynamicTileScheduler(TileSchedulerBase):
         max_notify_num_map = Tx.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = Tx.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
 
-        @Tx.macro
+        @Tx.inline
         def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
             if scope == "thread":
                 pass
@@ -334,7 +334,7 @@ class DynamicTileScheduler(TileSchedulerBase):
         for func_trigger in func_trigger_list:
             self.queue.enqueue(-1, func_trigger(idx), push_level)
 
-    @Tx.macro
+    @Tx.inline
     def pre_notify_and_push(
         self, evt: Semaphore, func_notify, func_trigger_list,
         push_level: Literal["thread", "warp", "warpgroup", "cta"],

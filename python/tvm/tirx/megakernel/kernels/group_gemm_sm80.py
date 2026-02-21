@@ -44,7 +44,7 @@ return __half2float(x);
     return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
 
 # fmt: off
-@Tx.macro
+@Tx.inline
 def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
     with Tx.thread():
         C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
@@ -135,7 +135,7 @@ class GroupGEMMTile(Tile):
         smem_manager.pool_allocator.move_base_to(start_offset)
         C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, A, B, C, topk_weights, topk_ids, sorted_tok_ids, expert_ids, num_tokens_post_pad):
         with Tx.cta():
             wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")

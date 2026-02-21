@@ -59,11 +59,11 @@ class GateUpSiluTile(GemmTile):
         self.wait_complete = Tx.local_cell("bool", name="wait_complete")
         self.off = Tx.local_cell("int32", name="off")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with Tx.thread():
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")

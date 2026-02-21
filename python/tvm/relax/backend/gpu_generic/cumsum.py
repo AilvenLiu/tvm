@@ -78,7 +78,7 @@ def gpu_2d_continuous_cumsum(
     LOG_TX = T.int64(int(math.log2(tx_len)))
     LOG_BLOCK_N = T.int64(int(math.log2(tx_len * ty_len * thread_elem)))
 
-    @T.macro
+    @T.inline
     def block_inclusive_inside_block(
         batch: T.int64,
         cur_len: T.int64,
@@ -132,7 +132,7 @@ def gpu_2d_continuous_cumsum(
                                 for i in T.vectorized(N):
                                     tmp_buf[by, tmp_offset + bx] = shared_buf[block_elem - 1]
 
-    @T.macro
+    @T.inline
     def update_cross_block(
         batch: T.int64,
         cur_len: T.int64,

@@ -64,7 +64,7 @@ def test_partial_reduction():
             self.pos = int_var("pos")
             self.masked_pos = int_var("masked_pos")
             self.num_tot_tasks = num_tot_tasks
-        @Tx.macro
+        @Tx.inline
         def enqueue(self, task_type: int, *task_idx: int):
             self.tail_r[0] = Tx.cuda.atomic_add(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([Tx.int32(0)])), 1)
             # TODO: wait if tail - head > capacity
@@ -74,7 +74,7 @@ def test_partial_reduction():
             self.task_idxs[self.masked_pos[0], 1] = task_idx[1]
             Tx.cuda.thread_fence()                                     # publish data
 
-        @Tx.macro
+        @Tx.inline
         def dequeue(self, fetched_task_type: Tx.Buffer, fetched_task_idx: Tx.Buffer):
             self.head_r[0] = Tx.cuda.atomic_add(self.head.access_ptr("rw", offset=self.head.elem_offset_of([Tx.int32(0)])), 1)
             if self.head_r[0] < self.num_tot_tasks:
@@ -97,17 +97,17 @@ def test_partial_reduction():
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
             self.fetched_task_idx = Tx.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")
 
-        @Tx.macro
+        @Tx.inline
         def _fetch_from_queue(self):
           with Tx.thread()[0:1]:
             self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx)
           Tx.cuda.cta_sync()
 
-        @Tx.macro
+        @Tx.inline
         def init(self, linear_init):
             self._fetch_from_queue()
 
-        @Tx.macro
+        @Tx.inline
         def next_tile(self):
             self._fetch_from_queue()
 
@@ -121,7 +121,7 @@ def test_partial_reduction():
             self.sem = buffer
             self.state = int_var("state")
             self.queue = queue
-        @Tx.macro
+        @Tx.inline
         def semaphore_notify(self, *coord):
             with Tx.thread():
                 Tx.cuda.cta_sync()

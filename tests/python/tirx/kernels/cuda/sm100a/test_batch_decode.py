@@ -310,7 +310,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                         cur = Tx.alloc_local([1], "int32")
                         tx_start = Tx.meta_var(tx * VEC_SIZE)
 
-                        @Tx.macro
+                        @Tx.inline
                         def fetch_kv_offset(kt, kv_head_id_beg, offset):
                             token_id = Tx.meta_var(chunk_start_logical[0] + offset)
                             if token_id < chunk_end_logical[0]:
@@ -319,7 +319,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 indices[0] = Tx.cuda.ldg(kv_indices_global.ptr_to([p]), "int32")
                                 kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM
                                                                   + kv_head_id_beg * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM)
-                        @Tx.macro
+                        @Tx.inline
                         def sync_blk():
                             if BDZ <= 4:
                                 Tx.ptx.bar.sync(1 + tz, BDX * BDY)

@@ -101,46 +101,46 @@ class Barriers:
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
 
-    @Tx.macro
+    @Tx.inline
     def init(self, threads_num_wait):
         with Tx.thread()[0:1]:
             for i in Tx.serial(self.pipe_depth):
                 Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
-    @Tx.macro
+    @Tx.inline
     def wait(self, idx, phase):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
 
 class BarTRANS2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
 class BarMMA2LD(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarMMA2TMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarLD2MMA(Barriers):
 
-    @Tx.macro
+    @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
-@Tx.macro
+@Tx.inline
 def skip():
     pass
 
@@ -236,7 +236,7 @@ def deepgemm(
             Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
             tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
 
-            @Tx.macro
+            @Tx.inline
             def paritioned_loop(main_loop, epilogue1, epilogue2):
                 for ko in Tx.serial(PIPE_CIRCLE_NUM):
                     for ks in Tx.unroll(SMEM_PIPE_DEPTH):
@@ -270,7 +270,7 @@ def deepgemm(
                             n_start_sf = Tx.meta_var(n_idx * CTA_GROUP * BLK_N)
                             k_start = Tx.meta_var(stage * BLK_K)
 
-                            @Tx.macro
+                            @Tx.inline
                             def tma_load(ks):
                                 mma2tma_bar.wait(ks, phase)
                                 tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2trans_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
@@ -284,7 +284,7 @@ def deepgemm(
                                     SFAB_bytes = Tx.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
                                     Tx.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), Tx.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
 
-                            @Tx.macro
+                            @Tx.inline
                             def tma_load_epilogue(ks):
                                 mma2tma_bar.wait(ks, phase)
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
@@ -301,7 +301,7 @@ def deepgemm(
                             m_idx = Tx.meta_var(tile_scheduler.m_idx)
                             n_idx = Tx.meta_var(tile_scheduler.n_idx)
 
-                            @Tx.macro
+                            @Tx.inline
                             def transpose(ks):
                                 # wait for sf has been prepared
                                 Tx.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
@@ -313,7 +313,7 @@ def deepgemm(
                                 # mark that transpose is completed
                                 trans2mma_bar.arrive(ks)
 
-                            @Tx.macro
+                            @Tx.inline
                             def transpose_epilogue(ks):
                                 Tx.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
                                 trans2mma_bar.arrive(ks)
@@ -339,7 +339,7 @@ def deepgemm(
                                     ld2mma_bar.wait(tmem_idx, tmem_phase)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma(ks):
                                         # wait tma and sf-transpose arrival
                                         trans2mma_bar.wait(ks, phase)
@@ -382,11 +382,11 @@ def deepgemm(
                                                                                 descI, False, CTA_GROUP, True)
                                         mma2tma_bar.arrive(ks)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma_epilogue1():
                                         mma2ld_bar.arrive(tmem_idx)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def mma_epilogue2(ks):
                                         trans2mma_bar.wait(ks, phase)
                                         mma2tma_bar.arrive(ks)

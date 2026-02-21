@@ -38,7 +38,7 @@ class AppendKVTile(Tile):
         self.vec = Tx.alloc_local([self.vec_size], "float16", name="vec")
 
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

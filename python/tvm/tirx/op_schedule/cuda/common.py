@@ -98,7 +98,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
     sctx : ScheduleContext
         The schedule context.
 
-    inner_impl : Tx.macro
+    inner_impl : Tx.inline
         The inner implementation.
 
     macro : bool
@@ -121,7 +121,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
     if exec_scope.name == "cta":
         assert not isinstance(exec_scope, ExecScopeSlice)
 
-        @Tx.macro()
+        @Tx.inline()
         def impl():
             with Tx.thread()[0:1]:
                 inner_impl()
@@ -133,7 +133,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             # slice of multiple warps
             warp_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
 
-            @Tx.macro()
+            @Tx.inline()
             def impl():
                 with Tx.warp()[*warp_selector]:
                     with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
@@ -142,7 +142,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             return macro_or_prim_func(impl, need_macro=macro)
         else:
             # a single warp
-            @Tx.macro()
+            @Tx.inline()
             def impl():
                 with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                     inner_impl()
@@ -153,7 +153,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             # slice of multiple warpgroups
             warpgroup_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
 
-            @Tx.macro()
+            @Tx.inline()
             def impl():
                 with Tx.warpgroup()[*warpgroup_selector]:
                     with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
@@ -163,7 +163,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
             return macro_or_prim_func(impl, need_macro=macro)
         else:
             # a single warpgroup
-            @Tx.macro()
+            @Tx.inline()
             def impl():
                 with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
                     with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:

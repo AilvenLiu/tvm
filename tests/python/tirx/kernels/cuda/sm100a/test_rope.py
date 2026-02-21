@@ -88,7 +88,7 @@ def get_rope_kernel(head_dim):
                 pos = Tx.alloc_local([1], "int32")
                 head = Tx.alloc_local([1], "int32")
 
-                @Tx.macro
+                @Tx.inline
                 def compute_rope(global_in, global_out):
                     Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx:stx + vec_size])
                     Tx.cast(qk_vec32[:], qk_vec[:])

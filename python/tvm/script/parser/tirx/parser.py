@@ -32,7 +32,7 @@ from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
 from .._core import Parser, dispatch, doc
 from ..core.doc import from_doc
-from ..tir.entry import macro
+from ..tir.entry import inline
 
 
 def bind_with_value(self: Parser, node: doc.expr, var_name: str, value: Any) -> Any:
@@ -530,9 +530,9 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     self.function_annotations = supplied_annotation
 
 
-@dispatch.register(token="tir.macro", type_name="FunctionDef")
-def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
-    """The function definition visiting method for tir.
+@dispatch.register(token="tir.inline", type_name="FunctionDef")
+def visit_inline_function_def(self: Parser, node: doc.FunctionDef) -> None:
+    """The function definition visiting method for inline functions in tir.
 
     Parameters
     ----------
@@ -542,30 +542,16 @@ def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
     node : doc.FunctionDef
         The doc AST function definition node.
     """
-    # get the hygienic flag from the macro decorator
-
-    macro_decorator = node.decorator_list[-1]
-    if isinstance(macro_decorator, doc.Call):
-        # T.macro(hygienic=True/False)
-        if macro_decorator.func.attr != "macro":
-            self.report_error(macro_decorator, "The decorator must be @T.macro")
-        hygienic = macro_decorator.keywords[0].value.value
-        assert isinstance(hygienic, bool)
-    elif isinstance(macro_decorator, doc.Attribute):
-        # T.macro
-        assert macro_decorator.attr == "macro"
-        hygienic = True
-    else:
-        self.report_error(
-            macro_decorator, "The decorator must be @T.macro or @T.macro(hygienic=True/False)"
-        )
-    # remove the macro decorator
+    # remove the inline decorator
     node.decorator_list.pop()
     # adjust the node location to the source code location
     node.lineno += self.diag.source.start_line - 1
     node.col_offset += self.diag.source.start_column + 1
     node.end_lineno += self.diag.source.start_line - 1
     node.end_col_offset += self.diag.source.start_column + 1
+
+    # Record definition depth for LEGB late binding
+    definition_depth = len(self.var_table.frames)
 
     def get_func():
         func_ast = from_doc(node)
@@ -580,7 +566,7 @@ def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
         return func, func_name
 
     func, func_name = get_func()
-    wrapper = macro(func, hygienic=hygienic)
+    wrapper = inline(func, definition_depth=definition_depth, defining_var_table=self.var_table)
 
     self.var_table.add(func_name, wrapper, allow_shadowing=False)
     return None

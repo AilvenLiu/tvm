@@ -40,7 +40,7 @@ class RMSnormTile(Tile):
         self.rms_norm = Tx.alloc_local([1], "float32", name="rms_norm")
         self.mask = Tx.alloc_local([1], "uint32", name="mask")
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, qkv, q_weight, k_weight):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

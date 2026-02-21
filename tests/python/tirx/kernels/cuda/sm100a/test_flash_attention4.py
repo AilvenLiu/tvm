@@ -165,7 +165,7 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             func_name, x_rounded, frac_ex2, source_code=source_code, return_type="float32"
         )
 
-    @Tx.macro
+    @Tx.inline
     def ex2_emulation_2(out, idx, x, y):
         # Polynomial coefficients for exp2 approximation (degree 3)
         poly_ex2_deg3 = Tx.meta_var(
@@ -215,30 +215,30 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             self.init_phase = 0 if is_p2c else 1
             self.pipe_depth = pipe_depth
 
-        @Tx.macro
+        @Tx.inline
         def init(self, threads_num_wait):
             with Tx.thread()[0:1]:
                 for i in Tx.serial(self.pipe_depth):
                     Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
-        @Tx.macro
+        @Tx.inline
         def wait(self, idx, phase):
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
     class BarrierWithCommit(Barriers):
-        @Tx.macro
+        @Tx.inline
         def arrive(self, idx):
             if CTA_GROUP == 1:
                 if Tx.ptx.elect_sync():
                     Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]))
 
     class BarrierWithArrive(Barriers):
-        @Tx.macro
+        @Tx.inline
         def arrive(self, idx):
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
     class BarrierWithExpectTx(Barriers):
-        @Tx.macro
+        @Tx.inline
         def arrive(self, idx, expected_bytes=None):
             if expected_bytes is not None:
                 Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
@@ -250,7 +250,7 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
         def __init__(self, prefix: str):
             self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
 
-        @Tx.macro
+        @Tx.inline
         def init(self, smem_ptr, ldo, sdo, swizzle):
             Tx.ptx.tcgen05.encode_matrix_descriptor(
                 Tx.address_of(self.desc), smem_ptr, ldo, sdo, swizzle
@@ -446,7 +446,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                     for i_q in Tx.unroll(2):
                         bar_p_full_o_rescaled.arrive(i_q)
 
-                @Tx.macro
+                @Tx.inline
                 def advance_kv_stage():
                     stage_kv[0] = stage_kv[0] + 1
                     if stage_kv[0] == SMEM_PIPE_DEPTH_KV:
@@ -474,7 +474,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                             if warp_id == 1:
                                 with Tx.warp():
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def load_q(i_q):
                                         # Use phase_q_load for Q prefetch barrier synchronization
                                         bar_load_q_empty.wait(i_q, phase_q_load[0])
@@ -493,7 +493,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                             bar_load_q_full.arrive(i_q, CTA_GROUP * BLK_M * HEAD_DIM * F16_BYTES)  # ar(0,x)
                                         profiler.end(ProfileEventType.IssueTMA_Q, lane_id == 0)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def load_k(i_kv):
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
                                         tma_copy_k = Tx.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
@@ -506,7 +506,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                         profiler.end(ProfileEventType.IssueTMA_K, lane_id == 0)
                                         advance_kv_stage()
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def load_v(i_kv):
                                         bar_load_kv_empty.wait(stage_kv[0], phase_kv[0])
                                         tma_copy_v = Tx.meta_var({"dispatch": "tma", "mbar": bar_load_kv_full.mbar.ptr_to([stage_kv[0]]), "cta_group": CTA_GROUP})
@@ -579,7 +579,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                         trans_a=False, trans_b=True, n_cta_groups=CTA_GROUP,
                                     )
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def gemm_qk(q_stage, kv_stage, tmem_col_s, bar_s_full):
                                         descQ = SmemDescriptor("Q")
                                         descK = SmemDescriptor("K")
@@ -608,7 +608,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                     )
                                         bar_s_full.arrive(q_stage)
 
-                                    @Tx.macro
+                                    @Tx.inline
                                     def gemm_pv(i_q, kv_stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):
                                         descV = SmemDescriptor("V")
                                         # All threads: encode V descriptor ONCE
@@ -741,7 +741,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                 row_max = Tx.alloc_local([1], "float32")
                                 row_sum = Tx.alloc_local([1], "float32")
 
-                                @Tx.macro
+                                @Tx.inline
                                 def mask_r2p(s_chunk_buf, col_limit, ncol: Tx.int32):
                                     """Apply mask using R2P-style bit manipulation.
 
@@ -772,7 +772,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 in_bound = Tx.bitwise_and(mask, Tx.shift_left(Tx.int32(1), i))
                                                 s_chunk_buf[c] = Tx.Select(Tx.cast(in_bound, "bool"), s_chunk_buf[c], Tx.float32(-float("inf")))
 
-                                @Tx.macro
+                                @Tx.inline
                                 def apply_causal_mask(s_chunk_buf, m_blk_idx, n_blk_idx):
                                     """Apply causal mask to attention scores.
 
@@ -808,7 +808,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     # Use R2P-style masking instead of per-column comparison
                                     mask_r2p(s_chunk_buf, col_limit_right, BLK_N)
 
-                                @Tx.macro
+                                @Tx.inline
                                 def softmax_step(i_kv, apply_mask=False, is_first=False):
                                     s_chunk_buf = Tx.alloc_local([BLK_N], "float32")
                                     s_chunk = s_chunk_buf.view(128, BLK_N, layout=TileLayout(S[(128, BLK_N) : (1 @ axis_tid_in_wg, 1)]))

@@ -284,6 +284,33 @@ class VarTable:
         """
         return {key: values[-1] for key, values in self.name2value.items() if values}
 
+    def get_at_depth(self, depth: int) -> Dict[str, Any]:
+        """Get variables visible at the given frame depth, using current values.
+
+        For each variable name that appears in frames 0..depth-1, count how many
+        times it was pushed (to handle shadowing), then index into name2value at
+        count-1 to retrieve the latest value visible at that depth.
+
+        Parameters
+        ----------
+        depth : int
+            The frame depth (number of frames visible).
+
+        Returns
+        -------
+        res : Dict[str, Any]
+            Variable dictionary of values visible at the given depth.
+        """
+        result: Dict[str, Any] = {}
+        name_count: Dict[str, int] = defaultdict(int)
+        for frame_idx in range(min(depth, len(self.frames))):
+            for name in self.frames[frame_idx].vars:
+                name_count[name] += 1
+        for name, count in name_count.items():
+            if self.name2value[name]:
+                result[name] = self.name2value[name][count - 1]
+        return result
+
     def exist(self, value: Any) -> bool:
         """Check if any value exists in variable table.
 

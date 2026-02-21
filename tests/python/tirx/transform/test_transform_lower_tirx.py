@@ -688,7 +688,7 @@ def test_lower_scope_id():
 
 def test_lower_scope_id2():
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def func(warp_id, tx):
         with Tx.cta():
             wg_id = Tx.warpgroup_id([2], parent="cta")

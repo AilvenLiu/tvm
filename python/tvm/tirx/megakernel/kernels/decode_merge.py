@@ -75,11 +75,11 @@ class DecodeMergeTile(Tile):
         self.m_tmp = Tx.alloc_local([1], "float32", name="m_tmp")
         self.o_tmp = Tx.alloc_local([self.vec_size], "float32", name="o_tmp")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, pool_allocator: Tx.PoolAllocator):
         self.alloc_buffer(pool_allocator)
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")

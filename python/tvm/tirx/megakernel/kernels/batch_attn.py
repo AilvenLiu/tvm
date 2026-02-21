@@ -80,7 +80,7 @@ __device__ __forceinline__ float {func_name}(float x, float y) {{
     return Tx.cuda.func_call(func_name, x, y, source_code=source_code, return_type="float32")
 
 
-@Tx.macro
+@Tx.inline
 def cast_load(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
@@ -90,7 +90,7 @@ def cast_load(v, vec_len, buf, *indices):
         Tx.cast(v[:], v_tmp[:])
 
 
-@Tx.macro
+@Tx.inline
 def cast_store(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
@@ -244,11 +244,11 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                         else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16, name="cta_sync_md_smem")
         self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16, name="smem_o")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
-    @Tx.macro
+    @Tx.inline
     def page_produce_kv(self, produce_v: bool, kv_idx_base_in, smem_offset, smem, kv_tvm, warp_id, lane_id):
         v_offset = self.kv_heads * self.page_size * self.head_dim if produce_v else 0
         fill_mode = Tx.meta_var("zero" if produce_v else "")
@@ -310,7 +310,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.block_iter_base = int_var(name="block_iter_base")
         self.packed_kv_bound = int_var(name="packed_kv_bound")
         
-    @Tx.macro
+    @Tx.inline
     def _init_state(
         self,
         m_idx,
@@ -369,7 +369,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
             self.packed_kv_bound = self.kv_indptr[0] * self.page_size + self.kv_len[0] 
         
 
-    @Tx.macro
+    @Tx.inline
     def prefetch(
         self,
         m_idx,
@@ -399,7 +399,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
             warp_id = Tx.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             
-            @Tx.macro
+            @Tx.inline
             def prefetch_offset(packed_block_iter_base_in):
                 with Tx.thread():
                     packed_block_iter_base = int_var(name="packed_block_iter_base", val=packed_block_iter_base_in)
@@ -432,7 +432,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                         profiler.end(ProfileEventType.ATTN_INIT, lane_id == 0)
                     prefetch_offset(self.block_iter_base[0] + self.kv_tile_idx[0] * self.cta_tile_kv)
 
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
         m_idx,
@@ -469,7 +469,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     self.tid[1] = warp_id % self.num_warps_q
                     self.tid[2] = warp_id // self.num_warps_q
                     
-                @Tx.macro
+                @Tx.inline
                 def prefetch_offset(packed_block_iter_base_in):
                     with Tx.thread():
                         packed_block_iter_base = int_var(name="packed_block_iter_base", val=packed_block_iter_base_in)
@@ -480,9 +480,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             entry_idx = int_var(name="entry_idx", val=Tx.floormod(packed_block_iter[0], self.page_size))
                             mapped_page = Tx.meta_var(Tx.if_then_else(packed_block_iter[0] < self.packed_kv_bound[0], kv_indices_tvm[page_iter[0]], 0))
                             self.thr_local_kv_offset[i] = kv_tvm.elem_offset_of([mapped_page, 0, self.kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
-                @Tx.macro
+                @Tx.inline
                 def handle_single_task(has_prefetched):                
-                    @Tx.macro
+                    @Tx.inline
                     def load_q_global_smem():
                         if self.get_warp_idx_kv(self.tid) == 0:
                             q_smem_offset_w = int_var(name="q_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_q, wg_id * self.cta_tile_q + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
@@ -508,7 +508,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                         profiler.end(ProfileEventType.ATTN_LOAD_Q, lane_id == 0)
                     self.scope_sync(wg_id)
 
-                    @Tx.macro
+                    @Tx.inline
                     def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
                         with Tx.thread():
                             C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
@@ -525,7 +525,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                 Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                         C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]), C_mma.ptr_to([4]))
 
-                    @Tx.macro
+                    @Tx.inline
                     def compute_qk():
                         with Tx.thread():
                             a_frag = Tx.alloc_local([self.num_mma_q, 4], "uint32", name="a_frag")
@@ -553,7 +553,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             self.q_smem_offset_r[0] -= self.num_mma_d_qk * 2
                             self.k_smem_offset_r[0] -= self.num_mma_d_qk * size_of("float16")
 
-                    @Tx.macro
+                    @Tx.inline
                     def logits_mask():
                         chunk_end = Tx.meta_var(self.kv_end[0])
                         with Tx.thread():
@@ -566,7 +566,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                             kv_idx = int_var(name="kv_idx", val=kv_idx_base[0] + mma_kv * 16 + 2 * (lane_id % 4) + 8 * (reg_id // 4) + reg_id % 2)
                                             self.s_frag[mma_q, mma_kv, reg_id] = Tx.if_then_else(Tx.Not(kv_idx[0] >= chunk_end), self.s_frag[mma_q, mma_kv, reg_id], Tx.float32(-self.inf))
 
-                    @Tx.macro
+                    @Tx.inline
                     def update_mdo_states():
                         WARP_MASK = Tx.meta_var(0xFFFFFFFF)
                         with Tx.thread():
@@ -596,7 +596,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                         self.s_frag[mma_q, mma_kv, j * 2 + 4] = ptx_exp2(self.s_frag[mma_q, mma_kv, j * 2 + 4] * sm_scale[0] - self.m[mma_q, j] * sm_scale[0])
                                         self.s_frag[mma_q, mma_kv, j * 2 + 5] = ptx_exp2(self.s_frag[mma_q, mma_kv, j * 2 + 5] * sm_scale[0] - self.m[mma_q, j] * sm_scale[0])
 
-                    @Tx.macro
+                    @Tx.inline
                     def compute_sfm_v():
                         with Tx.thread():
                             s_frag_f16 = Tx.alloc_local([self.num_mma_q, self.num_mma_kv, 8], "float16", name="s_frag_f16")
@@ -619,7 +619,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                 self.v_smem_offset_r[0] = self.advance_offset_by_row(16, self.upcast_stride_v, self.v_smem_offset_r[0]) - size_of("float16") * self.num_mma_d_vo
                             self.v_smem_offset_r[0] -= 16 * self.num_mma_kv * self.upcast_stride_v
 
-                    @Tx.macro
+                    @Tx.inline
                     def loop_body(WITH_MASK: bool):
                         prefetch_offset(self.block_iter_base[0] + (self.kv_tile_idx[0] - 1) * self.cta_tile_kv)
                         Tx.ptx.cp_async.wait_group(1)
@@ -676,7 +676,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     
                     self.scope_sync(wg_id)
 
-                    @Tx.macro
+                    @Tx.inline
                     def finalize_m():
                         with Tx.thread():
                             sm_scale = float_var(name="sm_scale", val=self.get_sm_scale())
@@ -685,7 +685,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                     if self.m[mma_q, j] != -self.inf:
                                         self.m[mma_q, j] *= sm_scale[0]
 
-                    @Tx.macro
+                    @Tx.inline
                     def threadblock_sync_mdo_states():
                         for mma_q in Tx.unroll(self.num_mma_q):
                             for mma_d in Tx.unroll(self.num_mma_d_vo):
@@ -735,7 +735,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                     o_new[reg_id] += o_i[reg_id] * o_scale[(reg_id % 4) // 2, i]
                                         Tx.copy(self.o_frag[mma_q, mma_d, :], o_new[:])
 
-                    @Tx.macro
+                    @Tx.inline
                     def normalize_d():
                         with Tx.thread():
                             d_rcp = Tx.alloc_local([self.num_mma_q, 2], "float32", name="d_rcp")
@@ -747,7 +747,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                     for reg_id in Tx.unroll(8):
                                         self.o_frag[mma_q, mma_d, reg_id] *= d_rcp[mma_q, (reg_id >> 1) & 1]
 
-                    @Tx.macro
+                    @Tx.inline
                     def store_o_to_smem(o_smem):
                         for mma_q in Tx.unroll(self.num_mma_q):
                             for mma_d in Tx.unroll(self.num_mma_d_vo):
@@ -757,7 +757,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                     o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.cta_tile_q + (self.get_warp_idx_q(self.tid) * self.num_mma_q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
                                     Tx.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
 
-                    @Tx.macro
+                    @Tx.inline
                     def write_partial_o(o_ptr_base_offset, o_stride_n):
                         o_packed_idx_base_warp = Tx.meta_var(self.qo_packed_idx_base[0])
                         o_packed_idx_base_cta = Tx.meta_var(self.packed_qo_start[0])
@@ -783,7 +783,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                 o_smem_offset_w[0] = self.advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
                                             o_smem_offset_w[0] = self.advance_offset_by_row(4, self.upcast_stride_o, o_smem_offset_w[0]) - 2 * self.num_mma_d_vo
 
-                    @Tx.macro
+                    @Tx.inline
                     def write_final_o(o_ptr_base_offset):
                         o_packed_idx_base = Tx.meta_var(self.qo_packed_idx_base[0])
                         o_smem = Tx.meta_var(self.smem_o)
@@ -809,7 +809,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                 o_smem_offset_w[0] = self.advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
                                             o_smem_offset_w[0] = self.advance_offset_by_row(4, self.upcast_stride_o, o_smem_offset_w[0]) - 2 * self.num_mma_d_vo
 
-                    @Tx.macro
+                    @Tx.inline
                     def write_partial_lse():
                         if self.num_kv_chunks[0] > 1:
                             if self.get_warp_idx_kv(self.tid) == 0:

@@ -308,7 +308,7 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                 B_local = Tx.alloc_local([4], b_type)
                 C_local = Tx.alloc_local([4], c_type)
 
-                @Tx.macro
+                @Tx.inline
                 def G2L(buf_local, buf_global, block_8x8, mode="row"):
                     if mode == "row":
                         for i in range(block_8x8):
@@ -323,7 +323,7 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row + j, col]
 
-                @Tx.macro
+                @Tx.inline
                 def L2G(buf_local, buf_global, block_8x8):
                     for i in range(block_8x8):
                         row = Tx.meta_var(i % 2 * 8 + tx // 4)
@@ -399,7 +399,7 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
                 B_local = Tx.alloc_local([2], b_type)
                 C_local = Tx.alloc_local([4], c_type)
 
-                @Tx.macro
+                @Tx.inline
                 def G2L(buf_local, buf_global, block_8x8, mode="row"):
                     if mode == "row":
                         for i in range(block_8x8):
@@ -414,7 +414,7 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
                             for j in range(2):
                                 buf_local[i * 2 + j] = buf_global[row + j, col]
 
-                @Tx.macro
+                @Tx.inline
                 def L2G(buf_local, buf_global, block_8x8):
                     for i in range(block_8x8):
                         row = Tx.meta_var(i % 2 * 8 + tx // 4)

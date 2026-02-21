@@ -35,7 +35,7 @@ class SiluMultiplyTile(Tile):
         self.idx = Tx.local_cell("int32", name="idx")
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output, tile_scheduler):
         with Tx.cta():
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -97,7 +97,7 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
         self.numel = numel
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output, sorted_token_ids):
         with Tx.cta():
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")

@@ -51,7 +51,7 @@ def test_fp8_gemm_hopper_no_ws():
     n_blocks = (N + BLK_N - 1) // BLK_N
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
         with Tx.thread()[tid == 0]:
             stage = Tx.meta_var(k_tile % STAGES_TMA)
@@ -62,7 +62,7 @@ def test_fp8_gemm_hopper_no_ws():
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
 
-    @Tx.macro
+    @Tx.inline
     def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):
         stage = Tx.meta_var(k_tile % STAGES_TMA)
         parity = Tx.meta_var((k_tile // STAGES_TMA) % 2)
@@ -75,7 +75,7 @@ def test_fp8_gemm_hopper_no_ws():
             Tx.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True, descA, descB, *get_accum_list(accum, 128))
         Tx.ptx.wgmma.commit_group()
 
-    @Tx.macro
+    @Tx.inline
     def r2S(warp_id, lane_id, C_smem: tvm.tir.Buffer, accum, accum_half, n_tile):
         Tx.cuda.cta_sync()
         for st_tile in Tx.serial(4):
@@ -86,7 +86,7 @@ def test_fp8_gemm_hopper_no_ws():
             row = Tx.meta_var(warp_id * 16 + lane_id % 16)
             Tx.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))
 
-    @Tx.macro
+    @Tx.inline
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
         Tx.ptx.fence.proxy("shared")
         Tx.cuda.cta_sync()
@@ -95,7 +95,7 @@ def test_fp8_gemm_hopper_no_ws():
             Tx.ptx.cp_async.bulk.commit_group()
             Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
-    @Tx.macro
+    @Tx.inline
     def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):
         Tx.cuda.cta_sync()
         for n_tile in Tx.serial(BLK_N // 64):

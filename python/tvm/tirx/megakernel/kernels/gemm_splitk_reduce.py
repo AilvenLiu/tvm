@@ -29,7 +29,7 @@ class SplitKReduceTile(Tile):
         self.tmp = Tx.alloc_local([self.VEC_SIZE], "float32", name="tmp")
         self.vec_16 = Tx.alloc_local([self.VEC_SIZE], "float16", name="vec_16")
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             self._alloc_local()
@@ -59,7 +59,7 @@ class MOETopKReduceTile(SplitKReduceTile):
         super().__init__(M, N, dtype, top_k)
 
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             self._alloc_local()

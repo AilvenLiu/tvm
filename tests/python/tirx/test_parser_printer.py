@@ -689,7 +689,7 @@ def test_alloc_apis():
             self.idx = Tx.local_cell("int32", "idx")
             self.inner_pool2 = Tx.decl_cell("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")
 
-        @Tx.macro
+        @Tx.inline
         def init(self):
             self.Ta = self.Ta + Tx.float16(1)
             self.Tb = self.Tb + Tx.float16(2)
@@ -749,7 +749,7 @@ def test_alloc_apis():
 
 def test_macro():
     # fmt: off
-    @Tx.macro(hygienic=True)
+    @Tx.inline
     def mul(x, c):
         Tx.evaluate(x * c)
 
@@ -758,11 +758,11 @@ def test_macro():
         with Tx.kernel():
             for x in range(10):
 
-                @Tx.macro(hygienic=True)
+                @Tx.inline
                 def add(c):
                     Tx.evaluate(x + c)
 
-                @Tx.macro(hygienic=False)
+                @Tx.inline
                 def two_add_and_mul(c):
                     add(c)
                     add(c + c)
@@ -796,7 +796,7 @@ def test_macro_recursive():
         with Tx.kernel():
             for x in Tx.serial(10):
 
-                @Tx.macro
+                @Tx.inline
                 def add(x, c):
                     if c > 0:
                         add(x, c - 1)
@@ -964,7 +964,7 @@ def test_cell_assign_in_macro():
         def __init__(self, counter):
             self.counter = counter
 
-        @Tx.macro
+        @Tx.inline
         def add_one(self):
             # PrimExpr assigned to cell via self.attr → buffer_store succeeds
             self.counter = self.counter + Tx.int32(1)

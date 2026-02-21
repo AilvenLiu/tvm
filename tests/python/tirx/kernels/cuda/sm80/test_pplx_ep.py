@@ -83,7 +83,7 @@ def test_dispatch_combine(world_size=8):
                     [1], "int32", scope="local", align=4, name="semaphore_state"
                 )
 
-            @Tx.macro
+            @Tx.inline
             def wait(self):
                 with Tx.thread():
                     while 1:
@@ -92,7 +92,7 @@ def test_dispatch_combine(world_size=8):
                             break
                         Tx.cuda.nano_sleep(40)
 
-            @Tx.macro
+            @Tx.inline
             def signal(self):
                 with Tx.thread():
                     Tx.cuda.cta_sync()
@@ -100,7 +100,7 @@ def test_dispatch_combine(world_size=8):
                         Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
                     Tx.cuda.thread_fence()
 
-            @Tx.macro
+            @Tx.inline
             def sync(self):
                 self.signal()
                 self.wait()
@@ -108,7 +108,7 @@ def test_dispatch_combine(world_size=8):
         def int_var():
             return Tx.alloc_buffer([1], "uint32", scope="local", align=4)
 
-        @Tx.macro
+        @Tx.inline
         def zero_smem(tid, smem_buf):
             # zero out the shared memory buffer
             for k in Tx.serial(Tx.ceildiv(N_EXPERTS, N_WARPS_DISPATCH * 32)):
@@ -117,7 +117,7 @@ def test_dispatch_combine(world_size=8):
                     smem_buf[idx] = 0
             Tx.cuda.cta_sync()
 
-        @Tx.macro
+        @Tx.inline
         def warp_count(lane_id, dst_expert, count, send_experts):
             # threads in a leader warp collectively counts the number of tokens to send to a dest expert
             count[0] = 0
@@ -135,7 +135,7 @@ def test_dispatch_combine(world_size=8):
                 count[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, count[0], i[0], 32, 32)
                 i[0] = i[0] // 2
 
-        @Tx.macro
+        @Tx.inline
         def thread_signal(group_idx, lane_id, dst_expert, count, buf_target_wait):
             # a single thread signal the count
             dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % N_LOCAL_EXPERTS))
@@ -150,14 +150,14 @@ def test_dispatch_combine(world_size=8):
                     pe=dst_rank,
                 )
 
-        @Tx.macro
+        @Tx.inline
         def thread_accum(tid, token_idx, send_experts, smem_buf):
             # threads collectively accum the token index counter
             if tid < K:
                 dst_expert = send_experts[token_idx, tid]
                 smem_buf[dst_expert] += 1
 
-        @Tx.macro
+        @Tx.inline
         def thread_prepare_buf(n_threads, tid, token_idx, send_tokens, buf_send):
             # thread collectively prepare the send buffer for the dispatch kernel
             for k in Tx.serial(Tx.ceildiv(HIDDEN_DIM, n_threads)):
@@ -167,7 +167,7 @@ def test_dispatch_combine(world_size=8):
             if tid == 0:
                 buf_send[token_idx, HIDDEN_DIM] = Tx.cast(token_idx, dtype)
 
-        @Tx.macro
+        @Tx.inline
         def warp_dispatch_exp(
             group_idx,
             warp_id,
@@ -207,7 +207,7 @@ def test_dispatch_combine(world_size=8):
                         pe=dst_rank,
                     )
 
-        @Tx.macro
+        @Tx.inline
         def cta_wait(
             bx,
             tid,
@@ -250,7 +250,7 @@ def test_dispatch_combine(world_size=8):
                     )
                 Tx.cuda.cta_sync()
 
-        @Tx.macro
+        @Tx.inline
         def thread_compute_meta(
             bx,
             tid,
@@ -287,7 +287,7 @@ def test_dispatch_combine(world_size=8):
                             buf_meta_group[meta_idx] = Tx.cast(group_rank, "uint32")
                             buf_meta_token[meta_idx] = Tx.cast(token_idx, "uint32")
 
-        @Tx.macro
+        @Tx.inline
         def thread_store_tokens(
             bx,
             tid,
@@ -317,7 +317,7 @@ def test_dispatch_combine(world_size=8):
                                 ]
                     Tx.cuda.cta_sync()
 
-        @Tx.macro
+        @Tx.inline
         def thread_prepare_buf_back(
             bx,
             tid,
@@ -344,7 +344,7 @@ def test_dispatch_combine(world_size=8):
                                 ]
                     Tx.cuda.cta_sync()
 
-        @Tx.macro
+        @Tx.inline
         def warp_dispatch_dp(
             rank,
             bx,
@@ -386,7 +386,7 @@ def test_dispatch_combine(world_size=8):
                                 pe=dst_rank,
                             )
 
-        @Tx.macro
+        @Tx.inline
         def thread_combine(
             bx,
             tid,

@@ -76,7 +76,7 @@ class EPDispatchKernel:
             ProfileEventType.EP_DISPATCH_RECV,
         )
 
-    @Tx.macro
+    @Tx.inline
     def run_tile(self, tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
         with Tx.cta():
@@ -258,7 +258,7 @@ class EPCombineKernel:
             ProfileEventType.EP_COMBINE_RECV,
         )
 
-    @Tx.macro
+    @Tx.inline
     def run_tile(self, tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
         with Tx.cta():

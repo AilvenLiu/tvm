@@ -157,7 +157,7 @@ class MegaKernelMOE(MegaKernelWrapper):
         self.class_list.add(subclass)
         return tile
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_gating(self, A, B, output, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
@@ -170,7 +170,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.gate, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, A, B, output, self.profiler)
             self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_topk_softmax(self, gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=True):
         with Tx.cta():
             if is_dynamic_sch:
@@ -184,7 +184,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global, renormalize=renormalize)
             self.tile_scheduler.notify(self.evt_topk_softmax, lambda notify_idx: (1, -1, 0), scope="cta")
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_align(self, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -204,7 +204,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                     self.evt_group_gemm_down.sem[0] = (self.evt_group_gemm_down.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE) * (self.HIDDEN_SIZE // GroupGEMMTileSM100.BLK_N // down_proj_task_size)
             self.tile_scheduler.notify(self.evt_moe_align, lambda notify_idx: (1, -1, 0), scope="thread")
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_count_and_sort(self, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
@@ -219,7 +219,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             self.run_tile(self.count_and_sort_expert_tokens, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global)
             self.tile_scheduler.notify(self.evt_count_and_sort, lambda notify_idx: (1, -1, 0), scope="cta")
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_group_gemm_gate_up_silu(self, A, B, output, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
@@ -235,7 +235,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             idx = Tx.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
             self.tile_scheduler.notify(self.evt_group_gemm_gate_up, lambda notify_idx: (1, -1, idx), scope="warpgroup", scope_id=0)
 
-    @Tx.macro
+    @Tx.inline
     def task_impl_moe_group_gemm_down(self, A, B, output, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
@@ -252,7 +252,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                     self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx * down_proj_task_size + i, self.tile_scheduler.k_idx, A, B, output, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def fused_body(
         self,
         batch_size,
@@ -426,7 +426,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             # exec queue
             exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
 
-            @Tx.macro
+            @Tx.inline
             def run(low_batch, dynamic_gemm_size):
                 num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
@@ -526,7 +526,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
             queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
 
-            @Tx.macro
+            @Tx.inline
             def run(low_batch, dynamic_gemm_size, down_proj_task_size):
                 num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(

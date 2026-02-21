@@ -44,13 +44,13 @@ class EPDispatchPrecomputeTile(Tile):
         # alloc local memory
         self.count = Tx.alloc_local([1], "uint32", name="count")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
 
@@ -153,12 +153,12 @@ class EPDispatchSendTile(Tile):
         # alloc local memory
         self.dst_index = Tx.alloc_local([1], "int32", name="dst_index")
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
 
@@ -242,12 +242,12 @@ class EPDispatchRecvTile(Tile):
         # alloc local memory
         pass
 
-    @Tx.macro
+    @Tx.inline
     def init(self, smem_manager: SmemManager):
         self._alloc_local()
 
     # fmt: off
-    @Tx.macro
+    @Tx.inline
     def run(
         self,
 

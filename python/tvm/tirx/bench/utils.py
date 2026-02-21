@@ -253,7 +253,7 @@ class CudaProfiler:
             return self.default_leader
         return Tx.bool(True)
 
-    @Tx.macro
+    @Tx.inline
     def init(self, group_id: tvm.tir.PrimExpr):
         if self.profiler_enabled:
             Tx.timer_init_cuda(
@@ -264,7 +264,7 @@ class CudaProfiler:
                 group_id,
             )
 
-    @Tx.macro
+    @Tx.inline
     def start(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
             Tx.timer_start_cuda(
@@ -276,7 +276,7 @@ class CudaProfiler:
                 self._leader(leader),
             )
 
-    @Tx.macro
+    @Tx.inline
     def end(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
             Tx.timer_end_cuda(
@@ -288,7 +288,7 @@ class CudaProfiler:
                 self._leader(leader),
             )
 
-    @Tx.macro
+    @Tx.inline
     def finalize(self, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
         if self.profiler_enabled:
             Tx.timer_finalize_cuda(

@@ -32,7 +32,7 @@ class AllreduceTile(Tile):
         super().__init__()
         self.world_size = world_size
 
-    @Tx.macro
+    @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
