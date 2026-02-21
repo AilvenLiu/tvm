@@ -77,7 +77,7 @@ Doc PrintVar(const tirx::Var& var, const AccessPath& var_p, const IRDocsifier& d
   if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(var)) {
     return doc.value();
   }
-  TVM_FFI_THROW(IndexError) << "Variable is not defined in the environment: " << var->name_hint;
+  TVM_FFI_THROW(InternalError) << "IndexError: Variable is not defined in the environment: " << var->name_hint;
   TVM_FFI_UNREACHABLE();
 }
 
@@ -269,7 +269,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
         }
         static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-        ICHECK_EQ(tirx_op_map.count(op), 0)
+        TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 0)
             << "TIRX built-in operators should not be used in normal Call";
         prefix = TIR(d, name);
         if (dtype_locations.count(op)) {
@@ -333,7 +333,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       return TIR(d, "reduce")
           ->Call({combiner}, {"source", "init", "axis", "condition", "value_index"},
                  {source, init, axis, condition, value_index});
-      TVM_FFI_THROW(ValueError) << "Reduce should never exist in TIR: " << r;
     });
 
 #define TVM_SCRIPT_PRINTER_DEF_BINARY(NodeType, OpString)                                         \
@@ -344,15 +343,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                                       ExprDoc b = d->AsDoc<ExprDoc>(node->b, p->Attr("b"));       \
                                       return TIR(d, OpString)->Call({a, b});                      \
                                     });
-
-bool IsNumber(const ExprDoc& e) {
-  if (const auto* n = e.as<LiteralDocNode>()) {
-    if (n->value != nullptr) {
-      return n->value.as<IntImmNode>() || n->value.as<FloatImmNode>();
-    }
-  }
-  return false;
-}
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Div>("", [](tirx::Div node, AccessPath p, IRDocsifier d) -> Doc {

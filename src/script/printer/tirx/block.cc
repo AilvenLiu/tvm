@@ -120,9 +120,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   auto print_remapped_iter_var = [&]() {
     if (remap_vars_indices.size()) {
       int m = remap_vars_indices.size();
-      if (!m) {
-        return;
-      }
       if (m == 1) {
         print_single_iter_var(remap_vars_indices[0]);
         remap_vars_indices.clear();

@@ -82,7 +82,7 @@ inline PrimFuncFrame FindPrimFuncFrame(const ffi::String& method) {
  * \return The top frame of SBlockFrame.
  */
 inline SBlockFrame FindSBlockFrame(const ffi::String& method) {
-  if (ffi::Optional<SBlockFrame> frame = IRBuilder::Current()->FindFrame<SBlockFrame>()) {
+  if (ffi::Optional<SBlockFrame> frame = IRBuilder::Current()->GetLastFrame<SBlockFrame>()) {
     return frame.value();
   } else if (ffi::Optional<SBlockFrame> frame = IRBuilder::Current()->FindFrame<SBlockFrame>()) {
     TVM_FFI_THROW(ValueError)

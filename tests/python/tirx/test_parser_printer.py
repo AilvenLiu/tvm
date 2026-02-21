@@ -104,16 +104,17 @@ def test_roundtrip_exec_scope():
 
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_roundtrip_layout():
     def get_layout1():
         return Tx.TileLayout(
-            shard=([8, 8, 8, 4, 2], [6, 4@laneid, 2, 1@laneid, 1]),
+            shard=([8, 8, 8, 4, 2], [6, 4 @ laneid, 2, 1 @ laneid, 1]),
         )
 
     def get_layout2():
-        return Tx.TileLayout(shard=([8, 8, 8, 4, 2], [64, 4@laneid, 8, 2, 1]))
+        return Tx.TileLayout(shard=([8, 8, 8, 4, 2], [64, 4 @ laneid, 8, 2, 1]))
 
     def get_layout3():
         return Tx.TileLayout(
@@ -154,6 +155,7 @@ def test_roundtrip_layout():
 
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_print_kwargs_schedule_op_full_code():
@@ -177,7 +179,7 @@ def test_print_kwargs_schedule_op_full_code():
     assert_structural_equal(test, from_source(code))
 
 
-L_LANE = Tx.TileLayout(shard=([32], [1@laneid]))
+L_LANE = Tx.TileLayout(shard=([32], [1 @ laneid]))
 
 
 def test_roundtrip_buffer_view_get1():
@@ -889,6 +891,7 @@ def test_buffer():
             pass
     # fmt: on
     code = test.script()
+    assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
 
@@ -904,6 +907,115 @@ def test_kwargs_op_call():
     print(code)
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
+
+def test_workspace_default_none():
+    """Regression: TIRX op IR builder functions (binary_reduce, unary_reduce,
+    binary_chain, reduce_negate) should handle workspace=None (the default)
+    without error. Previously these functions were missing the
+    ``if workspace is None: workspace = {}`` guard."""
+    from tvm.script.ir_builder.tir import tirx as tirx_builder
+    from tvm.tir import BufferRegion, Buffer
+
+    A_buf = tvm.tir.decl_buffer((128, 128), "float16", name="A")
+    B_buf = tvm.tir.decl_buffer((128, 128), "float16", name="B")
+    C_buf = tvm.tir.decl_buffer((128,), "float16", name="C")
+    A = BufferRegion(A_buf, [tvm.ir.Range(0, 128), tvm.ir.Range(0, 128)])
+    B = BufferRegion(B_buf, [tvm.ir.Range(0, 128), tvm.ir.Range(0, 128)])
+    C = BufferRegion(C_buf, [tvm.ir.Range(0, 128)])
+
+    # These should not crash when workspace is not provided (defaults to None)
+    from tvm.tirx.operator import op as tirx_op
+
+    op_br = tirx_op.BinaryReduce(
+        B, C, A, B, tirx_op.get_tirx_op("add"), tirx_op.get_tirx_op("max"), (-1,)
+    )
+    assert len(op_br.workspace) == 0
+
+    op_ur = tirx_op.UnaryReduce(
+        B, C, A, tirx_op.get_tirx_op("sqrt"), tirx_op.get_tirx_op("sum"), None, None, (-1,)
+    )
+    assert len(op_ur.workspace) == 0
+
+    op_bc = tirx_op.BinaryChain(
+        B, A, A, A, tirx_op.get_tirx_op("add"), tirx_op.get_tirx_op("mul"), False
+    )
+    assert len(op_bc.workspace) == 0
+
+    op_rn = tirx_op.ReduceNegate(C, A, (-1,), False, tirx_op.get_tirx_op("sum"))
+    assert len(op_rn.workspace) == 0
+
+
+def test_cell_assign_in_macro():
+    """Regression: the parser's cell-assignment sugar (cell = PrimExpr) must
+    work in macro context via self.attr.
+
+    The parser narrowed ``except Exception: pass`` around the cell-detection
+    path. This test verifies that PrimExpr assignment to a cell attribute in
+    a macro still goes through buffer_store correctly.
+
+    The full integration regression for the TypeError fallthrough path
+    (meta_var assigned to a cell variable) is covered by
+    test_hgemm::test_hgemm (tile_scheduler.m_idx pattern)."""
+
+    # fmt: off
+    class State:
+        def __init__(self, counter):
+            self.counter = counter
+
+        @Tx.macro
+        def add_one(self):
+            # PrimExpr assigned to cell via self.attr → buffer_store succeeds
+            self.counter = self.counter + Tx.int32(1)
+
+    @Tx.prim_func(tirx=True)
+    def test():
+        with Tx.kernel():
+            with Tx.thread([128]):
+                counter = Tx.local_cell("int32")
+                state = Tx.meta_var(State(counter))
+                state.add_one()
+                Tx.evaluate(state.counter)
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_cell_assign_error_not_swallowed():
+    """Regression: genuine errors (non-TypeError) from buffer_store during
+    cell-assignment sugar must propagate, not be silently swallowed.
+
+    Before the fix, both eval_expr and buffer_store were wrapped in a single
+    broad ``except Exception: pass``, so any error from buffer_store would be
+    swallowed and the assignment would silently fall through to eval_assign."""
+    from unittest.mock import patch
+
+    original = tvm.script.ir_builder.tir.buffer_store
+
+    def bomb(*args, **kwargs):
+        # Intercept only the cell-assignment path (indices == [0])
+        if args[2] == [0]:
+            raise ValueError("boom")
+        return original(*args, **kwargs)
+
+    src = """
+# from tvm.script import tirx as Tx
+
+@Tx.prim_func(tirx=True)
+def func():
+    with Tx.kernel():
+        with Tx.thread([128]):
+            cell = Tx.local_cell("int32")
+            cell = cell + Tx.int32(1)
+"""
+    # The ValueError propagates through the parser framework which wraps it
+    # into a DiagnosticError.  Before the fix the broad ``except Exception``
+    # would silently swallow it and fall through to eval_assign.
+    with patch("tvm.script.ir_builder.tir.buffer_store", side_effect=bomb):
+        with pytest.raises(tvm.error.DiagnosticError):
+            from_source(src)
 
 
 if __name__ == "__main__":

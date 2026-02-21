@@ -108,8 +108,6 @@ def sqrt(
     config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
-    if workspace is None:
-        workspace = {}
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
     return f_insert(
@@ -878,6 +876,8 @@ def binary_reduce(
     config : Dict[str, Any]
         The scheduler configuration.
     """
+    if workspace is None:
+        workspace = {}
     binary_output = _to_region(binary_output)
     reduce_output = _to_region(reduce_output)
     if isinstance(binary_input1, Buffer):
@@ -955,6 +955,8 @@ def unary_reduce(
     config : Dict[str, Any]
         The scheduler configuration.
     """
+    if workspace is None:
+        workspace = {}
     unary_output = _to_region(unary_output)
     reduce_output = _to_region(reduce_output)
     unary_input = _to_region(unary_input)
@@ -1035,6 +1037,8 @@ def binary_chain(
     config : Dict[str, Any]
         The scheduler configuration.
     """
+    if workspace is None:
+        workspace = {}
     output = _to_region(output)
     data = _to_region(data)
 
@@ -1100,6 +1104,8 @@ def reduce_negate(
     config : Dict[str, Any]
         The scheduler configuration.
     """
+    if workspace is None:
+        workspace = {}
     output = _to_region(output)
     input = _to_region(input)
     reduce_axes = _wrap_elem_in_tuple(reduce_axes)
@@ -1107,8 +1113,6 @@ def reduce_negate(
     if isinstance(reduce_op, str):
         reduce_op = tirx_op.get_tirx_op(reduce_op)
 
-    if workspace is None:
-        workspace = {}
     config = kwargs or {}
     return f_insert(
         tirx_op.ReduceNegate(
@@ -1178,9 +1182,7 @@ class PoolAllocator:
             if isinstance(buf_or_frame, frame.AllocBufferFrame):
                 from functools import partial
 
-                buf_or_frame.add_callback(
-                    partial(buf_or_frame.__exit__, None, None, None)
-                )
+                buf_or_frame.add_callback(partial(buf_or_frame.__exit__, None, None, None))
                 buf = buf_or_frame.__enter__()
             else:
                 buf = buf_or_frame
@@ -1253,9 +1255,7 @@ class PoolAllocator:
         if isinstance(attr_frame, frame.AttrFrame):
             from functools import partial
 
-            attr_frame.add_callback(
-                partial(attr_frame.__exit__, None, None, None)
-            )
+            attr_frame.add_callback(partial(attr_frame.__exit__, None, None, None))
             attr_frame.__enter__()
 
 

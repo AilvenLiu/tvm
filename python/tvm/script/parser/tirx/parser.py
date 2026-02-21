@@ -324,20 +324,31 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
         # cell = xxx <=> cell.buffer[()] = xxx
         # or for a normal 1-dim buffer with shape (1,)
         # buffer = xxx <=> buffer[()] = xxx
+        # Try to resolve lhs as a buffer/cell variable. eval_expr may raise
+        # if the name is not yet defined (i.e. this is a new variable binding),
+        # which is the expected fallthrough case.
+        lhs_value = None
         try:
             lhs_copy = deepcopy(lhs)
             if hasattr(lhs_copy, "ctx"):
                 lhs_copy.ctx = doc.Load()
             lhs_value = self.eval_expr(lhs_copy)
-            if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
-                buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
-                if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
-                    # only 1-dim buffer with shape (1,) can be assigned directly
-                    # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+        except Exception:  # pylint: disable=broad-except
+            pass
+        # Buffer check and store are intentionally outside the try/except so
+        # that genuine errors (e.g. wrong shape, bad store) are not swallowed.
+        # Only TypeError from FFI type mismatch (e.g. rhs is a meta_var, not
+        # a PrimExpr or auto-convertible scalar) triggers fallthrough.
+        if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
+            buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
+            if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
+                # only 1-dim buffer with shape (1,) can be assigned directly
+                # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+                try:
                     T.buffer_store(buffer, rhs, [0])
                     return
-        except Exception:
-            pass
+                except TypeError:
+                    pass  # rhs not compatible with buffer_store, fall through
         # otherwise
         self.eval_assign(target=lhs, source=rhs, bind_value=bind_assign_value)
 
@@ -396,20 +407,22 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
             indices = [self.eval_expr(lhs.slice)]
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)
     else:
+        lhs_value = None
         try:
             lhs_copy = deepcopy(lhs)
             if hasattr(lhs_copy, "ctx"):
                 lhs_copy.ctx = doc.Load()
             lhs_value = self.eval_expr(lhs_copy)
-            if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
-                buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
-                if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
-                    # only 1-dim buffer with shape (1,) can be assigned directly
-                    # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
+            buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
+            if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
+                try:
                     T.buffer_store(buffer, rhs, [0])
                     return
-        except Exception:
-            pass
+                except TypeError:
+                    pass
         self.eval_assign(target=lhs, source=rhs, bind_value=bind_assign_value)
 
 
@@ -740,37 +753,7 @@ def visit_return(self: Parser, node: doc.Return) -> None:
     T.evaluate(tvm.tirx.ret(value))
 
 
-@dispatch.register(token="tirx", type_name="Continue")
-def visit_continue(self: Parser, node: doc.Continue) -> None:  # pylint:disable=unused-argument
-    """The continue visiting method for tirx.
-
-    Parameters
-    ----------
-    self : Parser
-        The visiting parser.
-
-    node : doc.Continue
-        The doc AST continue node.
-    """
-    T.Continue()
-
-
-@dispatch.register(token="tirx", type_name="Break")
-def visit_break(self: Parser, node: doc.Break) -> None:  # pylint:disable=unused-argument
-    """The continue visiting method for tirx.
-
-    Parameters
-    ----------
-    self : Parser
-        The visiting parser.
-
-    node : doc.Break
-        The doc AST break node.
-    """
-    T.Break()
-
-
-@dispatch.register(token="tirx", type_name="tvm_declare_function")
+@dispatch.register(token="tir", type_name="tvm_declare_function")
 def visit_tvm_declare_function(self: Parser, node: doc.FunctionDef) -> GlobalVar:
     """The function declaration step for tirx
 

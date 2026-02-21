@@ -89,17 +89,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
           }
 
-          auto print_member_function_call = [&](std::string method) {
-            ffi::Array<Doc> args;
-            for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
-            }
-            return OpCallDoc(
-                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayItem(0)),
-                              method),
-                args, {}, {}, std::nullopt);
-          };
-
           static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
