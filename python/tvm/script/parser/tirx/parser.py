@@ -138,6 +138,8 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         return value.cell
     if isinstance(value, T.meta_var):
         return value.value
+    elif getattr(type(value), "_is_meta_class", False):
+        return value
     elif isinstance(value, list | tuple):
         for i, v in enumerate(value):
             bind_assign_value(self, node, f"{var_name}_{i}", v)

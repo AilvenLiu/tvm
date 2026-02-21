@@ -17,7 +17,7 @@ class FuseSplitKReduceTile(SplitKReduceTile):
             batch_size = Tx.int32()
             input = Tx.match_buffer(input_ptr, (split_k_factor, batch_size, N), "float32", layout="default")
             output = Tx.match_buffer(output_ptr, (batch_size, N), dtype, layout="default")
-            split_k_reduce_tile = Tx.meta_var(FuseSplitKReduceTile(batch_size, N, dtype, split_k_factor))
+            split_k_reduce_tile = FuseSplitKReduceTile(batch_size, N, dtype, split_k_factor)
             with Tx.cta():
                 split_k_reduce_tile.init(None)
                 with Tx.cta():

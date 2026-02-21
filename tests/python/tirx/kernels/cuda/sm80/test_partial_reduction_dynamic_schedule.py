@@ -48,6 +48,7 @@ def test_partial_reduction():
         PARTIAL = 0
         REDUCE = 1
 
+    @Tx.meta_class
     class MPMCQueue:
         def __init__(self, capacity: int, task_types: Tx.Buffer, task_idxs: Tx.Buffer, head: Tx.Buffer, tail: Tx.Buffer, num_tot_tasks: int):
             if capacity & (capacity - 1):
@@ -89,6 +90,7 @@ def test_partial_reduction():
             else:
               fetched_task_type[0] = -1
 
+    @Tx.meta_class
     class DynamicTileScheduler:
         def __init__(self, queue: MPMCQueue):
             self.queue = queue
@@ -112,6 +114,7 @@ def test_partial_reduction():
         def valid(self):
             return self.fetched_task_type[0] >= 0
 
+    @Tx.meta_class
     class Semaphore:
         def __init__(self, cnt: int, buffer: Tx.Buffer, queue: MPMCQueue):
             self.cnt = cnt
@@ -180,14 +183,14 @@ def test_partial_reduction():
         with Tx.kernel():
             bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
             tx = Tx.thread_id([1024], parent="cta")
-            queue = Tx.meta_var(MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M))
-            sem = Tx.meta_var(Semaphore(NUM_BLOCK_N, sem_ptr, queue))
+            queue = MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M)
+            sem = Semaphore(NUM_BLOCK_N, sem_ptr, queue)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem_1 = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 B_smem_2 = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                tile_scheduler = Tx.meta_var(DynamicTileScheduler(queue))
+                tile_scheduler = DynamicTileScheduler(queue)
                 tile_scheduler.init(bx)
                 while tile_scheduler.valid():
                     if tile_scheduler.fetched_task_type[0] == TaskType.PARTIAL.value:

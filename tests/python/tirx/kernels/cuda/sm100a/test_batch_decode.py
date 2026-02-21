@@ -278,7 +278,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                 with Tx.cta():
                     # allocate the memory
-                    pool = Tx.meta_var(Tx.PoolAllocator())
+                    pool = Tx.PoolAllocator()
                     k_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     v_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
                     kv_offset = pool.alloc([BDZ, BDX, BDY, TILE_PER_BDX], "int32")
@@ -535,7 +535,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                 with Tx.cta():
                     # allocate the memory
-                    pool = Tx.meta_var(Tx.PoolAllocator())
+                    pool = Tx.PoolAllocator()
                     o_tmp_smem = pool.alloc([PIPE_DEPTH, BDY, HEAD_DIM], "float32")
                     lse_tmp_smem_load = pool.alloc([BDY, BDX], "float32")
                     lse_tmp_smem_use = lse_tmp_smem_load.view(BDX, BDY)

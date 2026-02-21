@@ -755,7 +755,7 @@ def sblock_alloc_buffer(
     layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     name: str | None = None,
-) -> Buffer | frame.AllocBufferFrame:
+) -> Buffer:
     """SBlock-level buffer allocation function.
 
     Parameters
@@ -796,9 +796,8 @@ def sblock_alloc_buffer(
 
     Returns
     -------
-    res : Union[Buffer, frame.AllocBufferFrame]
-        The allocated buffer or the AllocBufferFrame if the function is called under
-        T.prim_func(tirp=True).
+    res : Buffer
+        The allocated buffer.
     """
     shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
     if strides is not None:
@@ -825,12 +824,14 @@ def sblock_alloc_buffer(
         _get_layout(layout, shape, scope),
         allocated_addr,
     )
-    if name is not None and isinstance(alloc_frame, frame.AllocBufferFrame):
+    if isinstance(alloc_frame, frame.AllocBufferFrame):
         alloc_frame.add_callback(partial(alloc_frame.__exit__, None, None, None))
         buf = alloc_frame.__enter__()
+    else:
+        buf = alloc_frame
+    if name is not None:
         IRBuilder.name(name, buf)
-        return buf
-    return alloc_frame
+    return buf
 
 
 def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
@@ -1529,7 +1530,7 @@ def decl_buffer(
     layout="default",
     name=None,
     allocated_addr=None,
-) -> frame.DeclBufferFrame | Buffer:
+) -> Buffer:
     """Create a buffer declaration node.
 
     When ``data`` is provided, creates a DeclBuffer (alias to existing data).
@@ -1579,8 +1580,8 @@ def decl_buffer(
 
     Returns
     -------
-    res : frame.DeclBufferFrame | Buffer
-        The result DeclBufferFrame.
+    res : Buffer
+        The declared buffer.
     """
     shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
     if strides is not None:
@@ -1602,12 +1603,14 @@ def decl_buffer(
         _get_layout(layout, shape, scope),
         allocated_addr,
     )
-    if name is not None:
+    if isinstance(decl_frame, frame.DeclBufferFrame):
         decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))
         buf = decl_frame.__enter__()
+    else:
+        buf = decl_frame
+    if name is not None:
         IRBuilder.name(name, buf)
-        return buf
-    return decl_frame
+    return buf
 
 
 alloc_shared = functools.partial(alloc_buffer, scope="shared")
@@ -1648,19 +1651,15 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
         allocated_addr=None,
         name=name,
     )
-    if name is None:
-        if isinstance(buf, frame.AllocBufferFrame):
-            buf.add_callback(partial(buf.__exit__, None, None, None))
-            buf = buf.__enter__()
-            assert isinstance(buf, Buffer)
-            return cell_wrapper(buf[0])
     assert isinstance(buf, Buffer)
+    if name is None:
+        return cell_wrapper(buf[0])
     return buf[0]
 
 
 def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
     """Declare a zero-dimensional buffer (cell) from a pointer."""
-    res = decl_buffer(
+    buf = decl_buffer(
         shape=(1,),
         dtype=dtype,
         data=data,
@@ -1674,13 +1673,10 @@ def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None)
         layout=TileLayout((1,)),
         name=name,
     )
+    assert isinstance(buf, Buffer)
     if name is None:
-        assert isinstance(res, frame.DeclBufferFrame)
-        res.add_callback(partial(res.__exit__, None, None, None))
-        buf = res.__enter__()
         return cell_wrapper(buf[0])
-    assert isinstance(res, Buffer)
-    return res[0]
+    return buf[0]
 
 
 def shared_cell(dtype: str = "float32", name: str = None) -> BufferLoad:
@@ -2313,12 +2309,24 @@ def Range(begin: PrimExpr, end: PrimExpr) -> ir.Range:  # pylint: disable=invali
 
 if TYPE_CHECKING:
     T = TypeVar("T")
+    C = TypeVar("C")
 
     # When type checking (and by extension, for linters like Pylint), make meta_var an identity function.
     def meta_var(x: T) -> T:
         return x
 
+    def meta_class(cls: C) -> C:
+        return cls
+
 else:
+
+    def meta_class(cls):
+        """Decorator for utility classes used inside @T.prim_func.
+
+        Instances of decorated classes are treated as parser meta values.
+        """
+        cls._is_meta_class = True
+        return cls
 
     class meta_var:
         """A meta variable used in TVMScript metaprogramming. It means that the value of the variable

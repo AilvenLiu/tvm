@@ -207,10 +207,11 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
         out[idx] = combine_int_frac_ex2(xy_rounded[0], xy_frac_ex2[0])
         out[idx + 1] = combine_int_frac_ex2(xy_rounded[1], xy_frac_ex2[1])
 
+    @Tx.meta_class
     class Barriers:
 
         def __init__(self, pool_allocator, pipe_depth, is_p2c):
-            self.mbar = pool_allocator.alloc([pipe_depth], "uint64").buffer
+            self.mbar = pool_allocator.alloc([pipe_depth], "uint64")
             self.init_phase = 0 if is_p2c else 1
             self.pipe_depth = pipe_depth
 
@@ -244,6 +245,7 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             else:
                 Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
+    @Tx.meta_class
     class SmemDescriptor:
         def __init__(self, prefix: str):
             self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
@@ -317,7 +319,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             Tx.attr(0, "tirx.persistent_kernel", True)
             with Tx.cta():
-                pool = Tx.meta_var(Tx.PoolAllocator())
+                pool = Tx.PoolAllocator()
                 # Allocate Q buffer with alignment
                 Q_smem = pool.alloc((SMEM_PIPE_DEPTH_Q, BLK_M, HEAD_DIM), "float16", layout=Q_layout, align=1024)
                 # Allocate K and V buffers (they share the same offset)
@@ -349,31 +351,31 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                 stage_kv = Tx.alloc_local([1], "int32")
 
-                bar_load_q_full = Tx.meta_var(BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_Q, True))
-                bar_load_q_empty = Tx.meta_var(BarrierWithCommit(pool, SMEM_PIPE_DEPTH_Q, False))  # init_phase = 1
+                bar_load_q_full = BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_Q, True)
+                bar_load_q_empty = BarrierWithCommit(pool, SMEM_PIPE_DEPTH_Q, False)  # init_phase = 1
 
-                bar_load_kv_full = Tx.meta_var(BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_KV, True))
-                bar_load_kv_empty = Tx.meta_var(BarrierWithCommit(pool, SMEM_PIPE_DEPTH_KV, False))
+                bar_load_kv_full = BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_KV, True)
+                bar_load_kv_empty = BarrierWithCommit(pool, SMEM_PIPE_DEPTH_KV, False)
 
-                bar_p_full_o_rescaled = Tx.meta_var(BarrierWithArrive(pool, 2, True))
+                bar_p_full_o_rescaled = BarrierWithArrive(pool, 2, True)
 
-                bar_s_full = Tx.meta_var(BarrierWithCommit(pool, 2, True))
+                bar_s_full = BarrierWithCommit(pool, 2, True)
 
-                bar_o_full = Tx.meta_var(BarrierWithCommit(pool, 2, True))
+                bar_o_full = BarrierWithCommit(pool, 2, True)
 
-                bar_softmax_corr_full = Tx.meta_var(BarrierWithArrive(pool, 2, True))
-                bar_softmax_corr_empty = Tx.meta_var(BarrierWithArrive(pool, 2, False))
+                bar_softmax_corr_full = BarrierWithArrive(pool, 2, True)
+                bar_softmax_corr_empty = BarrierWithArrive(pool, 2, False)
 
-                bar_corr_epi_full = Tx.meta_var(BarrierWithArrive(pool, TMEM_PIPE_DEPTH, True))
-                bar_corr_epi_empty = Tx.meta_var(BarrierWithArrive(pool, TMEM_PIPE_DEPTH, False))
-                bar_p_full_2 = Tx.meta_var(BarrierWithArrive(pool, 2, True))
+                bar_corr_epi_full = BarrierWithArrive(pool, TMEM_PIPE_DEPTH, True)
+                bar_corr_epi_empty = BarrierWithArrive(pool, TMEM_PIPE_DEPTH, False)
+                bar_p_full_2 = BarrierWithArrive(pool, 2, True)
 
-                bar_s0_s1_sequence = Tx.meta_var(BarrierWithArrive(pool, 8, True))
+                bar_s0_s1_sequence = BarrierWithArrive(pool, 8, True)
 
-                bar_tmem_dealloc = Tx.meta_var(BarrierWithArrive(pool, 1, True))
+                bar_tmem_dealloc = BarrierWithArrive(pool, 1, True)
                 pool.commit()
 
-                profiler = Tx.meta_var(CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON))
+                profiler = CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON)
 
                 if wg_id == 0 and warp_id == 0:
                     Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr[0]), n_cols=N_COLS_TMEM, cta_group=CTA_GROUP)
@@ -383,7 +385,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 tmem_as_f16 = Tx.decl_buffer((128, N_COLS_TMEM * 2), "float16", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM * 2], [(1, "TLane"), (1, "TCol")])))
 
                 # Create appropriate scheduler based on causal mode
-                scheduler = Tx.meta_var(
+                scheduler = (
                     FlashAttentionLPTScheduler(
                         "fa_scheduler",
                         num_batches=BATCH_SIZE,
@@ -579,8 +581,8 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                                     @Tx.macro
                                     def gemm_qk(q_stage, kv_stage, tmem_col_s, bar_s_full):
-                                        descQ = Tx.meta_var(SmemDescriptor("Q"))
-                                        descK = Tx.meta_var(SmemDescriptor("K"))
+                                        descQ = SmemDescriptor("Q")
+                                        descK = SmemDescriptor("K")
                                         # All threads: encode base descriptors ONCE
                                         descQ.init(Q_smem.ptr_to([q_stage, 0, 0]),
                                                    ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
@@ -608,7 +610,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                                     @Tx.macro
                                     def gemm_pv(i_q, kv_stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):
-                                        descV = Tx.meta_var(SmemDescriptor("V"))
+                                        descV = SmemDescriptor("V")
                                         # All threads: encode V descriptor ONCE
                                         descV.init(V_smem.ptr_to([kv_stage, 0, 0]),
                                                    ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES,

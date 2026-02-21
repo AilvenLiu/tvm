@@ -86,12 +86,13 @@ TILE_M_NUM = M // (NUM_CONSUMER * BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
+@Tx.meta_class
 class Barriers:
 
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, pipe_width, is_p2c):
         self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
             (pipe_depth, pipe_width), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        ).buffer
+        )
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
         self.pipe_width = pipe_width
@@ -200,10 +201,10 @@ def test_hgemm():
                 stage = Tx.local_cell("int32")
 
                 # barriers
-                tma2mma = Tx.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
-                mma2tma = Tx.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
-                mma2ld = Tx.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
-                ld2mma = Tx.meta_var(BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False))
+                tma2mma = BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True)
+                mma2tma = BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False)
+                mma2ld = BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True)
+                ld2mma = BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False)
 
                 tma2mma.init(1)
                 mma2tma.init(NUM_CONSUMER)
@@ -214,7 +215,7 @@ def test_hgemm():
                 tma_finished = Tx.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # Tile scheduler
-                tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE))
+                tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE)
                 tile_scheduler.init(bx // 2)
                 m_idx = Tx.meta_var(tile_scheduler.m_idx)
                 n_idx = Tx.meta_var(tile_scheduler.n_idx)

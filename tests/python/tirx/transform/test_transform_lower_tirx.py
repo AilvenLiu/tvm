@@ -1120,6 +1120,7 @@ def test_lower_buffer_offset():
 
 def test_lower_alloc_decl_buffer_outside_of_parser():
     # fmt: off
+    @Tx.meta_class
     class State:
         def __init__(self, smem):
             self.A = Tx.alloc_local([1], "float16", name="A")
@@ -1133,9 +1134,7 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
         return buf
 
     def int_var2(val):
-        frame = Tx.alloc_local([1], "int32")
-        frame.add_callback(partial(frame.__exit__, None, None, None))
-        buf = frame.__enter__()
+        buf = Tx.alloc_local([1], "int32")
         if val is not None:
             Tx.buffer_store(buf, val, 0)
         return buf
@@ -1146,7 +1145,7 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
         with Tx.kernel():
             with Tx.thread():
                 smem = Tx.alloc_buffer([100], "uint8", scope="shared.dyn")
-                state = Tx.meta_var(State(smem.data))
+                state = State(smem.data)
                 state.A[0] = Tx.float16(1)
                 state.B[0] = Tx.float16(2)
                 state.C[0] = Tx.float16(3)

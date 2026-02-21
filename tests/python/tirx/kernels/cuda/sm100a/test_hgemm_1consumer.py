@@ -81,12 +81,13 @@ TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
+@Tx.meta_class
 class Barriers:
 
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
         self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
             (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        ).buffer
+        )
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
 
@@ -191,11 +192,11 @@ def test_hgemm_1consumer():
                 descI = Tx.local_cell("uint32")
 
                 # initialize
-                tma2mma_bar = Tx.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
-                mma2tma_bar = Tx.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
-                mma2ld_bar = Tx.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
-                ld2mma_bar = Tx.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-                tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE))
+                tma2mma_bar = BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True)
+                mma2tma_bar = BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
+                mma2ld_bar = BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
+                ld2mma_bar = BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
+                tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE)
                 tma2mma_bar.init(1)
                 mma2ld_bar.init(1)
                 mma2tma_bar.init(1)

@@ -175,17 +175,13 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
     INF = 5e4
 
     def int_var(val=None):
-        frame = Tx.alloc_local([1], "int32")
-        frame.add_callback(partial(frame.__exit__, None, None, None))
-        buf = frame.__enter__()
+        buf = Tx.alloc_local([1], "int32")
         if val is not None:
             Tx.buffer_store(buf, val, 0)
         return buf
 
     def float_var(val=None):
-        frame = Tx.alloc_local([1], "float32")
-        frame.add_callback(partial(frame.__exit__, None, None, None))
-        buf = frame.__enter__()
+        buf = Tx.alloc_local([1], "float32")
         if val is not None:
             Tx.buffer_store(buf, val, 0)
         return buf
@@ -354,7 +350,7 @@ __device__ __forceinline__ float {func_name}() {{
                 warp_id = Tx.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
                 lane_id = Tx.thread_id([32], parent="warp")
 
-                pool = Tx.meta_var(Tx.PoolAllocator())
+                pool = Tx.PoolAllocator()
                 q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
                 k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
                 v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
@@ -820,6 +816,7 @@ __device__ __forceinline__ float {func_name}() {{
         ) + NUM_THREADS * size_of("float32")
         NUM_WORKERS = SM_COUNT * NUM_WARPS
 
+        @Tx.meta_class
         class State:
             def __init__(self, vec_size):
                 self.vec_size = vec_size
@@ -887,7 +884,7 @@ __device__ __forceinline__ float {func_name}() {{
                     worker_id = int_var(bx * NUM_WARPS + warp_id)
 
                     buf = Tx.alloc_shared([SMEM_SIZE], "uint8")
-                    pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+                    pool = Tx.PoolAllocator(buf.data)
                     v_smem = pool.alloc([NUM_WARPS, NUM_SMEM_STAGES, BDY, HEAD_DIM], "float16")
                     s_smem = pool.alloc([NUM_WARPS, 32], "float32")
 
@@ -904,7 +901,7 @@ __device__ __forceinline__ float {func_name}() {{
                             partial_idx_to_offset = Tx.meta_var(lambda off: (merge_indptr_buf[packed_qo_idx[0]] + off) * KV_HEADS + kv_head_idx[0])
                             merge_idx_to_offset = Tx.meta_var((merge_o_indices_buf[packed_qo_idx[0]] * KV_HEADS + kv_head_idx[0]) * GQA_GROUP_SIZE + qo_head_idx[0])
 
-                            state = Tx.meta_var(State(VEC_SIZE))
+                            state = State(VEC_SIZE)
                             state.init()
 
                             num_index_sets = int_var(merge_indptr_buf[packed_qo_idx[0] + 1] - merge_indptr_buf[packed_qo_idx[0]])

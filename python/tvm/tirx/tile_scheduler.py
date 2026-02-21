@@ -16,13 +16,14 @@
 # under the License.
 """Reusable tile scheduler helpers for TIR tests/kernels.
 
-These classes emit TIR via @Tx.macro. Construct them with Tx.meta_var(...)
-inside a PrimFunc and call their macros.
+These classes emit TIR via @Tx.macro. Decorate with @Tx.meta_class so that
+instances are automatically treated as meta values inside @Tx.prim_func.
 """
 
 from tvm.script import tirx as Tx
 
 
+@Tx.meta_class
 class BaseTileScheduler:
     """Base class for tile schedulers with common state and macros."""
 
@@ -125,10 +126,10 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
     Usage
     -----
     ```python
-    scheduler = Tx.meta_var(ClusterPersistentScheduler2D(
+    scheduler = ClusterPersistentScheduler2D(
         "sched", num_m_tiles=M_TILES, num_n_tiles=N_TILES,
         num_clusters=NUM_CLUSTERS, l2_group_size=8
-    ))
+    )
     scheduler.init(cluster_id)  # cluster_id = cta_idx // CLUSTER_SIZE
 
     while scheduler.valid():

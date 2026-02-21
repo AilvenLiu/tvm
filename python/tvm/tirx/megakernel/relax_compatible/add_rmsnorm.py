@@ -21,10 +21,10 @@ class FuseAddRMSNormTile(AddRMSNormTile):
             weight = Tx.match_buffer(weight_ptr, (hidden_size), "float16", scope="global")
             output = Tx.match_buffer(output_ptr, (seq_len, hidden_size), "float16", scope="global")
             out_residual = Tx.match_buffer(out_residual_ptr, (seq_len, hidden_size), "float16", scope="global")
-            add_rmsnorm_tile = Tx.meta_var(FuseAddRMSNormTile(rms_norm_eps, hidden_size))
+            add_rmsnorm_tile = FuseAddRMSNormTile(rms_norm_eps, hidden_size)
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(add_rmsnorm_tile)
                 add_rmsnorm_tile.init(smem_manager)
                 with Tx.cta():
@@ -49,10 +49,10 @@ class FuseRMSNormTile(RMSNormTile):
             output = Tx.match_buffer(output_ptr, (seq_len, hidden_size), "float16", scope="global")
             input = Tx.match_buffer(input_ptr, (seq_len, hidden_size), "float32", scope="global")
             weight = Tx.match_buffer(weight_ptr, (hidden_size), "float16", scope="global")
-            rmsnorm_tile = Tx.meta_var(FuseRMSNormTile(rms_norm_eps, hidden_size))
+            rmsnorm_tile = FuseRMSNormTile(rms_norm_eps, hidden_size)
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(rmsnorm_tile)
                 rmsnorm_tile.init(smem_manager)
                 with Tx.cta():

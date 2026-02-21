@@ -128,6 +128,7 @@ def test_fp16_fused_attn():
 
 
 
+    @Tx.meta_class
     class Pipeline:
         def __init__(self, full, empty, bytes):
             self.full = full
@@ -181,6 +182,7 @@ def test_fp16_fused_attn():
             for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
                 Tx.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])
 
+    @Tx.meta_class
     class PipelineState:
         def __init__(self, prefix: str):
             self.index = Tx.local_cell("int32", name=prefix + "_index")
@@ -238,6 +240,7 @@ def test_fp16_fused_attn():
                         S_reg[i * 4 + 3] = -INF
                     col = col + 8
 
+    @Tx.meta_class
     class Softmax:
         sm_scale_log2 = 1 / (HEAD_DIM**0.5) * math.log2(math.exp(1))
         row = 4 * BLK_Q // ((NUM_WARPS // 4 - 1) * 128)
@@ -461,14 +464,14 @@ def test_fp16_fused_attn():
 
                 with Tx.thread():
                     # tile scheduler
-                    tile_scheduler = Tx.meta_var(IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
+                    tile_scheduler = IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr)
                     # pipeline
-                    pipeline_k = Tx.meta_var(Pipeline(full_k, empty_k, TMA_BYTES_K))
-                    pipeline_v = Tx.meta_var(Pipeline(full_v, empty_v, TMA_BYTES_V))
-                    producer_k = Tx.meta_var(PipelineState("producer_k"))
-                    producer_v = Tx.meta_var(PipelineState("producer_v"))
-                    consumer_k = Tx.meta_var(PipelineState("consumer_k"))
-                    consumer_v = Tx.meta_var(PipelineState("consumer_v"))
+                    pipeline_k = Pipeline(full_k, empty_k, TMA_BYTES_K)
+                    pipeline_v = Pipeline(full_v, empty_v, TMA_BYTES_V)
+                    producer_k = PipelineState("producer_k")
+                    producer_v = PipelineState("producer_v")
+                    consumer_k = PipelineState("consumer_k")
+                    consumer_v = PipelineState("consumer_v")
                     leader_cond = Tx.meta_var(tid % 128 == 0)
                     q_phase = Tx.local_cell("int32")
                     # producer WG regs
@@ -484,17 +487,15 @@ def test_fp16_fused_attn():
                     O_reg = Tx.alloc_buffer([O_REG_COUNT], "float32", scope="local")
 
                     # profiler
-                    profiler = Tx.meta_var(
-                        CudaProfiler(
-                            profiler_buffer,
-                            write_stride=PROFILER_WRITE_STRIDE,
-                            num_groups=NUM_GROUPS,
-                        )
+                    profiler = CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
                     )
                     profiler.init(wg_id)
 
                     # softmax
-                    softmax = Tx.meta_var(Softmax("softmax"))
+                    softmax = Softmax("softmax")
                     ############################################################################## INITIALIZATION
                     # tile scheduler
                     tile_scheduler.init(bx)

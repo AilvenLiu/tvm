@@ -116,10 +116,8 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
         valid_num_tokens = Tx.match_buffer(valid_num_tokens_ptr, (M // MAX_BLK_M), "int32")
         numel = Tx.int32()
         routing_weights = Tx.match_buffer(routing_weights_ptr, (numel), "float32")
-        group_gemm_tile = Tx.meta_var(
-            GroupGEMMTile(
-                N, K, E, top_k, numel, "float16", "float16", acc_output=acc_output, low_batch=low_batch
-            )
+        group_gemm_tile = GroupGEMMTile(
+            N, K, E, top_k, numel, "float16", "float16", acc_output=acc_output, low_batch=low_batch
         )
         group_gemm_tile.host_init()
         with Tx.kernel():
@@ -128,14 +126,14 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
             buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-            smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+            smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
             smem_manager.set_tile(group_gemm_tile)
             group_gemm_tile.init(smem_manager)
             smem_manager.set_tile(group_gemm_tile.__class__)
             GroupGEMMTile.class_init(smem_manager)
             M_TILE_CNT = Tx.meta_var(ceildiv(num_tokens_post_padded[0], MAX_BLK_M))
             N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
-            tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1))
+            tile_scheduler = ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1)
             tile_scheduler.init(bx)
             smem_manager.init()
             while tile_scheduler.valid():

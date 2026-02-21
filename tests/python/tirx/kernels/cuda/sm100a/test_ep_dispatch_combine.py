@@ -159,7 +159,7 @@ class EPDispatchKernel:
 
                 with Tx.cta():
                     buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                    smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
                     self.device_init_all(smem_manager)
                     self.class_init_all(smem_manager)
 
@@ -341,7 +341,7 @@ class EPCombineKernel:
 
                 with Tx.cta():
                     buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                    smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
                     self.device_init_all(smem_manager)
                     self.class_init_all(smem_manager)
 

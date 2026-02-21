@@ -40,10 +40,10 @@ class FuseBatchAttnTile(BatchAttnTile):
             o = Tx.match_buffer(o_ptr, (batch_size, qo_heads, head_dim), "float16", scope="global")
             partial_o = Tx.match_buffer(partial_o_ptr, (FuseBatchAttnTile.max_num_kv_splits * kv_heads * head_dim), "float32", scope="global")
             partial_lse = Tx.match_buffer(partial_lse_ptr, (FuseBatchAttnTile.max_num_kv_splits * kv_heads), "float32", scope="global")
-            attn_tile = Tx.meta_var(FuseBatchAttnTile(page_size, qo_heads, kv_heads, head_dim, prefetch_on=prefetch_on, profiler_on=False))
+            attn_tile = FuseBatchAttnTile(page_size, qo_heads, kv_heads, head_dim, prefetch_on=prefetch_on, profiler_on=False)
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(attn_tile)
                 attn_tile.init(smem_manager)
                 with Tx.cta():

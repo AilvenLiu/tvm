@@ -26,7 +26,7 @@ class FuseSplitKReduceRMSnormRopeQTile(SplitKReduceRMSnormRopeQTile):
             q_rms_weight = Tx.match_buffer(q_weight_ptr, [head_dim], "float16", scope="global")
             rope_pos = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
             cos_sin_cache = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, head_dim], "float32", scope="global")
-            reduce_rms_rope_tile = Tx.meta_var(FuseSplitKReduceRMSnormRopeQTile(batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor))
+            reduce_rms_rope_tile = FuseSplitKReduceRMSnormRopeQTile(batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor)
             with Tx.cta():
                 reduce_rms_rope_tile.init(None)
                 with Tx.cta():
@@ -55,7 +55,7 @@ class FuseSplitKReduceRMSnormRopeAppendKTile(SplitKReduceRMSnormRopeAppendKTile)
             cos_sin_cache = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, head_dim], "float32", scope="global")
             append_pos = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
             kv_cache = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, kv_heads, page_size, head_dim], "float16", scope="global")
-            reduce_rms_rope_append_tile = Tx.meta_var(FuseSplitKReduceRMSnormRopeAppendKTile(batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor, page_size))
+            reduce_rms_rope_append_tile = FuseSplitKReduceRMSnormRopeAppendKTile(batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor, page_size)
             with Tx.cta():
                 reduce_rms_rope_append_tile.init(None)
                 with Tx.cta():
@@ -80,7 +80,7 @@ class FuseSplitKReduceAppendVTile(SplitKReduceAppendVTile):
             partial = Tx.match_buffer(partial_ptr, [split_k_factor, batch_size, (qo_heads + 2 * kv_heads) * head_dim], "float32", scope="global")
             append_pos = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
             kv_cache = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, kv_heads, page_size, head_dim], "float16", scope="global")
-            reduce_rms_rope_append_tile = Tx.meta_var(FuseSplitKReduceAppendVTile(batch_size, kv_heads, qo_heads, head_dim, split_k_factor, page_size))
+            reduce_rms_rope_append_tile = FuseSplitKReduceAppendVTile(batch_size, kv_heads, qo_heads, head_dim, split_k_factor, page_size)
             with Tx.cta():
                 reduce_rms_rope_append_tile.init(None)
                 with Tx.cta():

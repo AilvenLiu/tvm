@@ -34,6 +34,7 @@ NUM_BLOCK_N = N // BLOCK_N
 
 
 # fmt: off
+@Tx.meta_class
 class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
@@ -95,6 +96,7 @@ STAGE_1_SM_CNT = 116
 STAGE_2_SM_CNT = 16
 TOTAL_SM_CNT = STAGE_1_SM_CNT + STAGE_2_SM_CNT
 
+@Tx.meta_class
 class SpatialTileScheduler:
     def __init__(self, prefix: str, tile_num: Tuple[int, int], sm_cnt: int):
         self.tile_num = tile_num
@@ -134,11 +136,11 @@ def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore:
     with Tx.kernel():
         bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
         tx = Tx.thread_id([1024], parent="cta")
-        sem = Tx.meta_var(Semaphore(NUM_BLOCK_N, sem_ptr))
+        sem = Semaphore(NUM_BLOCK_N, sem_ptr)
         with Tx.cta()[0: STAGE_1_SM_CNT]:
             A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
             B_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            stage1_scheduler = Tx.meta_var(SpatialTileScheduler("stage1", (NUM_BLOCK_M, NUM_BLOCK_N), STAGE_1_SM_CNT))
+            stage1_scheduler = SpatialTileScheduler("stage1", (NUM_BLOCK_M, NUM_BLOCK_N), STAGE_1_SM_CNT)
             stage1_scheduler.init(bx)
             while stage1_scheduler.valid():
                 m_idx = Tx.meta_var(stage1_scheduler.m_idx[0])
@@ -151,7 +153,7 @@ def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore:
         with Tx.cta()[STAGE_1_SM_CNT: TOTAL_SM_CNT]:
             B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
             C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            stage2_scheduler = Tx.meta_var(SpatialTileScheduler("stage2", (NUM_BLOCK_M, 1), STAGE_2_SM_CNT))
+            stage2_scheduler = SpatialTileScheduler("stage2", (NUM_BLOCK_M, 1), STAGE_2_SM_CNT)
             stage2_scheduler.init(bx - STAGE_1_SM_CNT)
             while stage2_scheduler.valid():
                 m_idx = Tx.meta_var(stage2_scheduler.m_idx[0])

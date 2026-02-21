@@ -91,12 +91,13 @@ TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
+@Tx.meta_class
 class Barriers:
 
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
         self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
             (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        ).buffer
+        )
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
 
@@ -183,7 +184,7 @@ def deepgemm(
         lane_id = Tx.thread_id([32], parent="warp")
         with Tx.cta():
             # alloc shared memory
-            pool = Tx.meta_var(Tx.PoolAllocator())
+            pool = Tx.PoolAllocator()
             tmem_addr = Tx.decl_cell("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
             pool.move_base_to(1024)
             A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
@@ -209,12 +210,12 @@ def deepgemm(
             phase = Tx.local_cell("int32")
 
             # initialize
-            tma2trans_bar = Tx.meta_var(Barriers(pool.ptr, 6, SMEM_PIPE_DEPTH, True))
-            trans2mma_bar = Tx.meta_var(BarTRANS2MMA(pool.ptr, 6 + SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, True))
-            mma2tma_bar = Tx.meta_var(BarMMA2TMA(pool.ptr, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
-            mma2ld_bar = Tx.meta_var(BarMMA2LD(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
-            ld2mma_bar = Tx.meta_var(BarLD2MMA(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-            tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE))
+            tma2trans_bar = Barriers(pool.ptr, 6, SMEM_PIPE_DEPTH, True)
+            trans2mma_bar = BarTRANS2MMA(pool.ptr, 6 + SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, True)
+            mma2tma_bar = BarMMA2TMA(pool.ptr, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
+            mma2ld_bar = BarMMA2LD(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
+            ld2mma_bar = BarLD2MMA(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
+            tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE)
 
             tma2trans_bar.init(1)
             trans2mma_bar.init(CTA_GROUP * 32)

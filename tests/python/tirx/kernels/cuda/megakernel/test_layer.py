@@ -866,7 +866,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                     elif self.tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
                         self.task_impl_batch_attention_merge(batch_size, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                        self.task_impl_gemm_o_proj(batch_size, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, o_proj_weight_global, residual_global if self.world_size == 1 else partial_o_global, is_dynamic_sch)
+                        self.task_impl_gemm_o_proj(batch_size, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM), o_proj_weight_global, residual_global if self.world_size == 1 else partial_o_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                         self.task_impl_gemm_o_reduce(batch_size, partial_o_global, hidden_state_attn_mlp_global, before_o_allreduce_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.O_ALLREDUCE.value:

@@ -276,7 +276,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
             lane_id = Tx.thread_id([32], parent="warp")
 
             buf = Tx.alloc_shared([SMEM_SIZE * WARP_GROUP_COUNT], "uint8", scope="shared.dyn")
-            pool = Tx.meta_var(Tx.PoolAllocator(buf.data))
+            pool = Tx.PoolAllocator(buf.data)
             A_smem = pool.alloc([NUM_STAGES *  BLK_M * BLK_K], "float16", align=16)
             B_smem = pool.alloc([NUM_STAGES *  BLK_N * BLK_K], "float16", align=16)
             pool.move_base_to(0)
@@ -441,7 +441,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     write_C_to_gmem()
 
                 M_TILE_CNT = Tx.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
-                scheduler = Tx.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt * 2, l2_group_size=1))
+                scheduler = ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt * 2, l2_group_size=1)
                 scheduler.init(bx * 2 + wg_id)
                 m_idx = Tx.meta_var(scheduler.m_idx)
                 n_idx = Tx.meta_var(scheduler.n_idx)

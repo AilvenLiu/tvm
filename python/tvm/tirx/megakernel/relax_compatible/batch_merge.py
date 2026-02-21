@@ -23,10 +23,10 @@ class FuseBatchMergeTile(BatchMergeTile):
             num_qo_len = Tx.match_buffer(num_qo_len_ptr, (1), "int32", scope="global", offset_factor=1)
             merge_indptr = Tx.match_buffer(merge_indptr_ptr, (FuseBatchMergeTile.max_num_kv_splits), "int32", scope="global", offset_factor=1)
             merge_o_indices = Tx.match_buffer(merge_o_indices_ptr, (FuseBatchMergeTile.max_num_kv_splits), "int32", scope="global", offset_factor=1)
-            batch_merge_tile = Tx.meta_var(FuseBatchMergeTile(head_dim, kv_heads, qo_heads))
+            batch_merge_tile = FuseBatchMergeTile(head_dim, kv_heads, qo_heads)
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(batch_merge_tile)
                 batch_merge_tile.init(smem_manager)
                 with Tx.cta():

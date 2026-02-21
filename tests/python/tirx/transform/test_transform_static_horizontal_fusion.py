@@ -52,7 +52,7 @@ def test_basic():
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
@@ -75,7 +75,7 @@ def test_basic():
             C_ptr = Tx.match_buffer(C, (M, 1), "float32")
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
@@ -189,7 +189,7 @@ def test_extra_args():
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
@@ -212,7 +212,7 @@ def test_extra_args():
             C_ptr = Tx.match_buffer(C, (M, 1), "float32")
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})

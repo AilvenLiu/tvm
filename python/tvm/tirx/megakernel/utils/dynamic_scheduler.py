@@ -105,6 +105,7 @@ class SchedulerBarrier(Barriers):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0]))
 
 
+@Tx.meta_class
 class MPMCQueue:
 
     def __init__(

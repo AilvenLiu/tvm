@@ -147,14 +147,12 @@ def test_fp8_gemm_hopper_no_ws():
                     accum = Tx.alloc_buffer([128], "float32", scope="local")
                     accum_half = Tx.alloc_buffer([8], "float16", scope="local")
                     # tile scheduler
-                    tile_scheduler = Tx.meta_var(
-                        ClusterPersistentScheduler2D(
-                            "tile_scheduler",
-                            num_m_tiles=m_blocks,
-                            num_n_tiles=n_blocks,
-                            num_clusters=SM_COUNT,
-                            l2_group_size=GROUP_SIZE,
-                        )
+                    tile_scheduler = ClusterPersistentScheduler2D(
+                        "tile_scheduler",
+                        num_m_tiles=m_blocks,
+                        num_n_tiles=n_blocks,
+                        num_clusters=SM_COUNT,
+                        l2_group_size=GROUP_SIZE,
                     )
 
                     # initialize the tile scheduler

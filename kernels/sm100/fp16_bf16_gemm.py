@@ -111,13 +111,13 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             lane_id = Tx.thread_id([32], parent="warp")
 
             # smem allocation
-            pool = Tx.meta_var(Tx.PoolAllocator())
+            pool = Tx.PoolAllocator()
             tmem_addr = pool.alloc((1,), "uint32")
 
-            tma2mma = Tx.meta_var(TMABar(pool, PIPE_DEPTH, "tma2mma"))
-            mma2tma = Tx.meta_var(TCGen05Bar(pool, PIPE_DEPTH, "mma2tma"))
-            mma2ld = Tx.meta_var(TCGen05Bar(pool, NUM_CONSUMER, "mma2ld"))
-            ld2mma = Tx.meta_var(MBarrier(pool, NUM_CONSUMER, "ld2mma"))
+            tma2mma = TMABar(pool, PIPE_DEPTH, "tma2mma")
+            mma2tma = TCGen05Bar(pool, PIPE_DEPTH, "mma2tma")
+            mma2ld = TCGen05Bar(pool, NUM_CONSUMER, "mma2ld")
+            ld2mma = MBarrier(pool, NUM_CONSUMER, "ld2mma")
             pool.move_base_to(1024)
             Asmem = pool.alloc((PIPE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, layout=A_layout)
             Bsmem = pool.alloc((PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
@@ -131,7 +131,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             ld2mma.init(128 * CTA_GROUP)  # signaled by warpgroup1(2) of both CTAs
 
             # CTA-0 is responsible for receiving signals of the finish of TMA of both 2 CTAs
-            tma2mma_cta0 = Tx.meta_var(tma2mma.remote_view(0))
+            tma2mma_cta0 = tma2mma.remote_view(0)
 
             # tmem allocation
             if wg_id == 0 and warp_id == 0:
@@ -146,7 +146,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
             tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, 512], [1@TLane, 1@TCol])))
 
-            tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=M // MMA_M // NUM_CONSUMER, num_n_tiles=N // MMA_N, l2_group_size=8, num_clusters=SM_COUNT // CTA_GROUP))
+            tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=M // MMA_M // NUM_CONSUMER, num_n_tiles=N // MMA_N, l2_group_size=8, num_clusters=SM_COUNT // CTA_GROUP)
             tile_scheduler.init(bx // CTA_GROUP)
             m_idx = Tx.meta_var(tile_scheduler.m_idx)
             n_idx = Tx.meta_var(tile_scheduler.n_idx)
@@ -156,7 +156,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             if wg_id == 2:
                 if warp_id == 3:
                     # load warp
-                    tma_phase = Tx.meta_var(PipelineState("tma", PIPE_DEPTH))
+                    tma_phase = PipelineState("tma", PIPE_DEPTH)
                     tma_phase.init(is_producer=True)
 
                     @Tx.macro
@@ -182,9 +182,9 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
                 elif warp_id < 2 and cbx == 0:
                     # mma warp
-                    mma_phase = Tx.meta_var(PipelineState("mma", PIPE_DEPTH))
+                    mma_phase = PipelineState("mma", PIPE_DEPTH)
                     mma_phase.init(is_producer=False)
-                    ld_phase = Tx.meta_var(PipelineState("ld", 1))
+                    ld_phase = PipelineState("ld", 1)
                     ld_phase.init(is_producer=True)
 
                     accum = Tx.local_cell("int32")
@@ -212,7 +212,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                             tile_scheduler.next_tile()
 
             elif wg_id < 2:
-                wb_phase = Tx.meta_var(PipelineState("wb", 1))
+                wb_phase = PipelineState("wb", 1)
                 wb_phase.init(is_producer=False)
 
                 @Tx.macro

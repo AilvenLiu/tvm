@@ -205,6 +205,7 @@ def export_to_perfetto_trace(
     tgen.flush()
 
 
+@Tx.meta_class
 class CudaProfiler:
     """A lightweight wrapper around Tx.timer_* CUDA intrinsics.
 

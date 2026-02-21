@@ -113,6 +113,7 @@ def get_hgemm_kernel(dim_n, dim_k):
     }}
     """
 
+    @Tx.meta_class
     class Semaphore:
         def __init__(self, cnt, buffer):
             self.cnt = cnt
@@ -144,12 +145,13 @@ def get_hgemm_kernel(dim_n, dim_k):
                         source_code=atomic_add_system_uint64,
                     )
 
+    @Tx.meta_class
     class Barriers:
 
         def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
             self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
                 (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-            ).buffer
+            )
             self.init_phase = 0 if is_p2c else 1
             self.pipe_depth = pipe_depth
 
@@ -240,29 +242,25 @@ def get_hgemm_kernel(dim_n, dim_k):
                 descA = Tx.local_cell("uint64")
                 descB = Tx.local_cell("uint64")
                 descI = Tx.local_cell("uint32")
-                profiler = Tx.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                        profiler_enabled=PROFILER_ON,
-                    )
+                profiler = CudaProfiler(
+                    profiler_buffer,
+                    write_stride=PROFILER_WRITE_STRIDE,
+                    num_groups=NUM_GROUPS,
+                    profiler_enabled=PROFILER_ON,
                 )
                 # initialize
-                tma2mma_bar = Tx.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
-                mma2tma_bar = Tx.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
-                mma2ld_bar = Tx.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
-                ld2mma_bar = Tx.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
+                tma2mma_bar = BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True)
+                mma2tma_bar = BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
+                mma2ld_bar = BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
+                ld2mma_bar = BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
                 m_tiles_expr = Tx.truncdiv(M + BLK_M * CTA_GROUP - 1, BLK_M * CTA_GROUP)
-                tile_scheduler = Tx.meta_var(
-                    GroupMajor3D(
-                        "tile_scheduler",
-                        m_tiles=m_tiles_expr,
-                        n_tiles=TILE_N_NUM,
-                        k_tiles=TILE_K_NUM,
-                        group_rows=TILE_GROUPS_ROW_SIZE,
-                        step=SM_NUMBER,
-                    )
+                tile_scheduler = GroupMajor3D(
+                    "tile_scheduler",
+                    m_tiles=m_tiles_expr,
+                    n_tiles=TILE_N_NUM,
+                    k_tiles=TILE_K_NUM,
+                    group_rows=TILE_GROUPS_ROW_SIZE,
+                    step=SM_NUMBER,
                 )
                 tma2mma_bar.init(1)
                 mma2ld_bar.init(1)

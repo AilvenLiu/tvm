@@ -57,7 +57,7 @@ class DecodeTile(Tile):
         self.batch_size = qkv_tvm.shape[0]
         self.new_batch_size = request_indices_tvm.shape[0]
         self.qkv_global = qkv_tvm
-        self.kv_cache_global = Tx.reshape(kv_cache_tvm, (-1,)).buffer
+        self.kv_cache_global = Tx.reshape(kv_cache_tvm, (-1,))
         self.o_global = o_tvm
         self.lse_global = lse_tvm
         self.o_tmp_global = o_tmp_tvm

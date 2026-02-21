@@ -49,6 +49,7 @@ def test_hgemm_hopper_ws_cooperative():
     def ceildiv(a, b):
         return (a + b - 1) // b
 
+    @Tx.meta_class
     class PipelineState:
         def __init__(self, prefix: str):
             self.index = Tx.local_cell("int32", name=prefix + "_index")
@@ -136,22 +137,20 @@ def test_hgemm_hopper_ws_cooperative():
                     # work tile info
                     m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
                     n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
-                    tile_scheduler = Tx.meta_var(
-                        ClusterPersistentScheduler2D(
-                            "tile_scheduler",
-                            num_m_tiles=m_blocks,
-                            num_n_tiles=n_blocks,
-                            num_clusters=SM_COUNT,
-                            l2_group_size=GROUP_SIZE,
-                            cluster_m=CLUSTER_M,
-                            cluster_n=CLUSTER_N,
-                        )
+                    tile_scheduler = ClusterPersistentScheduler2D(
+                        "tile_scheduler",
+                        num_m_tiles=m_blocks,
+                        num_n_tiles=n_blocks,
+                        num_clusters=SM_COUNT,
+                        l2_group_size=GROUP_SIZE,
+                        cluster_m=CLUSTER_M,
+                        cluster_n=CLUSTER_N,
                     )
                     # produer pipelinen states
-                    producer = Tx.meta_var(PipelineState("producer"))
+                    producer = PipelineState("producer")
                     # consumer pipeline states
-                    consumer_read = Tx.meta_var(PipelineState("consumer_read"))
-                    consumer_release = Tx.meta_var(PipelineState("consumer_release"))
+                    consumer_read = PipelineState("consumer_read")
+                    consumer_release = PipelineState("consumer_release")
                     # consumer signals
                     is_signal_thread = Tx.local_cell("int32")
                     dst_block_ID = Tx.local_cell("int32")
@@ -455,16 +454,14 @@ def test_hgemm_hopper_no_ws():
                     # tile scheduler
                     m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
                     n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
-                    tile_scheduler = Tx.meta_var(
-                        ClusterPersistentScheduler2D(
-                            "tile_scheduler",
-                            num_m_tiles=m_blocks,
-                            num_n_tiles=n_blocks,
-                            num_clusters=SM_COUNT,
-                            l2_group_size=GROUP_SIZE,
-                            cluster_m=CLUSTER_M,
-                            cluster_n=CLUSTER_N,
-                        )
+                    tile_scheduler = ClusterPersistentScheduler2D(
+                        "tile_scheduler",
+                        num_m_tiles=m_blocks,
+                        num_n_tiles=n_blocks,
+                        num_clusters=SM_COUNT,
+                        l2_group_size=GROUP_SIZE,
+                        cluster_m=CLUSTER_M,
+                        cluster_n=CLUSTER_N,
                     )
 
                     # initialize the tile scheduler

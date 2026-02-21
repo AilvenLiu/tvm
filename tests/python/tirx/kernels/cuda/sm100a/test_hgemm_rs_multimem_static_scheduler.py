@@ -108,6 +108,7 @@ __forceinline__ __device__ uint64_t atomic_add_system_uint64(uint64_t* addr, uin
 """
 
 
+@Tx.meta_class
 class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
@@ -161,6 +162,7 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
 """
 
 
+@Tx.meta_class
 class Pipeline:
     def __init__(
         self,
@@ -175,13 +177,13 @@ class Pipeline:
         self.pipeline_num = pipeline_num
         self.mbar_p2c = Tx.decl_buffer(
             (pipeline_depth, pipeline_num), "uint64", shared_buf, elem_offset=base_offset
-        ).buffer
+        )
         self.mbar_c2p = Tx.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        ).buffer
+        )
         self.idx = Tx.local_cell("int32", name="pipeline_idx")
         self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
         self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
@@ -403,24 +405,22 @@ def test_hgemm_rs():
                 descI = Tx.local_cell("uint32")
                 base_desc_A = Tx.local_cell("uint64")
                 base_desc_B = Tx.local_cell("uint64")
-                tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
-                mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
+                tma2mma_pipe = TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True)
+                mma2ld_pipe = MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False)
                 mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                 tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                 ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
-                sem = Tx.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
+                sem = Semaphore(cnt=WORLD_SIZE, buffer=semaphore)
                 offset = Tx.local_cell(dtype="int32")
                 task_id = Tx.local_cell("int32")
                 task_id = 0
                 task_smem = Tx.decl_buffer((MAX_TASKS, 3), "int32", buf.data, elem_offset=SMEM_OFFSET // 4)
-                profiler = Tx.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                        profiler_enabled=PROFILER_ON,
-                    )
+                profiler = CudaProfiler(
+                    profiler_buffer,
+                    write_stride=PROFILER_WRITE_STRIDE,
+                    num_groups=NUM_GROUPS,
+                    profiler_enabled=PROFILER_ON,
                 )
                 profiler.init(wg_id)
                 # alloc TMEM

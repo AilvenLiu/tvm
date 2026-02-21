@@ -30,11 +30,11 @@ class FuseGemmTile(GemmTile):
         
         @Tx.macro
         def gemm_body(A, B, output, m_idx, n_idx, k_idx):
-            gemm_tile = Tx.meta_var(FuseGemmTile(N, K, ab_dtype, ab_dtype, split_k_factor, BLK_M, BLK_M, prefetch_on=prefetch_on, use_tma_reduce=use_tma_reduce, profiler_on=False))
+            gemm_tile = FuseGemmTile(N, K, ab_dtype, ab_dtype, split_k_factor, BLK_M, BLK_M, prefetch_on=prefetch_on, use_tma_reduce=use_tma_reduce, profiler_on=False)
             gemm_tile.host_init()
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 with Tx.cta():
@@ -100,7 +100,7 @@ class FuseGemmTile(GemmTile):
                         A = Tx.match_buffer(A_ptr, (m, K1, K2), ab_dtype, layout="default")
                         B = Tx.match_buffer(B_ptr, (N, K), ab_dtype, layout="default")
                         output = Tx.match_buffer(output_ptr, (m, N), out_dtype, layout="default")
-                        gemm_body(A.view(m, -1).buffer, B, output, m_idx, n_idx, k_idx)
+                        gemm_body(A.view(m, -1), B, output, m_idx, n_idx, k_idx)
                     return gemm_func_split_k, num_tiles, tile_size
                 else:
                     @Tx.prim_func(tirx=True, private=True)
@@ -112,7 +112,7 @@ class FuseGemmTile(GemmTile):
                         A = Tx.match_buffer(A_ptr, (m, K1, K2), ab_dtype, layout="default")
                         B = Tx.match_buffer(B_ptr, (N, K), ab_dtype, layout="default")
                         partial_sum = Tx.match_buffer(partial_sum_ptr, (split_k_factor, m, N), out_dtype, layout="default")
-                        gemm_body(A.view(m, -1).buffer, B, partial_sum, m_idx, n_idx, k_idx)
+                        gemm_body(A.view(m, -1), B, partial_sum, m_idx, n_idx, k_idx)
                     return gemm_func_split_k, num_tiles, tile_size
 
 class FuseGateUpSiluTile(GateUpSiluTile):
@@ -143,11 +143,11 @@ class FuseGateUpSiluTile(GateUpSiluTile):
             A = Tx.match_buffer(A_ptr, (m, K), ab_dtype, layout="default")
             B = Tx.match_buffer(B_ptr, (N, K), ab_dtype, layout="default")
             output = Tx.match_buffer(C_ptr, (m, N // 2), out_dtype, layout="default")
-            gemm_tile = Tx.meta_var(FuseGateUpSiluTile(N, K, ab_dtype, ab_dtype, 1, BLK_M, BLK_M, prefetch_on=prefetch_on, profiler_on=False))
+            gemm_tile = FuseGateUpSiluTile(N, K, ab_dtype, ab_dtype, 1, BLK_M, BLK_M, prefetch_on=prefetch_on, profiler_on=False)
             gemm_tile.host_init()
             with Tx.cta():
                 buf = Tx.alloc_buffer((KernelConfig.MAX_SMEM_SIZE,), "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 with Tx.cta():

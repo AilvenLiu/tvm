@@ -166,6 +166,7 @@ def tir_ws_kernel(M: int, N: int, K: int):
         f"using ws kernel, cluster shape: {CLUSTER_M}x{CLUSTER_N} num clusters: {NUM_CLUSTERS} grid size: {GRID_SIZE} pipeline depth: {PIPE_DEPTH} Tile shape: {CTA_M}x{CTA_N}x{CTA_K}"
     )
 
+    @Tx.meta_class
     class SmemDescriptor:
         def __init__(self, prefix: str):
             self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
@@ -224,6 +225,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             "tvm_builtin_pointer_offset", ptr, offset, source_code=pointer_offset_source_code, return_type="handle"
         )
 
+    @Tx.meta_class
     class RowiseSwizzleOffset:
         def __init__(self, swizzle_len, atom_len, per_element, row_base, prefix: str = "row_sw_offset"):
             self.swizzle_len = swizzle_len
@@ -279,19 +281,19 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             pair_leader_rank = pair_id * CTA_GROUP  # rank of pair's leader
 
             # tile scheduler
-            tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=CLUSTER_M_TILES, num_n_tiles=CLUSTER_N_TILES, num_clusters=NUM_CLUSTERS))
+            tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=CLUSTER_M_TILES, num_n_tiles=CLUSTER_N_TILES, num_clusters=NUM_CLUSTERS)
             tile_scheduler.init(cta_idx // CLUSTER_SIZE)
             m_idx = Tx.meta_var(tile_scheduler.m_idx)
             n_idx = Tx.meta_var(tile_scheduler.n_idx)
 
             ############################ SMEM allocation #################################
-            pool = Tx.meta_var(Tx.PoolAllocator())
+            pool = Tx.PoolAllocator()
             tmem_addr = pool.alloc([1], "uint32", align=4)
             # Pipeline mbarriers: one per stage
-            tma_full = Tx.meta_var(TMABar(pool, PIPE_DEPTH, "tma_full"))
-            tma_empty = Tx.meta_var(TCGen05Bar(pool, PIPE_DEPTH, "tma_empty"))
-            acc_full = Tx.meta_var(TCGen05Bar(pool, TMEM_PIPE_DEPTH, "acc_full"))
-            acc_empty = Tx.meta_var(MBarrier(pool, TMEM_PIPE_DEPTH, "acc_empty"))
+            tma_full = TMABar(pool, PIPE_DEPTH, "tma_full")
+            tma_empty = TCGen05Bar(pool, PIPE_DEPTH, "tma_empty")
+            acc_full = TCGen05Bar(pool, TMEM_PIPE_DEPTH, "acc_full")
+            acc_empty = MBarrier(pool, TMEM_PIPE_DEPTH, "acc_empty")
             # Pipelined SMEM buffers
             A_smem_packed = pool.alloc((PIPE_DEPTH, CTA_M, CTA_K // 2), "uint8", layout=A_layout_pipe, align=1024)
             B_smem_packed = pool.alloc((PIPE_DEPTH, CTA_N, CTA_K // 2), "uint8", layout=B_layout_pipe, align=1024)
@@ -326,11 +328,11 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             Tx.cuda.cluster_sync()
 
             # Get pointer to pair leader's mbar_tma array for TMA arrive
-            tma_full_cta0 = Tx.meta_var(tma_full.remote_view(pair_leader_rank))
+            tma_full_cta0 = tma_full.remote_view(pair_leader_rank)
 
             # descriptor cells
-            descSFA = Tx.meta_var(SmemDescriptor("SFA"))
-            descSFB = Tx.meta_var(SmemDescriptor("SFB"))
+            descSFA = SmemDescriptor("SFA")
+            descSFB = SmemDescriptor("SFB")
 
             # The mask containing the pair leader and follower in the cluster
             pair_mask = Tx.local_cell("int32")
@@ -338,17 +340,17 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             pair_mask = pair_mask | (1 << pair_leader_rank)
             pair_mask = pair_mask | (1 << (pair_leader_rank + 1))
 
-            tma_state = Tx.meta_var(PipelineState("state", PIPE_DEPTH))
+            tma_state = PipelineState("state", PIPE_DEPTH)
             tma_state.init(is_producer=True)
-            mma_state = Tx.meta_var(PipelineState("state", PIPE_DEPTH))
+            mma_state = PipelineState("state", PIPE_DEPTH)
             mma_state.init(is_producer=False)
-            acc_state = Tx.meta_var(PipelineState("acc", TMEM_PIPE_DEPTH))
+            acc_state = PipelineState("acc", TMEM_PIPE_DEPTH)
             acc_state.init(is_producer=True)
             accum = Tx.local_cell("int32")
             accum = 0
-            epi_state = Tx.meta_var(PipelineState("epi", TMEM_PIPE_DEPTH))
+            epi_state = PipelineState("epi", TMEM_PIPE_DEPTH)
             epi_state.init(is_producer=False)
-            epi_wb_state = Tx.meta_var(PipelineState("epi_wb", WB_PIPE_DEPTH))
+            epi_wb_state = PipelineState("epi_wb", WB_PIPE_DEPTH)
             epi_wb_state.init(is_producer=True)
 
             alpha_local = Tx.local_cell("float32")
@@ -436,7 +438,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                     tile_scheduler.next_tile()
 
             elif warp_id >= int(WarpRole.EPILOGUE):
-                row_sw_offset = Tx.meta_var(RowiseSwizzleOffset(3, 3, 3, tid_in_wg)) # D's swizzle settings
+                row_sw_offset = RowiseSwizzleOffset(3, 3, 3, tid_in_wg) # D's swizzle settings
                 row_sw_offset.init()
 
                 while tile_scheduler.valid():

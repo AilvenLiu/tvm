@@ -225,12 +225,13 @@ __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
 """
 
 
+@Tx.meta_class
 class Barriers:
 
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, pipe_width, is_p2c):
         self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
             (pipe_depth, pipe_width), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        ).buffer
+        )
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
         self.pipe_width = pipe_width
@@ -279,6 +280,7 @@ class BarLD2MMA(Barriers):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0, idx]), cta_id=0, pred=True)
 
 
+@Tx.meta_class
 class Pipeline:
     def __init__(
         self,
@@ -293,13 +295,13 @@ class Pipeline:
         self.pipeline_num = pipeline_num
         self.mbar_p2c = Tx.decl_buffer(
             (pipeline_depth, pipeline_num), "uint64", shared_buf, elem_offset=base_offset
-        ).buffer
+        )
         self.mbar_c2p = Tx.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        ).buffer
+        )
         self.idx = Tx.local_cell("int32", name="pipeline_idx")
         self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
         self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
@@ -350,6 +352,7 @@ def int_var(name: str, scope="local", dtype="int32", align=4):
     return buf
 
 
+@Tx.meta_class
 class MPMCQueue:
     def __init__(
         self,
@@ -486,6 +489,7 @@ def consumer_fetch(
     sch_pipe.p2c_phase = sch_pipe.p2c_phase ^ 1
 
 
+@Tx.meta_class
 class MixedDynamicTileScheduler:
     def __init__(
         self,
@@ -591,6 +595,7 @@ class MixedDynamicTileScheduler:
         return tvm.tir.any(self.fetched_task_type[0] >= 0, self.rs_rem[0] >= 0)
 
 
+@Tx.meta_class
 class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
@@ -683,30 +688,28 @@ def test_hgemm_rs():
                 stage = Tx.local_cell("int32", name="stage")
 
                 # gemm + rs
-                sem = Tx.meta_var(Semaphore(cnt=2 * WORLD_SIZE, buffer=semaphore))
+                sem = Semaphore(cnt=2 * WORLD_SIZE, buffer=semaphore)
                 offset = Tx.local_cell(dtype="int32")
-                gemm_queue = Tx.meta_var(GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS))
-                rs_queue = Tx.meta_var(RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS))
+                gemm_queue = GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS)
+                rs_queue = RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS)
                 packed_buf = Tx.decl_buffer((1,), "uint64", buf.data, elem_offset=64)
                 packed_ptr: Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
                 packed_value = Tx.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
-                sch_pipe = Tx.meta_var(Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False))
-                tile_scheduler = Tx.meta_var(MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe))
-                profiler = Tx.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                        profiler_enabled=PROFILER_ON,
-                    )
+                sch_pipe = Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False)
+                tile_scheduler = MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe)
+                profiler = CudaProfiler(
+                    profiler_buffer,
+                    write_stride=PROFILER_WRITE_STRIDE,
+                    num_groups=NUM_GROUPS,
+                    profiler_enabled=PROFILER_ON,
                 )
 
                 # initialize
                 profiler.init(warp_id_in_cta)
-                tma2mma = Tx.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
-                mma2tma = Tx.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
-                mma2ld = Tx.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
-                ld2mma = Tx.meta_var(BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False))
+                tma2mma = BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True)
+                mma2tma = BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False)
+                mma2ld = BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True)
+                ld2mma = BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False)
                 tma2mma.init(1)
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)

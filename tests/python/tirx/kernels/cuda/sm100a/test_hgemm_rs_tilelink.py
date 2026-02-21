@@ -116,6 +116,7 @@ __forceinline__ __device__ void wait(void* sem_addr, int value) {
 """
 
 
+@Tx.meta_class
 class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
@@ -173,6 +174,7 @@ __device__ __forceinline__ void write_remote_tma(
 """
 
 
+@Tx.meta_class
 class Pipeline:
     def __init__(
         self,
@@ -187,13 +189,13 @@ class Pipeline:
         self.pipeline_num = pipeline_num
         self.mbar_p2c = Tx.decl_buffer(
             (pipeline_depth, pipeline_num), "uint64", shared_buf, elem_offset=base_offset
-        ).buffer
+        )
         self.mbar_c2p = Tx.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        ).buffer
+        )
         self.idx = Tx.local_cell("int32", name="pipeline_idx")
         self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
         self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
@@ -318,15 +320,13 @@ def test_hgemm_rs():
             tid = Tx.thread_id([NUM_THREADS], parent="cta")
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             rank = Tx.nvshmem.my_pe()
-            sem = Tx.meta_var(Semaphore(cnt=1, buffer=semaphore))
+            sem = Semaphore(cnt=1, buffer=semaphore)
             with Tx.cta():
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                profiler = Tx.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                    )
+                profiler = CudaProfiler(
+                    profiler_buffer,
+                    write_stride=PROFILER_WRITE_STRIDE,
+                    num_groups=NUM_GROUPS,
                 )
 
                 reg_fp16 = Tx.alloc_buffer((BLK_N,), d_type, scope="local")
@@ -344,15 +344,15 @@ def test_hgemm_rs():
                     descI = Tx.local_cell("uint32")
                     base_desc_A = Tx.local_cell("uint64")
                     base_desc_B = Tx.local_cell("uint64")
-                    tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
-                    mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
+                    tma2mma_pipe = TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True)
+                    mma2ld_pipe = MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False)
                     mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                     tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                     ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                     tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                     m_clusters = Tx.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
                     n_clusters = Tx.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = Tx.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
+                    gemm_tile_scheduler = RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE)
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
                     with Tx.warp()[0:1]:
@@ -457,17 +457,15 @@ def test_hgemm_rs():
                     buffer_load_smem = Tx.decl_buffer((RS_PIPE_DEPTH, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512)
                     gemm_out_load_smem = Tx.decl_buffer((RS_PIPE_DEPTH, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512 + RS_BLK_M * RS_BLK_N * RS_PIPE_DEPTH)
                     out_smem = Tx.decl_buffer((2, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512 + RS_BLK_M * RS_BLK_N * RS_PIPE_DEPTH * 2)
-                    load_pipe = Tx.meta_var(
-                        ReducePipe(
-                            buf.data, 128, RS_PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=False
-                        )
+                    load_pipe = ReducePipe(
+                        buf.data, 128, RS_PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=False
                     )
                     local_buffer = Tx.alloc_buffer((VEC_SIZE), d_type, scope="local")
                     local_acc = Tx.alloc_buffer((VEC_SIZE,), d_type, scope="local")
                     dst_rank = Tx.meta_var((rank + WORLD_SIZE - 1) % WORLD_SIZE)
                     m_clusters = Tx.meta_var((LOCAL_M + BLK_M - 1) // BLK_M)
                     n_clusters = Tx.meta_var((N + BLK_N - 1) // BLK_N)
-                    rs_tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("rs_tile_scheduler", num_m_tiles=m_clusters, num_n_tiles=n_clusters, num_clusters=RS_SMS, l2_group_size=GROUP_SIZE * 4))
+                    rs_tile_scheduler = ClusterPersistentScheduler2D("rs_tile_scheduler", num_m_tiles=m_clusters, num_n_tiles=n_clusters, num_clusters=RS_SMS, l2_group_size=GROUP_SIZE * 4)
                     load_pipe.init(c2p_thread_count=256)
                     Tx.cuda.cta_sync()
                     for stage in range(WORLD_SIZE):

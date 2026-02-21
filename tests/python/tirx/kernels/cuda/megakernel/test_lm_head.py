@@ -20,6 +20,7 @@ class LMHeadLayer:
         self.N = N
         self.K = K
 
+    @Tx.meta_class
     class TileScheduler:
         def __init__(self, n):
             self.n = n
@@ -42,18 +43,18 @@ class LMHeadLayer:
 
     @Tx.macro
     def body(self, A, B, out, blk_m):
-        gemm_tile = Tx.meta_var(GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m))
+        gemm_tile = GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m)
         gemm_tile.host_init()
         with Tx.kernel():
             bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                smem_manager = Tx.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
                 smem_manager.set_tile(gemm_tile)
                 gemm_tile.init(smem_manager)
                 smem_manager.set_tile(gemm_tile.__class__)
                 gemm_tile.class_init(smem_manager)
-                scheduler = Tx.meta_var(self.TileScheduler(self.N))
+                scheduler = self.TileScheduler(self.N)
                 scheduler.init(bx)
                 smem_manager.init()
                 while scheduler.valid():

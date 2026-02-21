@@ -103,6 +103,7 @@ __forceinline__ __device__ uint64_t atomic_add_system_uint64(uint64_t* addr, uin
 """
 
 
+@Tx.meta_class
 class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
@@ -134,6 +135,7 @@ class Semaphore:
             Tx.cuda.thread_fence()
 
 
+@Tx.meta_class
 class Pipeline:
     def __init__(
         self,
@@ -299,15 +301,13 @@ class ReduceScatter:
             lane_id = Tx.thread_id([32], parent="warp")
             tid = Tx.thread_id([NUM_THREADS], parent="cta")
             rank = Tx.nvshmem.my_pe()
-            sem = Tx.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
+            sem = Semaphore(cnt=WORLD_SIZE, buffer=semaphore)
             with Tx.cta():
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                profiler = Tx.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                    )
+                profiler = CudaProfiler(
+                    profiler_buffer,
+                    write_stride=PROFILER_WRITE_STRIDE,
+                    num_groups=NUM_GROUPS,
                 )
                 profiler.init(0)
                 with Tx.cta()[0:GEMM_SMS]:
@@ -324,15 +324,15 @@ class ReduceScatter:
                     descI = Tx.local_cell("uint32")
                     base_desc_A = Tx.local_cell("uint64")
                     base_desc_B = Tx.local_cell("uint64")
-                    tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
-                    mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
+                    tma2mma_pipe = TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True)
+                    mma2ld_pipe = MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False)
                     mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                     tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                     ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                     tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                     m_clusters = Tx.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
                     n_clusters = Tx.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = Tx.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
+                    gemm_tile_scheduler = RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE)
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
                     with Tx.warp()[0:1]:
@@ -488,10 +488,8 @@ class ReduceScatter:
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             with Tx.cta():
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                load_pipe = Tx.meta_var(
-                    ReducePipe(
-                        buf.data, 0, RS_LOAD_PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=False
-                    )
+                load_pipe = ReducePipe(
+                    buf.data, 0, RS_LOAD_PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=False
                 )
                 input_smem = Tx.decl_buffer(
                     (RS_LOAD_PIPE_DEPTH, BLK_M_RS, BLK_N_RS),

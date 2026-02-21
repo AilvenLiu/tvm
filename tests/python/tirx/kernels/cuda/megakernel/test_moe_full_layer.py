@@ -550,7 +550,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
                         self.task_impl_gemm_o_proj(
                             batch_size,
-                            o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer,
+                            o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM),
                             o_proj_weight_global,
                             partial_o_global if self.world_size > 1 else residual_global,
                             is_dynamic_sch

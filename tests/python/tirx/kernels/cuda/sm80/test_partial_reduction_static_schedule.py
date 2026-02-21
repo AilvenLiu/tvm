@@ -80,6 +80,7 @@ def test_partial_reduction():
         REDUCE = 1
 
 
+    @Tx.meta_class
     class StaticTileScheduler:
         def __init__(self, tasks_indptr: Tx.Buffer, task_types: Tx.Buffer, task_indices: Tx.Buffer):
            self.linear_idx = int_var("linear_idx")
@@ -110,6 +111,7 @@ def test_partial_reduction():
         def valid(self):
             return self.linear_idx[0] < self.linear_lim[0]
 
+    @Tx.meta_class
     class Semaphore:
         def __init__(self, cnt, buffer):
             self.cnt = cnt
@@ -183,13 +185,13 @@ def test_partial_reduction():
         with Tx.kernel():
             bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
             tx = Tx.thread_id([1024], parent="cta")
-            sem = Tx.meta_var(Semaphore(NUM_BLOCK_N, sem_ptr))
+            sem = Semaphore(NUM_BLOCK_N, sem_ptr)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem_1 = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 B_smem_2 = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                tile_scheduler = Tx.meta_var(StaticTileScheduler(tasks_indptr_ptr, task_types_ptr, task_indices_ptr))
+                tile_scheduler = StaticTileScheduler(tasks_indptr_ptr, task_types_ptr, task_indices_ptr)
                 tile_scheduler.init(bx)
                 while tile_scheduler.valid():
                     if tile_scheduler.task_type[0] == TaskType.PARTIAL.value:

@@ -163,14 +163,14 @@ def tir_kernel(M: int, N: int, K: int):
             lane_id = Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 # alloc shared memory
-                pool = Tx.meta_var(Tx.PoolAllocator())
+                pool = Tx.PoolAllocator()
                 tmem_addr = pool.alloc([1], "uint32", align=4)
                 # Pipeline mbarriers
-                tma2trans = Tx.meta_var(TMABar(pool, SMEM_PIPE_DEPTH, "tma2trans"))
-                trans2mma = Tx.meta_var(MBarrier(pool, SMEM_PIPE_DEPTH, "trans2mma"))
-                mma2tma = Tx.meta_var(TCGen05Bar(pool, SMEM_PIPE_DEPTH, "mma2tma"))
-                mma2ld = Tx.meta_var(TCGen05Bar(pool, TMEM_PIPE_DEPTH, "mma2ld"))
-                ld2mma = Tx.meta_var(MBarrier(pool, TMEM_PIPE_DEPTH, "ld2mma"))
+                tma2trans = TMABar(pool, SMEM_PIPE_DEPTH, "tma2trans")
+                trans2mma = MBarrier(pool, SMEM_PIPE_DEPTH, "trans2mma")
+                mma2tma = TCGen05Bar(pool, SMEM_PIPE_DEPTH, "mma2tma")
+                mma2ld = TCGen05Bar(pool, TMEM_PIPE_DEPTH, "mma2ld")
+                ld2mma = MBarrier(pool, TMEM_PIPE_DEPTH, "ld2mma")
                 pool.move_base_to(1024)
                 A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
                 B_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
@@ -192,7 +192,7 @@ def tir_kernel(M: int, N: int, K: int):
                 descSFB = Tx.local_cell("uint64")
                 descI = Tx.local_cell("uint32")
 
-                tile_scheduler = Tx.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, l2_group_size=TILE_GROUPS_ROW_SIZE, num_clusters=SM_NUMBER // 2))
+                tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, l2_group_size=TILE_GROUPS_ROW_SIZE, num_clusters=SM_NUMBER // 2)
 
                 # initialize barriers
                 tma2trans.init(1)
@@ -221,7 +221,7 @@ def tir_kernel(M: int, N: int, K: int):
                     with Tx.warpgroup()[wg_id == 1]:
                         Tx.attr({"tirx.scope_partition": True})
                         with Tx.warp(parent="warpgroup")[warp_id == 3]:
-                            tma_state = Tx.meta_var(PipelineState("tma", SMEM_PIPE_DEPTH))
+                            tma_state = PipelineState("tma", SMEM_PIPE_DEPTH)
                             tma_state.init(is_producer=True)
                             while tile_scheduler.valid():
                                 m_idx = Tx.meta_var(tile_scheduler.m_idx)
@@ -252,7 +252,7 @@ def tir_kernel(M: int, N: int, K: int):
 
                         with Tx.warp(parent="warpgroup")[warp_id == 2]:
                             # transpose
-                            trans_state = Tx.meta_var(PipelineState("trans", SMEM_PIPE_DEPTH))
+                            trans_state = PipelineState("trans", SMEM_PIPE_DEPTH)
                             trans_state.init(is_producer=False)
                             while tile_scheduler.valid():
                                 m_idx = Tx.meta_var(tile_scheduler.m_idx)
@@ -280,7 +280,7 @@ def tir_kernel(M: int, N: int, K: int):
                                 tmem_idx = Tx.local_cell("int32", "tmem_idx")
                                 tmem_phase = Tx.local_cell("int32", "tmem_phase")
                                 Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
-                                mma_state = Tx.meta_var(PipelineState("mma", SMEM_PIPE_DEPTH))
+                                mma_state = PipelineState("mma", SMEM_PIPE_DEPTH)
                                 mma_state.init(is_producer=False)
                                 accum = Tx.local_cell("int32")
                                 while tile_scheduler.valid():

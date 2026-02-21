@@ -16,13 +16,14 @@
 # under the License.
 """Reusable pipeline state and mbarrier helpers for SM100 kernels.
 
-These classes emit TIR via @Tx.macro. Construct them with Tx.meta_var(...)
-inside a PrimFunc and call their macros.
+These classes emit TIR via @Tx.macro. Decorate with @Tx.meta_class so that
+instances are automatically treated as meta values inside @Tx.prim_func.
 """
 
 from tvm.script import tirx as Tx
 
 
+@Tx.meta_class
 class PipelineState:
     """Tracks pipeline stage and phase for software-pipelined loops.
 
@@ -58,12 +59,13 @@ class PipelineState:
             self.phase = self.phase ^ 1
 
 
+@Tx.meta_class
 class MBarrier:
     """Mbarrier wrapper with regular mbarrier.arrive.
 
     Parameters
     ----------
-    pool : PoolAllocator (meta_var)
+    pool : PoolAllocator
         Shared memory pool allocator.
     depth : int
         Number of barrier slots (one per pipeline stage).
@@ -72,7 +74,7 @@ class MBarrier:
     """
 
     def __init__(self, pool, depth, name="mbar"):
-        self.buf = pool.alloc((depth,), "uint64", align=8).buffer
+        self.buf = pool.alloc((depth,), "uint64", align=8)
         self.depth = depth
 
     @Tx.macro

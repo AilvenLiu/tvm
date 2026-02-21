@@ -50,7 +50,7 @@ def get_rmsnorm_kernel(hidden_size):
             thread_id = Tx.meta_var(ty * bdx + tx)
 
             with Tx.cta():
-                pool = Tx.meta_var(Tx.PoolAllocator())
+                pool = Tx.PoolAllocator()
                 x_smem = pool.alloc([hidden_size], "float32")
                 sum_sq_smem = pool.alloc([bdy], "float32")
                 pool.commit()

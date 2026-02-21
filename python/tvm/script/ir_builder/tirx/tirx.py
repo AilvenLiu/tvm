@@ -26,7 +26,7 @@ from tvm.tirx.expr import FloatImm
 from tvm.tirx.predicate import Predicate
 
 from . import _ffi_api, frame
-from .ir import alloc_buffer, attr, decl_buffer
+from .ir import alloc_buffer, attr, decl_buffer, meta_class
 
 
 def _to_region(buffer: Union[BufferRegion, Buffer]):
@@ -1163,6 +1163,7 @@ def select(
 _POOL_UNSET = object()
 
 
+@meta_class
 class PoolAllocator:
     """Bump allocator over a contiguous shared memory region.
 
@@ -1178,14 +1179,7 @@ class PoolAllocator:
 
     def __init__(self, ptr=_POOL_UNSET):
         if ptr is _POOL_UNSET:
-            buf_or_frame = alloc_buffer([0], "uint8", scope="shared.dyn")
-            if isinstance(buf_or_frame, frame.AllocBufferFrame):
-                from functools import partial
-
-                buf_or_frame.add_callback(partial(buf_or_frame.__exit__, None, None, None))
-                buf = buf_or_frame.__enter__()
-            else:
-                buf = buf_or_frame
+            buf = alloc_buffer([0], "uint8", scope="shared.dyn")
             self.ptr = buf.data
             self._owns_buffer = True
         else:
@@ -1205,7 +1199,7 @@ class PoolAllocator:
         axis_separators=None,
         layout="default",
         name=None,
-    ) -> Union[frame.DeclBufferFrame, Buffer]:
+    ) -> Buffer:
         if align > 0:
             self.offset = (self.offset + align - 1) // align * align
         res = decl_buffer(

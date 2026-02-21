@@ -1161,6 +1161,7 @@ class _Rewriter(PyExprMutator):
             )
 
     def _build_persistent_kernel(self, buffer_replace_map: Dict[relax.Call, Dict[Buffer, Buffer]], var_replace_map: Dict[Var, Var]):
+        @T.meta_class
         class PersistentVars:
             def __init__(self, persistent_var_infos: Dict[str, PersistentVarInfo], smem_manager: SmemManager):
                 nonlocal buffer_replace_map
@@ -1255,7 +1256,7 @@ class _Rewriter(PyExprMutator):
 
             def handle_f_init(alloc_evt_info: AllocEventInfo, idx):
                 event = alloc_evt_info.event_tensor
-                etensor_buf_1d = self.event_buffers[event].view(-1).buffer
+                etensor_buf_1d = self.event_buffers[event].view(-1)
                 shape = [T.int32(s) for s in event.struct_info.shape.values]
                 st_idx = convert_1d_index_to_nd(idx[0], shape)
                 var_replace_map = {}
@@ -1401,9 +1402,9 @@ class _Rewriter(PyExprMutator):
                 lane_id = T.thread_id([32], parent="warp")
                 smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
                 replace_dyn_shared_mem_buffer(smem_buffer)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, smem_manager))
-                persistent_vars = T.meta_var(PersistentVars(self.persistent_var_infos, smem_manager))
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data)
+                tile_scheduler = set_tile_scheduler(queue, tasks, head, tail, smem_manager)
+                persistent_vars = PersistentVars(self.persistent_var_infos, smem_manager)
                 profiler = T.meta_var(set_profiler(profiler_buf))
                 init_profiler(warp_id, profiler)
                 persistent_vars.init()

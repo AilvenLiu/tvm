@@ -680,6 +680,7 @@ def test_grid():
 
 def test_alloc_apis():
     # fmt: off
+    @Tx.meta_class
     class Test:
         def __init__(self, Ta, inner_pool):
             self.Ta = Ta
@@ -718,7 +719,7 @@ def test_alloc_apis():
             with Tx.thread():
                 Ta = Tx.local_cell("float16")
                 inner_pool = Tx.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")
-                test = Tx.meta_var(Test(Ta, inner_pool))
+                test = Test(Ta, inner_pool)
                 test.init()
                 A[0] = C
                 A[0] = C + D

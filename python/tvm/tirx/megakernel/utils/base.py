@@ -30,6 +30,7 @@ from .config import KernelConfig, ProfileEventType
 from .utils import any_sync, f_init_const
 
 
+@Tx.meta_class
 class Tile:
     """Abstract base class for megakernel tiles."""
     need_init = True
@@ -66,6 +67,7 @@ class Tile:
         raise NotImplementedError("prefetch is not implemented")
 
 
+@Tx.meta_class
 class Barriers:
     """Mbarrier wrapper class"""
     def __init__(self, smem_manager, pipe_depth, is_p2c, persistent=True):
@@ -93,6 +95,7 @@ class Barriers:
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
 
+@Tx.meta_class
 class SmemManager:
     """Shared memory manager"""
     def __init__(self, smem_max_bytes, chunk_size, ptr: Var, fusion_mode=False):
@@ -368,6 +371,7 @@ class SmemManager:
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
 
 
+@Tx.meta_class
 class SemaphoreBase:
     """Abstract base class for semaphore."""
     base = 1 << 16
@@ -382,6 +386,7 @@ class SemaphoreBase:
         raise NotImplementedError
 
 
+@Tx.meta_class
 class TileSchedulerBase:
     """Abstract base class for tile schedulers."""
     MAX_TASKS = 128
@@ -450,7 +455,7 @@ class InitETensorTile(Tile):
                         Tx.evaluate(0)
                     else:
                         nelem = functools.reduce(lambda x, y: x * y, etensor.shape, 1)
-                        etensor_1d = etensor.view(-1).buffer
+                        etensor_1d = etensor.view(-1)
                         with Tx.While(idx[0] < nelem):
                             with Tx.vectorized(self.VEC_SIZE) as v:
                                 Tx.buffer_store(etensor_1d, f_init(*self.convert_1d_index_to_nd(idx[0] + v, etensor.shape)) * (SemaphoreBase.base + 1), idx[0] + v)
