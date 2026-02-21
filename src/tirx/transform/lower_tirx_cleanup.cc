@@ -131,7 +131,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       if (target_->kind->name == "trn" && !buf->layout.defined()) {
         return buf;
       }
-      return GetFlattenedBuffer(buf);
+      return GetFlattenedBuffer(buf, /*is_alloc=*/true);
     };
     auto buffer = mutate(op->buffer);
     auto body = VisitStmt(op->body);
@@ -155,7 +155,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     return StmtExprMutator::VisitStmt_(decl_buffer.get());
   }
 
-  Buffer GetFlattenedBuffer(Buffer buf) {
+  Buffer GetFlattenedBuffer(Buffer buf, bool is_alloc = false) {
     auto it = buffer_remap_.find(buf);
     if (it != buffer_remap_.end()) {
       return it->second;
@@ -176,6 +176,36 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       writer->shape = new_shape;
       writer->strides = {};
       writer->axis_separators = {};
+    } else if (is_alloc) {
+      if (auto tile_layout = buf->layout.as<TileLayoutNode>();
+          tile_layout && tile_layout->HasThreadAxis()) {
+        // Logical alloc_buffer with thread axes: physical shape = memory-axis span
+        arith::Analyzer ana;
+        PrimExpr mem_span = make_const(DataType::Int(32), 1);
+        for (const auto& iter : tile_layout->shard) {
+          if (iter->axis->IsMemoryAxis()) {
+            mem_span = mem_span + (iter->extent - 1) * iter->stride;
+          }
+        }
+        for (const auto& iter : tile_layout->replica) {
+          if (iter->axis->IsMemoryAxis()) {
+            mem_span = mem_span + (iter->extent - 1) * iter->stride;
+          }
+        }
+        for (const auto& [axis, off] : tile_layout->offset) {
+          if (axis->IsMemoryAxis()) {
+            mem_span = mem_span + off;
+          }
+        }
+        flattened = buf;
+        writer = flattened.CopyOnWrite();
+        writer->shape = {ana.Simplify(mem_span)};
+        writer->strides = {};
+        writer->axis_separators = {};
+      } else {
+        flattened = buf.GetFlattenedBuffer();
+        writer = flattened.CopyOnWrite();
+      }
     } else {
       flattened = buf.GetFlattenedBuffer();
       writer = flattened.CopyOnWrite();
@@ -262,6 +292,12 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
           }
         }
         return res;
+      }
+      if (auto tile = buffer->layout.value().as<TileLayoutNode>();
+          tile && tile->HasThreadAxis()) {
+        LOG(FATAL) << "Cannot lower direct BufferLoad/BufferStore on a buffer with thread-axis "
+                    << "layout: unable to verify that the coordinate matches the current thread. "
+                    << "Use .view() + .storage() to decompose thread and memory axes.";
       }
       auto res = buffer->layout.value()->Canonicalize()->Apply(indices, buffer->shape);
       ICHECK_EQ(res.size(), 1) << "Expected a single element offset";

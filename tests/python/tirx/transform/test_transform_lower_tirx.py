@@ -20,7 +20,7 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.tir.layout import laneid, warpid
+from tvm.tir.layout import laneid, warpid, tid_in_wg
 from tvm.script import tirx as Tx
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRx
@@ -1188,6 +1188,54 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
                 G = Tx.alloc_local((1,), "int32", layout=None)
                 G = 4
                 G = G[0] + 4
+    # fmt: on
+
+    compare(before, after, LowerTIRx)
+
+
+def test_alloc_buffer_with_thread_axis_layout():
+    """alloc_buffer with thread-axis layout should lower to 1D physical buffer with memory-axis span."""
+    # fmt: off
+    @Tx.prim_func(private=True, tirx=True)
+    def before(out: Tx.Buffer((128, 4), "float32")) -> None:
+        with Tx.kernel():
+            bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
+            wg_id = Tx.warpgroup_id([1], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            lane_id = Tx.thread_id([32], parent="warp")
+
+            with Tx.warpgroup():
+                with Tx.thread():
+                    # Single-step alloc with thread-axis layout
+                    reg_wg = Tx.alloc_buffer((128, 4), "float32", scope="local",
+                                              layout=Tx.TileLayout(shard=([128, 4], [1 @ tid_in_wg, 1])))
+                    # Access via .storage() to decompose thread and memory axes
+                    reg = reg_wg.storage(4)
+                    for i in Tx.serial(4):
+                        reg[i] = out[lane_id + warp_id * 32, i]
+
+    @Tx.prim_func(private=True, tirx=True)
+    def after(out_handle: Tx.handle):
+        out = Tx.match_buffer(out_handle, (128, 4), layout=None)
+        out_1 = Tx.decl_buffer((512,), data=out.data, layout=None)
+        blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
+        threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
+        blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
+        warp_id_in_cta: Tx.int32 = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        bx: Tx.int32 = blockIdx_x
+        by: Tx.int32 = blockIdx_y
+        bz: Tx.int32 = blockIdx_z
+        wg_id: Tx.int32 = warp_id_in_cta // 4
+        warp_id: Tx.int32 = warp_id_in_cta % 4
+        lane_id: Tx.int32 = threadIdx_x % 32
+        with Tx.kernel():
+            with Tx.warpgroup():
+                with Tx.thread():
+                    reg_wg = Tx.alloc_local((4,), layout=None)
+                    reg = Tx.decl_buffer((4,), data=reg_wg.data, scope="local", layout=None)
+                    for i in range(4):
+                        reg[i] = out_1[warp_id_in_cta % 4 * 128 + threadIdx_x % 32 * 4 + i]
     # fmt: on
 
     compare(before, after, LowerTIRx)
