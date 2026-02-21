@@ -29,7 +29,7 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol
+from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 
 
 class TaskType(Enum):
@@ -628,20 +628,15 @@ class Semaphore:
 def test_hgemm_rs():
     A_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(
-            shard=(
-                (PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K),
-                (NUM_CONSUMER * BLK_M * BLK_K, BLK_M * BLK_K, BLK_K, 1),
-            )
-        ),
+        Tx.TileLayout(Tx.S[(PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K) : (NUM_CONSUMER * BLK_M * BLK_K, BLK_M * BLK_K, BLK_K, 1)]),
     )
     B_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(shard=((PIPELINE_DEPTH, BLK_N, BLK_K), (BLK_N * BLK_K, BLK_K, 1))),
+        Tx.TileLayout(Tx.S[(PIPELINE_DEPTH, BLK_N, BLK_K) : (BLK_N * BLK_K, BLK_K, 1)]),
     )
     D_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
+        Tx.TileLayout(Tx.S[(NUM_CONSUMER, BLK_M, EPI_TILE) : (BLK_M * EPI_TILE, EPI_TILE, 1)]),
     )
 
     # fmt: off
@@ -678,7 +673,7 @@ def test_hgemm_rs():
 
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                 reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 descA = Tx.local_cell("uint64")
                 descB = Tx.local_cell("uint64")
@@ -730,7 +725,7 @@ def test_hgemm_rs():
                 Tx.cuda.cta_sync()
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [1@TCol, 1@TLane])))
+                                     layout=TileLayout(S[(128, N_COLS) : (1@TCol, 1@TLane)]))
                 Tx.ptx.fence.proxy("shared")
                 Tx.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)

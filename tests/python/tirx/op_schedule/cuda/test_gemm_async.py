@@ -30,7 +30,7 @@ import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg, S
 from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout
 from tvm.tirx.op_schedule.cuda.gemm_async import sf_tmem_layout
 
@@ -186,7 +186,7 @@ def test_gemm_tcgen05_cta_group_1(task):
             with Tx.warp()[0:1]:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
             Tx.cuda.cta_sync()
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
 
             with Tx.thread()[0:1]:
                 tma_args = Tx.meta_var({"dispatch": "tma", "mbar": tma_mbar.ptr_to([0])})
@@ -204,7 +204,7 @@ def test_gemm_tcgen05_cta_group_1(task):
             
             Tx.ptx.tcgen05.fence.after_thread_sync()
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[*r_tmem_C])
             Tx.cuda.cta_sync()
@@ -315,7 +315,7 @@ def test_gemm_tcgen05_cta_group_2(task):
 
             with Tx.warp()[0:1]:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=2)
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [(1, "TLane"), (1, "TCol")])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
             Tx.ptx.fence.mbarrier_init()
             Tx.ptx.fence.proxy("shared")
             Tx.cuda.cta_sync()
@@ -340,7 +340,7 @@ def test_gemm_tcgen05_cta_group_2(task):
             Tx.cuda.cta_sync()
 
             C_reg = Tx.alloc_local(width , dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[C_region[0][0]:C_region[0][1], C_region[1][0]:C_region[1][0] + width])
             Tx.cuda.cta_sync()
@@ -444,7 +444,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
 
     F32_BYTES = 4
     F128_BYTES = 16
-    SF_smem_layout = TileLayout(([4, 32], [32, 1]))
+    SF_smem_layout = TileLayout(S[(4, 32) : (32, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -480,7 +480,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
             Tx.cuda.cta_sync()
 
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
             sfa_tmem = Tx.decl_buffer((M, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFA_TMEM_START, layout=sfa_layout)
             sfb_tmem = Tx.decl_buffer((N, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFB_TMEM_START, layout=sfb_layout)
 
@@ -521,7 +521,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
             # Copy result from tmem to global
             Tx.ptx.tcgen05.fence.after_thread_sync()
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[*r_tmem_C])
             Tx.cuda.cta_sync()
@@ -634,7 +634,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
     F32_BYTES = 4
     F128_BYTES = 16
-    SF_smem_layout = TileLayout(([4, 32], [32, 1]))
+    SF_smem_layout = TileLayout(S[(4, 32) : (32, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -670,7 +670,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
             with Tx.warp()[0:1]:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=2)
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [(1, "TLane"), (1, "TCol")])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
 
             sfa_tmem = Tx.decl_buffer((128, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFA_TMEM_START, layout=sf_layout)
             sfb_tmem = Tx.decl_buffer((128, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFB_TMEM_START, layout=sf_layout)
@@ -723,7 +723,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
             # Copy result from tmem to global
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[C_region[0][0]:C_region[0][1], C_region[1][0]:C_region[1][0] + width])
             Tx.cuda.cta_sync()
@@ -825,7 +825,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
 
     F32_BYTES = 4
     F128_BYTES = 16
-    SF_smem_layout = TileLayout(([4, 32], [32, 1]))
+    SF_smem_layout = TileLayout(S[(4, 32) : (32, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -864,7 +864,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
             Tx.cuda.cta_sync()
 
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
             sfa_tmem = Tx.decl_buffer((M, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFA_TMEM_START, layout=sfa_layout)
             sfb_tmem = Tx.decl_buffer((N, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFB_TMEM_START, layout=sfb_layout)
 
@@ -905,7 +905,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
             # Copy result from tmem to global
             Tx.ptx.tcgen05.fence.after_thread_sync()
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[0:128, 0:N])
             Tx.cuda.cta_sync()
@@ -1003,7 +1003,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
     F32_BYTES = 4
     F128_BYTES = 16
-    SF_smem_layout = TileLayout(([4, 32], [32, 1]))
+    SF_smem_layout = TileLayout(S[(4, 32) : (32, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -1042,7 +1042,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
             with Tx.warp()[0:1]:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=2)
-            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [(1, "TLane"), (1, "TCol")])))
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
 
             sfa_tmem = Tx.decl_buffer((M_per_cta, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFA_TMEM_START, layout=sfa_layout)
             sfb_tmem = Tx.decl_buffer((N_total, sf_mma_k), SF_dtype, scope="tmem", allocated_addr=SFB_TMEM_START, layout=sfb_layout)
@@ -1095,7 +1095,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
             # Copy result from tmem to global
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[0:128, 0:width])
             Tx.cuda.cta_sync()
@@ -1205,7 +1205,7 @@ def test_gemm_block_scaled_fp8_sf_id():
 
     F32_BYTES = 4
     F128_BYTES = 16
-    SF_smem_layout = TileLayout(([4, 32], [32, 1]))
+    SF_smem_layout = TileLayout(S[(4, 32) : (32, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -1241,7 +1241,7 @@ def test_gemm_block_scaled_fp8_sf_id():
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
             Tx.cuda.cta_sync()
 
-            tmem = Tx.decl_buffer(C_shape, C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(([128, C_shape[1]], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer(C_shape, C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))
             sfa_tmem = Tx.decl_buffer((M, sf_mma_k * num_ki), SF_dtype, scope="tmem", allocated_addr=SFA_TMEM_START, layout=sfa_layout)
             sfb_tmem = Tx.decl_buffer((N, sf_mma_k * num_ki), SF_dtype, scope="tmem", allocated_addr=SFB_TMEM_START, layout=sfb_layout)
 
@@ -1287,7 +1287,7 @@ def test_gemm_block_scaled_fp8_sf_id():
             # Copy result from tmem to global
             Tx.ptx.tcgen05.fence.after_thread_sync()
             C_reg = Tx.alloc_local(N, dtype=C_dtype)
-            C_view = C_reg.view(128, N, layout=TileLayout(([128, N], [1@axis_tid_in_wg, 1])))
+            C_view = C_reg.view(128, N, layout=TileLayout(S[(128, N) : (1@axis_tid_in_wg, 1)]))
             with Tx.warpgroup()[0:1]:
                 Tx.copy(C_view[:, :], tmem[0:128, 0:N])
             Tx.cuda.cta_sync()

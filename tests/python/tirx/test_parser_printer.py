@@ -110,15 +110,15 @@ def test_roundtrip_exec_scope():
 def test_roundtrip_layout():
     def get_layout1():
         return Tx.TileLayout(
-            shard=([8, 8, 8, 4, 2], [6, 4 @ laneid, 2, 1 @ laneid, 1]),
+            Tx.S[(8, 8, 8, 4, 2) : (6, 4@laneid, 2, 1@laneid, 1)],
         )
 
     def get_layout2():
-        return Tx.TileLayout(shard=([8, 8, 8, 4, 2], [64, 4 @ laneid, 8, 2, 1]))
+        return Tx.TileLayout(Tx.S[(8, 8, 8, 4, 2) : (64, 4@laneid, 8, 2, 1)])
 
     def get_layout3():
         return Tx.TileLayout(
-            shard=([8, 16, 8, 16], [1024, 16, 128, 1]),
+            Tx.S[(8, 16, 8, 16) : (1024, 16, 128, 1)],
         )
 
     def get_layout4():
@@ -127,7 +127,7 @@ def test_roundtrip_layout():
     def get_layout5():
         return Tx.ComposeLayout(
             Tx.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
-            Tx.TileLayout(shard=([64, 64, 4], [64, 1, 64 * 64])),
+            Tx.TileLayout(Tx.S[(64, 64, 4) : (64, 1, 64 * 64)]),
         )
 
     # fmt: off
@@ -179,7 +179,7 @@ def test_print_kwargs_schedule_op_full_code():
     assert_structural_equal(test, from_source(code))
 
 
-L_LANE = Tx.TileLayout(shard=([32], [1 @ laneid]))
+L_LANE = Tx.TileLayout(Tx.S[32 : 1@laneid])
 
 
 def test_roundtrip_buffer_view_get1():
@@ -189,7 +189,7 @@ def test_roundtrip_buffer_view_get1():
         with Tx.kernel():
             with Tx.cta():
                 A = Tx.alloc_buffer([2], dtype="float16", scope="local")
-                A_layout = Tx.TileLayout(shard=([1, 2], [2, 1]))
+                A_layout = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
                 A_warp_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 A_warp = A.view(8, 8, layout=A_warp_layout)
 
@@ -217,7 +217,7 @@ def test_roundtrip_buffer_view_get2():
 
             with Tx.cta():
                 A = Tx.alloc_buffer([2,], dtype="float16", scope="local")
-                A_layout = Tx.TileLayout(shard=([1, 2], [2, 1]))
+                A_layout = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
                 B_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 B = A.view(8, 8, layout=B_layout)
                 D = B.storage(2)
@@ -542,7 +542,7 @@ def test_roundtrip_implicit_buffer_region():
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test(A_ptr: Tx.handle):
-        A = Tx.match_buffer(A_ptr, (10, 10, 10), "float32", layout=Tx.TileLayout((10, 10, 10)))
+        A = Tx.match_buffer(A_ptr, (10, 10, 10), "float32", layout=Tx.TileLayout(Tx.S[10, 10, 10]))
         with Tx.kernel():
             Tx.memset(A[0], Tx.float32(0.0))
 
@@ -867,7 +867,7 @@ def test_buffer():
         A: Tx.Buffer((10, 11), "float32", layout=None),
         B: Tx.Buffer((10, 11), "float32", scope="global"),
         C: Tx.Buffer((10, 11), "float32", layout="default"),
-        D: Tx.Buffer((10, 11), "float32", layout=Tx.TileLayout(([10, 11], [1, 10]))),
+        D: Tx.Buffer((10, 11), "float32", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)])),
         E_ptr: Tx.handle,
         F_ptr: Tx.handle,
         G_ptr: Tx.handle,
@@ -876,18 +876,18 @@ def test_buffer():
         E = Tx.match_buffer(E_ptr, [10, 11], "float16", layout=None)
         F = Tx.match_buffer(F_ptr, [10, 11], "float16", scope="global")
         G = Tx.match_buffer(G_ptr, [10, 11], "float16", layout="default")
-        H = Tx.match_buffer(H_ptr, [10, 11], "float16", layout=Tx.TileLayout(([10, 11], [1, 10])))
+        H = Tx.match_buffer(H_ptr, [10, 11], "float16", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
 
         A0 = Tx.decl_buffer((10, 11), "float32", data=A.data, layout=None)
         B0 = Tx.decl_buffer((10, 11), "float32", data=B.data, scope="global")
         C0 = Tx.decl_buffer((10, 11), "float32", data=C.data, layout="default")
-        D0 = Tx.decl_buffer((10, 11), "float32", data=D.data, layout=Tx.TileLayout(([10, 11], [1, 10])))
+        D0 = Tx.decl_buffer((10, 11), "float32", data=D.data, layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
 
         with Tx.kernel():
             A1 = Tx.alloc_buffer((10, 11), "float32", layout=None)
             B1 = Tx.alloc_buffer((10, 11), "float32", scope="global")
             C1 = Tx.alloc_buffer((10, 11), "float32", layout="default")
-            D1 = Tx.alloc_buffer((10, 11), "float32", layout=Tx.TileLayout(([10, 11], [1, 10])))
+            D1 = Tx.alloc_buffer((10, 11), "float32", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
 
             pass
     # fmt: on

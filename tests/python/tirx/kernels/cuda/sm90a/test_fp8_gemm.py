@@ -110,9 +110,9 @@ def test_fp8_gemm_hopper_no_ws():
 
     @Tx.prim_func(tirx=True)
     def manual(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout((M, K)))
-        B = Tx.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout((N, K)))
-        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout((M, N)))
+        A = Tx.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[M, K]))
+        B = Tx.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))
+        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
         A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
         B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)

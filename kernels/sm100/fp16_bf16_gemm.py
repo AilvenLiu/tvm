@@ -24,7 +24,7 @@ from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
 from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
 
@@ -144,7 +144,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             tmem_addr_local = Tx.local_cell("uint32")
             tmem_addr_local = tmem_addr[0]
 
-            tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, 512], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]))
 
             tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=M // MMA_M // NUM_CONSUMER, num_n_tiles=N // MMA_N, l2_group_size=8, num_clusters=SM_COUNT // CTA_GROUP)
             tile_scheduler.init(bx // CTA_GROUP)
@@ -225,7 +225,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     for no in Tx.unroll(MMA_N // TMEM_LD_N):
                         Dreg = Tx.alloc_local((TMEM_LD_N,), acc_type)
                         with Tx.warpgroup():
-                            Dreg_wg = Dreg.view(128, TMEM_LD_N, layout=TileLayout(([128, TMEM_LD_N], [1@axis_tid_in_wg, 1])))
+                            Dreg_wg = Dreg.view(128, TMEM_LD_N, layout=TileLayout(S[(128, TMEM_LD_N) : (1@axis_tid_in_wg, 1)]))
                             n_tmem_ld_st = Tx.meta_var(wg_id * MMA_N + no * TMEM_LD_N)
                             Tx.copy(Dreg_wg[:, :], tmem[:, n_tmem_ld_st : n_tmem_ld_st + TMEM_LD_N])
                         with Tx.thread():

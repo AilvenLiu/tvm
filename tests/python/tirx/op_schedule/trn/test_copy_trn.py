@@ -22,16 +22,16 @@ import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, P, F
+from tvm.tir.layout import TileLayout, P, F, S
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
 def test_simple_copy():
     src_shape = [128, 512]
-    src_layout = Tx.TileLayout(([128, 512], [512, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(128, 512) : (512, 1)])
     dst_shape = [128, 512]
-    dst_layout = TileLayout(shard=([128, 512], [1@P, 1@F]))
+    dst_layout = TileLayout(S[(128, 512) : (1@P, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -61,10 +61,10 @@ def test_simple_copy():
 
 def test_simple_copy_2():
     src_shape = [128, 512]
-    src_layout = TileLayout(([128, 4, 128], [512, 128, 1]))
+    src_layout = TileLayout(S[(128, 4, 128) : (512, 128, 1)])
 
     dst_shape = [128, 512]
-    dst_layout = TileLayout(shard=([128, 4, 128], [4@F, 1@F, 1@P]))
+    dst_layout = TileLayout(S[(128, 4, 128) : (4@F, 1@F, 1@P)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -94,9 +94,9 @@ def test_simple_copy_2():
 
 def test_copy_in_a_loop():
     src_shape = [512, 512]
-    src_layout = Tx.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(4, 128, 512) : (512 * 128, 512, 1)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([4, 128, 512], [512@F, 1@P, 1@F]))
+    dst_layout = TileLayout(S[(4, 128, 512) : (512@F, 1@P, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -129,9 +129,9 @@ def test_copy_in_a_loop():
 
 def test_copy_in_a_loop_2():
     src_shape = [512, 512]
-    src_layout = Tx.TileLayout(([128, 2048], [2048, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(128, 2048) : (2048, 1)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([128, 2048], [1@P, 1@F]))
+    dst_layout = TileLayout(S[(128, 2048) : (1@P, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -172,9 +172,9 @@ def test_copy_in_a_loop_2():
 
 def test_copy_transpose():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([128, 2048], [1@P, 1@F]))
+    src_layout = TileLayout(S[(128, 2048) : (1@P, 1@F)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([2048, 128], [1@F, 1@P]))
+    dst_layout = TileLayout(S[(2048, 128) : (1@F, 1@P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -219,9 +219,9 @@ def test_copy_transpose():
 
 def test_copy_transpose_2():
     src_shape = [65536]
-    src_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     dst_shape = [4, 65536]
-    dst_layout = TileLayout(shard=([4, 128, 128, 4], [(4, "F"), (16, "F"), (1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(4, 128, 128, 4) : (4 @ F, 16 @ F, 1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def copy() -> None:
@@ -266,13 +266,9 @@ def test_copy_transpose_2():
 
 def test_copy_different_f():
     src_shape = [512, 64]
-    src_layout = TileLayout(
-        shard=([4, 128, 4, 4, 4], [64@F, 1@P, 16@F, 4@F, 1@F])
-    )
+    src_layout = TileLayout(S[(4, 128, 4, 4, 4) : (64@F, 1@P, 16@F, 4@F, 1@F)])
     dst_shape = [512, 64]
-    dst_layout = TileLayout(
-        shard=([4, 128, 4, 4, 4], [64@F, 1@P, 4@F, 16@F, 1@F])
-    )
+    dst_layout = TileLayout(S[(4, 128, 4, 4, 4) : (64@F, 1@P, 4@F, 16@F, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy() -> None:
@@ -307,11 +303,9 @@ def test_copy_different_f():
 
 def test_copy_different_shape():
     src_shape = [512, 64]
-    src_layout = TileLayout(
-        shard=([4, 128, 4, 4, 4], [64@F, 1@P, 16@F, 4@F, 1@F])
-    )
+    src_layout = TileLayout(S[(4, 128, 4, 4, 4) : (64@F, 1@P, 16@F, 4@F, 1@F)])
     dst_shape = [4, 128, 4]
-    dst_layout = TileLayout(shard=([4, 128, 4], [4@F, 1@P, 1@F]))
+    dst_layout = TileLayout(S[(4, 128, 4) : (4@F, 1@P, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy() -> None:
@@ -345,9 +339,9 @@ def test_copy_different_shape():
 
 def test_copy_irregular_shape():
     src_shape = [128, 10000]
-    src_layout = TileLayout(shard=([128, 10000], [10000, 1]))
+    src_layout = TileLayout(S[(128, 10000) : (10000, 1)])
     dst_shape = [128, 512]
-    dst_layout = TileLayout(shard=([128, 512], [1@P, 1@F]))
+    dst_layout = TileLayout(S[(128, 512) : (1@P, 1@F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -382,9 +376,9 @@ def test_copy_irregular_shape():
 
 def test_copy_different_shape_dim():
     src_shape = [32, 128, 512]
-    src_layout = TileLayout(shard=([32, 128, 512], [128 * 512, 128, 1]))
+    src_layout = TileLayout(S[(32, 128, 512) : (128 * 512, 128, 1)])
     dst_shape = [128, 512]
-    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -415,9 +409,9 @@ def test_copy_different_shape_dim():
 
 def test_copy_with_offset():
     src_shape = [256, 512]
-    src_layout = TileLayout(shard=([256, 512], [512, 1]))
+    src_layout = TileLayout(S[(256, 512) : (512, 1)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -455,9 +449,9 @@ def test_copy_with_offset():
 
 def test_large_dma_copy():
     src_shape = [512, 4096]
-    src_layout = Tx.TileLayout(([4, 128, 4096], [4096 * 128, 4096, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(4, 128, 4096) : (4096 * 128, 4096, 1)])
     dst_shape = [512, 4096]
-    dst_layout = TileLayout(shard=([4, 128, 4096], [(4096, "F"), (1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(4, 128, 4096) : (4096 @ F, 1 @ P, 1 @ F)])
 
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -495,7 +489,7 @@ def test_large_dma_copy():
 
 def test_copy_with_inst_size_limit():
     src_shape = [512, 4096]
-    src_layout = dst_layout = TileLayout(shard=([4, 128, 4096], [(4096, "F"), (1, "P"), (1, "F")]))
+    src_layout = dst_layout = TileLayout(S[(4, 128, 4096) : (4096 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
 
@@ -530,11 +524,9 @@ def test_copy_with_inst_size_limit():
 
 def test_copy_with_complex_index():
     A_shape = [4096, 4096]
-    A_layout = Tx.TileLayout(([4096, 4096], [1, 4096]))
+    A_layout = Tx.TileLayout(Tx.S[(4096, 4096) : (1, 4096)])
     A_sbuf_shape = (2, 2048, 1024)
-    A_sbuf_layout = TileLayout(
-        shard=([2, 2048, 8, 128], [(16384, "F"), (1, "F"), (2048, "F"), (1, "P")])
-    )
+    A_sbuf_layout = TileLayout(S[(2, 2048, 8, 128) : (16384 @ F, 1 @ F, 2048 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -565,9 +557,9 @@ def test_copy_with_complex_index():
 
 def test_copy_with_complex_index_2():
     A_sbuf_shape = [4096, 4096]
-    A_sbuf_layout = Tx.TileLayout(shard=([4096, 32, 128], [(1, "F"), (4096, "F"), (1, "P")]))
+    A_sbuf_layout = Tx.TileLayout(Tx.S[(4096, 32, 128) : (1 @ F, 4096 @ F, 1 @ P)])
     A_shape = (2, 2048, 1024)
-    A_layout = Tx.TileLayout(([2, 2048, 1024], [2048 * 1024, 1, 2048]))
+    A_layout = Tx.TileLayout(Tx.S[(2, 2048, 1024) : (2048 * 1024, 1, 2048)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -599,9 +591,9 @@ def test_copy_with_complex_index_2():
 
 def test_copy_transpose_with_workspace():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(128, 2048) : (1 @ P, 1 @ F)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([2048, 128], [(1, "F"), (1, "P")]))
+    dst_layout = TileLayout(S[(2048, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -649,9 +641,9 @@ def test_copy_transpose_with_workspace():
 
 def test_copy_with_guard():
     src_shape = [512, 512]
-    src_layout = Tx.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(4, 128, 512) : (512 * 128, 512, 1)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -686,9 +678,9 @@ def test_copy_with_guard():
 
 def test_copy_with_guard_2():
     src_shape = [512, 512]
-    src_layout = Tx.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
+    src_layout = Tx.TileLayout(Tx.S[(4, 128, 512) : (512 * 128, 512, 1)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -723,9 +715,9 @@ def test_copy_with_guard_2():
 
 def test_copy_transpose_with_guard():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(shard=([2048, 128], [(1, "F"), (1, "P")]))
+    dst_layout = TileLayout(S[(2048, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)

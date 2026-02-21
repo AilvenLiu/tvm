@@ -167,14 +167,14 @@ def test_tcgen05_cp_ld_roundtrip():
     N_COLS = 512
     REPEAT_NUM = 1
     SWIZZLE = 0
-    A_layout = Tx.TileLayout(shard=([HEIGHT, WIDTH // 4, 4], [4, HEIGHT * 4, 1]))
+    A_layout = Tx.TileLayout(Tx.S[(HEIGHT, WIDTH // 4, 4) : (4, HEIGHT * 4, 1)])
     ldo, sdo = 128, 8
     cta_group = 1
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def test_cp_ld(A: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(shard=([HEIGHT, WIDTH // 4, 4], [4, HEIGHT * 4, 1]))),
-                   B: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(shard=([HEIGHT, WIDTH // 4, 4], [4, HEIGHT * 4, 1])))):
+    def test_cp_ld(A: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(Tx.S[(HEIGHT, WIDTH // 4, 4) : (4, HEIGHT * 4, 1)])),
+                   B: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(Tx.S[(HEIGHT, WIDTH // 4, 4) : (4, HEIGHT * 4, 1)]))):
         with Tx.kernel():
             bx = Tx.cta_id([1], parent="kernel")
             warp_id = Tx.warp_id([4], parent="cta")
@@ -256,37 +256,37 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
     cta_group = 1
 
     if SWIZZLE == 0:
-        A_layout = Tx.TileLayout(shard=([M, K // 8, 8], [8, M * 8, 1]))
-        B_layout = Tx.TileLayout(shard=([N, K // 8, 8], [8, N * 8, 1]))
+        A_layout = Tx.TileLayout(Tx.S[(M, K // 8, 8) : (8, M * 8, 1)])
+        B_layout = Tx.TileLayout(Tx.S[(N, K // 8, 8) : (8, N * 8, 1)])
         ldo, sdo = 128, 8
     elif SWIZZLE == 1:
         A_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 1, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([M, K // 16, 16], [16, M * 16, 1])),
+            Tx.TileLayout(Tx.S[(M, K // 16, 16) : (16, M * 16, 1)]),
         )
         B_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 1, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([N, K // 16, 16], [16, N * 16, 1])),
+            Tx.TileLayout(Tx.S[(N, K // 16, 16) : (16, N * 16, 1)]),
         )
         ldo, sdo = 256, 16
     elif SWIZZLE == 2:
         A_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([M, K // 32, 32], [32, M * 32, 1])),
+            Tx.TileLayout(Tx.S[(M, K // 32, 32) : (32, M * 32, 1)]),
         )
         B_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([N, K // 32, 32], [32, N * 32, 1])),
+            Tx.TileLayout(Tx.S[(N, K // 32, 32) : (32, N * 32, 1)]),
         )
         ldo, sdo = 512, 32
     elif SWIZZLE == 3:
         A_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([M, 1, 64], [64, M * 64, 1])),
+            Tx.TileLayout(Tx.S[(M, 1, 64) : (64, M * 64, 1)]),
         )
         B_layout = Tx.ComposeLayout(
             Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            Tx.TileLayout(shard=([N, 1, 64], [64, N * 64, 1])),
+            Tx.TileLayout(Tx.S[(N, 1, 64) : (64, N * 64, 1)]),
         )
         ldo, sdo = 1, 64
     else:
@@ -296,8 +296,8 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def test_mma_ss_no_tma(A: Tx.Buffer((M, K), a_type, layout=Tx.TileLayout((M, K))),
-                           B: Tx.Buffer((N, K), b_type, layout=Tx.TileLayout((N, K))),
+    def test_mma_ss_no_tma(A: Tx.Buffer((M, K), a_type, layout=Tx.TileLayout(Tx.S[M, K])),
+                           B: Tx.Buffer((N, K), b_type, layout=Tx.TileLayout(Tx.S[N, K])),
                            C: Tx.Buffer((M, N), d_type)):
         with Tx.kernel():
             bx = Tx.cta_id([1], parent="kernel")

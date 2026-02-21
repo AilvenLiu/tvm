@@ -2,7 +2,7 @@ from typing import Literal
 
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
 from tvm.tirx.bench.utils import CudaProfiler
 
@@ -96,7 +96,7 @@ class GemmTile(Tile):
             a_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K)
         )
         self.B_layout = tma_shared_layout(b_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K))
-        self.D_layout = Tx.TileLayout(shard=((self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N), (self.EPI_TILE * self.MMA_N, self.MMA_N, 1)))
+        self.D_layout = Tx.TileLayout(Tx.S[(self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N) : (self.EPI_TILE * self.MMA_N, self.MMA_N, 1)])
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
@@ -152,7 +152,7 @@ class GemmTile(Tile):
         # alloc local memory
         GemmTile.tile_idx = Tx.local_cell("int32", "tile_idx")
         GemmTile.phase = Tx.alloc_buffer((1,), "int32", scope="local", name="phase")
-        GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, 512], [1@TLane, 1@TCol])), name="tmem")
+        GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
 
     @classmethod
     @Tx.macro
@@ -234,7 +234,7 @@ class GemmTile(Tile):
                 # tmem -> rf (ld) -> smem
                 for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                     with Tx.warpgroup():
-                        reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(([128, self.TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
+                        reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(S[(128, self.TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
                         col_st = Tx.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
                         Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                     with Tx.thread():

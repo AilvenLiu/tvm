@@ -22,7 +22,7 @@ from tvm.arith import Analyzer
 import tvm
 from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, PrimFunc
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
+from tvm.tir.layout import S, TileLayout, TLane, TCol, tid_in_wg
 from tvm.tir.stmt import OpCall
 from tvm.runtime import DataType
 from tvm.tirx.op_schedule import (
@@ -267,9 +267,9 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     tmem_st, tmem_extent = get_st_extent(tmem_region)
     local_st, local_extent = get_st_extent(local_region)
     # tmem layout (128, WIDTH):(1@TLane, 1@TCol)
-    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [1@TLane, 1@TCol])).canonicalize()
+    tmem_layout = TileLayout(S[(128, tmem_buf.shape[1]) : (1 @ TLane, 1 @ TCol)]).canonicalize()
     # local layout
-    local_layout = TileLayout(([128, width], [1@tid_in_wg, 1])).canonicalize()
+    local_layout = TileLayout(S[(128, width) : (1 @ tid_in_wg, 1)]).canonicalize()
 
     # tmem allocated addr is not None
     assert tmem_buf.allocated_addr is not None
@@ -297,7 +297,7 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
         with Tx.warp():
-            local_storage = local_buf.view(local_buf.shape[1] * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
+            local_storage = local_buf.view(local_buf.shape[1] * elem_per_32b, layout=TileLayout(S[num * elem_per_32b]))
             local_32b = local_storage.view("uint32")
             op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[local_st[1] // elem_per_32b+i] for i in range(num)])
             if not async_op:

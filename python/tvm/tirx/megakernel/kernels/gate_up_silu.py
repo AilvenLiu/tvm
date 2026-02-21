@@ -1,6 +1,6 @@
 from tvm.script import tirx as Tx
 
-from tvm.tir.layout import TileLayout, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, S, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
 
 from .gemm import GemmTile
@@ -38,10 +38,7 @@ class GateUpSiluTile(GemmTile):
             method="exclusive",
         )
         self.D_layout = Tx.TileLayout(
-            shard=(
-                (GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2),
-                (GemmTile.EPI_TILE * GemmTile.MMA_N // 2, GemmTile.MMA_N // 2, 1)
-            )
+            Tx.S[(GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2) : (GemmTile.EPI_TILE * GemmTile.MMA_N // 2, GemmTile.MMA_N // 2, 1)]
         )
         self.output_smem = smem_manager.alloc(
             (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N // 2),
@@ -98,7 +95,7 @@ class GateUpSiluTile(GemmTile):
                 # tmem -> rf (ld) -> smem
                 for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                     with Tx.warpgroup():
-                        reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(([128, self.TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
+                        reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(S[(128, self.TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
                         col_st = Tx.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
                         Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                     if self.profiler_on:

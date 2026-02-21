@@ -20,8 +20,8 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import laneid, tid_in_wg, tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import laneid, tid_in_wg, tx, warpid
+from tvm.tir.layout import TileLayout, S
 
 from tvm.tirx.op_schedule.cuda.cast import _cast_layout_supported_for_local
 
@@ -55,7 +55,7 @@ from tvm.tirx.op_schedule.cuda.cast import _cast_layout_supported_for_local
 def test_unary_op_shared(input, op_type, dtype):
     g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout(g_shape)
+    g_layout = s_layout = TileLayout(S[g_shape])
 
     copy_slice = list(slice(None) for _ in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))
@@ -155,7 +155,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
     g_shape, st_a, st_b, st_res, ext_a, ext_b, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout(g_shape)
+    g_layout = s_layout = TileLayout(S[g_shape])
 
     copy_slice = list(slice(None) for i in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))
@@ -311,7 +311,7 @@ def test_unary_op_local(input, op_type, dtype):
     # get shape info
     NUM_COL = 128
     g_shape_a = g_shape_b = (16 * N_WARPS, NUM_COL)
-    g_layout_a = g_layout_b = TileLayout(g_shape_a)
+    g_layout_a = g_layout_b = TileLayout(S[g_shape_a])
     acc_shape = red_shape = (16, NUM_COL)
 
     @Tx.prim_func(tirx=True)
@@ -327,10 +327,10 @@ def test_unary_op_local(input, op_type, dtype):
 
             with Tx.thread():
                 # acc layout
-                atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+                atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-                tile = Tx.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
+                tile = Tx.TileLayout(Tx.S[(2, NUM_COL // 8) : (1, 2)])
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 acc = Tx.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -434,7 +434,7 @@ def test_binary_op_local(input, op_type, dtype):
     # get shape info
     NUM_COL = 128
     g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
-    g_layout_a, g_layout_b = TileLayout(g_shape_a), TileLayout(g_shape_b)
+    g_layout_a, g_layout_b = TileLayout(S[g_shape_a]), TileLayout(S[g_shape_b])
     A_shape, B_shape = (16, NUM_COL), (16, 4)
     const = Tx.float16(3.0) if dtype == "float16" else Tx.float32(3.0)
 
@@ -452,10 +452,10 @@ def test_binary_op_local(input, op_type, dtype):
 
             with Tx.thread():
                 # A layout
-                atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+                atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-                tile = Tx.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
+                tile = Tx.TileLayout(Tx.S[(2, NUM_COL // 8) : (1, 2)])
                 A_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 A_buffer = Tx.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -465,9 +465,9 @@ def test_binary_op_local(input, op_type, dtype):
                 )
 
                 # B layout
-                B_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
+                B_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
                 B_warp_atom = B_atom.tile(warp_layout, (8, 4), (1, 1))
-                B_tile = Tx.TileLayout(shard=([2, 1], [1, 1]))
+                B_tile = Tx.TileLayout(Tx.S[(2, 1) : (1, 1)])
                 B_layout = B_warp_atom.tile(B_tile, (2, 1), (8, 4))
                 B_buffer = Tx.alloc_buffer(
                     [2,],
@@ -550,16 +550,16 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test_cast(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, shape, A_dtype, layout=TileLayout(shape))
-        B = Tx.match_buffer(B_ptr, shape, B_dtype, layout=TileLayout(shape))
+        A = Tx.match_buffer(A_ptr, shape, A_dtype, layout=TileLayout(S[shape]))
+        B = Tx.match_buffer(B_ptr, shape, B_dtype, layout=TileLayout(S[shape]))
 
         with Tx.kernel():
             bx = Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
-                A_local = Tx.alloc_local(shape, dtype=A_dtype, layout=TileLayout(shape))
-                B_local = Tx.alloc_local(shape, dtype=B_dtype, layout=TileLayout(shape))
+                A_local = Tx.alloc_local(shape, dtype=A_dtype, layout=TileLayout(S[shape]))
+                B_local = Tx.alloc_local(shape, dtype=B_dtype, layout=TileLayout(S[shape]))
                 Tx.copy(A_local, A)
                 Tx.cast(B_local, A_local)
                 Tx.copy(B, B_local)
@@ -579,7 +579,7 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
     """Tx.cast in warpgroup scope with offset (tid_in_wg + layout offset). Covers offset/tid_in_wg/warpgroup scope."""
     N_THREADS, LOCAL_LEN = 128, 8
     g_shape = (N_THREADS, LOCAL_LEN)
-    g_layout = TileLayout(g_shape)
+    g_layout = TileLayout(S[g_shape])
     use_offset = True
     if use_offset:
         from tvm.tir.layout import Iter, Axis
@@ -587,7 +587,7 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
         shard = [Iter(N_THREADS, 1, tid_in_wg), Iter(LOCAL_LEN, 1, m_axis)]
         cast_layout = TileLayout.from_iters(shard, [], {m_axis: 0})
     else:
-        cast_layout = TileLayout(([N_THREADS, LOCAL_LEN], [1 @ tid_in_wg, 1]))
+        cast_layout = TileLayout(S[(N_THREADS, LOCAL_LEN) : (1 @ tid_in_wg, 1)])
 
     dev = tvm.cuda(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
@@ -636,8 +636,8 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
     """Tx.cast with view+layout in CTA scope (128 threads, register->register)."""
     N_THREADS, LOCAL_LEN = 128, 8
     g_shape = (N_THREADS, LOCAL_LEN)
-    g_layout = TileLayout(g_shape)
-    cast_layout = TileLayout(([N_THREADS, LOCAL_LEN], [1 @ tx, 1]))
+    g_layout = TileLayout(S[g_shape])
+    cast_layout = TileLayout(S[(N_THREADS, LOCAL_LEN) : (1 @ tx, 1)])
 
     dev = tvm.cuda(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
@@ -690,18 +690,18 @@ def test_cast_layout_partition_and_validation():
     # (layout, expected_supported, optional check: part -> None or assert)
     cases = [
         # Supported: single tx, tid_in_wg, thread in middle (from_iters), mixed warpid+laneid
-        (TileLayout(([128, 8], [1 @ tx, 1])), True,
+        (TileLayout(S[(128, 8) : (1 @ tx, 1)]), True,
          lambda p: p[0].get(tx) == ([0], [128]) and p[1] == [1] and p[2] == [8]),
-        (TileLayout(([128, 8], [1 @ tid_in_wg, 1])), True,
+        (TileLayout(S[(128, 8) : (1 @ tid_in_wg, 1)]), True,
          lambda p: p[0].get(tid_in_wg) == ([0], [128])),
         (TileLayout.from_iters(
             [Iter(4, 16, "m"), Iter(8, 2, tx), Iter(2, 1, "m")], [], {}), True,
          lambda p: p[0].get(tx) == ([1], [8]) and p[1] == [0, 2]),
-        (TileLayout(([2, 8, 4, 2], [2 @ warpid, 4 @ laneid, 1 @ laneid, 1])), True,
+        (TileLayout(S[(2, 8, 4, 2) : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)]), True,
          lambda p: warpid in p[0] and laneid in p[0] and p[1] == [3] and p[2] == [2]),
         # Rejected: no thread, no local, thread in replica
-        (TileLayout(([64, 8], [1, 1])), False, None),
-        (TileLayout(([8, 8], [1 @ tx, 1 @ laneid])), False, None),
+        (TileLayout(S[(64, 8) : (1, 1)]), False, None),
+        (TileLayout(S[(8, 8) : (1 @ tx, 1 @ laneid)]), False, None),
         (TileLayout.from_iters(
             [Iter(128, 1, tx), Iter(8, 1, m_axis)], [Iter(2, 1, laneid)], {}), False, None),
     ]
@@ -723,8 +723,8 @@ def test_cast_mixed_axes_and_subregion():
     LOCAL_LEN = 4
     SLICE_START, SLICE_END = 0, 2
     full_shape = (8, N_WARPS, 4, LOCAL_LEN)
-    g_layout = TileLayout(full_shape)
-    cast_layout = TileLayout((full_shape, [4 @ laneid, 2 @ warpid, 1 @ laneid, 1]))
+    g_layout = TileLayout(S[full_shape])
+    cast_layout = TileLayout(S[full_shape : (4 @ laneid, 2 @ warpid, 1 @ laneid, 1)])
 
     A_ref = np.zeros(full_shape, dtype="float32")
     for j in range(full_shape[0]):
@@ -785,7 +785,7 @@ def test_cast_joint_decomposition_extents_order():
     from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
     from tvm.tir.layout import warpid
 
-    layout = TileLayout(([2, 32, 4], [2 @ warpid, 32 @ laneid, 1]))
+    layout = TileLayout(S[(2, 32, 4) : (2 @ warpid, 32 @ laneid, 1)])
     part = _get_layout_thread_local_partition(layout)
     assert part is not None
     thread_groups, local_dims, local_extents = part
@@ -812,9 +812,9 @@ def test_cast_validate_extent_mismatch_rejected():
     from tvm.tir.layout import warpid
 
     view_shape = (2, 8, 4, 8)
-    g_layout = TileLayout(view_shape)
-    src_layout = TileLayout((view_shape, [2 @ warpid, 4 @ laneid, 1 @ laneid, 1]))
-    dst_layout = TileLayout((view_shape, [2 @ warpid, 8 @ laneid, 1 @ laneid, 1]))  # dim1 extent 8 != 4
+    g_layout = TileLayout(S[view_shape])
+    src_layout = TileLayout(S[view_shape : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)])
+    dst_layout = TileLayout(S[view_shape : (2 @ warpid, 8 @ laneid, 1 @ laneid, 1)])  # dim1 extent 8 != 4
 
     @Tx.prim_func(tirx=True)
     def kernel(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:

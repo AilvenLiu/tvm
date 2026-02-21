@@ -406,8 +406,8 @@ def test_fp16_fused_attn():
     @Tx.prim_func(tirx=True)
     def manual(Q_ptr: Tx.handle, K_ptr: Tx.handle, V_ptr: Tx.handle, b_indices_ptr: Tx.handle, h_indices_ptr: Tx.handle,
                q_indices_ptr: Tx.handle, tiles_indptr_ptr: Tx.handle, O_ptr: Tx.handle, profiler_buffer_ptr: Tx.handle) -> None:
-        qo_layout = Tx.meta_var(Tx.TileLayout(QO_SHAPE))
-        kv_layout = Tx.meta_var(Tx.TileLayout(KV_SHAPE))
+        qo_layout = Tx.meta_var(Tx.TileLayout(Tx.S[QO_SHAPE]))
+        kv_layout = Tx.meta_var(Tx.TileLayout(Tx.S[KV_SHAPE]))
         Q = Tx.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
         K = Tx.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
         V = Tx.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)

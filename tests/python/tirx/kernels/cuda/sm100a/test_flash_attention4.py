@@ -9,7 +9,7 @@ from enum import Enum
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirx.tile_scheduler import FlashAttentionLinearScheduler, FlashAttentionLPTScheduler
 
@@ -287,9 +287,9 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 func_name, self.desc, offset, source_code=source_code, return_type="uint64"
             )
 
-    Q_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((SMEM_PIPE_DEPTH_Q, BLK_M, NUM_BLK_K, BLK_K), (BLK_M * HEAD_DIM, BLK_K, BLK_M * BLK_K, 1))))
-    K_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((SMEM_PIPE_DEPTH_KV, BLK_N, NUM_BLK_K, BLK_K), (BLK_N * HEAD_DIM, BLK_K, BLK_N * BLK_K, 1))))
-    O_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE), (BLK_M * HEAD_DIM, EPI_TILE, BLK_M * EPI_TILE, 1))))
+    Q_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH_Q, BLK_M, NUM_BLK_K, BLK_K) : (BLK_M * HEAD_DIM, BLK_K, BLK_M * BLK_K, 1)]))
+    K_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH_KV, BLK_N, NUM_BLK_K, BLK_K) : (BLK_N * HEAD_DIM, BLK_K, BLK_N * BLK_K, 1)]))
+    O_layout = Tx.ComposeLayout(Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True), Tx.TileLayout(Tx.S[(TMEM_PIPE_DEPTH, BLK_M, NUM_EPI_TILE, EPI_TILE) : (BLK_M * HEAD_DIM, EPI_TILE, BLK_M * EPI_TILE, 1)]))
 
     @Tx.prim_func(tirx=True)
     def flash_attention4(
@@ -381,8 +381,8 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                     Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr[0]), n_cols=N_COLS_TMEM, cta_group=CTA_GROUP)
                     Tx.cuda.trap_when_assert_failed(tmem_addr[0] == Tx.uint32(0))
 
-                tmem = Tx.decl_buffer((128, N_COLS_TMEM), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM], [(1, "TLane"), (1, "TCol")])))
-                tmem_as_f16 = Tx.decl_buffer((128, N_COLS_TMEM * 2), "float16", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS_TMEM * 2], [(1, "TLane"), (1, "TCol")])))
+                tmem = Tx.decl_buffer((128, N_COLS_TMEM), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS_TMEM) : (1 @ TLane, 1 @ TCol)]))
+                tmem_as_f16 = Tx.decl_buffer((128, N_COLS_TMEM * 2), "float16", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS_TMEM * 2) : (1 @ TLane, 1 @ TCol)]))
 
                 # Create appropriate scheduler based on causal mode
                 scheduler = (
@@ -811,11 +811,11 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                 @Tx.macro
                                 def softmax_step(i_kv, apply_mask=False, is_first=False):
                                     s_chunk_buf = Tx.alloc_local([BLK_N], "float32")
-                                    s_chunk = s_chunk_buf.view(128, BLK_N, layout=TileLayout(([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])))
+                                    s_chunk = s_chunk_buf.view(128, BLK_N, layout=TileLayout(S[(128, BLK_N) : (1 @ axis_tid_in_wg, 1)]))
 
                                     p_chunk_buf_f32 = Tx.alloc_local([BLK_N // 2], "float32")
                                     p_chunk_buf = Tx.decl_buffer((BLK_N,), dtype="float16", data=p_chunk_buf_f32.data)
-                                    p_chunk = p_chunk_buf.view(128, BLK_N, layout=TileLayout(([128, BLK_N], [(1, "tid_in_wg"), (1, "m")])))
+                                    p_chunk = p_chunk_buf.view(128, BLK_N, layout=TileLayout(S[(128, BLK_N) : (1 @ axis_tid_in_wg, 1)]))
 
                                     tmem_col_s = Tx.meta_var(tmem_s_base + wg_id * tmem_offset)
                                     tmem_col_p = Tx.meta_var(tmem_p_base + wg_id * tmem_offset)
@@ -980,7 +980,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 RESCALE_TILE = 16
 
                                                 o_row_buf = Tx.alloc_buffer((16,), "float32", scope="local")
-                                                o_row_wg = o_row_buf.view(128, 16, layout=TileLayout(([128, 16], [(1, "tid_in_wg"), (1, "m")])))
+                                                o_row_wg = o_row_buf.view(128, 16, layout=TileLayout(S[(128, 16) : (1 @ axis_tid_in_wg, 1)]))
 
                                                 for d_tile in Tx.unroll(ceildiv(HEAD_DIM, RESCALE_TILE)):
                                                     d_start = d_tile * RESCALE_TILE
@@ -1015,7 +1015,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     norm_scale = Tx.ptx.rcp(Tx.Select(acc_O_mn_row_is_zero_or_nan, Tx.float32(1.0), row_sum))
                                     tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
                                     o_row_f32_buf = Tx.alloc_buffer((TMEM_EPI_LD_SIZE,), "float32", scope="local")
-                                    o_row_f32_wg = o_row_f32_buf.view(128, TMEM_EPI_LD_SIZE, layout=TileLayout(([128, TMEM_EPI_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                                    o_row_f32_wg = o_row_f32_buf.view(128, TMEM_EPI_LD_SIZE, layout=TileLayout(S[(128, TMEM_EPI_LD_SIZE) : (1 @ axis_tid_in_wg, 1)]))
                                     o_row_f16 = Tx.alloc_local([TMEM_EPI_LD_SIZE], "float16")
 
                                     for d_tile in Tx.unroll(ceildiv(HEAD_DIM, TMEM_EPI_LD_SIZE)):

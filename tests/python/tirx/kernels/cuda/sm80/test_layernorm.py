@@ -56,12 +56,12 @@ def test_layernorm(dtype):
     @Tx.prim_func(tirx=True)
     def layernorm(inp_ptr: Tx.handle, inp_resid_ptr: Tx.handle, norm_weight_ptr: Tx.handle, norm_bias_ptr: Tx.handle,
                   out_ptr: Tx.handle, out_resid_ptr: Tx.handle) -> None:
-        inp = Tx.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout((ATTN_B, 1, ATTN_N, ATTN_D)))
-        out = Tx.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout((ATTN_B, 1, ATTN_N, ATTN_D)))
-        inp_resid = Tx.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout((ATTN_B, 1, ATTN_N, ATTN_D)))
-        out_resid = Tx.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout((ATTN_B, 1, ATTN_N, ATTN_D)))
-        norm_weight = Tx.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout((ATTN_D,))) # gamma
-        norm_bias = Tx.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout((ATTN_D,))) # beta
+        inp = Tx.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
+        out = Tx.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
+        inp_resid = Tx.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
+        out_resid = Tx.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
+        norm_weight = Tx.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # gamma
+        norm_bias = Tx.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # beta
 
         with Tx.kernel():
             bx, by = Tx.cta_id([Tx.ceildiv(ATTN_N, N_PER_TILE), ATTN_B], parent="kernel")
@@ -70,12 +70,12 @@ def test_layernorm(dtype):
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
-                x_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
-                resid_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
-                norm_weight_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout((ATTN_D,)))
-                norm_bias_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout((ATTN_D,)))
-                mean = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout((NUM_WORKERS, 1, 1)), align=8)
-                var = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout((NUM_WORKERS, 1, 1)), align=8)
+                x_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))
+                resid_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))
+                norm_weight_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))
+                norm_bias_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))
+                mean = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)
+                var = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)
 
                 Tx.copy(norm_bias_smem[:], norm_bias[:])
                 Tx.copy(norm_weight_smem[:], norm_weight[:])

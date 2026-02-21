@@ -423,38 +423,34 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
   ffi::Array<ffi::String> keys;
   ffi::Array<ExprDoc> values;
 
-  // print shard, replica, and offset
-  if (layout->shard.size() > 0) {
-    ffi::Array<ExprDoc> shard_e_docs, shard_sa_docs;
-    for (const auto& iter : layout->shard) {
-      shard_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
-      shard_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
-                                        d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
+  // Emit via from_iters([Iter(e, s, "ax"), ...], ...)
+  auto iter_list = [&](const ffi::Array<tir::Iter>& iters) -> ExprDoc {
+    ffi::Array<ExprDoc> docs;
+    for (const auto& iter : iters) {
+      docs.push_back(d->AsDoc<ExprDoc>(iter, p));
     }
+    return ListDoc(docs);
+  };
+
+  if (layout->shard.size() > 0) {
     keys.push_back("shard");
-    values.push_back(TupleDoc({ListDoc(shard_e_docs), ListDoc(shard_sa_docs)}));
+    values.push_back(iter_list(layout->shard));
   }
   if (layout->replica.size() > 0) {
-    ffi::Array<ExprDoc> replicate_e_docs, replicate_sa_docs;
-    for (const auto& iter : layout->replica) {
-      replicate_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
-      replicate_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
-                                            d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
-    }
     keys.push_back("replica");
-    values.push_back(TupleDoc({ListDoc(replicate_e_docs), ListDoc(replicate_sa_docs)}));
+    values.push_back(iter_list(layout->replica));
   }
   if (layout->offset.size() > 0) {
-    ffi::Array<ExprDoc> exclude_docs;
+    ffi::Array<ExprDoc> offset_keys, offset_values;
     for (const auto& [axis, off] : layout->offset) {
-      exclude_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(axis->name, p->Attr("axis")),
-                                       d->AsDoc<ExprDoc>(off, p->Attr("offset"))}));
+      offset_keys.push_back(LiteralDoc::Str(axis->name, p->Attr("axis")));
+      offset_values.push_back(d->AsDoc<ExprDoc>(off, p->Attr("offset")));
     }
     keys.push_back("offset");
-    values.push_back(ListDoc(exclude_docs));
+    values.push_back(DictDoc(offset_keys, offset_values));
   }
 
-  return TIRx(d, "TileLayout")->Call({}, keys, values);
+  return TIRx(d, "TileLayout")->Attr("from_iters")->Call({}, keys, values);
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //

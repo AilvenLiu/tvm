@@ -36,7 +36,7 @@ from .common import (
     validate_copy_op,
     single_thread,
 )
-from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout, TLayout
+from tvm.tir.layout import S, TileLayout, SwizzleLayout, ComposeLayout, TLayout
 
 
 class SwizzleMode(Enum):
@@ -86,7 +86,7 @@ def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape) 
     if isinstance(swizzle_mode, int):
         swizzle_mode = SwizzleMode(swizzle_mode)
     if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-        return TileLayout(shape).canonicalize()
+        return TileLayout(S[tuple(shape)]).canonicalize()
     atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
     layout = tma_atom_layout(dtype, swizzle_mode)
     tile_to_shape = copy.copy(atom_shape)
@@ -290,7 +290,7 @@ def to_tile_layout(layout: TLayout, shape: List[int]) -> TileLayout:
     if isinstance(layout, ComposeLayout):
         return layout.tile_layout
     elif isinstance(layout, SwizzleLayout):
-        return TileLayout(shard=(list(shape), TLayout._get_default_strides(list(shape))))
+        return TileLayout(S[tuple(shape)])
     else:
         return layout
 

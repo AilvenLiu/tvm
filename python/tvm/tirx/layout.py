@@ -20,13 +20,11 @@ import functools
 import operator
 import re
 from typing import (
-    TYPE_CHECKING,
-    ClassVar,
     Dict,
     List,
     Optional,
+    Sequence,
     Tuple,
-    TypeAlias,
     Union,
 )
 
@@ -270,7 +268,7 @@ class TLayout(Object):
 
         tile_shape = [to_shape[i] // current_shape[i] for i in range(len(to_shape))]
         return self.tile(
-            TileLayout(shard=(tile_shape, TLayout._get_default_strides(tile_shape))),
+            TileLayout(S[tuple(tile_shape)]),
             tile_shape,
             current_shape,
         )
@@ -388,60 +386,9 @@ class TLayout(Object):
 class Axis(Object):
     """Layout axis wrapper."""
 
-    # ------------------------------------------------------------------
-    # Hints for static analysers / editors
-    # ------------------------------------------------------------------
-    if TYPE_CHECKING:
-        # Thread axes
-        pid: ClassVar["Axis"]
-        bx: ClassVar["Axis"]
-        by: ClassVar["Axis"]
-        bz: ClassVar["Axis"]
-        cbx: ClassVar["Axis"]
-        cby: ClassVar["Axis"]
-        cbz: ClassVar["Axis"]
-        tx: ClassVar["Axis"]
-        warpid: ClassVar["Axis"]
-        laneid: ClassVar["Axis"]
-        wgid: ClassVar["Axis"]
-        tid_in_wg: ClassVar["Axis"]
-        wid_in_wg: ClassVar["Axis"]
-        # Memory axes
-        m: ClassVar["Axis"]
-        P: ClassVar["Axis"]
-        F: ClassVar["Axis"]
-        Bank: ClassVar["Axis"]
-        TCol: ClassVar["Axis"]
-        TLane: ClassVar["Axis"]
-
     # ---- forbid direct construction ----
     def __init__(self, *args, **kwargs):  # noqa: D401
         raise RuntimeError("Cannot create Axis directly; use Axis.get()")
-
-    # ---- implementation helpers ----
-    _NAMES = [
-        # Thread axes
-        "pid",
-        "bx",
-        "by",
-        "bz",
-        "cbx",
-        "cby",
-        "cbz",
-        "tx",
-        "warpid",
-        "laneid",
-        "wgid",
-        "tid_in_wg",
-        "wid_in_wg",
-        # Memory axes
-        "m",
-        "P",
-        "F",
-        "Bank",
-        "TCol",
-        "TLane",
-    ]
 
     @staticmethod
     def _register_axis(name: str) -> "Axis":
@@ -478,22 +425,47 @@ class Axis(Object):
 
 
 # ------------------------------------------------------------------
-# 2)  Runtime: actually attach the attributes
+# 2)  Register axis singletons
 # ------------------------------------------------------------------
-Axis.reg_dict = {}
-for _n in Axis._NAMES:  # pylint: disable=protected-access
-    _axis_obj = Axis._register_axis(_n)  # pylint: disable=protected-access
-    setattr(Axis, _n, _axis_obj)
-    Axis.reg_dict[_n] = _axis_obj
-    # Export axis names at module level for `from tvm.tir.layout import laneid` style.
-    globals()[_n] = _axis_obj
+# Explicit assignments so both runtime and static analysers (Pyright) can
+# resolve `Axis.laneid` and `from tvm.tir.layout import laneid`.
 
-# Populate __all__ for axis symbols in addition to classes
+# Thread axes
+Axis.pid = pid = Axis._register_axis("pid")
+Axis.bx = bx = Axis._register_axis("bx")
+Axis.by = by = Axis._register_axis("by")
+Axis.bz = bz = Axis._register_axis("bz")
+Axis.cbx = cbx = Axis._register_axis("cbx")
+Axis.cby = cby = Axis._register_axis("cby")
+Axis.cbz = cbz = Axis._register_axis("cbz")
+Axis.tx = tx = Axis._register_axis("tx")
+Axis.warpid = warpid = Axis._register_axis("warpid")
+Axis.laneid = laneid = Axis._register_axis("laneid")
+Axis.wgid = wgid = Axis._register_axis("wgid")
+Axis.tid_in_wg = tid_in_wg = Axis._register_axis("tid_in_wg")
+Axis.wid_in_wg = wid_in_wg = Axis._register_axis("wid_in_wg")
+# Memory axes
+Axis.m = m = Axis._register_axis("m")
+Axis.P = P = Axis._register_axis("P")
+Axis.F = F = Axis._register_axis("F")
+Axis.Bank = Bank = Axis._register_axis("Bank")
+Axis.TCol = TCol = Axis._register_axis("TCol")
+Axis.TLane = TLane = Axis._register_axis("TLane")
+
+Axis.reg_dict = {
+    "pid": pid, "bx": bx, "by": by, "bz": bz,
+    "cbx": cbx, "cby": cby, "cbz": cbz, "tx": tx,
+    "warpid": warpid, "laneid": laneid, "wgid": wgid,
+    "tid_in_wg": tid_in_wg, "wid_in_wg": wid_in_wg,
+    "m": m, "P": P, "F": F, "Bank": Bank, "TCol": TCol, "TLane": TLane,
+}
+
 try:
     __all__  # type: ignore[name-defined]
 except NameError:  # pragma: no cover
     __all__ = []  # type: ignore[var-annotated]
-__all__ += Axis._NAMES  # pylint: disable=protected-access
+__all__ += list(Axis.reg_dict)
+__all__ += ["S", "R"]
 
 
 # ------------------------------------------------------------------
@@ -555,6 +527,82 @@ class _OffsetExpr:
 _OffsetExprLike = Union[_OffsetExpr, _OnAxis, PrimExpr, int]
 
 
+# ------------------------------------------------------------------
+# Composable layout specs: S[shape:stride] + R[shape:stride] + offset
+# ------------------------------------------------------------------
+class _LayoutSpec:
+    """Composable layout specification built via ``S[shape:stride] + R[shape:stride] + offset``.
+
+    Instances are created by the module-level ``S`` and ``R`` builders and
+    combined with ``+``.  Pass the result directly to :class:`TileLayout`.
+    """
+
+    __slots__ = ("shard", "replica", "offset")
+
+    def __init__(self, shard=None, replica=None, offset=None):
+        self.shard = shard  # (shape_tuple, stride_tuple) or (shape_tuple, None)
+        self.replica = replica  # (shape_tuple, stride_tuple) or None
+        self.offset = offset  # _OffsetExprLike or None
+
+    def __add__(self, other):
+        if isinstance(other, _LayoutSpec):
+            return _LayoutSpec(
+                shard=self.shard or other.shard,
+                replica=other.replica if other.replica else self.replica,
+                offset=self.offset or other.offset,
+            )
+        if isinstance(other, (_OnAxis, _OffsetExpr, int)):
+            return _LayoutSpec(
+                shard=self.shard, replica=self.replica, offset=other
+            )
+        return NotImplemented
+
+    def __radd__(self, other):
+        if isinstance(other, (_OnAxis, _OffsetExpr, int)):
+            return _LayoutSpec(
+                shard=self.shard, replica=self.replica, offset=other
+            )
+        return NotImplemented
+
+
+class _SpecBuilder:
+    """Builder for ``S[shape : stride]`` and ``R[shape : stride]`` syntax.
+
+    - 1-D: ``S[8 : 4@laneid]``
+    - N-D: ``S[(8, 4, 2) : (4@laneid, 1@laneid, 1)]``
+    - Extents only: ``S[8, 4, 2]``
+    """
+
+    __slots__ = ("_kind",)
+
+    def __init__(self, kind: str):
+        self._kind = kind  # "shard" or "replica"
+
+    @staticmethod
+    def _to_tuple(x):
+        if isinstance(x, tuple):
+            return x
+        if isinstance(x, list):
+            return tuple(x)
+        return (x,)
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            pair = (self._to_tuple(key.start), self._to_tuple(key.stop))
+        elif isinstance(key, (tuple, list)):
+            pair = (tuple(key), None)  # extents only
+        else:
+            pair = ((key,), None)  # single extent
+
+        if self._kind == "shard":
+            return _LayoutSpec(shard=pair)
+        return _LayoutSpec(replica=pair)
+
+
+S = _SpecBuilder("shard")
+R = _SpecBuilder("replica")
+
+
 def _to_offset_expr(x: _OffsetExprLike) -> _OffsetExpr:
     if isinstance(x, _OffsetExpr):
         return x
@@ -580,6 +628,27 @@ class Iter(Object):
         )
 
 
+def _spec_to_iters(pair) -> list:
+    """Convert a ``(shape, stride)`` pair from :class:`_LayoutSpec` to ``List[Iter]``."""
+    if pair is None:
+        return []
+    shape, strides = pair
+    if strides is None:
+        strides = TLayout._get_default_strides(shape, 1)
+    result = []
+    for e, s in zip(shape, strides):
+        if isinstance(s, _OnAxis):
+            result.append(Iter(e, s.value, s.axis))
+        elif isinstance(s, str):
+            result.append(Iter(e, 1, s))
+        elif isinstance(s, tuple):
+            result.append(Iter(e, s[0], s[1]))
+        else:
+            result.append(Iter(e, s, "m"))
+    return result
+
+
+
 @tvm_ffi.register_object("tir.TileLayout")
 class TileLayout(TLayout):
     """A memory layout that tiles data across devices."""
@@ -588,72 +657,30 @@ class TileLayout(TLayout):
     replicate: List[Iter]
     exclude: List[Tuple[Axis, PrimExpr]]
 
-    IterList: TypeAlias = Union[
-        Tuple[List[PrimExpr], List[Union[Tuple[PrimExpr, Union[str, Axis]], PrimExpr]]], List[Iter]
-    ]
-
-    def __init__(
-        self,
-        shard: IterList = None,
-        replica: IterList = None,
-        offset: "_OffsetExprLike" = None,
-    ):
-        # New API: accept only replica and offset
-        offset_dict = dict()
-        if offset is not None:
-            off_expr = _to_offset_expr(offset)
-            for ax, val in off_expr.terms.items():
-                offset_dict[ax] = val
-        if (
-            shard is not None
-            and all(isinstance(iter, Iter) for iter in shard)
-            and replica is not None
-            and all(isinstance(iter, Iter) for iter in replica)
-        ):
-            self.__init_handle_by_constructor__(
-                _ffi_api.TileLayout,  # pylint: disable=no-member
-                shard,
-                replica,
-                offset_dict,
-            )
-            return
-        # Handle None values
-        if shard is None or shard == ():
-            shard = ([], [])
-        if replica is None:
-            replica = ([], [])
-
-        if isinstance(shard, (tuple, list)) and not isinstance(shard[0], (tuple, list)):
-            # shard can be just a tuple of extents, infer the default strides
-            shard = (shard, TLayout._get_default_strides(shard, 1))
-        # Convert to Iter objects
-        assert len(shard[0]) == len(shard[1]), "shard's extent and stride must have the same length"
-        assert len(replica[0]) == len(
-            replica[1]
-        ), "replicate's extent and stride must have the same length"
-
-        def process_iter(e, s):
-            if isinstance(s, _OnAxis):
-                return Iter(e, s.value, s.axis)
-            return Iter(e, s[0], s[1]) if isinstance(s, tuple) else Iter(e, s, "m")
-
-        shard = [process_iter(e, s) for e, s in zip(shard[0], shard[1])]
-        replica = [process_iter(e, s) for e, s in zip(replica[0], replica[1])]
-
+    def __init__(self, spec: "_LayoutSpec"):
+        shard_iters = _spec_to_iters(spec.shard)
+        replica_iters = _spec_to_iters(spec.replica)
+        offset_dict = {}
+        if spec.offset is not None:
+            off_expr = _to_offset_expr(spec.offset)
+            offset_dict = dict(off_expr.terms)
         self.__init_handle_by_constructor__(
             _ffi_api.TileLayout,  # pylint: disable=no-member
-            shard,
-            replica,
+            shard_iters,
+            replica_iters,
             offset_dict,
         )
 
     @staticmethod
     def from_iters(
-        shard: IterList = None, replica: IterList = None, offset: Dict[Axis, PrimExpr] = None
+        shard: "Sequence[Iter]" = (),
+        replica: "Sequence[Iter]" = (),
+        offset: Optional[Dict[Union[Axis, str], PrimExpr]] = None,
     ) -> "TileLayout":
-        if offset is None:
-            offset = dict()
-        return _ffi_api.TileLayout(shard, replica, offset)  # pylint: disable=no-member
+        """Construct a TileLayout from pre-built Iter objects."""
+        if offset:
+            offset = {Axis.get(k) if isinstance(k, str) else k: v for k, v in offset.items()}
+        return _ffi_api.TileLayout(shard, replica, offset or {})  # pylint: disable=no-member
 
     def is_trivial(self) -> bool:
         """Check if the layout is trivial."""
@@ -711,12 +738,10 @@ class TileLayout(TLayout):
 
         f_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "F"]
         p_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "P"]
-        f_tile_layout = TileLayout(
-            shard=(f_shape, [(s, "F") for s in TLayout._get_default_strides(f_shape, 1)])
-        )
-        p_tile_layout = TileLayout(
-            shard=(p_shape, [(s, "P") for s in TLayout._get_default_strides(p_shape, 1)])
-        )
+        f_strides = TLayout._get_default_strides(f_shape, 1)
+        p_strides = TLayout._get_default_strides(p_shape, 1)
+        f_tile_layout = TileLayout(S[tuple(f_shape) : tuple(s @ F for s in f_strides)])
+        p_tile_layout = TileLayout(S[tuple(p_shape) : tuple(s @ P for s in p_strides)])
         result = []
         f_index = p_index = 0
 

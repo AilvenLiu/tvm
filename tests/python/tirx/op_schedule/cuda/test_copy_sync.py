@@ -22,7 +22,7 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout, tid_in_wg, TLane, TCol
+from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout, tid_in_wg, TLane, TCol, S
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
@@ -42,9 +42,9 @@ ml_dtypes_dict = {
             (8, 8),  # s_shape
             ((0, 8), (0, 8)),  # g_region
             8,  # thread_cnt
-            TileLayout([16, 16]),  # layoutA
-            TileLayout([16, 16]),  # layoutB
-            TileLayout([8, 8]),  # layoutS
+            TileLayout(S[16, 16]),  # layoutA
+            TileLayout(S[16, 16]),  # layoutB
+            TileLayout(S[8, 8]),  # layoutS
             tvm.cuda(0),
         ),
         # A[0:128, 0:32] -> A_smem[0:128, 0:32] -> B[0:128, 0:32]
@@ -53,9 +53,9 @@ ml_dtypes_dict = {
             (128, 32),  # s_shape
             ((0, 128), (0, 32)),  # g_region
             32,  # thread_cnt
-            TileLayout([128, 32]),  # layoutA
-            TileLayout([128, 32]),  # layoutB
-            TileLayout([128, 32]),  # layoutS
+            TileLayout(S[128, 32]),  # layoutA
+            TileLayout(S[128, 32]),  # layoutB
+            TileLayout(S[128, 32]),  # layoutS
             tvm.cuda(0),
         ),
         # A[32:64, 32:64] -> A_smem[0:32, 0:32] -> B[32:64, 32:64]
@@ -64,9 +64,9 @@ ml_dtypes_dict = {
             (32, 32),  # s_shape
             ((32, 64), (32, 64)),  # g_region
             32,  # thread_cnt
-            TileLayout([64, 64]),  # layoutA
-            TileLayout([64, 64]),  # layoutB
-            TileLayout([32, 32]),  # layoutS
+            TileLayout(S[64, 64]),  # layoutA
+            TileLayout(S[64, 64]),  # layoutB
+            TileLayout(S[32, 32]),  # layoutS
             tvm.cuda(0),
         ),
         # A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32]
@@ -75,9 +75,9 @@ ml_dtypes_dict = {
             (32, 32),  # s_shape
             ((0, 1), (0, 32), (0, 32)),  # g_region
             32,  # thread_cnt
-            TileLayout([4, 32, 32]),  # layoutA
-            TileLayout([4, 32, 32]),  # layoutB
-            TileLayout([32, 32]),  # layoutS
+            TileLayout(S[4, 32, 32]),  # layoutA
+            TileLayout(S[4, 32, 32]),  # layoutB
+            TileLayout(S[32, 32]),  # layoutS
             tvm.cuda(0),
         ),
         ############################################################################### default
@@ -87,9 +87,9 @@ ml_dtypes_dict = {
             (8, 8),  # s_shape
             ((0, 8), (0, 8)),  # g_region
             32,  # thread_cnt
-            TileLayout([16, 16]),  # layoutA
-            TileLayout([16, 16]),  # layoutB
-            TileLayout([8, 64]),  # layoutS
+            TileLayout(S[16, 16]),  # layoutA
+            TileLayout(S[16, 16]),  # layoutB
+            TileLayout(S[8, 64]),  # layoutS
             tvm.cuda(0),
         ),
         # A[32:96, 256:512] -> A_smem[0:32, 0:256] -> B[32:96, 256:512]
@@ -98,9 +98,9 @@ ml_dtypes_dict = {
             (32, 256),  # s_shape
             ((16, 48), (256, 512)),  # g_region
             32,  # thread_cnt
-            TileLayout([96, 512]),  # layoutA
-            TileLayout([96, 512]),  # layoutB
-            ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout([8, 64]))
+            TileLayout(S[96, 512]),  # layoutA
+            TileLayout(S[96, 512]),  # layoutB
+            ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout(S[8, 64]))
             .tile_to((16, 128), (8, 64))
             .tile_to((32, 256), (16, 128)),  # layoutS
             tvm.cuda(0),
@@ -169,9 +169,9 @@ def test_copy_g2s_s2g(task, dtype, scope):
             (8, 8),  # l_shape
             ((3, 4), (8, 16), (8, 16)),  # g_region
             1,  # thread_cnt
-            TileLayout([4, 16, 16]),  # layoutA
-            TileLayout([4, 16, 16]),  # layoutB
-            TileLayout([8, 8]),  # layoutLocal
+            TileLayout(S[4, 16, 16]),  # layoutA
+            TileLayout(S[4, 16, 16]),  # layoutB
+            TileLayout(S[8, 8]),  # layoutLocal
             tvm.cuda(0),
         ),
     ],
@@ -240,8 +240,8 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
     if WIDTH % VEC_LEN != 0:
         pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
 
-    g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
-    local_view = TileLayout(shard=([128, WIDTH], [1@tid_in_wg, 1]))
+    g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
+    local_view = TileLayout(S[(128, WIDTH) : (1 @ tid_in_wg, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -268,7 +268,7 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
                 Tx.tvm_storage_sync("shared")
 
                 tmem = Tx.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, OFFSET + WIDTH], [1@TLane, 1@TCol])))
+                                     layout=TileLayout(S[(128, OFFSET + WIDTH) : (1 @ TLane, 1 @ TCol)]))
 
                 A_reg = Tx.alloc_local((WIDTH), dtype)
                 B_reg = Tx.alloc_local((WIDTH), dtype)
@@ -344,8 +344,8 @@ def test_copy_tmem2reg_sliced_local(dtype, width_32b, local_offset_32b):
     if WIDTH % VEC_LEN != 0 or TOTAL_LOCAL_WIDTH % VEC_LEN != 0:
         pytest.skip(f"dtype {dtype} + width {width_32b} + offset {local_offset_32b} is not supported")
 
-    g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
-    local_view = TileLayout(shard=([128, TOTAL_LOCAL_WIDTH], [1@tid_in_wg, 1]))
+    g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
+    local_view = TileLayout(S[(128, TOTAL_LOCAL_WIDTH) : (1 @ tid_in_wg, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -372,7 +372,7 @@ def test_copy_tmem2reg_sliced_local(dtype, width_32b, local_offset_32b):
                 Tx.tvm_storage_sync("shared")
 
                 tmem = Tx.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, WIDTH], [1@TLane, 1@TCol])))
+                                     layout=TileLayout(S[(128, WIDTH) : (1 @ TLane, 1 @ TCol)]))
 
                 # Allocate larger local buffer, but only use a slice
                 A_reg = Tx.alloc_local((TOTAL_LOCAL_WIDTH), dtype)

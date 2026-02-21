@@ -90,6 +90,7 @@ from tvm.tirx.expr import (
     Var,
 )
 from tvm.tirx.generic import cast
+from tvm.tirx.layout import ComposeLayout, Iter, SwizzleLayout, TileLayout, TLayout, S, R
 
 from .. import IRBuilder
 from . import _ffi_api, frame, utils
@@ -109,7 +110,7 @@ def _get_layout(
     if layout == "default":
         if scope in ["trn.sbuf", "trn.psum"]:
             return None
-        return TileLayout(shape)
+        return TileLayout(S[tuple(shape)])
     shape = tuple(shape)
     if scope == "trn.sbuf":
         layout = TileLayout.trainium(layout, shape)
@@ -832,7 +833,6 @@ def sblock_alloc_buffer(
     if name is not None:
         IRBuilder.name(name, buf)
     return buf
-
 
 def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
     """The range constructor.
@@ -1647,7 +1647,7 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
         align=-1,
         buffer_type="default",
         axis_separators=None,
-        layout=TileLayout((1,)),
+        layout=TileLayout(S[1]),
         allocated_addr=None,
         name=name,
     )
@@ -1670,7 +1670,7 @@ def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None)
         offset_factor=0,
         buffer_type="default",
         axis_separators=None,
-        layout=TileLayout((1,)),
+        layout=TileLayout(S[1]),
         name=name,
     )
     assert isinstance(buf, Buffer)
@@ -3280,9 +3280,12 @@ __all__ += [
     "ScopeIdDef",
     "Var",
     "TLayout",
+    "Iter",
     "TileLayout",
     "SwizzleLayout",
     "ComposeLayout",
+    "S",
+    "R",
     "static_assert",
     "alloc_shared",
     "alloc_local",

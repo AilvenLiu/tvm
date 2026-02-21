@@ -349,8 +349,8 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     # 5. (ROW_RED, ROW_RED, const)
 
     # WGMMA layout check
-    atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+    atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+    warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
     def check_wgmma(buf):
@@ -360,7 +360,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             return None
 
     # ROW_RED layout check
-    red_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
+    red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     def check_row_red(buf):

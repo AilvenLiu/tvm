@@ -22,15 +22,15 @@ import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, P, F
+from tvm.tir.layout import TileLayout, P, F, S
 from tvm.tirx.transform import NaiveAllocator
 
 
 def test_one_alloc():
     src_shape = [128, 512]
-    src_layout = TileLayout(([128, 512], [512, 1]))
+    src_layout = TileLayout(S[(128, 512) : (512, 1)])
     dst_shape = [128, 512]
-    dst_layout = TileLayout(([128, 512], [1@P, 1@F]))
+    dst_layout = TileLayout(S[(128, 512) : (1@P, 1@F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:

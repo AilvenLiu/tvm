@@ -29,7 +29,7 @@ from tvm.tirx.bench.utils import ProtonContext, bench
 
 from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
 from tvm.tirx.op_schedule.cuda.gemm_async import sf_tmem_layout
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
 
@@ -143,14 +143,14 @@ def tir_ws_kernel(M: int, N: int, K: int):
     B_layout_fp4 = tma_shared_layout(
         "float4_e2m1fn", SwizzleMode.SWIZZLE_128B_ATOM, (PIPE_DEPTH, CTA_N, CTA_K)
     )
-    SFA_layout_pipe = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 256])
-    SFB_layout_pipe = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 256])
+    SFA_layout_pipe = TileLayout(S[PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 256])
+    SFB_layout_pipe = TileLayout(S[PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 256])
     D_layout_wb = tma_shared_layout(
         "bfloat16", SwizzleMode.SWIZZLE_128B_ATOM, (WB_PIPE_DEPTH, CTA_M, EPI_TILE)
     )
     # layouts for descriptor generation (used by tcgen05.cp for SF→TMEM copy)
-    SFA_layout_desc = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 32, 16]).pack(16)
-    SFB_layout_desc = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 32, 16]).pack(16)
+    SFA_layout_desc = TileLayout(S[PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 32, 16]).pack(16)
+    SFB_layout_desc = TileLayout(S[PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 32, 16]).pack(16)
 
     A_BYTES = (CTA_M * CTA_K // 2) * CTA_GROUP
     B_BYTES = (CTA_N * CTA_K // 2) * CTA_GROUP
@@ -251,7 +251,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
 
         def apply(self, offset):
             offset_layout = TileLayout(
-                shard=(self.shape, [self.signed_strides[self.swizzle_len - 1 - i] for i in range(self.atom_len)] + [0])
+                S[self.shape : [self.signed_strides[self.swizzle_len - 1 - i] for i in range(self.atom_len)] + [0]]
             )
             return offset_layout.apply(offset)["m"]
 
@@ -310,7 +310,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             with Tx.warp()[warp_id == 0]:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr[0]), n_cols=SM100_TMEM_CAPACITY_COLUMNS, cta_group=CTA_GROUP)
                 Tx.cuda.warp_sync()
-            tmem = Tx.decl_buffer((CTA_M, SM100_TMEM_CAPACITY_COLUMNS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([CTA_M, SM100_TMEM_CAPACITY_COLUMNS], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((CTA_M, SM100_TMEM_CAPACITY_COLUMNS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(CTA_M, SM100_TMEM_CAPACITY_COLUMNS) : (1@TLane, 1@TCol)]))
             # float4 views for gemm_async dispatch (share data with uint8 packed buffers)
             # Must pass elem_offset to preserve pool allocation offset (uint8 elem_offset = byte offset,
             # fp4 has 2 elements per byte, so fp4 elem_offset = uint8 elem_offset * 2)
@@ -464,7 +464,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                                 else:
                                     col_st = MMA_N - EPI_TILE + no * EPI_TILE
                                     
-                            cast_layout = TileLayout(([CTA_M, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1]))
+                            cast_layout = TileLayout(S[(CTA_M, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)])
                             for ni in Tx.unroll(EPI_TILE // TMEM_LD_SIZE):
                                 with Tx.warpgroup():
                                     # TMEM -> RF

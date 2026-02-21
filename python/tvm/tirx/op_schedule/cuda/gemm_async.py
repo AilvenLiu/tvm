@@ -25,7 +25,7 @@ from tvm.tir import PrimFunc
 from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir.stmt import OpCall, AllocBuffer, SeqStmt, Evaluate
-from tvm.tir.layout import TileLayout, ComposeLayout, TLane, TCol
+from tvm.tir.layout import S, R, TileLayout, ComposeLayout, TLane, TCol
 from tvm.tirx.op_schedule import ScheduleContext, register_dispatch, predicate
 from tvm.tirx.operator.op import KernelReplacePoint
 from .common import single_thread, validate_gemm_op, get_st_extent
@@ -47,10 +47,10 @@ def sf_tmem_layout(rows, sf_mma_k, K, dtype="float8_e8m0fnu"):
     epc = 32 // DataType(dtype).bits  # elem_per_col
 
     # Atom: one 32-row chunk, one MMA's worth of SF
-    atom = TileLayout(shard=([32, sf_mma_k], [1 @ TLane, 1 @ TCol]), replica=([4], [32 @ TLane]))
+    atom = TileLayout(S[(32, sf_mma_k) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
 
     if K == 1:
-        outer = TileLayout(shard=([M], [epc @ TCol]))
+        outer = TileLayout(S[M : epc @ TCol])
     else:
         # Pack consecutive ki's within one uint32 TMEM column when possible
         pack_factor = epc // sf_mma_k
@@ -59,13 +59,13 @@ def sf_tmem_layout(rows, sf_mma_k, K, dtype="float8_e8m0fnu"):
         if pack_factor > 1:
             K_outer = K // pack_factor
             if K_outer == 1:
-                outer = TileLayout(shard=([M, pack_factor], [epc @ TCol, sf_mma_k @ TCol]))
+                outer = TileLayout(S[(M, pack_factor) : (epc @ TCol, sf_mma_k @ TCol)])
             else:
                 outer = TileLayout(
-                    shard=([M, K_outer, pack_factor], [epc @ TCol, M * epc @ TCol, sf_mma_k @ TCol])
+                    S[(M, K_outer, pack_factor) : (epc @ TCol, M * epc @ TCol, sf_mma_k @ TCol)]
                 )
         else:
-            outer = TileLayout(shard=([M, K], [epc @ TCol, M * epc @ TCol]))
+            outer = TileLayout(S[(M, K) : (epc @ TCol, M * epc @ TCol)])
 
     return atom.direct_sum(outer, left_shape=[M, K], right_shape=[32, sf_mma_k])
 
@@ -108,10 +108,7 @@ def _validate_sf_tmem_layout(slice_layout, rows, sf_K_total, sf_mma_k, name):
     ), f"{name}: sf_K_total={sf_K_total} must be divisible by sf_mma_k={sf_mma_k}"
     K = sf_K_total // sf_mma_k
 
-    atom = TileLayout(
-        shard=([32, sf_mma_k], [1 @ TLane, 1 @ TCol]),
-        replica=([4], [32 @ TLane]),
-    )
+    atom = TileLayout(S[(32, sf_mma_k) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
     # interleaved_shape is the interleaved domain [M, 32, K, sf_mma_k]
     outer = atom.is_direct_sum_right(slice_layout, [M, 32, K, sf_mma_k], [32, sf_mma_k])
     assert outer is not None, f"{name}: layout does not match atom direct_sum outer pattern"
@@ -317,7 +314,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         ), f"tcgen05: SFB K extent={SFB_K_total} must be in {valid_sfb_K}"
 
     # Check C's sliced layout: (M, N):(1@TLane, 1@TCol), allow offset
-    base = TileLayout(([M, N], [1 @ TLane, 1 @ TCol]))
+    base = TileLayout(S[(M, N) : (1 @ TLane, 1 @ TCol)])
     expected_c_layout = TileLayout.from_iters(
         base.shard, base.replica, C_slice_layout.offset
     ).canonicalize()

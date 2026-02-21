@@ -20,18 +20,18 @@ import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, P, F, S
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
 def test_simple_activation_reduce():
     A_shape = (128, 512)
-    A_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    A_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     B_shape = (128, 512)
-    B_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    B_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     C_shape = (128, 1)
-    C_layout = TileLayout(shard=([128, 1], [(1, "P"), (1, "F")]))
+    C_layout = TileLayout(S[(128, 1) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -69,11 +69,11 @@ def test_simple_activation_reduce():
 
 def test_activation_reduce_in_loop():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(shard=([16 * 1024, 128], [(1, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(shard=([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")]))
+    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024 @ F, 2048 @ F, 1 @ F, 1 @ P)])
     C_shape = (16, 128)
-    C_layout = TileLayout(shard=([2, 4, 2, 128], [(2, "F"), (4, "F"), (1, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(2, 4, 2, 128) : (2 @ F, 4 @ F, 1 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -111,11 +111,11 @@ def test_activation_reduce_in_loop():
 
 def test_activation_reduce_in_loop2():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(shard=([16 * 1024, 128], [(1, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(shard=([16 * 512, 128], [(1, "F"), (1, "P")]))
+    B_layout = TileLayout(S[(16 * 512, 128) : (1 @ F, 1 @ P)])
     C_shape = (16, 128)
-    C_layout = TileLayout(shard=([2, 4, 2, 128], [(2, "F"), (4, "F"), (1, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(2, 4, 2, 128) : (2 @ F, 4 @ F, 1 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -153,11 +153,11 @@ def test_activation_reduce_in_loop2():
 
 def test_activation_reduce_two_stage():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(shard=([16 * 1024, 128], [(1, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(shard=([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")]))
+    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024 @ F, 2048 @ F, 1 @ F, 1 @ P)])
     C_shape = (1, 128)
-    C_layout = TileLayout(shard=([1, 128], [(1, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(1, 128) : (1 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -201,13 +201,13 @@ def test_activation_reduce_two_stage():
 
 def test_activation_reduce_with_bias_scale():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(shard=([16 * 1024, 128], [(1, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(shard=([16 * 512, 128], [(1, "F"), (1, "P")]))
+    B_layout = TileLayout(S[(16 * 512, 128) : (1 @ F, 1 @ P)])
     C_shape = (16, 128)
-    C_layout = TileLayout(shard=([2, 4, 2, 128], [(2, "F"), (4, "F"), (1, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(2, 4, 2, 128) : (2 @ F, 4 @ F, 1 @ F, 1 @ P)])
     bias_shape = 128
-    bias_layout = TileLayout(shard=([128, 1], [(1, "P"), (1, "F")]))
+    bias_layout = TileLayout(S[(128, 1) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -241,11 +241,11 @@ def test_activation_reduce_with_bias_scale():
 
 def test_simple_tensor_scalar_reduce():
     A_shape = (128, 512)
-    A_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    A_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     B_shape = (128, 512)
-    B_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    B_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     C_shape = (128, 1)
-    C_layout = TileLayout(shard=([128, 1], [(1, "P"), (1, "F")]))
+    C_layout = TileLayout(S[(128, 1) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce():
@@ -276,13 +276,13 @@ def test_simple_tensor_scalar_reduce():
 
 def test_tensor_tensor_reduce_fail():
     A_shape = (128, 512)
-    A_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    A_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     B_shape = (128, 512)
-    B_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    B_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     D_shape = (128, 512)
-    D_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
+    D_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     C_shape = (128, 1)
-    C_layout = TileLayout(shard=([128, 1], [(1, "P"), (1, "F")]))
+    C_layout = TileLayout(S[(128, 1) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce():
@@ -302,15 +302,13 @@ def test_tensor_tensor_reduce_fail():
 
 def test_tensor_scalar_reduce_complex():
     src1_shape = [32, 128, 512]
-    src1_layout = TileLayout(
-        shard=([32, 128, 4, 128], [(128, "F"), (1, "F"), (32 * 128, "F"), (1, "P")])
-    )
+    src1_layout = TileLayout(S[(32, 128, 4, 128) : (128 @ F, 1 @ F, 32 * 128 @ F, 1 @ P)])
     src2_shape = [128, 512]
-    src2_layout = TileLayout(shard=([128, 4, 128], [(1, "F"), (128, "F"), (1, "P")]))
+    src2_layout = TileLayout(S[(128, 4, 128) : (1 @ F, 128 @ F, 1 @ P)])
     dst_shape = src1_shape
     dst_layout = src1_layout
     reduce_dst_shape = [128, 512]
-    reduce_dst_layout = TileLayout(shard=([128, 4, 128], [(1, "F"), (128, "F"), (1, "P")]))
+    reduce_dst_layout = TileLayout(S[(128, 4, 128) : (1 @ F, 128 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce() -> None:
@@ -343,11 +341,11 @@ def test_tensor_scalar_reduce_complex():
 
 def test_tensor_scalar_reduce_two_stage():
     src1_shape = [512, 1024, 4]
-    src1_layout = TileLayout(shard=([128, 4096, 4], [(1, "P"), (1, "F"), (4096, "F")]))
+    src1_layout = TileLayout(S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)])
     dst1_shape = src1_shape
     dst1_layout = src1_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
+    reduce_dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce() -> None:
@@ -385,13 +383,11 @@ def test_tensor_scalar_reduce_two_stage():
 
 def test_vector_chain():
     src1_shape = [32, 128, 512]
-    src1_layout = TileLayout(
-        shard=([32, 128, 4, 128], [(1, "F"), (32, "F"), (32 * 128, "F"), (1, "P")])
-    )
+    src1_layout = TileLayout(S[(32, 128, 4, 128) : (1 @ F, 32 @ F, 32 * 128 @ F, 1 @ P)])
     src2_shape = [128, 512]
-    src2_layout = TileLayout(shard=([512, 128], [(1, "F"), (1, "P")]))
+    src2_layout = TileLayout(S[(512, 128) : (1 @ F, 1 @ P)])
     src3_shape = [512]
-    src3_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
+    src3_layout = TileLayout(S[(4, 128) : (1 @ F, 1 @ P)])
     dst_shape = src1_shape
     dst_layout = src1_layout
 
@@ -430,11 +426,9 @@ def test_vector_chain():
 
 def test_vector_chain_2():
     src1_shape = [32, 128, 512]
-    src1_layout = TileLayout(
-        shard=([32, 128, 4, 128], [(1, "F"), (32, "F"), (32 * 128, "F"), (1, "P")])
-    )
+    src1_layout = TileLayout(S[(32, 128, 4, 128) : (1 @ F, 32 @ F, 32 * 128 @ F, 1 @ P)])
     src2_shape = [128, 512]
-    src2_layout = TileLayout(shard=([512, 128], [(1, "F"), (1, "P")]))
+    src2_layout = TileLayout(S[(512, 128) : (1 @ F, 1 @ P)])
     src3_shape = src1_shape
     src3_layout = src1_layout
     dst_shape = src1_shape
@@ -475,9 +469,9 @@ def test_vector_chain_2():
 
 def test_reduce_negate():
     src_shape = [128, 512, 4]
-    src_layout = TileLayout(shard=([128, 512, 4], [(1, "P"), (4, "F"), (1, "F")]))
+    src_layout = TileLayout(S[(128, 512, 4) : (1 @ P, 4 @ F, 1 @ F)])
     dst_shape = [128, 4]
-    dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
+    dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -508,11 +502,11 @@ def test_reduce_negate():
 
 def test_binary_reduce_guard():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
+    reduce_dst_layout = TileLayout(S[(4, 128) : (1 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def binary_reduce() -> None:
@@ -547,11 +541,11 @@ def test_binary_reduce_guard():
 
 def test_unary_reduce_guard():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
+    reduce_dst_layout = TileLayout(S[(4, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -594,11 +588,11 @@ def test_unary_reduce_guard():
 
 def test_binary_chain_guard():
     src_shape = [512, 512]
-    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
+    src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
     src2_shape = [512, 1]
-    src2_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
+    src2_layout = TileLayout(S[(4, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -633,11 +627,11 @@ def test_binary_chain_guard():
 
 def test_activation_reduce_two_stage_workspace():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(shard=([16 * 1024, 128], [(1, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(shard=([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")]))
+    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024 @ F, 2048 @ F, 1 @ F, 1 @ P)])
     C_shape = (1, 128)
-    C_layout = TileLayout(shard=([1, 128], [(1, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(1, 128) : (1 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -683,11 +677,11 @@ def test_activation_reduce_two_stage_workspace():
 
 def test_tensor_scalar_reduce_two_stage_workspace():
     src1_shape = [512, 1024, 4]
-    src1_layout = TileLayout(shard=([128, 4096, 4], [(1, "P"), (1, "F"), (4096, "F")]))
+    src1_layout = TileLayout(S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)])
     dst1_shape = src1_shape
     dst1_layout = src1_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
+    reduce_dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce() -> None:

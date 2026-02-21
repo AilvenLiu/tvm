@@ -6,7 +6,7 @@ import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.tir.layout import TileLayout, TLane, TCol
+from tvm.tir.layout import TileLayout, TLane, TCol, S
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 
 import torch
@@ -147,19 +147,19 @@ def skip():
 
 A_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-    Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))),
+    Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_M, BLK_K) : (BLK_M * BLK_K, BLK_K, 1)]),
 )
 B_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-    Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_N, BLK_K), (BLK_N * BLK_K, BLK_K, 1))),
+    Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_N, BLK_K) : (BLK_N * BLK_K, BLK_K, 1)]),
 )
 D_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-    Tx.TileLayout(shard=((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
+    Tx.TileLayout(Tx.S[(TMEM_PIPE_DEPTH, BLK_M, EPI_TILE) : (BLK_M * EPI_TILE, EPI_TILE, 1)]),
 )
 
-SFA_layout = Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
-SFB_layout = Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
+SFA_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFA // 32, 32) : (BLK_SFA, 32, 1)])
+SFB_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFB // 32, 32) : (BLK_SFB, 32, 1)])
 
 
 @Tx.prim_func(tirx=True)
@@ -198,7 +198,7 @@ def deepgemm(
 
             # alloc local memory
             reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
+            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
             reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
             stage = Tx.local_cell("int32")
             descA = Tx.local_cell("uint64")
@@ -234,7 +234,7 @@ def deepgemm(
             Tx.ptx.fence.mbarrier_init()
             Tx.cuda.cluster_sync()
             Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
-            tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
+            tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
 
             @Tx.macro
             def paritioned_loop(main_loop, epilogue1, epilogue2):

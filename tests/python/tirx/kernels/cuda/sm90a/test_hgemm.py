@@ -102,9 +102,9 @@ def test_hgemm_hopper_ws_cooperative():
     # fmt: off
     @Tx.prim_func(tirx=True)
     def manual(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=Tx.TileLayout((M, K)))
-        B = Tx.match_buffer(B_ptr, (K, N), "float16", scope="global", layout=Tx.TileLayout((K, N)))
-        C = Tx.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=Tx.TileLayout((M, N)))
+        A = Tx.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, K]))
+        B = Tx.match_buffer(B_ptr, (K, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[K, N]))
+        C = Tx.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
 
         A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
@@ -130,8 +130,8 @@ def test_hgemm_hopper_ws_cooperative():
                 B_smem = Tx.alloc_buffer([STAGES_MMA, BLK_K * BLK_N], "float16", scope="shared.dyn", align=128)
                 C_smem = Tx.alloc_buffer([STAGES_EPI, BLK_M * 32], "float32", scope="shared.dyn", align=1024)
                 # mainloop pipeline barriers, note that these are cluster-wide barriers
-                full = Tx.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=Tx.TileLayout([STAGES_MMA]), align=8)
-                empty = Tx.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=Tx.TileLayout([STAGES_MMA]), align=8)
+                full = Tx.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=Tx.TileLayout(Tx.S[STAGES_MMA]), align=8)
+                empty = Tx.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=Tx.TileLayout(Tx.S[STAGES_MMA]), align=8)
 
                 with Tx.thread():
                     # work tile info
@@ -414,9 +414,9 @@ def test_hgemm_hopper_no_ws():
 
     @Tx.prim_func(tirx=True)
     def manual(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=Tx.TileLayout([M, K]))
-        B = Tx.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=Tx.TileLayout([N, K]))
-        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout([M, N]))
+        A = Tx.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, K]))
+        B = Tx.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))
+        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
         A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
         B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)

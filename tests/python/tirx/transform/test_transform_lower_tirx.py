@@ -39,7 +39,7 @@ def compare(before, after, transform):
         tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
-L_LANE = Tx.TileLayout(shard=([32], [1 @ laneid]))
+L_LANE = Tx.TileLayout(Tx.S[32 : 1 @ laneid])
 
 
 def test_lower_view_get():
@@ -52,7 +52,7 @@ def test_lower_view_get():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(shard=([2], [1])))
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))
                 B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 # load in_buf into A
                 with Tx.warp():
@@ -119,8 +119,8 @@ def test_lower_view_get():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
-                tile = Tx.TileLayout(shard=([2, 2], [2, 1]))
+                atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                tile = Tx.TileLayout(Tx.S[(2, 2) : (2, 1)])
                 warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
 
                 A = Tx.alloc_buffer([4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))
@@ -193,13 +193,13 @@ def test_lower_view_get():
 
             with Tx.thread():
                 # shard from thread to warp
-                atom = Tx.TileLayout((1, 2))
+                atom = Tx.TileLayout(Tx.S[1, 2])
                 warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
                 # tile
-                tile = Tx.TileLayout(shard=([2, 128 // 8], [1, 2])) # column-major
+                tile = Tx.TileLayout(Tx.S[(2, 128 // 8) : (1, 2)]) # column-major
                 warp_layout = warp_atom.tile(tile, (2, 128 // 8), (8, 8))
                 # shard from warp to cta
-                L_warp = Tx.TileLayout(shard=([8], [1@warpid]))
+                L_warp = Tx.TileLayout(Tx.S[8 : 1@warpid])
                 layout = warp_layout.tile(L_warp, (8, 1), (16, 128))
                 # alloc
                 acc = Tx.alloc_buffer([64,], dtype="float32", scope="local", layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
@@ -497,7 +497,7 @@ def test_lower_tirx_keep_different_swizzle():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(shard=([2], [1])))
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))
                 B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 with Tx.warp():
                     # warp view of this load
@@ -1207,7 +1207,7 @@ def test_alloc_buffer_with_thread_axis_layout():
                 with Tx.thread():
                     # Single-step alloc with thread-axis layout
                     reg_wg = Tx.alloc_buffer((128, 4), "float32", scope="local",
-                                              layout=Tx.TileLayout(shard=([128, 4], [1 @ tid_in_wg, 1])))
+                                              layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ tid_in_wg, 1)]))
                     # Access via .storage() to decompose thread and memory axes
                     reg = reg_wg.storage(4)
                     for i in Tx.serial(4):

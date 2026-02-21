@@ -29,7 +29,7 @@ from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
 
 from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
-from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import TileLayout, S, R, TLane, TCol, tid_in_wg as axis_tid_in_wg
 
 
 def parse_args():
@@ -135,8 +135,8 @@ def tir_kernel(M: int, N: int, K: int):
     B_layout = tma_shared_layout(b_type, SwizzleMode.SWIZZLE_128B_ATOM, (SMEM_PIPE_DEPTH, BLK_N, BLK_K))
     D_layout = tma_shared_layout(d_type, SwizzleMode.SWIZZLE_64B_ATOM, (TMEM_PIPE_DEPTH, BLK_M, EPI_TILE))
 
-    SFA_layout = Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
-    SFB_layout = Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
+    SFA_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFA // 32, 32) : (BLK_SFA, 32, 1)])
+    SFB_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFB // 32, 32) : (BLK_SFB, 32, 1)])
 
     # TMEM SF layouts: stride-0 K_MMA (all MMA iters share same SF since
     # quantization group = BLK_K = 128 = 4 MMAs × 32).
@@ -148,8 +148,8 @@ def tir_kernel(M: int, N: int, K: int):
     K_ITERS = BLK_K // MMA_K  # 4 MMA iterations per pipe stage
     K_PER_PIPE = sf_mma_k * K_ITERS  # 4 SF elements per pipe stage
     M_sf_sfb = BLK_SFB // 32  # 8 row chunks for N > 128
-    SFA_tmem_layout = TileLayout(shard=([TMEM_PIPE_DEPTH, M_sf, 32, K_ITERS], [M_sf * sfa_epc @ TCol, sfa_epc @ TCol, 1 @ TLane, 0 @ TCol]), replica=([4], [32 @ TLane]))
-    SFB_tmem_layout = TileLayout(shard=([TMEM_PIPE_DEPTH, M_sf_sfb, 32, K_ITERS], [M_sf_sfb * sfb_epc @ TCol, sfb_epc @ TCol, 1 @ TLane, 0 @ TCol]), replica=([4], [32 @ TLane]))
+    SFA_tmem_layout = TileLayout(S[(TMEM_PIPE_DEPTH, M_sf, 32, K_ITERS) : (M_sf * sfa_epc @ TCol, sfa_epc @ TCol, 1 @ TLane, 0 @ TCol)] + R[4 : 32 @ TLane])
+    SFB_tmem_layout = TileLayout(S[(TMEM_PIPE_DEPTH, M_sf_sfb, 32, K_ITERS) : (M_sf_sfb * sfb_epc @ TCol, sfb_epc @ TCol, 1 @ TLane, 0 @ TCol)] + R[4 : 32 @ TLane])
 
     @Tx.prim_func(tirx=True)
     def kernel(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), D: Tx.Buffer((M, N), d_type), SFA: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, M), "uint32"), SFB: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, N), "uint32")):
@@ -183,7 +183,7 @@ def tir_kernel(M: int, N: int, K: int):
 
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                cast_layout = TileLayout(([128, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1]))
+                cast_layout = TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)])
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=cast_layout)
                 reg_16b = Tx.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
                 reg_16b_wg = reg_16b.view(128, TMEM_LD_SIZE, layout=cast_layout)
@@ -212,7 +212,7 @@ def tir_kernel(M: int, N: int, K: int):
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.cluster_sync()
                 Tx.cuda.trap_when_assert_failed(tmem_addr[0] == 0)
-                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
+                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
                 SFA_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, 128, K_PER_PIPE), sfa_type, scope="tmem", allocated_addr=SFA_TMEM_START_COL, layout=SFA_tmem_layout)
                 SFB_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, BLK_SFB, K_PER_PIPE), sfb_type, scope="tmem", allocated_addr=SFB_TMEM_START_COL, layout=SFB_tmem_layout)
 

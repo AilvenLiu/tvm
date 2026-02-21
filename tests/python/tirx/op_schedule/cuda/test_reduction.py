@@ -20,7 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import ir as I
-from tvm.tir.layout import laneid
+from tvm.tir.layout import laneid, S
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
 
@@ -85,8 +85,8 @@ def test_reduction_op_shared(input, op_type, dtype):
     copy_slice_b = list(slice(None) for i in range(len(g_shape_b)))
     reduce_slice_a = list(slice(st_a[i], st_a[i] + extent_a[i]) for i in range(len(g_shape_a)))
     reduce_slice_b = list(slice(st_b[i], st_b[i] + extent_b[i]) for i in range(len(g_shape_b)))
-    g_layout_a = s_layout_a = TileLayout(g_shape_a)
-    g_layout_b = s_layout_b = TileLayout(g_shape_b)
+    g_layout_a = s_layout_a = TileLayout(S[g_shape_a])
+    g_layout_b = s_layout_b = TileLayout(S[g_shape_b])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -171,7 +171,7 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
     # get shape info
     NUM_COL = 128
     g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
-    g_layout_a, g_layout_b = TileLayout(g_shape_a), TileLayout(g_shape_b)
+    g_layout_a, g_layout_b = TileLayout(S[g_shape_a]), TileLayout(S[g_shape_b])
     acc_shape, red_shape = (16, NUM_COL), (16, 4)
 
     # fmt: off
@@ -188,10 +188,10 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
             with Tx.thread():
                 # acc layout
-                atom = Tx.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = Tx.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
+                atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4@laneid, 1@laneid)])
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-                tile = Tx.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
+                tile = Tx.TileLayout(Tx.S[(2, NUM_COL // 8) : (1, 2)])
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 acc = Tx.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -201,9 +201,9 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
 
                 # red layout
-                red_atom = Tx.TileLayout(shard=([1, 1], [1, 1]))
+                red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
                 red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
-                red_tile = Tx.TileLayout(shard=([2, 1], [1, 1]))
+                red_tile = Tx.TileLayout(Tx.S[(2, 1) : (1, 1)])
                 red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
                 red = Tx.alloc_buffer(
                     [
@@ -296,8 +296,8 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
-        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
+        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout(S[reduction_len]))
+        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
             bx = Tx.cta_id([1], parent="kernel")
@@ -380,8 +380,8 @@ def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout([reduction_len]))
-        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout([1]))
+        A = Tx.match_buffer(A_ptr, [reduction_len], dtype, layout=TileLayout(S[reduction_len]))
+        B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
             bx = Tx.cta_id([1], parent="kernel")

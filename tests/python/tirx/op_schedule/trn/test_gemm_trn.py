@@ -22,16 +22,16 @@ import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, P, F, S
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
 def test_simple_gemm():
-    A_layout = TileLayout(shard=([128, 128], [(1, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([128, 128], [(1, "P"), (1, "F")]))
+    A_layout = TileLayout(S[(128, 128) : (1 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)])
 
-    C_layout = TileLayout(shard=([128, 128], [(1, "P"), (1, "F")])).to_psum()
+    C_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -62,12 +62,10 @@ def test_simple_gemm():
 
 
 def test_larger_gemm():
-    A_layout = TileLayout(shard=([2, 128, 4, 128], [(512, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(2, 128, 4, 128) : (512 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(
-        shard=([2, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(2, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -98,12 +96,10 @@ def test_larger_gemm():
 
 
 def test_gemm_in_a_loop():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -141,12 +137,10 @@ def test_gemm_in_a_loop():
 
 
 def test_gemm_with_stride():
-    A_layout = TileLayout(shard=([4, 128, 128, 8], [(1024, "F"), (1, "F"), (1, "P"), (128, "F")]))
-    B_layout = TileLayout(shard=([128, 8, 2, 128], [(1, "P"), (512, "F"), (256, "F"), (2, "F")]))
+    A_layout = TileLayout(S[(4, 128, 128, 8) : (1024 @ F, 1 @ F, 1 @ P, 128 @ F)])
+    B_layout = TileLayout(S[(128, 8, 2, 128) : (1 @ P, 512 @ F, 256 @ F, 2 @ F)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -185,12 +179,10 @@ def test_gemm_with_stride():
 
 
 def test_gemm_swap_lhs_rhs():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -228,10 +220,10 @@ def test_gemm_swap_lhs_rhs():
 
 
 def test_gemm_with_sbuf_output():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -276,14 +268,10 @@ def test_gemm_with_sbuf_output():
 
 
 def test_gemm_different_shape():
-    A_layout = TileLayout(
-        shard=([2, 4, 128, 8, 128], [(4096, "F"), (1024, "F"), (1, "F"), (128, "F"), (1, "P")])
-    )
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(2, 4, 128, 8, 128) : (4096 @ F, 1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -321,10 +309,10 @@ def test_gemm_different_shape():
 
 
 def test_gemm_too_large_f_size():
-    A_layout = TileLayout(shard=([256, 128], [(1, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([128, 1024], [(1, "P"), (1, "F")]))
+    A_layout = TileLayout(S[(256, 128) : (1 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(128, 1024) : (1 @ P, 1 @ F)])
 
-    C_layout = TileLayout(shard=([2, 128, 1024], [(1024, "F"), (1, "P"), (1, "F")])).to_psum()
+    C_layout = TileLayout(S[(2, 128, 1024) : (1024 @ F, 1 @ P, 1 @ F)]).to_psum()
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -356,10 +344,10 @@ def test_gemm_too_large_f_size():
 
 
 def test_gemm_sbuf_output_with_workspace():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -405,12 +393,10 @@ def test_gemm_sbuf_output_with_workspace():
 
 
 def test_gemm_pf_mismatch_fail():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([2, 128, 8, 128], [(128, "F"), (1, "F"), (256, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(2, 128, 8, 128) : (128 @ F, 1 @ F, 256 @ F, 1 @ P)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -434,12 +420,10 @@ def test_gemm_pf_mismatch_fail():
 
 
 def test_gemm_transpose_AB():
-    A_layout = TileLayout(shard=([8, 128, 4, 128], [(128, "F"), (1, "P"), (1024, "F"), (1, "F")]))
-    B_layout = TileLayout(shard=([2, 128, 8, 128], [(128, "F"), (1, "F"), (256, "F"), (1, "P")]))
+    A_layout = TileLayout(S[(8, 128, 4, 128) : (128 @ F, 1 @ P, 1024 @ F, 1 @ F)])
+    B_layout = TileLayout(S[(2, 128, 8, 128) : (128 @ F, 1 @ F, 256 @ F, 1 @ P)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -480,10 +464,10 @@ def test_gemm_transpose_AB():
 
 
 def test_gemm_guard():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -531,12 +515,10 @@ def test_gemm_guard():
 
 
 def test_gemm_guard2():
-    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
-    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 128 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(
-        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
-    ).to_psum()
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:

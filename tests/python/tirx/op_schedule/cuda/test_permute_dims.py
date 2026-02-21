@@ -22,7 +22,7 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, S
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
@@ -37,22 +37,22 @@ ml_dtypes_dict = {
     [
         (
             (4, 32),  # a_shape
-            TileLayout([4, 32]),  # layoutA
+            TileLayout(S[4, 32]),  # layoutA
             tvm.cuda(0),
         ),
         (
             (4, 64),  # a_shape
-            TileLayout([4, 64]),  # layoutA
+            TileLayout(S[4, 64]),  # layoutA
             tvm.cuda(0),
         ),
         (
             (3, 64),  # a_shape
-            TileLayout([3, 64]),  # layoutA
+            TileLayout(S[3, 64]),  # layoutA
             tvm.cuda(0),
         ),
         (
             (9, 64),  # a_shape
-            TileLayout([9, 64]),  # layoutA
+            TileLayout(S[9, 64]),  # layoutA
             tvm.cuda(0),
         ),
     ],
@@ -96,21 +96,21 @@ def test_vectorized_permute_dims_2d(task, dtype):
     [
         (
             (1, 4, 32),  # a_shape
-            TileLayout([1, 4, 32]),  # layoutA
+            TileLayout(S[1, 4, 32]),  # layoutA
             [0, 0, 0],
             [1, 4, 32],
             tvm.cuda(0),
         ),
         (
             (2, 2, 8, 64),  # a_shape
-            TileLayout([2, 2, 8, 64]),  # layoutA
+            TileLayout(S[2, 2, 8, 64]),  # layoutA
             [1, 1, 0, 0],
             [1, 1, 8, 64],
             tvm.cuda(0),
         ),
         (
             (1, 10, 40),
-            TileLayout([1, 10, 40]),
+            TileLayout(S[1, 10, 40]),
             [0, 5, 3],
             [1, 4, 32],
             tvm.cuda(0),

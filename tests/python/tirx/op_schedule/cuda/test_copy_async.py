@@ -24,7 +24,7 @@ import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.op_schedule.cuda.copy_async import (
     tma_atom_layout,
@@ -71,9 +71,9 @@ class TMACounter(StmtExprVisitor):
             (0, 0),  # g_st
             (8, 8),  # g_extent
             8,  # thread_cnt
-            TileLayout([16, 16]),  # layoutA
-            TileLayout([16, 16]),  # layoutB
-            TileLayout([8, 8]),  # layoutS
+            TileLayout(S[16, 16]),  # layoutA
+            TileLayout(S[16, 16]),  # layoutB
+            TileLayout(S[8, 8]),  # layoutS
         ),
         ################ A[0:128, 0:32] -> A_smem[0:128, 0:32] -> B[0:128, 0:32] ################
         (
@@ -82,9 +82,9 @@ class TMACounter(StmtExprVisitor):
             (0, 0),  # g_st
             (128, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout([128, 32]),  # layoutA
-            TileLayout([128, 32]),  # layoutB
-            TileLayout([128, 32]),  # layoutS
+            TileLayout(S[128, 32]),  # layoutA
+            TileLayout(S[128, 32]),  # layoutB
+            TileLayout(S[128, 32]),  # layoutS
         ),
         ################ A[32:64, 32:64] -> A_smem[0:32, 0:32] -> B[32:64, 32:64] ################
         (
@@ -93,9 +93,9 @@ class TMACounter(StmtExprVisitor):
             (32, 0),  # g_st
             (32, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout([64, 64]),  # layoutA
-            TileLayout([64, 64]),  # layoutB
-            TileLayout([32, 32]),  # layoutS
+            TileLayout(S[64, 64]),  # layoutA
+            TileLayout(S[64, 64]),  # layoutB
+            TileLayout(S[32, 32]),  # layoutS
         ),
         ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
         (
@@ -104,9 +104,9 @@ class TMACounter(StmtExprVisitor):
             (0, 0, 0),  # g_st
             (1, 32, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout([4, 32, 32]),  # layoutA
-            TileLayout([4, 32, 32]),  # layoutB
-            TileLayout([32, 32]),  # layoutS
+            TileLayout(S[4, 32, 32]),  # layoutA
+            TileLayout(S[4, 32, 32]),  # layoutB
+            TileLayout(S[32, 32]),  # layoutS
         ),
     ],
 )
@@ -174,8 +174,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             (8, 256),  # shared_shape
             ((0, 8), (0, 256)),  # shared_region
             8,  # thread count per CTA
-            TileLayout([8, 256]),  # A_layout
-            TileLayout([8, 256]),  # B_layout
+            TileLayout(S[8, 256]),  # A_layout
+            TileLayout(S[8, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (8, 256)),
         ),
         (
@@ -184,8 +184,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             (3, 64, 256),  # shared_shape
             ((1, 2), (0, 64), (0, 256)),  # shared_region
             64,  # thread count per CTA
-            TileLayout([64, 256]),  # A_layout
-            TileLayout([64, 256]),  # B_layout
+            TileLayout(S[64, 256]),  # A_layout
+            TileLayout(S[64, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (3, 64, 256)),
         ),
         (
@@ -194,8 +194,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             (32, 512),  # shared_shape
             ((0, 32), (0, 512)),  # shared_region
             64,  # thread count per CTA
-            TileLayout([32, 512]),  # A_layout
-            TileLayout([32, 512]),  # B_layout
+            TileLayout(S[32, 512]),  # A_layout
+            TileLayout(S[32, 512]),  # B_layout
             lambda dtype, swizzle_len: (
                 tma_atom_layout(dtype, swizzle_len)
                 .tile_to((16, 256), tma_atom_shape(dtype, swizzle_len))
@@ -210,8 +210,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             (128, 64),
             ((0, 128), (0, 64)),
             128,
-            TileLayout((8192, 8192)),
-            TileLayout((8192, 8192)),
+            TileLayout(S[8192, 8192]),
+            TileLayout(S[8192, 8192]),
             lambda dtype, swizzle_len: (
                 tma_shared_layout(dtype, swizzle_len, (128, 64)) if dtype == "float16" else None
             ),
@@ -301,24 +301,24 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
             (3, 8, 256),  # global_shape
             (8, 256),  # shared_shape
             8,  # thread count per CTA
-            TileLayout([3, 8, 256]),  # A_layout
-            TileLayout([3, 8, 256]),  # B_layout
+            TileLayout(S[3, 8, 256]),  # A_layout
+            TileLayout(S[3, 8, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (8, 256)),
         ),
         (
             (5, 64, 256),  # global_shape
             (64, 256),  # shared_shape
             64,  # thread count per CTA
-            TileLayout([5, 64, 256]),  # A_layout
-            TileLayout([5, 64, 256]),  # B_layout
+            TileLayout(S[5, 64, 256]),  # A_layout
+            TileLayout(S[5, 64, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (64, 256)),
         ),
         (
             (7, 32, 512),  # global_shape
             (32, 512),  # shared_shape
             32,  # thread count per CTA
-            TileLayout([7, 32, 512]),  # A_layout
-            TileLayout([7, 32, 512]),  # B_layout
+            TileLayout(S[7, 32, 512]),  # A_layout
+            TileLayout(S[7, 32, 512]),  # B_layout
             lambda dtype, swizzle_len: (
                 tma_atom_layout(dtype, swizzle_len)
                 .tile_to((16, 256), tma_atom_shape(dtype, swizzle_len))
@@ -417,24 +417,24 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
             (3, 8, 256),  # global_shape
             (8, 256),  # shared_shape
             8,  # thread count per CTA
-            TileLayout([3, 8, 256]),  # A_layout
-            TileLayout([3, 8, 256]),  # B_layout
+            TileLayout(S[3, 8, 256]),  # A_layout
+            TileLayout(S[3, 8, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (8, 256)),
         ),
         (
             (5, 64, 256),  # global_shape
             (64, 256),  # shared_shape
             64,  # thread count per CTA
-            TileLayout([5, 64, 256]),  # A_layout
-            TileLayout([5, 64, 256]),  # B_layout
+            TileLayout(S[5, 64, 256]),  # A_layout
+            TileLayout(S[5, 64, 256]),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (64, 256)),
         ),
         (
             (7, 32, 512),  # global_shape
             (32, 512),  # shared_shape
             32,  # thread count per CTA
-            TileLayout([7, 32, 512]),  # A_layout
-            TileLayout([7, 32, 512]),  # B_layout
+            TileLayout(S[7, 32, 512]),  # A_layout
+            TileLayout(S[7, 32, 512]),  # B_layout
             lambda dtype, swizzle_len: (
                 tma_atom_layout(dtype, swizzle_len)
                 .tile_to((16, 256), tma_atom_shape(dtype, swizzle_len))
@@ -519,8 +519,8 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (2, 2, 128, 64),  # shared_shape
             ((0, 1), (0, 1), (0, 128), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([128, 64]).canonicalize(),  # A_layout
-            TileLayout([128, 64]).canonicalize(),  # B_layout
+            TileLayout(S[128, 64]).canonicalize(),  # A_layout
+            TileLayout(S[128, 64]).canonicalize(),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (2, 2, 128, 64)
             ).canonicalize(),
@@ -531,8 +531,8 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (2, 2, 24, 64),  # shared_shape
             ((0, 1), (0, 1), (0, 24), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([128, 64]).canonicalize(),  # A_layout
-            TileLayout([128, 64]).canonicalize(),  # B_layout
+            TileLayout(S[128, 64]).canonicalize(),  # A_layout
+            TileLayout(S[128, 64]).canonicalize(),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (2, 2, 24, 64)
             ).canonicalize(),
@@ -543,8 +543,8 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (256, 64),  # shared_shape
             ((0, 128), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([256, 64]).canonicalize(),  # A_layout
-            TileLayout([256, 64]).canonicalize(),  # B_layout
+            TileLayout(S[256, 64]).canonicalize(),  # A_layout
+            TileLayout(S[256, 64]).canonicalize(),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (256, 64)
             ).canonicalize(),
@@ -642,8 +642,8 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
             (1, 1, 128, 64),  # shared_shape: (pipe_stage, blk_k, blk_m, blk_k)
             ((0, 1), (0, 1), (0, 128), (0, 64)),  # shared_region
             128,  # thread count
-            TileLayout([2, 128, 8, 64]).canonicalize(),  # A_layout (global)
-            TileLayout([2, 128, 8, 64]).canonicalize(),  # B_layout (global)
+            TileLayout(S[2, 128, 8, 64]).canonicalize(),  # A_layout (global)
+            TileLayout(S[2, 128, 8, 64]).canonicalize(),  # B_layout (global)
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (1, 1, 128, 64)
             ).canonicalize(),
@@ -655,8 +655,8 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
             (1, 1, 64, 128),  # shared_shape
             ((0, 1), (0, 1), (0, 64), (0, 128)),  # shared_region
             128,  # thread count
-            TileLayout([4, 64, 4, 128]).canonicalize(),
-            TileLayout([4, 64, 4, 128]).canonicalize(),
+            TileLayout(S[4, 64, 4, 128]).canonicalize(),
+            TileLayout(S[4, 64, 4, 128]).canonicalize(),
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (1, 1, 64, 128)
             ).canonicalize(),
@@ -766,8 +766,8 @@ def test_copy_tmem2reg_async(dtype, width_32b):
     if WIDTH % VEC_LEN != 0:
         pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
 
-    g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
-    local_view = TileLayout(shard=([128, WIDTH], [(1, "tid_in_wg"), (1, "m")]))
+    g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
+    local_view = TileLayout(S[(128, WIDTH) : (1 @ axis_tid_in_wg, 1)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -794,7 +794,7 @@ def test_copy_tmem2reg_async(dtype, width_32b):
                 Tx.tvm_storage_sync("shared")
 
                 tmem = Tx.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, WIDTH], [(1, "TLane"), (1, "TCol")])))
+                                     layout=TileLayout(S[(128, WIDTH) : (1 @ TLane, 1 @ TCol)]))
 
                 A_reg = Tx.alloc_local((WIDTH), dtype)
                 B_reg = Tx.alloc_local((WIDTH), dtype)
@@ -859,8 +859,8 @@ def test_copy_tmem2reg_async(dtype, width_32b):
             (6, 128, 64),  # shared_shape: 3D with extra pipeline dimension
             ((0, 1), (0, 32), (0, 64)),  # shared_region: unit extent in first dim
             128,  # thread count
-            TileLayout([128, 256]).canonicalize(),  # A_layout (global)
-            TileLayout([128, 256]).canonicalize(),  # B_layout (global)
+            TileLayout(S[128, 256]).canonicalize(),  # A_layout (global)
+            TileLayout(S[128, 256]).canonicalize(),  # B_layout (global)
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (6, 128, 64)
             ).canonicalize(),
@@ -872,8 +872,8 @@ def test_copy_tmem2reg_async(dtype, width_32b):
             (4, 256, 64),  # shared_shape: 3D
             ((1, 2), (0, 64), (0, 64)),  # shared_region: different slice index
             128,  # thread count
-            TileLayout([256, 512]).canonicalize(),
-            TileLayout([256, 512]).canonicalize(),
+            TileLayout(S[256, 512]).canonicalize(),
+            TileLayout(S[256, 512]).canonicalize(),
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (4, 256, 64)
             ).canonicalize(),
@@ -1008,7 +1008,7 @@ def test_copy_g2s_tma_symbolic_dimension(dtype, swizzle_len):
     # Shared memory layout with swizzle
     shared_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, swizzle_len, 3, swizzle_inner=True),
-        Tx.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))),
+        Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_M, BLK_K) : (BLK_M * BLK_K, BLK_K, 1)]),
     )
 
     # Compute bytes for mbarrier
@@ -1112,7 +1112,7 @@ def test_copy_g2s_tma_3d_with_view(dtype, swizzle_len):
     # This matches FA4 pattern where Q_layout has 3D TileLayout
     shared_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, swizzle_len, 3, swizzle_inner=True),
-        Tx.TileLayout(shard=((2, 128, 128), (128 * 128, 128, 1))),
+        Tx.TileLayout(Tx.S[(2, 128, 128) : (128 * 128, 128, 1)]),
     )
 
     # fmt: off

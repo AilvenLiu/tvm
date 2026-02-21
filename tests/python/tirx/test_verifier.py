@@ -367,7 +367,7 @@ def test_layout():
             lane = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                A = Tx.alloc_buffer((2,), layout=Tx.TileLayout((2, 1)))
+                A = Tx.alloc_buffer((2,), layout=Tx.TileLayout(Tx.S[2, 1]))
 
                 A[0] = 0
     # fmt: on

@@ -30,7 +30,7 @@ from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
 from tvm.tirx.tile_scheduler import RankAwareGroupMajorTileScheduler, ClusterPersistentScheduler2D
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol
+from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 
 
 class ProfileEventType(Enum):
@@ -278,22 +278,15 @@ class ReducePipe(Pipeline):
 def test_hgemm_rs():
     A_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(
-            shard=(
-                (PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64),
-                (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1),
-            )
-        ),
+        Tx.TileLayout(Tx.S[(PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64) : (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1)]),
     )
     B_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(
-            shard=((PIPE_DEPTH, BLK_N // 2, 1, 64), (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1))
-        ),
+        Tx.TileLayout(Tx.S[(PIPE_DEPTH, BLK_N // 2, 1, 64) : (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1)]),
     )
     D_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
+        Tx.TileLayout(Tx.S[(NUM_CONSUMER, BLK_M, EPI_TILE) : (BLK_M * EPI_TILE, EPI_TILE, 1)]),
     )
 
     # fmt: off
@@ -338,7 +331,7 @@ def test_hgemm_rs():
                     B_smem = Tx.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
                     C_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
                     reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
+                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                     descA = Tx.local_cell("uint64")
                     descB = Tx.local_cell("uint64")
                     descI = Tx.local_cell("uint32")
@@ -361,7 +354,7 @@ def test_hgemm_rs():
                     Tx.cuda.cta_sync()
                     Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                     tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                         layout=TileLayout(([128, N_COLS], [1@TCol, 1@TLane])))
+                                         layout=TileLayout(S[(128, N_COLS) : (1@TCol, 1@TLane)]))
                     # reset RF
                     with Tx.cta():
                         Tx.attr({"tirx.scope_partition": True})
