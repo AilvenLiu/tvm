@@ -102,6 +102,8 @@ Scopes: layout, kernel, op, op-schedule, lower-tirx, tvmscript, megakernel, infr
 
 Default branch: **`tirx`** (not `main`). Always use `--base tirx` when creating PRs.
 
+**NEVER force push to `tirx`** — no exceptions, no `--force`, no `--force-with-lease`. Always verify the current branch before any push.
+
 Branch naming: `<type>/<kebab-case-description>`, e.g. `feat/direct-sum`, `fix/slice-swizzle`.
 
 ## Common Gotchas
