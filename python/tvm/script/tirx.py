@@ -68,6 +68,8 @@ _sqrt_region = _ir_builder_tirx.sqrt
 _sqrt_expr = _tir.sqrt
 _exp_region = _ir_builder_tirx.exp
 _exp_expr = _tir.exp
+_exp2_region = _ir_builder_tirx.exp2
+_exp2_expr = _tir.exp2
 
 
 def sqrt(*args, **kwargs):
@@ -82,11 +84,18 @@ def exp(*args, **kwargs):
     return _exp_expr(*args, **kwargs)
 
 
+def exp2(*args, **kwargs):
+    if len(args) >= 1 and _is_buffer_or_region(args[0]):
+        return _exp2_region(*args, **kwargs)
+    return _exp2_expr(*args, **kwargs)
+
+
 globals()["cast"] = cast
 globals()["min"] = min
 globals()["max"] = max
 globals()["sqrt"] = sqrt
 globals()["exp"] = exp
+globals()["exp2"] = exp2
 
 for _name in dir(_tir):
     if not _name.startswith("_") and _name not in globals():

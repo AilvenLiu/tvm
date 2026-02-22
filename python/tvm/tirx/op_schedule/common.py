@@ -40,6 +40,7 @@ class MapOpType(Enum):
     MIN = 9
     EXP = 10
     FILL = 11  # FIXME: FILL and MEMSET are the same. merge them.
+    EXP2 = 12
 
 
 class ReduceOpType(Enum):
@@ -78,7 +79,9 @@ def register_unary_binary_schedule(
                 )
             ],
         )
-        def _dispatch_variant(op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type) -> PrimFunc:
+        def _dispatch_variant(
+            op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type
+        ) -> PrimFunc:
             return _cand(op, _ty, sctx)
 
     return None

@@ -807,6 +807,46 @@ def exp(
     )
 
 
+def exp2(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
+    scale: Optional[FloatImm] = None,
+    workspace: Dict[str, Buffer] = None,
+    dispatch: Optional[str] = None,
+    **kwargs,
+):
+    """Compute base-2 exponential (2^x) of all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for exp2 result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
+        The bias of the exp2 src.
+
+    scale : Optional[FloatImm]
+        The scale of the exp2 src.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+    """
+    if workspace is None:
+        workspace = {}
+    config = kwargs or {}
+    dst = _to_region(dst)
+    src = _to_region(src)
+    if bias is not None and isinstance(bias, Buffer):
+        bias = _to_region(bias)
+    return f_insert(
+        tirx_op.Exp2(dst, src, bias, scale, workspace=workspace, config=config, dispatch=dispatch)
+    )
+
+
 def compose_op(
     workspace: Dict[str, Buffer] = None, dispatch: Optional[str] = None, **kwargs
 ) -> frame.ComposeOpFrame:

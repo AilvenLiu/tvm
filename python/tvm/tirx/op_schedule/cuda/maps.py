@@ -28,6 +28,7 @@ for op_name_, op_type_ in {
     "fill": MapOpType.FILL,
     "reciprocal": MapOpType.RECIPROCAL,
     "exp": MapOpType.EXP,
+    "exp2": MapOpType.EXP2,
     "sqrt": MapOpType.SQRT,
 }.items():
     register_unary_binary_schedule(

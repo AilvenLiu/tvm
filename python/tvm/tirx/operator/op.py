@@ -448,6 +448,15 @@ class Exp(UnaryOpWithBiasScale):
     op = get_tirx_op("exp")
 
 
+class Exp2(UnaryOpWithBiasScale):
+    """Compute base-2 exponential (2^x) of all elements in src and store to dst.
+
+    If bias and scale are provided: dst = exp2(src * scale + bias)
+    """
+
+    op = get_tirx_op("exp2")
+
+
 class Select(BinaryOp):
     """Select elements from src1 or src2 based on the predicate.
 

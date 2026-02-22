@@ -302,7 +302,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         ),
     ],
 )
-@pytest.mark.parametrize("op_type", ["reciprocal", "exp"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "exp", "exp2"])
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_unary_op_local(input, op_type, dtype):
     layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
@@ -363,6 +363,8 @@ def test_unary_op_local(input, op_type, dtype):
                         Tx.reciprocal(res_view, acc_view)
                     elif op_type == "exp":
                         Tx.exp(res_view, acc_view)
+                    elif op_type == "exp2":
+                        Tx.exp2(res_view, acc_view)
 
                 # write res into B
                 with Tx.thread():
@@ -392,10 +394,13 @@ def test_unary_op_local(input, op_type, dtype):
         if op_type == "reciprocal":
             B_ref = 1 / A_np
         elif op_type == "exp":
+            B_ref = np.exp(A_np)
+        elif op_type == "exp2":
             B_ref = np.exp2(A_np)
         else:
             raise ValueError(f"op_type={op_type} is not supported")
-        atol = 1e-3
+        # exp (e^x) is not a native GPU instruction and has higher fp16 error than exp2
+        atol = 5e-3 if op_type == "exp" else 1e-3
         tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 

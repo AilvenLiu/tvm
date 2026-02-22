@@ -35,7 +35,8 @@ unary_op_table = {
     MapOpType.FILL: lambda x: x,
     MapOpType.SQRT: lambda x: Tx.sqrt(x),
     MapOpType.RECIPROCAL: lambda x: 1.0 / x,
-    MapOpType.EXP: Tx.exp2,
+    MapOpType.EXP: Tx.exp,
+    MapOpType.EXP2: Tx.exp2,
 }
 
 
@@ -231,11 +232,11 @@ def unary_cuda_impl(
 
     dst_buffer_region = op.args[0]
     if dst_buffer_region.buffer.scope().startswith("shared"):
-        if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
+        if unary_op in {MapOpType.SQRT, MapOpType.EXP, MapOpType.EXP2}:
             return unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
     elif dst_buffer_region.buffer.scope() == "local":
-        if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
+        if unary_op in {MapOpType.SQRT, MapOpType.EXP, MapOpType.EXP2}:
             return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)
 
