@@ -248,7 +248,7 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
     @Tx.meta_class
     class SmemDescriptor:
         def __init__(self, prefix: str):
-            self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
+            self.desc = Tx.local_scalar("uint64", name=prefix + "sdesc")
 
         @Tx.inline
         def init(self, smem_ptr, ldo, sdo, swizzle):
@@ -308,8 +308,8 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         num_total_tasks = Tx.meta_var(BATCH_SIZE * NUM_KV_HEADS * num_q_blocks)
 
         # use non-persistent kernel for causal attention
-        max_ctas = 148
-        cta_count = Tx.min(max_ctas, num_total_tasks) if not is_causal else num_total_tasks
+        max_ctas: Tx.let = 148
+        cta_count: Tx.let = Tx.min(max_ctas, num_total_tasks) if not is_causal else num_total_tasks
 
         with Tx.kernel():
             bx = Tx.cta_id([cta_count], parent="kernel")
@@ -331,10 +331,10 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 sScale = pool.alloc((SSCALE_TOTAL_SIZE,), "float32", align=1024)
                 tmem_addr = pool.alloc([1], "uint32")
 
-                ACC_SCALE_BASE = 0
-                ROW_SUM_BASE = 0  # Shares with ACC_SCALE
+                ACC_SCALE_BASE: Tx.let = 0
+                ROW_SUM_BASE: Tx.let = 0  # Shares with ACC_SCALE
 
-                TMEM_LD_SIZE = 16
+                TMEM_LD_SIZE: Tx.let = 16
 
                 # Allocate phase buffers using PoolAllocator
                 phase_kv = Tx.alloc_local([1], "int32")
@@ -453,11 +453,11 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                         stage_kv[0] = 0
                         phase_kv[0] ^= 1
 
-                num_kv_blocks = ceildiv(SEQ_LEN_KV, BLK_N)
-                tmem_s_base = 0
-                tmem_o_base = 256
-                tmem_p_base = 64
-                tmem_offset = 128
+                num_kv_blocks: Tx.let = ceildiv(SEQ_LEN_KV, BLK_N)
+                tmem_s_base: Tx.let = 0
+                tmem_o_base: Tx.let = 256
+                tmem_p_base: Tx.let = 64
+                tmem_offset: Tx.let = 128
 
                 while scheduler.valid():
                     # Extract indices from scheduler
@@ -522,7 +522,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                         advance_kv_stage()
 
                                     # For causal, compute reduced trip count for loads
-                                    load_trip_count = Tx.local_cell("int32")
+                                    load_trip_count: Tx.int32
                                     load_trip_count = get_n_block_max(m_block_idx, is_causal) if is_causal else num_kv_blocks
 
                                     load_q(0)
@@ -532,7 +532,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     phase_q_load[0] ^= 1
                                     load_v(load_trip_count - 1)
                                     for _i in Tx.serial(load_trip_count - 1, annotations={"disable_unroll": True}):
-                                        i_kv = load_trip_count - 2 - _i
+                                        i_kv: Tx.let = load_trip_count - 2 - _i
                                         load_k(i_kv)
                                         load_v(i_kv)
 
@@ -562,17 +562,17 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                             elif warp_id == 0:
                                 with Tx.warp():
-                                    acc = Tx.local_cell("int32")
+                                    acc: Tx.int32
                                     acc = 0
 
                                     # Encode instruction descriptors once
-                                    descI_qk = Tx.local_cell("uint32")
+                                    descI_qk: Tx.uint32
                                     Tx.ptx.tcgen05.encode_instr_descriptor(
                                         Tx.address_of(descI_qk), "float32", "float16", "float16",
                                         MMA_M, MMA_N, MMA_K,
                                         trans_a=False, trans_b=False, n_cta_groups=CTA_GROUP,
                                     )
-                                    descI_pv = Tx.local_cell("uint32")
+                                    descI_pv: Tx.uint32
                                     Tx.ptx.tcgen05.encode_instr_descriptor(
                                         Tx.address_of(descI_pv), "float32", "float16", "float16",
                                         MMA_M, MMA_N, MMA_K,
@@ -591,7 +591,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                                         for blk_k in Tx.unroll(NUM_BLK_K):
                                             for ki in Tx.unroll(BLK_K // MMA_K):
-                                                k = blk_k * (BLK_K // MMA_K) + ki
+                                                k: Tx.let = blk_k * (BLK_K // MMA_K) + ki
                                                 offset = Tx.meta_var(
                                                     (blk_k * BLK_M * BLK_K + ki * MMA_K) * F16_BYTES >> 4
                                                 )
@@ -659,7 +659,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 )
 
                                     for i_q in Tx.unroll(SMEM_PIPE_DEPTH_Q):
-                                        tmem_col_s = tmem_s_base + i_q * tmem_offset
+                                        tmem_col_s: Tx.let = tmem_s_base + i_q * tmem_offset
                                         bar_load_q_full.wait(i_q, phase_q_load[0])
                                         if i_q == 0:
                                             # for 2 q, confirm k is loaded
@@ -671,22 +671,22 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     advance_kv_stage()
 
                                     # For causal, compute reduced trip count
-                                    mma_trip_count = Tx.local_cell("int32")
+                                    mma_trip_count: Tx.int32
                                     mma_trip_count = get_n_block_max(m_block_idx, is_causal) if is_causal else num_kv_blocks
 
                                     for i_kv in Tx.serial(
                                         mma_trip_count - 1, annotations={"disable_unroll": True}
                                     ):
-                                        stage_v = stage_kv[0]
-                                        phase_v = phase_kv[0]
+                                        stage_v: Tx.let = stage_kv[0]
+                                        phase_v: Tx.let = phase_kv[0]
                                         advance_kv_stage()
                                         stage_k = Tx.meta_var(stage_kv[0])
                                         phase_k = Tx.meta_var(phase_kv[0])
 
                                         for i_q in Tx.unroll(SMEM_PIPE_DEPTH_Q):
-                                            tmem_col_s = tmem_s_base + i_q * tmem_offset
-                                            tmem_col_p = tmem_p_base + i_q * tmem_offset
-                                            tmem_col_o = tmem_o_base + i_q * tmem_offset
+                                            tmem_col_s: Tx.let = tmem_s_base + i_q * tmem_offset
+                                            tmem_col_p: Tx.let = tmem_p_base + i_q * tmem_offset
+                                            tmem_col_o: Tx.let = tmem_o_base + i_q * tmem_offset
                                             if i_q == 0:
                                                 # wait for v is loaded
                                                 bar_load_kv_full.wait(stage_v, phase_v)
@@ -708,8 +708,8 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                         phase_tmem[0] ^= 1
 
                                     for i_q in Tx.unroll(SMEM_PIPE_DEPTH_Q):
-                                        tmem_col_p = tmem_p_base + i_q * tmem_offset
-                                        tmem_col_o = tmem_o_base + i_q * tmem_offset
+                                        tmem_col_p: Tx.let = tmem_p_base + i_q * tmem_offset
+                                        tmem_col_o: Tx.let = tmem_o_base + i_q * tmem_offset
                                         if i_q == 0:
                                             # wait for v is loaded
                                             bar_load_kv_full.wait(stage_kv[0], phase_kv[0])
@@ -755,21 +755,22 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     The bit test `mask & (1 << i)` compiles to the R2P (Register to Predicate)
                                     PTX instruction, which is more efficient than per-column comparisons.
                                     """
-                                    CHUNK_SIZE = 24  # Max safe shift amount (< 32)
-                                    num_chunks = ceildiv(ncol, CHUNK_SIZE)
+                                    ncol = Tx.meta_var(ncol)
+                                    CHUNK_SIZE: Tx.let = 24  # Max safe shift amount (< 32)
+                                    num_chunks: Tx.let = ceildiv(ncol, CHUNK_SIZE)
 
                                     for s in Tx.unroll(num_chunks):
                                         # Compute col_limit for this chunk (clamped to [0, chunk_cols])
-                                        col_limit_s = Tx.max(col_limit - s * CHUNK_SIZE, 0)
-                                        mask = Tx.local_cell("uint32")
+                                        col_limit_s: Tx.let = Tx.max(col_limit - s * CHUNK_SIZE, 0)
+                                        mask: Tx.uint32
                                         # Create bitmask: col_limit=5 -> 0b11111 (bits 0-4 set)
                                         mask = Tx.shift_left(Tx.int32(1), col_limit_s) - 1
 
                                         # Apply mask to each column in this chunk
                                         for i in Tx.unroll(CHUNK_SIZE):
                                             if i < ncol - s * CHUNK_SIZE:
-                                                c = s * CHUNK_SIZE + i
-                                                in_bound = Tx.bitwise_and(mask, Tx.shift_left(Tx.int32(1), i))
+                                                c: Tx.let = s * CHUNK_SIZE + i
+                                                in_bound: Tx.let = Tx.bitwise_and(mask, Tx.shift_left(Tx.int32(1), i))
                                                 s_chunk_buf[c] = Tx.Select(Tx.cast(in_bound, "bool"), s_chunk_buf[c], Tx.float32(-float("inf")))
 
                                 @Tx.inline
@@ -789,21 +790,21 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     - tid_in_wg (0-127) maps to packed rows: (seq_pos, head) = (tid//GQA_RATIO, tid%GQA_RATIO)
                                     """
                                     # Convert thread index to sequence position within warpgroup
-                                    seq_pos_in_wg = tid_in_wg // GQA_RATIO
+                                    seq_pos_in_wg: Tx.let = tid_in_wg // GQA_RATIO
 
                                     # Global sequence position
                                     # wg_id 0/1 handles different Q stages (each stage has SEQ_Q_PER_TILE positions)
                                     # m_block covers SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q sequence positions
-                                    row_idx = (m_blk_idx * SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q +
+                                    row_idx: Tx.let = (m_blk_idx * SEQ_Q_PER_TILE * SMEM_PIPE_DEPTH_Q +
                                                wg_id * SEQ_Q_PER_TILE +
                                                seq_pos_in_wg)
 
                                     # Causal row offset (from mask.py:385)
                                     # For seq_len_q == seq_len_kv: causal_row_offset = 1 - n_block * BLK_N
-                                    causal_row_offset = 1 + SEQ_LEN_KV - n_blk_idx * BLK_N - SEQ_LEN_Q
+                                    causal_row_offset: Tx.let = 1 + SEQ_LEN_KV - n_blk_idx * BLK_N - SEQ_LEN_Q
 
                                     # Column limit: mask if col >= col_limit_right
-                                    col_limit_right = row_idx + causal_row_offset
+                                    col_limit_right: Tx.let = row_idx + causal_row_offset
 
                                     # Use R2P-style masking instead of per-column comparison
                                     mask_r2p(s_chunk_buf, col_limit_right, BLK_N)
@@ -862,12 +863,12 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     # and row_max_scaled is the max value of the tile after scaled
                                     # scale_log2 is the log2 of the scale factor
                                     row_max[0] = row_max_new[0]
-                                    row_max_scaled = row_max_safe[0] * scale_log2
+                                    row_max_scaled: Tx.let = row_max_safe[0] * scale_log2
                                     profiler.end(ProfileEventType.Softmax_MAX, tid_in_wg == 0)
 
                                     # Write acc_scale to sScale and arrive immediately (no wait here)
                                     if tid_in_wg < BLK_M and not is_first:
-                                        sScale_idx = ACC_SCALE_BASE + tid_in_wg + wg_id * BLK_M
+                                        sScale_idx: Tx.let = ACC_SCALE_BASE + tid_in_wg + wg_id * BLK_M
                                         sScale[sScale_idx] = acc_scale[0]
                                     bar_softmax_corr_full.arrive(wg_id)
                                     profiler.start(ProfileEventType.Softmax_FMA, tid_in_wg == 0)
@@ -920,30 +921,30 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                 bar_softmax_corr_empty.wait(wg_id, phase_q[0])
                                 phase_q[0] ^= 1
                                 # Compute block ranges for this Q block
-                                n_block_max = get_n_block_max(m_block_idx, is_causal)
-                                n_block_min_causal = get_n_block_min_causal_mask(m_block_idx) if is_causal else n_block_max
+                                n_block_max: Tx.let = get_n_block_max(m_block_idx, is_causal)
+                                n_block_min_causal: Tx.let = get_n_block_min_causal_mask(m_block_idx) if is_causal else n_block_max
 
                                 # Phase 1: Last KV block (n_block_max - 1) with causal mask
                                 # This block may have both seqlen boundary AND causal masking
                                 softmax_step(n_block_max - 1, apply_mask=is_causal, is_first=True)
 
                                 # Update n_block_max after Phase 1
-                                n_block_max_after_p1 = n_block_max - 1
+                                n_block_max_after_p1: Tx.let = n_block_max - 1
 
                                 # Phase 2: Blocks with partial causal masking 
                                 # These are blocks in [n_block_min_causal, n_block_max - 1)
-                                num_phase2_blocks = Tx.max(n_block_max_after_p1 - n_block_min_causal, 0)
+                                num_phase2_blocks: Tx.let = Tx.max(n_block_max_after_p1 - n_block_min_causal, 0)
                                 for i in Tx.serial(num_phase2_blocks, annotations={"disable_unroll": True}):
-                                    n_block = n_block_max_after_p1 - 1 - i
+                                    n_block: Tx.let = n_block_max_after_p1 - 1 - i
                                     softmax_step(n_block, apply_mask=True)
 
                                 # Update n_block_max after Phase 2
-                                n_block_max_after_p2 = Tx.min(n_block_max_after_p1, n_block_min_causal)
+                                n_block_max_after_p2: Tx.let = Tx.min(n_block_max_after_p1, n_block_min_causal)
 
                                 # Phase 3: Unmasked blocks (no causal mask overhead)
                                 # These are blocks in [0, n_block_min_causal)
                                 for i in Tx.serial(n_block_max_after_p2, annotations={"disable_unroll": True}):
-                                    n_block = n_block_max_after_p2 - 1 - i
+                                    n_block: Tx.let = n_block_max_after_p2 - 1 - i
                                     softmax_step(n_block, apply_mask=False)
                                 if tid_in_wg < BLK_M:
                                     sScale[ROW_SUM_BASE + tid_in_wg + wg_id * BLK_M] = row_sum[0]
@@ -958,7 +959,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                 phase_q[0] ^= 1
 
                                 # For causal, compute reduced trip count for correction warp
-                                corr_trip_count = get_n_block_max(m_block_idx, is_causal) if is_causal else num_kv_blocks
+                                corr_trip_count: Tx.let = get_n_block_max(m_block_idx, is_causal) if is_causal else num_kv_blocks
 
                                 for i_kv in Tx.serial(corr_trip_count - 1, annotations={"disable_unroll": True}):
                                     for i_q in Tx.unroll(2):
@@ -973,17 +974,17 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                         else:
                                             should_rescale[0] = 0
 
-                                        any_needs_rescale = Tx.ptx.any_sync(0xFFFFFFFF, should_rescale[0])
+                                        any_needs_rescale: Tx.let = Tx.ptx.any_sync(0xFFFFFFFF, should_rescale[0])
                                         if any_needs_rescale != 0:
                                             if tid_in_wg < BLK_M:
-                                                tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
-                                                RESCALE_TILE = 16
+                                                tmem_col_o_stage: Tx.let = tmem_o_base + i_q * tmem_offset
+                                                RESCALE_TILE: Tx.let = 16
 
                                                 o_row_buf = Tx.alloc_buffer((16,), "float32", scope="local")
                                                 o_row_wg = o_row_buf.view(128, 16, layout=TileLayout(S[(128, 16) : (1 @ axis_tid_in_wg, 1)]))
 
                                                 for d_tile in Tx.unroll(ceildiv(HEAD_DIM, RESCALE_TILE)):
-                                                    d_start = d_tile * RESCALE_TILE
+                                                    d_start: Tx.let = d_tile * RESCALE_TILE
                                                     if d_start < HEAD_DIM:
                                                         Tx.copy_async(o_row_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + 16])
                                                         for d in Tx.unroll(8):
@@ -1003,7 +1004,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     bar_softmax_corr_full.wait(i_q, phase_q[0])
 
                                     # 2. Read row_sum and release softmax_corr_empty immediately
-                                    row_sum = sScale[ROW_SUM_BASE + tid_in_wg + i_q * BLK_M]
+                                    row_sum: Tx.let = sScale[ROW_SUM_BASE + tid_in_wg + i_q * BLK_M]
                                     bar_softmax_corr_empty.arrive(i_q)
 
                                     # 3. Wait for O_full and epi_empty (after releasing softmax)
@@ -1011,15 +1012,15 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     bar_corr_epi_empty.wait(i_q, phase_tmem[0])
 
                                     profiler.start(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
-                                    acc_O_mn_row_is_zero_or_nan = tvm.tir.any(row_sum == Tx.float32(0.0), row_sum != row_sum)
-                                    norm_scale = Tx.ptx.rcp(Tx.Select(acc_O_mn_row_is_zero_or_nan, Tx.float32(1.0), row_sum))
-                                    tmem_col_o_stage = tmem_o_base + i_q * tmem_offset
+                                    acc_O_mn_row_is_zero_or_nan: Tx.let = tvm.tir.any(row_sum == Tx.float32(0.0), row_sum != row_sum)
+                                    norm_scale: Tx.let = Tx.ptx.rcp(Tx.Select(acc_O_mn_row_is_zero_or_nan, Tx.float32(1.0), row_sum))
+                                    tmem_col_o_stage: Tx.let = tmem_o_base + i_q * tmem_offset
                                     o_row_f32_buf = Tx.alloc_buffer((TMEM_EPI_LD_SIZE,), "float32", scope="local")
                                     o_row_f32_wg = o_row_f32_buf.view(128, TMEM_EPI_LD_SIZE, layout=TileLayout(S[(128, TMEM_EPI_LD_SIZE) : (1 @ axis_tid_in_wg, 1)]))
                                     o_row_f16 = Tx.alloc_local([TMEM_EPI_LD_SIZE], "float16")
 
                                     for d_tile in Tx.unroll(ceildiv(HEAD_DIM, TMEM_EPI_LD_SIZE)):
-                                        d_start = d_tile * TMEM_EPI_LD_SIZE
+                                        d_start: Tx.let = d_tile * TMEM_EPI_LD_SIZE
                                         if d_start < HEAD_DIM:
                                             Tx.copy_async(o_row_f32_wg, tmem[:, tmem_col_o_stage + d_start : tmem_col_o_stage + d_start + TMEM_EPI_LD_SIZE])
                                             for d in Tx.unroll(TMEM_EPI_LD_SIZE // 2):

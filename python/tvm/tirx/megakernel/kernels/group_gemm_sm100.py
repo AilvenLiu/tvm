@@ -78,8 +78,8 @@ class GroupGEMMTile(GemmTile):
 
     def _alloc_local(self, m_idx):
         super()._alloc_local(m_idx)
-        self.num_tokens_in_block = Tx.local_cell("int32", name="num_tokens_in_block")
-        self.eid = Tx.local_cell("int32", name="eid")
+        self.num_tokens_in_block = Tx.local_scalar("int32", name="num_tokens_in_block")
+        self.eid = Tx.local_scalar("int32", name="eid")
         Tx.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
     
     @Tx.inline

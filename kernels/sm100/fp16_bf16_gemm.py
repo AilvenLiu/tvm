@@ -142,7 +142,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             Tx.ptx.fence.mbarrier_init()
             Tx.cuda.cluster_sync()
 
-            tmem_addr_local = Tx.local_cell("uint32")
+            tmem_addr_local: Tx.uint32
             tmem_addr_local = tmem_addr[0]
 
             tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]))
@@ -188,7 +188,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     ld_phase = PipelineState("ld", 1)
                     ld_phase.init(is_producer=True)
 
-                    accum = Tx.local_cell("int32")
+                    accum: Tx.int32
 
                     @Tx.inline
                     def mma_stage(stage):

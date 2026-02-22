@@ -36,8 +36,8 @@ class PipelineState:
     """
 
     def __init__(self, prefix: str, pipe_depth: int):
-        self.stage = Tx.local_cell("int32", name=prefix + "_stage")
-        self.phase = Tx.local_cell("int32", name=prefix + "_phase")
+        self.stage = Tx.local_scalar("int32", name=prefix + "_stage")
+        self.phase = Tx.local_scalar("int32", name=prefix + "_phase")
         self.pipe_depth = pipe_depth
 
     @Tx.inline

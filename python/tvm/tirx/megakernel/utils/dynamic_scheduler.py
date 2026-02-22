@@ -129,10 +129,10 @@ class MPMCQueue:
         self.smem_manager = smem_manager
 
     def _alloc(self):
-        self.head_r = Tx.local_cell(dtype="int32", name="head_r")
-        self.tail_r = Tx.local_cell(dtype="int32", name="tail_r")
-        self.masked_pos = Tx.local_cell(dtype="int32", name="masked_pos")
-        self.idx = Tx.local_cell(dtype="int32", name="idx")
+        self.head_r = Tx.local_scalar(dtype="int32", name="head_r")
+        self.tail_r = Tx.local_scalar(dtype="int32", name="tail_r")
+        self.masked_pos = Tx.local_scalar(dtype="int32", name="masked_pos")
+        self.idx = Tx.local_scalar(dtype="int32", name="idx")
         self.tail_smem = self.smem_manager.alloc((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER,), "int32", name="tail_smem", method="persistent")
 
     @Tx.inline
@@ -225,13 +225,13 @@ class DynamicTileScheduler(TileSchedulerBase):
         self.smem_manager = smem_manager
 
     def _alloc(self):
-        self.task_info = Tx.local_cell(dtype="int32", name="task_info")
-        self.task_type = Tx.local_cell(dtype="int32", name="task_type")
-        self.m_idx = Tx.local_cell(dtype="int32", name="m_idx")
-        self.n_idx = Tx.local_cell(dtype="int32", name="n_idx")
-        self.k_idx = Tx.local_cell(dtype="int32", name="k_idx")
-        self.idx = Tx.local_cell(dtype="int32", name="idx")
-        self.dequeue_phase = Tx.local_cell(dtype="int32", name="dequeue_phase")
+        self.task_info = Tx.local_scalar(dtype="int32", name="task_info")
+        self.task_type = Tx.local_scalar(dtype="int32", name="task_type")
+        self.m_idx = Tx.local_scalar(dtype="int32", name="m_idx")
+        self.n_idx = Tx.local_scalar(dtype="int32", name="n_idx")
+        self.k_idx = Tx.local_scalar(dtype="int32", name="k_idx")
+        self.idx = Tx.local_scalar(dtype="int32", name="idx")
+        self.dequeue_phase = Tx.local_scalar(dtype="int32", name="dequeue_phase")
         self.p2c_dequeue_barrier = SchedulerBarrier(self.smem_manager, is_p2c=True)
         self.c2p_dequeue_barrier = SchedulerBarrier(self.smem_manager, is_p2c=False)
         self.packed_value = self.smem_manager.alloc((1,), "int32", align=16, name="packed_value", method="persistent")

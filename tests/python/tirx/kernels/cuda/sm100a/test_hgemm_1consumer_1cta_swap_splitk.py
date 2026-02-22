@@ -224,7 +224,7 @@ def get_hgemm_kernel(dim_n, dim_k):
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
                                         elem_offset=1024 // F16_BYTES)
                 B_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
@@ -235,23 +235,25 @@ def get_hgemm_kernel(dim_n, dim_k):
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
-                stage = Tx.local_cell("int32")
+                stage: Tx.int32
                 phase = Tx.alloc_buffer((1, ), "int32", scope="local")
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
-                profiler = CudaProfiler(
-                    profiler_buffer,
-                    write_stride=PROFILER_WRITE_STRIDE,
-                    num_groups=NUM_GROUPS,
-                    profiler_enabled=PROFILER_ON,
+                descA: Tx.uint64
+                descB: Tx.uint64
+                descI: Tx.uint32
+                profiler = Tx.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
+                    )
                 )
                 # initialize
                 tma2mma_bar = BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True)
                 mma2tma_bar = BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
                 mma2ld_bar = BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
                 ld2mma_bar = BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
-                m_tiles_expr = Tx.truncdiv(M + BLK_M * CTA_GROUP - 1, BLK_M * CTA_GROUP)
+                m_tiles_expr: Tx.let = Tx.truncdiv(M + BLK_M * CTA_GROUP - 1, BLK_M * CTA_GROUP)
                 tile_scheduler = GroupMajor3D(
                     "tile_scheduler",
                     m_tiles=m_tiles_expr,
@@ -338,8 +340,8 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                         elif warp_id == 0:
                             profiler.init(1)
-                            tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                            tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                            tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                            tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                             Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_N, MMA_M, MMA_K, False, False, CTA_GROUP)
                             phase[0] = 0
                             while tile_scheduler.valid():
@@ -390,8 +392,8 @@ def get_hgemm_kernel(dim_n, dim_k):
                     with Tx.warpgroup()[0:1]:
                         profiler.init(2)
                         Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
-                        tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                        tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                        tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                        tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                         phase[0] = 0
                         while tile_scheduler.valid():
                             m_idx = Tx.meta_var(tile_scheduler.m_idx)

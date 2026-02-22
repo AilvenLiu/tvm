@@ -673,7 +673,7 @@ PrimExpr Buffer::OffsetOf_p(const Array<PrimExpr>& indices) const {
   return tirx::Call(DataType::Int(32), tirx::builtin::buffer_offset(), {BufferLoad(*this, indices)});
 }
 
-bool Buffer::IsCell(bool alloc_or_decl) const {
+bool Buffer::IsScalar(bool alloc_or_decl) const {
   // TODO(@bohan): logical scope is not considered
   return (*this)->shape.size() == 1 && is_one((*this)->shape[0]) && (*this)->strides.size() == 0 &&
          (*this)->axis_separators.size() == 0 &&
@@ -715,8 +715,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferWithAllocatedAddr", &Buffer::with_allocated_addr)
       .def_method("tirx.BufferWithDtype", &Buffer::with_dtype)
       .def_method("tirx.BufferWithData", &Buffer::with_data)
-      .def_method("tirx.BufferIsCell", &Buffer::IsCell);
+      .def_method("tirx.BufferIsScalar", &Buffer::IsScalar);
 }
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace tvm

@@ -98,11 +98,11 @@ class StaticTileScheduler(TileSchedulerBase):
         unpack_from_32bit(self.queue_smem[self.tile_idx], Tx.address_of(self.task_type), Tx.address_of(self.m_idx), Tx.address_of(self.n_idx), Tx.address_of(self.k_idx))
 
     def _alloc(self):
-        self.m_idx = Tx.local_cell("int32", name=self.prefix + "_m_idx")
-        self.n_idx = Tx.local_cell("int32", name=self.prefix + "_n_idx")
-        self.k_idx = Tx.local_cell("int32", name=self.prefix + "_k_idx")
-        self.task_type = Tx.local_cell("int32", name=self.prefix + "_task_type")
-        self.tile_idx = Tx.local_cell("int32", name=self.prefix + "_tile_idx")
+        self.m_idx = Tx.local_scalar("int32", name=self.prefix + "_m_idx")
+        self.n_idx = Tx.local_scalar("int32", name=self.prefix + "_n_idx")
+        self.k_idx = Tx.local_scalar("int32", name=self.prefix + "_k_idx")
+        self.task_type = Tx.local_scalar("int32", name=self.prefix + "_task_type")
+        self.tile_idx = Tx.local_scalar("int32", name=self.prefix + "_tile_idx")
         self.queue_smem = self.smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent")
 
     @Tx.inline

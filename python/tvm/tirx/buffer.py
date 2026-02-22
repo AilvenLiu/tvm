@@ -247,20 +247,20 @@ class Buffer(Object, Scriptable):
         """
         return self.elem_offset_of(indices, inner) * tvm.DataType(self.dtype).bits // 8
 
-    def is_cell(self, alloc_or_decl=True):
-        """Check if the buffer is a cell.
+    def is_scalar(self, alloc_or_decl=True):
+        """Check if the buffer is a scalar.
 
         Parameters
         ----------
         alloc_or_decl : bool, optional
-            Whether to consider alloc_cell and decl_cell as cell. True for alloc_cell,
-            False for decl_cell.
+            Whether to consider alloc_scalar and decl_scalar as scalar. True for alloc_scalar,
+            False for decl_scalar.
 
         Returns
         -------
-            bool: True if the buffer is a cell, False otherwise.
+            bool: True if the buffer is a scalar, False otherwise.
         """
-        return _ffi_api.BufferIsCell(self, alloc_or_decl)
+        return _ffi_api.BufferIsScalar(self, alloc_or_decl)
 
     def ptr_to(self, indices):
         """Get the pointer to the buffer at the given indices (logical indices).

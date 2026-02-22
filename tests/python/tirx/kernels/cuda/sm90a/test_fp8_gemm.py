@@ -114,9 +114,9 @@ def test_fp8_gemm_hopper_no_ws():
         B = Tx.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))
         C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
-        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        C_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        C_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float8_e4m3fn", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float8_e4m3fn", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
@@ -136,13 +136,13 @@ def test_fp8_gemm_hopper_no_ws():
                 C_smem = Tx.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
                 # barriers
                 bars = Tx.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
-                desc_A = Tx.local_cell("uint64")
-                desc_B = Tx.local_cell("uint64")
+                desc_A: Tx.uint64
+                desc_B: Tx.uint64
 
                 with Tx.thread():
                     # index
-                    tma_index = Tx.local_cell("int32")
-                    mma_index = Tx.local_cell("int32")
+                    tma_index: Tx.int32
+                    mma_index: Tx.int32
                     # acuumulators
                     accum = Tx.alloc_buffer([128], "float32", scope="local")
                     accum_half = Tx.alloc_buffer([8], "float16", scope="local")

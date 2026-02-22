@@ -500,7 +500,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            descI_local = Tx.local_cell("uint32")
+            descI_local: Tx.uint32
             Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,
                                                                SFA_init_addr, SFB_init_addr,
                                                                M * cta_group, N, MMA_K, transA, transB, cta_group)
@@ -510,7 +510,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            descI_local = Tx.local_cell("uint32")
+            descI_local: Tx.uint32
             Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,
                                                   M * cta_group, N, MMA_K, transA, transB, cta_group)
             main_impl(descA_buf[0], descB_buf[0], descI_local)

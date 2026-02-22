@@ -301,10 +301,10 @@ class Pipeline:
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        )
-        self.idx = Tx.local_cell("int32", name="pipeline_idx")
-        self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
-        self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
+        ).buffer
+        self.idx = Tx.local_scalar("int32", name="pipeline_idx")
+        self.p2c_phase = Tx.local_scalar("int32", name="pipeline_p2c_phase")
+        self.c2p_phase = Tx.local_scalar("int32", name="pipeline_c2p_phase")
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
@@ -645,9 +645,9 @@ def test_hgemm_rs():
                                        semaphore: Tx.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64"), out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
                                        gemm_task_types: Tx.Buffer((CAPACITY,), "int32"), gemm_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), gemm_head: Tx.Buffer((1,), "int32"), gemm_tail: Tx.Buffer((1,), "int32"),
                                        rs_task_types: Tx.Buffer((CAPACITY,), "int32"), rs_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), rs_head: Tx.Buffer((1,), "int32"), rs_tail: Tx.Buffer((1,), "int32")):
-        A_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        B_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data, K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, gemm_out.data, N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
@@ -663,7 +663,7 @@ def test_hgemm_rs():
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
                                         elem_offset=1024 // F16_BYTES)
                 B_smem = Tx.decl_buffer((PIPELINE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
@@ -675,20 +675,20 @@ def test_hgemm_rs():
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                 reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
+                descA: Tx.uint64
+                descB: Tx.uint64
+                descI: Tx.uint32
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
                 phase_tmem = Tx.alloc_buffer((1,), "int32", scope="local")
-                stage = Tx.local_cell("int32", name="stage")
+                stage: Tx.int32
 
                 # gemm + rs
-                sem = Semaphore(cnt=2 * WORLD_SIZE, buffer=semaphore)
-                offset = Tx.local_cell(dtype="int32")
-                gemm_queue = GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS)
-                rs_queue = RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS)
+                sem = Tx.meta_var(Semaphore(cnt=2 * WORLD_SIZE, buffer=semaphore))
+                offset: Tx.int32
+                gemm_queue = Tx.meta_var(GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS))
+                rs_queue = Tx.meta_var(RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS))
                 packed_buf = Tx.decl_buffer((1,), "uint64", buf.data, elem_offset=64)
-                packed_ptr: Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
+                packed_ptr: Tx.let[Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
                 packed_value = Tx.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
                 sch_pipe = Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False)
                 tile_scheduler = MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe)
@@ -709,7 +709,7 @@ def test_hgemm_rs():
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)
                 ld2mma.init(128 * NUM_CONSUMER)
-                ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
                 tma_finished = Tx.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
                 phase[0] = 0
                 phase_tmem[0] = 0

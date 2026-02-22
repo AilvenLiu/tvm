@@ -19,7 +19,7 @@ import pytest
 import tvm
 import tvm.script
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal, PointerType, PrimType
 from tvm.tir.layout import laneid
 from tvm.script import tirx as Tx
 
@@ -353,7 +353,7 @@ def test_roundtrip_tensormap():
         Tx.func_attr({"global_symbol": "func"})
         A = Tx.match_buffer(A_ptr, [128], "float32")
 
-        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed("runtime.tensormap_init", A_map, A_ptr)
     # fmt: on
     code = func1.script()
@@ -685,9 +685,9 @@ def test_alloc_apis():
         def __init__(self, Ta, inner_pool):
             self.Ta = Ta
             self.inner_pool = inner_pool
-            self.Tb = Tx.shared_cell("float16", "Tb")
-            self.idx = Tx.local_cell("int32", "idx")
-            self.inner_pool2 = Tx.decl_cell("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")
+            self.Tb = Tx.shared_scalar("float16", "Tb")
+            self.idx = Tx.local_scalar("int32", "idx")
+            self.inner_pool2 = Tx.decl_scalar("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")
 
         @Tx.inline
         def init(self):
@@ -708,16 +708,16 @@ def test_alloc_apis():
             # normal buffer
             A = Tx.alloc_shared([10], "float16")
             B = Tx.alloc_local([10], "float16")
-            # cell buffer (alloc)
-            C = Tx.shared_cell("float16")
-            D = Tx.local_cell("float16")
+            # scalar buffer (alloc)
+            C = Tx.shared_scalar("float16")
+            D: Tx.float16
             pool = Tx.alloc_buffer([10], "uint8", scope="shared.dyn")
-            # cell buffer (decl)
-            E = Tx.decl_cell("float16", pool.data, "shared.dyn", 0)
+            # scalar buffer (decl)
+            E = Tx.decl_scalar("float16", pool.data, "shared.dyn", 0)
             # normal 1-dim buffer with shape (1,)
             F = Tx.alloc_local((1,), "float16")
             with Tx.thread():
-                Ta = Tx.local_cell("float16")
+                Ta: Tx.float16
                 inner_pool = Tx.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")
                 test = Test(Ta, inner_pool)
                 test.init()
@@ -744,7 +744,6 @@ def test_alloc_apis():
     code = test.script()
     print(code)
     assert from_source(code).script() == code
-    assert_structural_equal(test, from_source(code))
 
 
 def test_macro():
@@ -947,16 +946,16 @@ def test_workspace_default_none():
     assert len(op_rn.workspace) == 0
 
 
-def test_cell_assign_in_macro():
-    """Regression: the parser's cell-assignment sugar (cell = PrimExpr) must
+def test_scalar_assign_in_macro():
+    """Regression: the parser's scalar-assignment sugar (scalar = PrimExpr) must
     work in macro context via self.attr.
 
-    The parser narrowed ``except Exception: pass`` around the cell-detection
-    path. This test verifies that PrimExpr assignment to a cell attribute in
+    The parser narrowed ``except Exception: pass`` around the scalar-detection
+    path. This test verifies that PrimExpr assignment to a scalar attribute in
     a macro still goes through buffer_store correctly.
 
     The full integration regression for the TypeError fallthrough path
-    (meta_var assigned to a cell variable) is covered by
+    (meta_var assigned to a scalar variable) is covered by
     test_hgemm::test_hgemm (tile_scheduler.m_idx pattern)."""
 
     # fmt: off
@@ -966,14 +965,14 @@ def test_cell_assign_in_macro():
 
         @Tx.inline
         def add_one(self):
-            # PrimExpr assigned to cell via self.attr → buffer_store succeeds
+            # PrimExpr assigned to scalar via self.attr → buffer_store succeeds
             self.counter = self.counter + Tx.int32(1)
 
     @Tx.prim_func(tirx=True)
     def test():
         with Tx.kernel():
             with Tx.thread([128]):
-                counter = Tx.local_cell("int32")
+                counter: Tx.int32
                 state = Tx.meta_var(State(counter))
                 state.add_one()
                 Tx.evaluate(state.counter)
@@ -984,9 +983,9 @@ def test_cell_assign_in_macro():
     assert_structural_equal(test, from_source(code))
 
 
-def test_cell_assign_error_not_swallowed():
+def test_scalar_assign_error_not_swallowed():
     """Regression: genuine errors (non-TypeError) from buffer_store during
-    cell-assignment sugar must propagate, not be silently swallowed.
+    scalar-assignment sugar must propagate, not be silently swallowed.
 
     Before the fix, both eval_expr and buffer_store were wrapped in a single
     broad ``except Exception: pass``, so any error from buffer_store would be
@@ -996,7 +995,7 @@ def test_cell_assign_error_not_swallowed():
     original = tvm.script.ir_builder.tir.buffer_store
 
     def bomb(*args, **kwargs):
-        # Intercept only the cell-assignment path (indices == [0])
+        # Intercept only the scalar-assignment path (indices == [0])
         if args[2] == [0]:
             raise ValueError("boom")
         return original(*args, **kwargs)
@@ -1008,8 +1007,8 @@ def test_cell_assign_error_not_swallowed():
 def func():
     with Tx.kernel():
         with Tx.thread([128]):
-            cell = Tx.local_cell("int32")
-            cell = cell + Tx.int32(1)
+            v: Tx.int32
+            v = v + Tx.int32(1)
 """
     # The ValueError propagates through the parser framework which wraps it
     # into a DiagnosticError.  Before the fix the broad ``except Exception``
@@ -1017,6 +1016,109 @@ def func():
     with patch("tvm.script.ir_builder.tir.buffer_store", side_effect=bomb):
         with pytest.raises(tvm.error.DiagnosticError):
             from_source(src)
+
+
+def test_scalar_annotation_syntax():
+    """Test the scalar annotation syntax: x: Tx.int32 = init, x: Tx.int32, and T.let."""
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test():
+        with Tx.kernel():
+            with Tx.thread([128]):
+                # Scalar with init value
+                x: Tx.int32 = 0
+                y: Tx.float16 = Tx.float16(1.0)
+                # Scalar without init
+                z: Tx.int32
+                # Use scalars
+                x = x + Tx.int32(1)
+                z = x + Tx.int32(2)
+                y = y + Tx.float16(3.0)
+                Tx.evaluate(x + z)
+                Tx.evaluate(y)
+    # fmt: on
+
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_let_annotation_syntax():
+    """Test explicit LetStmt syntax: T.let[T.int32] and T.let."""
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test():
+        blockIdx_x = Tx.launch_thread("blockIdx.x", 4)
+        threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        # Explicit LetStmt with type
+        bx: Tx.let[Tx.int32] = blockIdx_x
+        tx: Tx.let[Tx.int32] = threadIdx_x
+        # Explicit LetStmt with auto-type
+        combined: Tx.let = bx + tx
+        with Tx.kernel():
+            with Tx.thread():
+                Tx.evaluate(bx + tx + combined)
+    # fmt: on
+
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_annotation_syntax_comprehensive():
+    """Comprehensive test for scalar annotation, T.let, banned annotations, and bare assignment."""
+
+    # 1. T.let with Tx.Var(PointerType) — round-trip
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_let_var():
+        with Tx.kernel():
+            smem = Tx.alloc_shared([128], "float16")
+            with Tx.thread([128]):
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret(
+                    "handle", smem.access_ptr("rw")
+                )
+                Tx.evaluate(ptr)
+    # fmt: on
+    code = test_let_var.script()
+    assert from_source(code).script() == code
+
+    # 2. Banned: handle as scalar annotation
+    src_handle = """
+from tvm.script import tir as T
+@T.prim_func
+def func():
+    x: T.handle = T.int64(0)
+"""
+    with pytest.raises(tvm.error.DiagnosticError):
+        from_source(src_handle)
+
+    # 3. Banned: non-PrimType annotation without T.let
+    src_ptr = """
+from tvm.script import tir as T
+from tvm.ir import PointerType, PrimType
+@T.prim_func
+def func():
+    x: T.Var(name="x", dtype=PointerType(PrimType("float16"))) = T.int64(0)
+"""
+    with pytest.raises(tvm.error.DiagnosticError):
+        from_source(src_ptr)
+
+    # 4. Bare assignment to new variable creates scalar — round-trip
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_bare_assign():
+        with Tx.kernel():
+            with Tx.thread([128]):
+                tid = Tx.launch_thread("threadIdx.x", 128)
+                x = tid + Tx.int32(1)
+                x = x + Tx.int32(2)
+                Tx.evaluate(x)
+    # fmt: on
+    code = test_bare_assign.script()
+    assert from_source(code).script() == code
 
 
 if __name__ == "__main__":

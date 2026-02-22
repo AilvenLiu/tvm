@@ -297,7 +297,7 @@ def test_print():
             A = Tx.match_buffer(A_ptr, (M,), dtype_str)
             B = Tx.match_buffer(B_ptr, (M,), dtype_str)
             C = Tx.match_buffer(C_ptr, (M,), dtype_str)
-            Ten = Tx.IntImm(dtype_str, 10)
+            Ten: Tx.let = Tx.IntImm(dtype_str, 10)
 
             for i in Tx.grid(M):
                 with Tx.sblock("C"):

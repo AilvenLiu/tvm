@@ -223,20 +223,20 @@ ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
   auto prefix = TIR(d, method);
   auto attrs = BufferAttrs(buffer, p, frame, d, var_definitions);
   if (method == "alloc_buffer") {
-    if (buffer.IsCell()) {
-      // The buffer can be allocated by the alloc_cell function
+    if (buffer.IsScalar()) {
+      // The buffer can be allocated by the alloc_scalar function
       auto dtype = d->AsDoc<ExprDoc>(buffer->dtype, p->Attr("dtype"));
       if (buffer.scope() == "shared") {
-        // shared_cell
-        prefix = TIR(d, "shared_cell");
+        // shared_scalar
+        prefix = TIR(d, "shared_scalar");
         attrs = ffi::Map<ffi::String, ExprDoc>({{"dtype", dtype}});
       } else if (buffer.scope() == "local") {
-        // local_cell
-        prefix = TIR(d, "local_cell");
+        // local_scalar
+        prefix = TIR(d, "local_scalar");
         attrs = ffi::Map<ffi::String, ExprDoc>({{"dtype", dtype}});
       } else {
-        // alloc_cell
-        prefix = TIR(d, "alloc_cell");
+        // alloc_scalar
+        prefix = TIR(d, "alloc_scalar");
         auto scope = d->AsDoc<ExprDoc>(buffer.scope(), p->Attr("scope"));
         attrs = ffi::Map<ffi::String, ExprDoc>({{"dtype", dtype}, {"scope", scope}});
       }
@@ -252,9 +252,9 @@ ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
       }
     }
   } else if (method == "decl_buffer") {
-    if (buffer.IsCell(false)) {
-      // decl_cell
-      prefix = TIR(d, "decl_cell");
+    if (buffer.IsScalar(false)) {
+      // decl_scalar
+      prefix = TIR(d, "decl_scalar");
       auto dtype = d->AsDoc<ExprDoc>(buffer->dtype, p->Attr("dtype"));
       auto scope = d->AsDoc<ExprDoc>(buffer.scope(), p->Attr("scope"));
       auto elem_offset = d->AsDoc<ExprDoc>(buffer->elem_offset, p->Attr("elem_offset"));
@@ -335,8 +335,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           ExprDoc buffer = d->AsDoc<ExprDoc>(store->buffer, p->Attr("buffer"));
           ExprDoc value = d->AsDoc<ExprDoc>(store->value, p->Attr("value"));
 
-          // special case for all 1-dim buffers with shape (1,) (no matter cell or normal)
-          if (store->buffer->shape.size() == 1 && tirx::is_one(store->buffer->shape[0])) {
+          // special case for scalar buffers
+          if ((store->buffer.IsScalar(true) || store->buffer.IsScalar(false)) &&
+              !store->predicate.defined()) {
             // ICHECK(store->indices.size() == 1 && tirx::is_zero(store->indices[0]))
             //     << "1-dim buffer with shape (1,) store with indices other than [0] is not "
             //        "supported";
@@ -364,14 +365,14 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         "", [](tirx::BufferLoad load, AccessPath p, IRDocsifier d) -> Doc {
           ExprDoc buffer = d->AsDoc<ExprDoc>(load->buffer, p->Attr("buffer"));
 
-          // special case for cell
-          if ((load->buffer.IsCell(true) || load->buffer.IsCell(false)) &&
+          // special case for scalar
+          if ((load->buffer.IsScalar(true) || load->buffer.IsScalar(false)) &&
               !load->predicate.defined()) {
             // ICHECK(load->indices.size() == 1 && tirx::is_zero(load->indices[0]))
-            //     << "Cell buffer load with indices other than [0] is not supported";
+            //     << "Scalar buffer load with indices other than [0] is not supported";
             ffi::Optional<ExprDoc> doc = d->GetVarDoc(load->buffer);
             ICHECK(doc.has_value())
-                << "Cell buffer is not defined in the environment: " << load->buffer;
+                << "Scalar buffer is not defined in the environment: " << load->buffer;
             return doc.value();
           }
 
@@ -396,8 +397,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
         }
       }
       if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(buffer)) {
-        // special case for cell buffer
-        if (buffer.IsCell()) {
+        // special case for scalar buffer
+        if (buffer.IsScalar()) {
           return doc.value()->Attr("buffer");
         }
         return doc.value();
@@ -424,7 +425,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
   ffi::Array<ExprDoc> values;
 
   // Emit via from_iters([Iter(e, s, "ax"), ...], ...)
-  auto iter_list = [&](const ffi::Array<tir::Iter>& iters) -> ExprDoc {
+  auto iter_list = [&](const ffi::Array<tirx::Iter>& iters) -> ExprDoc {
     ffi::Array<ExprDoc> docs;
     for (const auto& iter : iters) {
       docs.push_back(d->AsDoc<ExprDoc>(iter, p));

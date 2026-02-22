@@ -183,7 +183,7 @@ def get_group_gemm_kernel(M, K, E, top_k, N, config, mul_routed_weight):
     assert SMEM_SIZE % VEC_LEN == 0
 
     def int_cell(value):
-        buf = Tx.local_cell("int32")
+        buf = Tx.local_scalar("int32")
         if value is not None:
             Tx.buffer_store(buf.buffer, value, 0)
         return buf

@@ -173,7 +173,7 @@ def test_hgemm_1consumer():
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
                                         elem_offset=1024 // F16_BYTES)
                 B_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
@@ -185,11 +185,11 @@ def test_hgemm_1consumer():
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                 reg_fp16 = Tx.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
-                stage = Tx.local_cell("int32")
+                stage: Tx.int32
                 phase = Tx.alloc_buffer((1, ), "int32", scope="local")
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
+                descA: Tx.uint64
+                descB: Tx.uint64
+                descI: Tx.uint32
 
                 # initialize
                 tma2mma_bar = BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True)
@@ -202,7 +202,7 @@ def test_hgemm_1consumer():
                 mma2tma_bar.init(1)
                 ld2mma_bar.init(CTA_GROUP * 128)
                 tile_scheduler.init(bx // 2)
-                ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
                 tma_finished = Tx.decl_buffer([SMEM_PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # alloc TMEM
@@ -271,8 +271,8 @@ def test_hgemm_1consumer():
 
                         elif warp_id == 0:
                             if cbx == 0:
-                                tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                                tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                                tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                                tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                                 Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
                                 phase[0] = 0
                                 while tile_scheduler.valid():
@@ -319,8 +319,8 @@ def test_hgemm_1consumer():
 
                     with Tx.warpgroup()[0:1]:
                         Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
-                        tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                        tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                        tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                        tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                         phase[0] = 0
                         while tile_scheduler.valid():
                             m_idx = Tx.meta_var(tile_scheduler.m_idx)

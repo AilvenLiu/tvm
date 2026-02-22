@@ -254,11 +254,11 @@ class Buffer : public ObjectRef {
   TVM_DLL Buffer with_allocated_addr(ffi::Array<PrimExpr> allocated_addr) const;
 
   /*!
-   * \brief Return true if the buffer is a cell.
-   * \param alloc_or_decl Whether to consider alloc_cell and decl_cell as cell. True for alloc_cell,
-   * False for decl_cell.
+   * \brief Return true if the buffer is a scalar.
+   * \param alloc_or_decl Whether to consider alloc_scalar and decl_scalar as scalar. True for alloc_scalar,
+   * False for decl_scalar.
    */
-  TVM_DLL bool IsCell(bool alloc_or_decl = true) const;
+  TVM_DLL bool IsScalar(bool alloc_or_decl = true) const;
 
   /*!
    * \brief Return a new buffer with the dtype.

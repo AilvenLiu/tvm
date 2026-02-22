@@ -36,7 +36,7 @@ class AllreduceTile(Tile):
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            rank = Tx.nvshmem.my_pe()
+            rank: Tx.let = Tx.nvshmem.my_pe()
             # restrict tile size so that this will not be iterated over
             if tid < self.M_TILE * self.N_TILE // 8 and (m_idx * self.M_TILE +  (tid // (self.N_TILE // 8))) < input.shape[0]:
                 m_start = Tx.meta_var(m_idx * self.M_TILE +  (tid // (self.N_TILE // 8)))

@@ -131,11 +131,11 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
     res : Any
         The bound value.
     """
-    if isinstance(value, T.cell_wrapper):  # pylint: disable=protected-access
-        # special case for cell, name the buffer, but the var is used as BufferLoad
-        assert isinstance(value.cell, T.BufferLoad)
-        IRBuilder.name(var_name, value.cell.buffer)
-        return value.cell
+    if isinstance(value, T.scalar_wrapper):  # pylint: disable=protected-access
+        # special case for scalar, name the buffer, but the var is used as BufferLoad
+        assert isinstance(value.scalar, T.BufferLoad)
+        IRBuilder.name(var_name, value.scalar.buffer)
+        return value.scalar
     if isinstance(value, T.meta_var):
         return value.value
     elif getattr(type(value), "_is_meta_class", False):
@@ -155,10 +155,20 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         IRBuilder.name(var_name, value)
         return value
     else:
-        value = tvm.runtime.convert(value)
-        var = T.bind(value)
-        IRBuilder.name(var_name, var)
-        return var
+        if not isinstance(value, PrimExpr):
+            value = tvm.tir.const(value)
+        if not isinstance(value, tvm.tir.StringImm):
+            # x = expr -> scalar (auto-typed from value)
+            scalar = T.local_scalar(dtype=str(value.dtype), name=None)
+            IRBuilder.name(var_name, scalar.scalar.buffer)
+            T.buffer_store(scalar.scalar.buffer, value, [0])
+            return scalar.scalar
+        else:
+            # StringImm: x = expr -> immutable Bind var
+            ann_var = tvm.tir.Var(var_name, value.dtype)
+            IRBuilder.name(var_name, ann_var)
+            T.Bind(value, var=ann_var)
+            return ann_var
 
 
 def find_decorator_annotation(node: doc.FunctionDef, annotation: str, default: bool = True) -> bool:
@@ -322,11 +332,11 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
             indices = self.eval_expr(lhs.slice)
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)
     else:
-        # special case for cell
-        # cell = xxx <=> cell.buffer[()] = xxx
+        # special case for scalar buffers
+        # scalar = xxx <=> scalar.buffer[()] = xxx
         # or for a normal 1-dim buffer with shape (1,)
         # buffer = xxx <=> buffer[()] = xxx
-        # Try to resolve lhs as a buffer/cell variable. eval_expr may raise
+        # Try to resolve lhs as a buffer/scalar variable. eval_expr may raise
         # if the name is not yet defined (i.e. this is a new variable binding),
         # which is the expected fallthrough case.
         lhs_value = None
@@ -441,12 +451,45 @@ def visit_ann_assign(self: Parser, node: doc.AnnAssign) -> None:
         The doc AST annotated assign node.
     """
     lhs = node.target
-    rhs = self.eval_expr(node.value)
-    ann_var = self.visit_tvm_annotation(node.annotation)
-    if not isinstance(ann_var, Var):
-        self.report_error(node.annotation, "Annotation should be Var")
-    self.eval_assign(target=lhs, source=ann_var, bind_value=bind_assign_value)
-    T.bind(rhs, var=ann_var)
+    rhs = self.eval_expr(node.value) if node.value is not None else None
+    raw_ann = self.eval_expr(node.annotation)
+
+    if isinstance(raw_ann, T.LetAnnotation):
+        # T.let or T.let[type] -> immutable Bind var
+        if rhs is None:
+            self.report_error(node, "T.let annotation requires a value")
+        if not isinstance(rhs, PrimExpr):
+            if isinstance(rhs, str):
+                rhs = tvm.tir.StringImm(rhs)
+            else:
+                rhs = tvm.tir.const(rhs)
+        if raw_ann.type_spec is not None:
+            ann_var = raw_ann.as_var()
+        else:
+            ann_var = raw_ann.as_var(rhs_dtype=rhs.dtype)
+        if not isinstance(ann_var, Var):
+            self.report_error(node.annotation, "Annotation should resolve to Var")
+        self.eval_assign(target=lhs, source=ann_var, bind_value=bind_assign_value)
+        T.Bind(rhs, var=ann_var)
+    else:
+        ann_var = raw_ann() if callable(raw_ann) else raw_ann
+        if not isinstance(ann_var, Var):
+            self.report_error(node.annotation, "Annotation should resolve to Var")
+        if not isinstance(ann_var.type_annotation, PrimType):
+            self.report_error(
+                node.annotation,
+                "Use T.let[...] for non-PrimType annotations (e.g. PointerType, handle)",
+            )
+        if str(ann_var.dtype) == "handle":
+            self.report_error(
+                node.annotation,
+                "handle type cannot be used as scalar annotation; use T.let[T.handle] instead",
+            )
+        # x: T.int32 = expr -> scalar (mutable scalar buffer)
+        scalar = T.local_scalar(dtype=str(ann_var.dtype), name=None)
+        self.eval_assign(target=lhs, source=scalar, bind_value=bind_assign_value)
+        if rhs is not None:
+            T.buffer_store(scalar.scalar.buffer, rhs, [0])
 
 
 @dispatch.register(token="tirx", type_name="With")
@@ -615,7 +658,7 @@ def visit_expr_stmt(self: Parser, node: doc.Expr) -> None:
             f.add_callback(partial(f.__exit__, None, None, None))
             f.__enter__()
     elif isinstance(res, Var):
-        # Standalone Var expression (e.g. from T.bind(value, var=v)) --
+        # Standalone Var expression (e.g. from T.Bind(value, var=v)) --
         # the Bind statement was already emitted to the parent frame by the FFI call,
         # so just discard the returned Var.
         pass

@@ -24,7 +24,7 @@ class SplitKReduceTile(Tile):
         self.M_split = ceildiv(self.M, self.M_TILE)
 
     def _alloc_local(self):
-        self.idx = Tx.local_cell("int32", name="idx")
+        self.idx = Tx.local_scalar("int32", name="idx")
         self.vec_32 = Tx.alloc_local([self.VEC_SIZE], "float32", name="vec_32")
         self.tmp = Tx.alloc_local([self.VEC_SIZE], "float32", name="tmp")
         self.vec_16 = Tx.alloc_local([self.VEC_SIZE], "float16", name="vec_16")

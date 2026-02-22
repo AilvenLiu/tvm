@@ -52,8 +52,8 @@ def test_hgemm_hopper_ws_cooperative():
     @Tx.meta_class
     class PipelineState:
         def __init__(self, prefix: str):
-            self.index = Tx.local_cell("int32", name=prefix + "_index")
-            self.phase = Tx.local_cell("int32", name=prefix + "_phase")
+            self.index = Tx.local_scalar("int32", name=prefix + "_index")
+            self.phase = Tx.local_scalar("int32", name=prefix + "_phase")
 
         @Tx.inline
         def init(self, index, phase):
@@ -107,9 +107,9 @@ def test_hgemm_hopper_ws_cooperative():
         C = Tx.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
 
-        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        C_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        C_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float16", 2, A.data, K, M, f16_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float16", 2, B.data, N, K, f16_bytes * N, 64, BLK_K // 2, 1, 1, 0, swizzleB, 0, 0) # multicast
@@ -152,16 +152,16 @@ def test_hgemm_hopper_ws_cooperative():
                     consumer_read = PipelineState("consumer_read")
                     consumer_release = PipelineState("consumer_release")
                     # consumer signals
-                    is_signal_thread = Tx.local_cell("int32")
-                    dst_block_ID = Tx.local_cell("int32")
+                    is_signal_thread: Tx.int32
+                    dst_block_ID: Tx.int32
                     # smem desc_A, desc_B
-                    desc_A = Tx.local_cell("uint64")
-                    desc_B = Tx.local_cell("uint64")
+                    desc_A: Tx.uint64
+                    desc_B: Tx.uint64
                     # accumulators
                     accum = Tx.alloc_buffer([128], "float32", scope="local")
                     # epilogue
-                    col_swizzle = Tx.local_cell("int32")
-                    smem_offset = Tx.local_cell("int32")
+                    col_swizzle: Tx.int32
+                    smem_offset: Tx.int32
 
                     ############################################################################## INITIALIZATION
                     # initialize work tile info
@@ -418,9 +418,9 @@ def test_hgemm_hopper_no_ws():
         B = Tx.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))
         C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
 
-        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        C_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        C_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float16", 2, A.data, K, M, f16_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float16", 2, B.data, K, N, f16_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
@@ -440,13 +440,13 @@ def test_hgemm_hopper_no_ws():
                 C_smem = Tx.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
                 # barriers
                 bars = Tx.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
-                desc_A = Tx.local_cell("uint64")
-                desc_B = Tx.local_cell("uint64")
+                desc_A: Tx.uint64
+                desc_B: Tx.uint64
 
                 with Tx.thread():
                     # index
-                    tma_index = Tx.local_cell("int32")
-                    mma_index = Tx.local_cell("int32")
+                    tma_index: Tx.int32
+                    mma_index: Tx.int32
                     # acuumulators
                     accum = Tx.alloc_buffer([128], "float32", scope="local")
                     # temp accum

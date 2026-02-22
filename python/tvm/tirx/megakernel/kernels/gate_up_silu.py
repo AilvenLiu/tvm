@@ -53,11 +53,11 @@ class GateUpSiluTile(GemmTile):
         # alloc local memory
         self.reg = Tx.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         self.reg_fp16 = Tx.alloc_buffer((self.TMEM_LD_SIZE // 2,), "float16", scope="local", name="reg_fp16")
-        self.tmem_idx = Tx.local_cell("int32", name="tmem_idx")
-        self.tmem_phase = Tx.local_cell("int32", name="tmem_phase")
-        self.stage = Tx.local_cell("int32", name="stage")
-        self.wait_complete = Tx.local_cell("bool", name="wait_complete")
-        self.off = Tx.local_cell("int32", name="off")
+        self.tmem_idx = Tx.local_scalar("int32", name="tmem_idx")
+        self.tmem_phase = Tx.local_scalar("int32", name="tmem_phase")
+        self.stage = Tx.local_scalar("int32", name="stage")
+        self.wait_complete = Tx.local_scalar("bool", name="wait_complete")
+        self.off = Tx.local_scalar("int32", name="off")
 
     @Tx.inline
     def init(self, smem_manager: SmemManager):

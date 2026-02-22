@@ -46,7 +46,7 @@ def test_tmem_alloc_dealloc_relinquish():
             tx = Tx.thread_id([128], parent="cta")
             with Tx.cta():
                 # tmem_addr = Tx.alloc_buffer((1,), "uint32", scope="shared", align=8)
-                tmem_addr = Tx.shared_cell("uint32")
+                tmem_addr = Tx.shared_scalar("uint32")
 
                 # alloc TMEM
                 with Tx.warp()[0:1]:
@@ -109,7 +109,7 @@ def test_tcgen05_ld_st_roundtrip():
             with Tx.cta():
                 reg = Tx.alloc_buffer((WIDTH,), "float32", scope="local")
                 # tmem_addr = Tx.alloc_buffer((1,), "uint32", scope="shared", align=8)
-                tmem_addr = Tx.shared_cell("uint32")
+                tmem_addr = Tx.shared_scalar("uint32")
 
                 # alloc TMEM
                 with Tx.warp()[0:1]:
@@ -184,7 +184,7 @@ def test_tcgen05_cp_ld_roundtrip():
                 A_smem = Tx.alloc_buffer((HEIGHT, WIDTH), dtype, scope="shared", layout=A_layout)
                 reg = Tx.alloc_buffer((WIDTH,), dtype, scope="local")
                 # tmem_addr = Tx.alloc_buffer((1,), "uint32", scope="shared", align=8)
-                tmem_addr = Tx.shared_cell("uint32")
+                tmem_addr = Tx.shared_scalar("uint32")
                 descA = Tx.alloc_buffer((1,), "uint64", scope="local")
                 bar = Tx.alloc_buffer((1,), "uint64", scope="shared", align=8)
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
@@ -306,7 +306,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
             tx = Tx.thread_id([128], parent="cta")
             with Tx.cta():
                 dyn = Tx.alloc_buffer((dyn_smem_bytes,), "uint8", scope="shared")
-                tmem_addr = Tx.decl_cell("uint32", dyn.data, scope="shared", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", dyn.data, scope="shared", elem_offset=0)
                 A_smem = Tx.decl_buffer((M, K), a_type, dyn.data, elem_offset=256, layout=A_layout)
                 B_smem = Tx.decl_buffer((N, K), b_type, dyn.data, elem_offset=256 + M*K, layout=B_layout)
                 bar = Tx.decl_buffer((1,), "uint64", dyn.data, scope="shared", elem_offset=8)

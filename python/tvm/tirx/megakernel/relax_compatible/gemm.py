@@ -17,7 +17,7 @@ class FuseGemmTile(GemmTile):
         GemmTile.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)
         GemmTile.ld2mma_bar = BarLD2MMA(smem_manager, cls.TMEM_PIPE_DEPTH, False)
         # alloc local memory
-        GemmTile.tile_idx = Tx.alloc_cell("int32", scope="local.persistent", name="tile_idx")
+        GemmTile.tile_idx = Tx.alloc_scalar("int32", scope="local.persistent", name="tile_idx")
         GemmTile.phase = Tx.alloc_buffer((1,), "int32", scope="local.persistent", name="phase")
         GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem.persistent", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
 
@@ -126,7 +126,7 @@ class FuseGateUpSiluTile(GateUpSiluTile):
         GemmTile.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)
         GemmTile.ld2mma_bar = BarLD2MMA(smem_manager, cls.TMEM_PIPE_DEPTH, False)
         # alloc local memory
-        GemmTile.tile_idx = Tx.alloc_cell("int32", scope="local.persistent", name="tile_idx")
+        GemmTile.tile_idx = Tx.alloc_scalar("int32", scope="local.persistent", name="tile_idx")
         GemmTile.phase = Tx.alloc_buffer((1,), "int32", scope="local.persistent", name="phase")
         GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem.persistent", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
 

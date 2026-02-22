@@ -396,7 +396,7 @@ def test_host():
     def test1(A_ptr: Tx.handle):
         A = Tx.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
 
-        A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
 
         with Tx.kernel():

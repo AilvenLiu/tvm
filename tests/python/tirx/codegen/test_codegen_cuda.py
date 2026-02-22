@@ -254,8 +254,8 @@ def test_ptx_ldmatrix(trans, num):
                     trans, num, dtype, A_local.ptr_to([0]), A_shared.ptr_to([tx % 16, tx // 16 * 8])
                 )
                 for i in range(8):
-                    row = (i // 2) % 2 * 8
-                    col = (i // 4) * 8
+                    row: Tx.let = (i // 2) % 2 * 8
+                    col: Tx.let = (i // 4) * 8
                     B[row + tx // 4, col + tx % 4 * 2 + i % 2] = A_local[i]
     # fmt: on
 

@@ -272,10 +272,10 @@ class Pipeline:
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        )
-        self.idx = Tx.local_cell("int32", name="pipeline_idx")
-        self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
-        self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
+        ).buffer
+        self.idx = Tx.local_scalar("int32", name="pipeline_idx")
+        self.p2c_phase = Tx.local_scalar("int32", name="pipeline_p2c_phase")
+        self.c2p_phase = Tx.local_scalar("int32", name="pipeline_c2p_phase")
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
@@ -560,7 +560,7 @@ def test_ag_hgemm():
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
                                         elem_offset=1024 // F16_BYTES)
                 B_smem = Tx.decl_buffer((PIPELINE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
@@ -569,18 +569,18 @@ def test_ag_hgemm():
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
 
                 # alloc local memory
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
+                descA: Tx.uint64
+                descB: Tx.uint64
+                descI: Tx.uint32
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
                 phase_tmem = Tx.alloc_buffer((1,), "int32", scope="local")
-                stage = Tx.local_cell("int32")
+                stage: Tx.int32
 
                 # ag + gemm
                 sem = Semaphore(cnt=1, buffer=semaphore)
                 gemm_queue = GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS)
                 packed_buf = Tx.decl_buffer((1,), "uint64", buf.data, elem_offset=64)
-                packed_ptr: Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
+                packed_ptr: Tx.let[Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
                 packed_value = Tx.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
                 sch_pipe = Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False)
                 tile_scheduler = SingleDynamicTileScheduler(gemm_queue, packed_value, sch_pipe, sem)
@@ -596,7 +596,7 @@ def test_ag_hgemm():
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)
                 ld2mma.init(128 * NUM_CONSUMER)
-                ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
                 tma_finished = Tx.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
                 phase[0] = 0
                 phase_tmem[0] = 0

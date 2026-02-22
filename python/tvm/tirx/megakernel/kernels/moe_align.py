@@ -31,8 +31,8 @@ class MOEAlignTile(Tile):
 
     @Tx.inline
     def warp_exclusive_scan(self, v, output, mask=0xFFFFFFFF):
-        # offset = Tx.alloc_cell("int32", name="offset")
-        # original = Tx.alloc_cell("int32", name="original")
+        # offset = Tx.alloc_scalar("int32", name="offset")
+        # original = Tx.alloc_scalar("int32", name="original")
         # with Tx.warp():
         #     lane_id = Tx.thread_id(32, parent="warp")
         #     offset = 1
@@ -88,26 +88,26 @@ class MOEAlignTile(Tile):
             Tx.tvm_storage_sync("shared")
             idx[0] = tid
             while idx[0] < self.numel:
-                expert_id = topk_ids[
+                expert_id: Tx.let = topk_ids[
                     idx[0]
                 ]  # TODO: the reference expert use topk_ids[idx[0]] + 1. Is it correct?
                 Tx.cuda.atomic_add(Tx.address_of(self.shared_counts[expert_id]), 1)
                 idx[0] += KernelConfig.NUM_THREADS
             Tx.tvm_storage_sync("shared")
             if tid < self.num_experts:
-                padded_count = ceildiv(self.shared_counts[tid], self.block_size) * self.block_size
+                padded_count: Tx.let = ceildiv(self.shared_counts[tid], self.block_size) * self.block_size
                 self.scan_buf[tid] = padded_count
             elif tid < self.scan_size:
                 self.scan_buf[tid] = 0
             Tx.tvm_storage_sync("shared")
-            v = Tx.if_then_else(tid < self.num_experts, self.scan_buf[tid], 0)
+            v: Tx.let = Tx.if_then_else(tid < self.num_experts, self.scan_buf[tid], 0)
             self.warp_exclusive_scan(v, pre)
             if lane_id == 31:
                 self.warp_sums[warp_id] = pre[0] + v
             Tx.tvm_storage_sync("shared")
             num_warps_for_scan = Tx.meta_var(ceildiv(self.scan_size, 32))
             if warp_id == 0:
-                val = Tx.if_then_else(lane_id < num_warps_for_scan, self.warp_sums[lane_id], 0)
+                val: Tx.let = Tx.if_then_else(lane_id < num_warps_for_scan, self.warp_sums[lane_id], 0)
                 self.warp_exclusive_scan(val, sum_val)
                 if lane_id == num_warps_for_scan - 1:
                     self.prefix[self.num_experts] = sum_val[0] + val
@@ -122,17 +122,17 @@ class MOEAlignTile(Tile):
             if tid <= self.num_experts:
                 cumsum_buffer[tid] = self.prefix[tid]
             Tx.tvm_storage_sync("shared")
-            num_blocks = self.s_total_tokens_post_pad[0] // self.block_size
+            num_blocks: Tx.let = self.s_total_tokens_post_pad[0] // self.block_size
             idx[0] = tid
             while idx[0] < num_blocks:
-                block_start = idx[0] * self.block_size
+                block_start: Tx.let = idx[0] * self.block_size
                 left = Tx.alloc_local([1], "int32", name="left")
                 right = Tx.alloc_local([1], "int32", name="right")
                 with Tx.thread():
                     left[0] = 0
                     right[0] = self.num_experts
                     while left[0] < right[0]:
-                        mid = (left[0] + right[0]) // 2
+                        mid: Tx.let = (left[0] + right[0]) // 2
                         if self.prefix[mid] <= block_start:
                             left[0] = mid + 1
                         else:
@@ -148,7 +148,7 @@ class MOEAlignTile(Tile):
 
                 idx[0] += KernelConfig.NUM_THREADS
             if self.pad_sorted_token_ids:
-                VEC_SIZE = 4
+                VEC_SIZE: Tx.let = 4
                 idx[0] = tid * VEC_SIZE
                 out_ptr = sorted_token_ids.view(-1)
                 fill_vec = Tx.alloc_buffer([4], "int32", scope="local")
@@ -192,11 +192,11 @@ class CountAndSortExpertTokens(Tile):
         col_idx = Tx.alloc_local([1], "int32", name="col_idx")
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            process_token_idx = m_idx + tid * KernelConfig.SM_NUMBER
+            process_token_idx: Tx.let = m_idx + tid * KernelConfig.SM_NUMBER
             self.smem_manager.wait_all("cta")
             if process_token_idx < self.numel:
-                expert_id = topk_ids[process_token_idx]
-                rank_post_pad = Tx.cuda.atomic_add(Tx.address_of(cumsum_buffer[expert_id]), 1)
+                expert_id: Tx.let = topk_ids[process_token_idx]
+                rank_post_pad: Tx.let = Tx.cuda.atomic_add(Tx.address_of(cumsum_buffer[expert_id]), 1)
                 sorted_token_ids[rank_post_pad] = process_token_idx
                 self.s_rank_post_pad[tid] = rank_post_pad
             idx[0] = m_idx
@@ -216,7 +216,7 @@ class CountAndSortExpertTokens(Tile):
                         Tx.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
                     Tx.ptx.cp_async.commit_group()
                     Tx.ptx.cp_async.wait_group(self.PIPE_DEPTH - 1)
-                    rank_post_pad = self.s_rank_post_pad[cnt[0]]
+                    rank_post_pad: Tx.let = self.s_rank_post_pad[cnt[0]]
                     pipe_idx = Tx.meta_var(cnt[0] % self.PIPE_DEPTH)
                     if col_idx[0] < self.hidden_size:
                         for vec in Tx.vectorized(self.VEC_SIZE):

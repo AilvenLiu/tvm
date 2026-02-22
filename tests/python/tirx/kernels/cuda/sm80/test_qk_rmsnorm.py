@@ -75,7 +75,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
         weight_bias_global = Tx.match_buffer(weight_bias_ptr, [1], "float32", scope="global")
         bound_m_global = Tx.match_buffer(bound_m_ptr, [1], "int32", scope="global")
 
-        cta_count = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
+        cta_count: Tx.let = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
 
         with Tx.kernel():
             bx = Tx.cta_id([cta_count], parent="kernel")
@@ -112,8 +112,8 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
                 if row_idx[0] < total_jobs[0]:
                         # Determine Q or K
                         is_q = Tx.meta_var(row_idx[0] < q_job_cnt[0])
-                        qk_ptr: Tx.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype))) = Tx.if_then_else(is_q, q.data, k.data)
-                        weight_ptr: Tx.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype))) = Tx.if_then_else(is_q, q_weight.data, k_weight.data)
+                        qk_ptr: Tx.let[Tx.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q.data, k.data)
+                        weight_ptr: Tx.let[Tx.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q_weight.data, k_weight.data)
                         batch_size = Tx.meta_var(Tx.if_then_else(is_q, num_tokens * qo_heads, num_tokens * kv_heads))
 
                         if is_q:

@@ -185,8 +185,8 @@ def test_fp16_fused_attn():
     @Tx.meta_class
     class PipelineState:
         def __init__(self, prefix: str):
-            self.index = Tx.local_cell("int32", name=prefix + "_index")
-            self.phase = Tx.local_cell("int32", name=prefix + "_phase")
+            self.index = Tx.local_scalar("int32", name=prefix + "_index")
+            self.phase = Tx.local_scalar("int32", name=prefix + "_phase")
 
         @Tx.inline
         def init(self, index, phase):
@@ -215,8 +215,8 @@ def test_fp16_fused_attn():
         quad_id = Tx.meta_var(lane_id // 4)
         quad_lane = Tx.meta_var(lane_id % 4)
         with Tx.thread():
-            row = Tx.local_cell("int32")
-            col = Tx.local_cell("int32")
+            row: Tx.int32
+            col: Tx.int32
             row = q_row_base + consumer_id * 64 + warp_id_in_wg * 16 + quad_id
             col = kv_col_base + quad_lane * 2 - (KV_LEN - QO_LEN)
             if not CAUSAL:
@@ -331,7 +331,7 @@ def test_fp16_fused_attn():
 
         k_stage = Tx.meta_var(consumer_k.index)
         with Tx.thread():
-            scaleD = Tx.local_cell("int32")
+            scaleD: Tx.int32
             scaleD = 0
             Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)
             Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
@@ -418,10 +418,10 @@ def test_fp16_fused_attn():
         O = Tx.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
         profiler_buffer = Tx.match_buffer(profiler_buffer_ptr, (PROFILER_BUFFER_SIZE,), "uint64", scope="global")
 
-        Q_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        K_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        V_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        O_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        Q_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        K_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        V_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        O_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
         GSHAPE_QO = Tx.meta_var((HEAD_DIM, NHEADS, QO_LEN, BATCH_SIZE))
         GSTRIDES_QO = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * QO_LEN))
@@ -473,14 +473,14 @@ def test_fp16_fused_attn():
                     consumer_k = PipelineState("consumer_k")
                     consumer_v = PipelineState("consumer_v")
                     leader_cond = Tx.meta_var(tid % 128 == 0)
-                    q_phase = Tx.local_cell("int32")
+                    q_phase: Tx.int32
                     # producer WG regs
-                    kv_tile_idx_load = Tx.local_cell("int32")
-                    kv_tile_idx_read = Tx.local_cell("int32")
+                    kv_tile_idx_load: Tx.int32
+                    kv_tile_idx_read: Tx.int32
                     # smem desc_Q, desc_K, desc_V
-                    desc_Q = Tx.local_cell("uint64")
-                    desc_K = Tx.local_cell("uint64")
-                    desc_V = Tx.local_cell("uint64")
+                    desc_Q: Tx.uint64
+                    desc_K: Tx.uint64
+                    desc_V: Tx.uint64
                     # accums
                     S_reg = Tx.alloc_buffer([S_REG_COUNT], "float32", scope="local")
                     P_reg = Tx.alloc_buffer([S_REG_COUNT // 2], "uint32", scope="local")
@@ -590,7 +590,7 @@ def test_fp16_fused_attn():
                             while (tile_scheduler.valid()):
                                 if q_idx * BLK_Q >= QO_LEN:
                                     break
-                                kv_tile_idx_read = num_kv_tiles - 1
+                                kv_tile_idx_read =num_kv_tiles - 1
                                 # wait Q to be loaded
                                 Tx.ptx.mbarrier.try_wait(bar_Q_ptr, q_phase)
                                 q_phase = q_phase ^ 1
@@ -627,11 +627,11 @@ def test_fp16_fused_attn():
                                     P_reg_fp16[i] = Tx.Cast("float16", S_reg[i])
                                 profiler.end(ProfileEventType.WritePReg, leader_cond)
                                 with Tx.thread():
-                                    masking_step = Tx.local_cell("int32")
-                                    n_masking_steps = Tx.local_cell("int32")
+                                    masking_step: Tx.int32
+                                    n_masking_steps: Tx.int32
                                     masking_step = 0
                                     n_masking_steps = 0 if not CAUSAL else ceildiv(BLK_Q, BLK_KV)
-                                    kv_tile_idx_read = kv_tile_idx_read - 1
+                                    kv_tile_idx_read =kv_tile_idx_read - 1
                                     # split out tiles of K and V that require masking
 
                                     @Tx.inline
@@ -677,11 +677,11 @@ def test_fp16_fused_attn():
                                     while (masking_step < n_masking_steps and kv_tile_idx_read >= 0):
                                         consumer_body(True)
                                         masking_step = masking_step + 1
-                                        kv_tile_idx_read = kv_tile_idx_read - 1
+                                        kv_tile_idx_read =kv_tile_idx_read - 1
                                     # no masking
                                     while kv_tile_idx_read >= 0:
                                         consumer_body(False)
-                                        kv_tile_idx_read = kv_tile_idx_read - 1
+                                        kv_tile_idx_read =kv_tile_idx_read - 1
 
                                 # notify the producer to load the next Q tile
                                 Tx.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)

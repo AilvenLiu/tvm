@@ -133,10 +133,10 @@ class GemmTile(Tile):
         self.reg = Tx.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         if self.out_type == "float16":
             self.reg_fp16 = Tx.alloc_buffer((self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16")
-        self.tmem_idx = Tx.local_cell("int32", name="tmem_idx")
-        self.tmem_phase = Tx.local_cell("int32", name="tmem_phase")
-        self.stage = Tx.local_cell("int32", name="stage")
-        self.wait_complete = Tx.local_cell("bool", name="wait_complete")
+        self.tmem_idx = Tx.local_scalar("int32", name="tmem_idx")
+        self.tmem_phase = Tx.local_scalar("int32", name="tmem_phase")
+        self.stage = Tx.local_scalar("int32", name="stage")
+        self.wait_complete = Tx.local_scalar("bool", name="wait_complete")
 
     @classmethod
     def _alloc_buffer_class_member(cls, smem_manager: SmemManager):
@@ -150,7 +150,7 @@ class GemmTile(Tile):
         GemmTile.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)
         GemmTile.ld2mma_bar = BarLD2MMA(smem_manager, cls.TMEM_PIPE_DEPTH, False)
         # alloc local memory
-        GemmTile.tile_idx = Tx.local_cell("int32", "tile_idx")
+        GemmTile.tile_idx = Tx.local_scalar("int32", "tile_idx")
         GemmTile.phase = Tx.alloc_buffer((1,), "int32", scope="local", name="phase")
         GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
 
@@ -332,7 +332,7 @@ class GemmTile(Tile):
                     elif warp_id == 0:
                         # MMA
 
-                        descI = Tx.local_cell("uint32")
+                        descI: Tx.uint32
                         Tx.ptx.tcgen05.encode_instr_descriptor(
                             Tx.address_of(descI), "float32",
                             self.a_type, self.b_type,

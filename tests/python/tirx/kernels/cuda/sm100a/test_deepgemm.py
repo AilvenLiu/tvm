@@ -172,7 +172,7 @@ def deepgemm(
 ):
     # fmt: off
     Tx.func_attr({"global_symbol": "main"})
-    D_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+    D_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
     Tx.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, D.data, N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, 2, 0, 0)
 
     with Tx.kernel():
@@ -184,8 +184,8 @@ def deepgemm(
         lane_id = Tx.thread_id([32], parent="warp")
         with Tx.cta():
             # alloc shared memory
-            pool = Tx.PoolAllocator()
-            tmem_addr = Tx.decl_cell("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
+            pool = Tx.meta_var(Tx.PoolAllocator())
+            tmem_addr = Tx.decl_scalar("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
             pool.move_base_to(1024)
             A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
             B_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
@@ -200,14 +200,14 @@ def deepgemm(
             reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
             reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
             reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
-            stage = Tx.local_cell("int32")
-            descA = Tx.local_cell("uint64")
-            descB = Tx.local_cell("uint64")
-            descSFA = Tx.local_cell("uint64")
-            descSFB = Tx.local_cell("uint64")
-            descI = Tx.local_cell("uint32")
+            stage: Tx.int32
+            descA: Tx.uint64
+            descB: Tx.uint64
+            descSFA: Tx.uint64
+            descSFB: Tx.uint64
+            descI: Tx.uint32
 
-            phase = Tx.local_cell("int32")
+            phase: Tx.int32
 
             # initialize
             tma2trans_bar = Barriers(pool.ptr, 6, SMEM_PIPE_DEPTH, True)
@@ -323,8 +323,8 @@ def deepgemm(
 
                     with Tx.warp(parent="warpgroup")[warp_id == 0]:
                         if cbx == 0:
-                            tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                            tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                            tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                            tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                             Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type,
                                                                                 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
                             phase = 0
@@ -397,8 +397,8 @@ def deepgemm(
 
                 with Tx.warpgroup()[wg_id == 0]:
                     Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
-                    tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                    tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                    tmem_idx = Tx.local_scalar("int32", "tmem_idx")
+                    tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                     phase = 0
                     while tile_scheduler.valid():
                         m_idx = Tx.meta_var(tile_scheduler.m_idx)
@@ -441,8 +441,8 @@ def deepgemm(
                             Tx.cuda.warpgroup_sync(10)
 
                             # smem -> gmem
-                            m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
-                            n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
+                            m_start: Tx.let = (m_idx * CTA_GROUP + cbx) * BLK_M
+                            n_start: Tx.let = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
                             with Tx.thread(parent="warpgroup")[tid_in_wg == 0]:
                                 Tx.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
                                 Tx.ptx.cp_async.bulk.commit_group()

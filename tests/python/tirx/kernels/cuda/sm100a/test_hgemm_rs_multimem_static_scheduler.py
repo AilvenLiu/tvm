@@ -183,10 +183,10 @@ class Pipeline:
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        )
-        self.idx = Tx.local_cell("int32", name="pipeline_idx")
-        self.p2c_phase = Tx.local_cell("int32", name="pipeline_p2c_phase")
-        self.c2p_phase = Tx.local_cell("int32", name="pipeline_c2p_phase")
+        ).buffer
+        self.idx = Tx.local_scalar("int32", name="pipeline_idx")
+        self.p2c_phase = Tx.local_scalar("int32", name="pipeline_p2c_phase")
+        self.c2p_phase = Tx.local_scalar("int32", name="pipeline_c2p_phase")
         self.p_single_cta = p_single_cta
         self.c_single_cta = c_single_cta
 
@@ -369,9 +369,9 @@ def test_hgemm_rs():
     def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M // TILE_M, N // TILE_N, TILE_M, TILE_N), d_type),
                                        semaphore: Tx.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64"), out: Tx.Buffer((LOCAL_M, N), d_type),
                                        exec_queue: Tx.Buffer((SM_COUNT, MAX_TASKS, 3), "int32"), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
-        A_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
-        C_tensor_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        B_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        C_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, "float16", 2, A.data, K, M, K * 2, BLK_K, BLK_M, 1, 1, 0, 3, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, "float16", 2, B.data, K, N, K * 2, BLK_K, BLK_N // 2, 1, 1, 0, 3, 0, 0)
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_tensor_map, "float16", 4, gemm_out.data, TILE_N, TILE_M, N // TILE_N, M // TILE_M, TILE_N * 2, (TILE_N * TILE_M) * 2, (N * TILE_M) * 2, EPI_TILE, BLK_M, 1, 1, 1, 1, 1, 1, 0, 3, 0, 0)
@@ -386,27 +386,27 @@ def test_hgemm_rs():
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             with Tx.cta():
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
                 B_smem = Tx.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
                 C_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                 reg_fp16 = Tx.alloc_buffer((BLK_N,), d_type, scope="local")
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
-                base_desc_A = Tx.local_cell("uint64")
-                base_desc_B = Tx.local_cell("uint64")
-                tma2mma_pipe = TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True)
-                mma2ld_pipe = MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False)
+                descA: Tx.uint64
+                descB: Tx.uint64
+                descI: Tx.uint32
+                base_desc_A: Tx.uint64
+                base_desc_B: Tx.uint64
+                tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
+                mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
                 mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                 tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
-                ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
-                sem = Semaphore(cnt=WORLD_SIZE, buffer=semaphore)
-                offset = Tx.local_cell(dtype="int32")
-                task_id = Tx.local_cell("int32")
+                sem = Tx.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
+                offset: Tx.int32
+                task_id: Tx.int32
                 task_id = 0
                 task_smem = Tx.decl_buffer((MAX_TASKS, 3), "int32", buf.data, elem_offset=SMEM_OFFSET // 4)
                 profiler = CudaProfiler(

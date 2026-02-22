@@ -169,7 +169,7 @@ def tir_ws_kernel(M: int, N: int, K: int):
     @Tx.meta_class
     class SmemDescriptor:
         def __init__(self, prefix: str):
-            self.desc = Tx.local_cell("uint64", name=prefix + "sdesc")
+            self.desc = Tx.local_scalar("uint64", name=prefix + "sdesc")
 
         @Tx.inline
         def init(self, smem_ptr, ldo, sdo, swizzle):
@@ -268,17 +268,17 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             lane_id = Tx.thread_id([32], parent="warp")
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
             
-            warp_id = Tx.local_cell("int32")
+            warp_id: Tx.int32
             warp_id = Tx.cuda.func_call("canonical_warp_idx_sync", return_type="int32", source_code=warp_id_func_source)
 
-            cluster_rank = Tx.local_cell("int32")
+            cluster_rank: Tx.int32
             cluster_rank = cluster_rank_
             # General pair calculations - works for any cluster shape
-            cb_m = cluster_rank % CLUSTER_M
-            cb_n = cluster_rank // CLUSTER_M
-            pair_id = cluster_rank // CTA_GROUP  # which 2SM pair
-            id_in_pair = cluster_rank % CTA_GROUP  # 0=leader, 1=follower
-            pair_leader_rank = pair_id * CTA_GROUP  # rank of pair's leader
+            cb_m: Tx.let = cluster_rank % CLUSTER_M
+            cb_n: Tx.let = cluster_rank // CLUSTER_M
+            pair_id: Tx.let = cluster_rank // CTA_GROUP  # which 2SM pair
+            id_in_pair: Tx.let = cluster_rank % CTA_GROUP  # 0=leader, 1=follower
+            pair_leader_rank: Tx.let = pair_id * CTA_GROUP  # rank of pair's leader
 
             # tile scheduler
             tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=CLUSTER_M_TILES, num_n_tiles=CLUSTER_N_TILES, num_clusters=NUM_CLUSTERS)
@@ -335,7 +335,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             descSFB = SmemDescriptor("SFB")
 
             # The mask containing the pair leader and follower in the cluster
-            pair_mask = Tx.local_cell("int32")
+            pair_mask: Tx.int32
             pair_mask = 0
             pair_mask = pair_mask | (1 << pair_leader_rank)
             pair_mask = pair_mask | (1 << (pair_leader_rank + 1))
@@ -346,24 +346,24 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             mma_state.init(is_producer=False)
             acc_state = PipelineState("acc", TMEM_PIPE_DEPTH)
             acc_state.init(is_producer=True)
-            accum = Tx.local_cell("int32")
+            accum: Tx.int32
             accum = 0
             epi_state = PipelineState("epi", TMEM_PIPE_DEPTH)
             epi_state.init(is_producer=False)
             epi_wb_state = PipelineState("epi_wb", WB_PIPE_DEPTH)
             epi_wb_state.init(is_producer=True)
 
-            alpha_local = Tx.local_cell("float32")
+            alpha_local: Tx.float32
             alpha_local = alpha[0]
 
             # TMA warp
             if warp_id == int(WarpRole.TMA):
                 while tile_scheduler.valid():
-                    cta_m = m_idx * CLUSTER_M + cb_m
-                    cta_n = n_idx * CLUSTER_N + cb_n
-                    m_st = cta_m * CTA_M
-                    n_st = cta_n * MMA_N + id_in_pair * CTA_N
-                    out_n_st = cta_n * MMA_N
+                    cta_m: Tx.let = m_idx * CLUSTER_M + cb_m
+                    cta_n: Tx.let = n_idx * CLUSTER_N + cb_n
+                    m_st: Tx.let = cta_m * CTA_M
+                    n_st: Tx.let = cta_n * MMA_N + id_in_pair * CTA_N
+                    out_n_st: Tx.let = cta_n * MMA_N
 
                     @Tx.inline
                     def issue_tma_load(stage, phase, k_tile: Tx.int32):
@@ -442,10 +442,10 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                 row_sw_offset.init()
 
                 while tile_scheduler.valid():
-                    cta_m = m_idx * CLUSTER_M + cb_m
-                    cta_n = n_idx * CLUSTER_N + cb_n
-                    m_st = cta_m * CTA_M
-                    out_n_st = cta_n * MMA_N
+                    cta_m: Tx.let = m_idx * CLUSTER_M + cb_m
+                    cta_n: Tx.let = n_idx * CLUSTER_N + cb_n
+                    m_st: Tx.let = cta_m * CTA_M
+                    out_n_st: Tx.let = cta_n * MMA_N
                     
                     @Tx.inline
                     def epilogue(stage, phase):
@@ -455,7 +455,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                         reg_16b = Tx.alloc_buffer((EPI_TILE,), "bfloat16", scope="local")
 
                         for no in Tx.unroll(MMA_N // EPI_TILE):
-                            col_st = Tx.local_cell("int32")
+                            col_st: Tx.int32
                             if SFB_N == 128:
                                 col_st = epi_state.stage * MMA_N + no * EPI_TILE
                             elif SFB_N == 256:
@@ -488,7 +488,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                             Tx.cuda.warpgroup_sync(10)
                             # with Tx.thread():
                             #     Tx.copy(output_smem[epi_wb_state.stage, tid_in_wg, :], reg_16b[:])
-                            row_st = Tx.local_cell("int32")
+                            row_st: Tx.int32
                             row_st = output_smem.elem_offset_of([epi_wb_state.stage, tid_in_wg, 0])
                             for ni in Tx.unroll(EPI_TILE // 8):
                                 copy_128b(pointer_offset(output_smem.ptr_to([0, 0, 0]), row_st + row_sw_offset.apply(ni * 8)), reg_16b.ptr_to([ni * 8]))
@@ -496,7 +496,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                             Tx.cuda.warpgroup_sync(10)
                             
                             # launch tma copy from smem to gmem
-                            out_n = Tx.local_cell("int32")
+                            out_n: Tx.int32
                             if SFB_N == 128:
                                 out_n = out_n_st + no * EPI_TILE
                             elif SFB_N == 256:

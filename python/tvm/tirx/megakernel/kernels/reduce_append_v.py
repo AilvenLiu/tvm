@@ -29,8 +29,8 @@ class SplitKReduceAppendVTile(Tile):
         assert KernelConfig.NUM_THREADS % self.bdx == 0
 
     def _alloc_local(self):
-        self.idx = Tx.local_cell("int32", name="idx")
-        self.pos = Tx.local_cell("int32", name="pos")
+        self.idx = Tx.local_scalar("int32", name="idx")
+        self.pos = Tx.local_scalar("int32", name="pos")
         self.vec_32 = Tx.alloc_local([self.VEC_SIZE_16], "float32", name="vec_32")
         self.tmp = Tx.alloc_local([self.VEC_SIZE_16], "float32", name="tmp")
         self.vec_16 = Tx.alloc_local([self.VEC_SIZE_16], "float16", name="vec_16")

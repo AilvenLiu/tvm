@@ -32,7 +32,7 @@ class SiluMultiplyTile(Tile):
         # allocate register
         self.vec1 = Tx.alloc_local([self.VEC_SIZE], self.dtype, name="vec1")
         self.vec2 = Tx.alloc_local([self.VEC_SIZE], self.dtype, name="vec2")
-        self.idx = Tx.local_cell("int32", name="idx")
+        self.idx = Tx.local_scalar("int32", name="idx")
 
     # fmt: off
     @Tx.inline

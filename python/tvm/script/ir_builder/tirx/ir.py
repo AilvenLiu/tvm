@@ -1259,7 +1259,7 @@ def Assert(condition: PrimExpr, message, error_kind: str = "RuntimeError") -> fr
     return _ffi_api.Assert(condition, error_kind, message)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def bind(
+def Bind(  # pylint: disable=invalid-name
     value: PrimExpr,
     type_annotation: Type | None = None,  # pylint: disable=redefined-outer-name
     *,
@@ -1302,42 +1302,41 @@ def Let(  # pylint: disable=invalid-name
     return tir.Let(var, value, expr)
 
 
-def let(
-    v: Var,
-    value: PrimExpr,
-    body: PrimExpr = None,
-) -> Var:
-    """Create a new let binding.
-
-    Parameters
-    ----------
-    v : Var
-        The variable to bind.
-
-    value : PrimExpr
-        The value to be bound.
-
-    body : PrimExpr
-        The body expression, None will be used if it was not specified.
-
-    Returns
-    -------
-    res : Var
-        The bound variable.
+bind = Bind
+class LetAnnotation:
+    """Marker for explicit LetStmt. Created by T.let or T.let[type].
+    Usage in TVMScript:
+        x: T.let[T.int32] = expr   # LetStmt with explicit type
+        x: T.let = expr             # LetStmt with auto-typed RHS
     """
 
-    @deprecated("T.let", "T.Let")
-    def let_expr(v: Var, value: PrimExpr, body: PrimExpr) -> PrimExpr:
-        return tirx.Let(v, value, body)
+    def __init__(self, type_spec=None):
+        self.type_spec = type_spec
 
-    @deprecated("T.let", "T.bind")
-    def let_stmt(v: Var, value: PrimExpr) -> Var:
-        return bind(value, var=v)
+    def __class_getitem__(cls, item):
+        return LetAnnotation(item)
 
-    if body is None:
-        return let_stmt(v, value)
-    else:
-        return let_expr(v, value, body)
+    def __getitem__(self, item):
+        return LetAnnotation(item)
+
+    def as_var(self, rhs_dtype=None):
+        """Resolve to a tir.Var."""
+        if self.type_spec is not None:
+            if isinstance(self.type_spec, Var):
+                return self.type_spec  # Already a Var (e.g. Tx.handle(...))
+            elif callable(self.type_spec):
+                return self.type_spec()  # e.g. T.int32() -> Var
+            elif isinstance(self.type_spec, Type):
+                return Var("", self.type_spec)
+            else:
+                raise TypeError(f"Invalid type for T.let: {self.type_spec}")
+        elif rhs_dtype is not None:
+            return Var("", ir.PrimType(rhs_dtype))
+        else:
+            raise TypeError("T.let requires either a type or an RHS value")
+
+
+let = LetAnnotation()  # Singleton for T.let (no subscript)
 
 
 def allocate(
@@ -1618,28 +1617,28 @@ alloc_local = functools.partial(alloc_buffer, scope="local")
 
 
 if TYPE_CHECKING:
-    CellT = TypeVar("CellT")
+    ScalarT = TypeVar("ScalarT")
 
     # Keep type checking/linting simple by treating wrapper as identity.
-    def cell_wrapper(x: CellT) -> CellT:
+    def scalar_wrapper(x: ScalarT) -> ScalarT:
         return x
 
 else:
 
-    class cell_wrapper:
-        """Internal wrapper to allow IRBuilder auto-naming on cell assignment."""
+    class scalar_wrapper:
+        """Internal wrapper to allow IRBuilder auto-naming on scalar assignment."""
 
-        def __init__(self, cell: BufferLoad):
-            assert isinstance(cell, BufferLoad)
-            self.cell = cell
+        def __init__(self, scalar: BufferLoad):
+            assert isinstance(scalar, BufferLoad)
+            self.scalar = scalar
 
         def __getattr__(self, name: str) -> Any:
-            return getattr(self.cell, name)
+            return getattr(self.scalar, name)
 
 
-def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
-    """Allocate a zero-dimensional buffer (cell)."""
-    buf = sblock_alloc_buffer(
+def alloc_scalar(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
+    """Allocate a zero-dimensional buffer (scalar)."""
+    buf = alloc_buffer(
         shape=(1,),
         dtype=dtype,
         scope=scope,
@@ -1653,12 +1652,12 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
     )
     assert isinstance(buf, Buffer)
     if name is None:
-        return cell_wrapper(buf[0])
+        return scalar_wrapper(buf[0])
     return buf[0]
 
 
-def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
-    """Declare a zero-dimensional buffer (cell) from a pointer."""
+def decl_scalar(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
+    """Declare a zero-dimensional buffer (scalar) from a pointer."""
     buf = decl_buffer(
         shape=(1,),
         dtype=dtype,
@@ -1675,18 +1674,18 @@ def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None)
     )
     assert isinstance(buf, Buffer)
     if name is None:
-        return cell_wrapper(buf[0])
+        return scalar_wrapper(buf[0])
     return buf[0]
 
 
-def shared_cell(dtype: str = "float32", name: str = None) -> BufferLoad:
+def shared_scalar(dtype: str = "float32", name: str = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer in shared memory."""
-    return alloc_cell(dtype=dtype, scope="shared", name=name)
+    return alloc_scalar(dtype=dtype, scope="shared", name=name)
 
 
-def local_cell(dtype: str = "float32", name: str = None) -> BufferLoad:
+def local_scalar(dtype: str = "float32", name: str = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer in local memory."""
-    return alloc_cell(dtype=dtype, scope="local", name=name)
+    return alloc_scalar(dtype=dtype, scope="local", name=name)
 
 
 def launch_thread(
@@ -3241,7 +3240,9 @@ __all__ = float_types + [
     "Call",
     "CallEffectKind",
     "let",
+    "Bind",
     "bind",
+    "LetAnnotation",
     "Let",
     "IterVar",
     "CommReducer",
@@ -3289,10 +3290,10 @@ __all__ += [
     "static_assert",
     "alloc_shared",
     "alloc_local",
-    "cell_wrapper",
-    "alloc_cell",
-    "decl_cell",
-    "shared_cell",
-    "local_cell",
+    "scalar_wrapper",
+    "alloc_scalar",
+    "decl_scalar",
+    "shared_scalar",
+    "local_scalar",
     "add_to_parent",
 ]

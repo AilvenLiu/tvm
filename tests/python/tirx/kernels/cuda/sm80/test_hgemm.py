@@ -285,7 +285,7 @@ def test_hgemm_ampere():
                     for ko_idx in Tx.serial(K // KI):
                         ko = Tx.meta_var(ko_idx)
 
-                        slice_in = ko % 4
+                        slice_in: Tx.let = ko % 4
                         loadFragA(fragA, 1, SA, slice_in, 1, tx, tz)
                         loadFragB(fragB, 1, SB, slice_in, 1, tx, ty)
 

@@ -864,6 +864,12 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::BufferNode>([](const ObjectRef& node, ffi::String name) -> void {
       tvm::tirx::BufferNode* buffer =
           const_cast<tvm::tirx::BufferNode*>(node.as<tvm::tirx::BufferNode>());
+      if (!buffer->name.empty() && buffer->name != std::string(name)) {
+        LOG(FATAL) << "Buffer name conflict: buffer was created with name \""
+                   << buffer->name << "\", but the parser is trying to rename it to \""
+                   << name << "\". Remove the explicit `name=` argument and let the parser "
+                   << "auto-name the buffer from the LHS variable.";
+      }
       buffer->name = name;
       Namer::Name(buffer->data, name + "_ptr");
       int n = buffer->strides.size();
@@ -1129,7 +1135,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 }
 
-}  // namespace tirxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

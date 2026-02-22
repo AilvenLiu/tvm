@@ -70,7 +70,7 @@ def get_rope_kernel(head_dim):
         q_rope_global = Tx.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global")
         cos_sin_cache_global = Tx.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
         pos_ids_global = Tx.match_buffer(pos_ids, [nnz], "int32", scope="global")
-        half_rotary_dim = rotary_dim // 2
+        half_rotary_dim: Tx.let = rotary_dim // 2
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")

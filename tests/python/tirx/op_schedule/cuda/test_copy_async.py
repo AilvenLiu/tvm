@@ -253,7 +253,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
                 A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
                 mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, byte_offset=smem_bytes // 8)
 
-                mbar_ptr = mbarrier.ptr_to([0])
+                mbar_ptr: Tx.let = mbarrier.ptr_to([0])
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
                 Tx.ptx.fence.proxy("shared")
@@ -365,7 +365,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                 dyn = Tx.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
                 mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
-                phase = Tx.local_cell("int32")
+                phase: Tx.int32
 
                 phase = 0
                 with Tx.thread()[0:1]:

@@ -284,17 +284,17 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
             A = Tx.match_buffer(A_ptr, shape, dtype=dtype, align=16)
             B = Tx.match_buffer(B_ptr, shape, dtype=dtype, align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, dtype, len(shape), A.data, *tma_args_copy)
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, dtype, len(shape), B.data, *tma_args_copy)
 
             with Tx.kernel():
                 for blockIdx in Tx.thread_binding(1, thread="blockIdx.x"):
                     for threadIdx in Tx.thread_binding(128, thread="threadIdx.x"):
                         with Tx.thread():
-                            bar = Tx.shared_cell("uint64")
-                            phase = Tx.local_cell("int32")
+                            bar = Tx.shared_scalar("uint64")
+                            phase: Tx.int32
                             A_smem = Tx.alloc_buffer(shape, dtype, scope="shared", align=128)
 
                             phase = 0
@@ -372,9 +372,9 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
             A = Tx.match_buffer(A_ptr, total_elems, dtype=dtype, align=16)
             B = Tx.match_buffer(B_ptr, total_elems, dtype=dtype, align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, dtype, len(shape), A.data, *load_args)
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, dtype, len(shape), B.data, *store_args)
 
             with Tx.kernel():
@@ -382,8 +382,8 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
                     for threadIdx in Tx.thread_binding(128, thread="threadIdx.x"):
                         with Tx.thread():
                             A_smem = Tx.alloc_buffer((total_elems,), dtype, scope="shared", align=128)
-                            bar = Tx.shared_cell("uint64")
-                            phase = Tx.local_cell("int32")
+                            bar = Tx.shared_scalar("uint64")
+                            phase: Tx.int32
 
                             phase = 0
                             if threadIdx == 0:
@@ -455,9 +455,9 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
             A = Tx.match_buffer(A_ptr, shape, dtype="float32", align=16)
             B = Tx.match_buffer(B_ptr, shape, dtype="float32", align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float32", len(shape), A.data, *tma_args)
 
             with Tx.kernel():
@@ -465,8 +465,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                     for bx in Tx.thread_binding(4, thread="blockIdx.x"):
                         for tx in Tx.thread_binding(128, thread="threadIdx.x"):
                             with Tx.thread():
-                                bar = Tx.shared_cell("uint64")
-                                phase = Tx.local_cell("int32")
+                                bar = Tx.shared_scalar("uint64")
+                                phase: Tx.int32
                                 A_smem = Tx.alloc_buffer(shape[::-1], "float32", scope="shared", align=128)
 
                                 phase = 0
@@ -537,9 +537,9 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
             A = Tx.match_buffer(A_ptr, shape, dtype="float32", align=16)
             B = Tx.match_buffer(B_ptr, shape, dtype="float32", align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float32", len(shape), B.data, *tma_store_args)
 
             with Tx.kernel():
@@ -547,8 +547,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                     for bx in Tx.thread_binding(4, thread="blockIdx.x"):
                         for tx in Tx.thread_binding(128, thread="threadIdx.x"):
                             with Tx.thread():
-                                bar = Tx.shared_cell("uint64")
-                                phase = Tx.local_cell("int32")
+                                bar = Tx.shared_scalar("uint64")
+                                phase: Tx.int32
                                 A_smem = Tx.alloc_buffer(shape[::-1], "float32", scope="shared", align=128)
 
                                 phase = 0
@@ -620,7 +620,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
         def main(A_ptr: Tx.handle):
             A = Tx.match_buffer(A_ptr, shape, dtype="float32", align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
 
             with Tx.kernel():
@@ -699,9 +699,9 @@ def test_wgmma_ss_nt():
             B = Tx.match_buffer(B_ptr, shapeB, dtype=in_dtype, align=16)
             C = Tx.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
 
-            A_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, in_dtype, len(shapeA), A.data, *A_tma_args)
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
 
             with Tx.kernel():
@@ -711,11 +711,11 @@ def test_wgmma_ss_nt():
                 with Tx.thread():
                     A_smem = Tx.alloc_buffer(shapeA, in_dtype, scope="shared", align=1024)
                     B_smem = Tx.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
-                    bar = Tx.shared_cell("uint64")
-                    phase = Tx.local_cell("int32")
+                    bar = Tx.shared_scalar("uint64")
+                    phase: Tx.int32
 
-                    descA = Tx.local_cell("uint64")
-                    descB = Tx.local_cell("uint64")
+                    descA: Tx.uint64
+                    descB: Tx.uint64
                     C_local = Tx.alloc_buffer((C_elems,), out_dtype, scope="local")
 
                     # init phase and bar
@@ -856,7 +856,7 @@ def test_wgmma_rs_nt():
             B = Tx.match_buffer(B_ptr, shapeB, dtype=in_dtype, align=16)
             C = Tx.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
 
-            B_map: Tx.handle("tensormap") = Tx.tvm_stack_alloca("tensormap", 1)
+            B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
 
             with Tx.kernel():
@@ -866,10 +866,10 @@ def test_wgmma_rs_nt():
                 with Tx.thread():
                     B_smem = Tx.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
                     # bar = Tx.alloc_buffer((1,), "uint64", scope="shared", align=8)
-                    bar = Tx.shared_cell("uint64")
+                    bar = Tx.shared_scalar("uint64")
 
                     # descB = Tx.alloc_buffer((1,), "uint64", scope="local")
-                    descB = Tx.local_cell("uint64")
+                    descB: Tx.uint64
                     A_local = Tx.alloc_buffer((A_elems,), in_dtype, scope="local")
                     C_local = Tx.alloc_buffer((C_elems,), out_dtype, scope="local")
 

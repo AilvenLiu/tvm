@@ -187,10 +187,10 @@ def tir_kernel(M: int, N: int, K: int):
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=cast_layout)
                 reg_16b = Tx.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
                 reg_16b_wg = reg_16b.view(128, TMEM_LD_SIZE, layout=cast_layout)
-                stage = Tx.local_cell("int32")
-                descSFA = Tx.local_cell("uint64")
-                descSFB = Tx.local_cell("uint64")
-                descI = Tx.local_cell("uint32")
+                stage: Tx.int32
+                descSFA: Tx.uint64
+                descSFB: Tx.uint64
+                descI: Tx.uint32
 
                 tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, l2_group_size=TILE_GROUPS_ROW_SIZE, num_clusters=SM_NUMBER // 2)
 
@@ -277,12 +277,12 @@ def tir_kernel(M: int, N: int, K: int):
 
                         with Tx.warp(parent="warpgroup")[warp_id == 0]:
                             if cbx == 0:
-                                tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                                tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                                tmem_idx: Tx.int32
+                                tmem_phase: Tx.int32
                                 Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
                                 mma_state = PipelineState("mma", SMEM_PIPE_DEPTH)
                                 mma_state.init(is_producer=False)
-                                accum = Tx.local_cell("int32")
+                                accum: Tx.int32
                                 while tile_scheduler.valid():
                                     m_idx = Tx.meta_var(tile_scheduler.m_idx)
                                     n_idx = Tx.meta_var(tile_scheduler.n_idx)
@@ -325,8 +325,8 @@ def tir_kernel(M: int, N: int, K: int):
 
                     with Tx.warpgroup()[wg_id == 0]:
                         Tx.cuda.trap_when_assert_failed(tmem_addr[0] == 0)
-                        tmem_idx = Tx.local_cell("int32", "tmem_idx")
-                        tmem_phase = Tx.local_cell("int32", "tmem_phase")
+                        tmem_idx: Tx.int32
+                        tmem_phase: Tx.int32
                         while tile_scheduler.valid():
                             m_idx = Tx.meta_var(tile_scheduler.m_idx)
                             n_idx = Tx.meta_var(tile_scheduler.n_idx)
@@ -368,8 +368,8 @@ def tir_kernel(M: int, N: int, K: int):
                                 Tx.cuda.warpgroup_sync(10)
 
                                 # smem -> gmem
-                                m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
-                                n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
+                                m_start: Tx.let = (m_idx * CTA_GROUP + cbx) * BLK_M
+                                n_start: Tx.let = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
                                 with Tx.thread(parent="warpgroup")[tid_in_wg == 0]:
                                     Tx.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
                                     Tx.ptx.cp_async.bulk.commit_group()

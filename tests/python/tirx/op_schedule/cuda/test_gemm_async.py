@@ -306,7 +306,7 @@ def test_gemm_tcgen05_cta_group_2(task):
             tma_mbar = Tx.alloc_shared([1], "uint64")
             mma_mbar = Tx.alloc_shared([1], "uint64")
 
-            ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
+            ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
             tma_mbar_cta_0 = Tx.decl_buffer([1], "uint64", data=ptr, scope="shared")
 
             with Tx.thread()[0:1]:
@@ -661,7 +661,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
             descSFA = Tx.alloc_buffer((1,), "uint64", scope="local")
             descSFB = Tx.alloc_buffer((1,), "uint64", scope="local")
 
-            ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
+            ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
             tma_mbar_cta_0 = Tx.decl_buffer([1], "uint64", data=ptr, scope="shared")
 
             with Tx.thread()[0:1]:
@@ -1033,7 +1033,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
             descSFA = Tx.alloc_buffer((1,), "uint64", scope="local")
             descSFB = Tx.alloc_buffer((1,), "uint64", scope="local")
 
-            ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
+            ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))
             tma_mbar_cta_0 = Tx.decl_buffer([1], "uint64", data=ptr, scope="shared")
 
             with Tx.thread()[0:1]:

@@ -180,7 +180,7 @@ def test_hgemm():
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 A_smem = Tx.decl_buffer((PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
                                         elem_offset=1024 // F16_BYTES)
                 B_smem = Tx.decl_buffer((PIPELINE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
@@ -189,11 +189,11 @@ def test_hgemm():
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
 
                 # alloc local memory
-                descI = Tx.local_cell("uint32")
-                descA = Tx.local_cell("uint64")
-                descB = Tx.local_cell("uint64")
+                descI: Tx.uint32
+                descA: Tx.uint64
+                descB: Tx.uint64
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
-                stage = Tx.local_cell("int32")
+                stage: Tx.int32
 
                 # barriers
                 tma2mma = BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True)
@@ -206,7 +206,7 @@ def test_hgemm():
                 mma2ld.init(1)
                 ld2mma.init(128 * NUM_CONSUMER)
 
-                ptr: Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
                 tma_finished = Tx.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # Tile scheduler
@@ -281,7 +281,7 @@ def test_hgemm():
                                 tile_scheduler.next_tile()
 
                         elif warp_id < 2 and cbx == 0:
-                            phase_tmem = Tx.local_cell("int32")
+                            phase_tmem: Tx.int32
                             phase_tmem = 0
                             phase[0] = 0
 
@@ -321,7 +321,7 @@ def test_hgemm():
                         reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                         reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
                         reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
-                        phase_tmem = Tx.local_cell("int32")
+                        phase_tmem: Tx.int32
 
                         phase_tmem = 0
                         while tile_scheduler.valid():
@@ -345,8 +345,8 @@ def test_hgemm():
                                 Tx.ptx.fence.proxy(scope="shared")
                                 # st to gmem via event
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
-                                    m_start = (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M
-                                    n_start = n_idx * BLK_N * CTA_GROUP + i * EPI_TILE
+                                    m_start: Tx.let = (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M
+                                    n_start: Tx.let = n_idx * BLK_N * CTA_GROUP + i * EPI_TILE
                                     Tx.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[wg_id, :, :], dispatch="tma")
                                     Tx.ptx.cp_async.bulk.commit_group()
                                     Tx.ptx.cp_async.bulk.wait_group(0)
