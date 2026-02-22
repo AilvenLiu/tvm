@@ -185,7 +185,7 @@ def test_bar_arrive():
 
     src, mod = _get_source(func)
     assert "tvm_builtin_ptx_bar_arrive(0, 128)" in src
-    assert 'bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count)' in src
+    assert 'bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count) : "memory"' in src
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -202,7 +202,7 @@ def test_bar_sync():
 
     src, mod = _get_source(func)
     assert "tvm_builtin_ptx_bar_sync(0, 128)" in src
-    assert 'bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count)' in src
+    assert 'bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count) : "memory"' in src
 
 
 @tvm.testing.requires_cuda_compute_version(9)

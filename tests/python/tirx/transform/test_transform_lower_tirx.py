@@ -1240,5 +1240,27 @@ def test_alloc_buffer_with_thread_axis_layout():
     compare(before, after, LowerTIRx)
 
 
+def test_scope_id_compliment_no_div_by_zero():
+    """Regression test: Compliment must not divide by zero when kernel extent < cluster extent.
+
+    Before the fix, defining cluster cta_id with extent > kernel cta_id extent would crash
+    with a divide-by-zero in the Compliment function during ScopeIdDef verification.
+    After the fix, it raises a validation error instead of crashing.
+    """
+    # The well-formedness verifier (which calls Compliment internally) runs at parse time.
+    # Before the fix this would crash with divide-by-zero; now it raises a clean error.
+    with pytest.raises(Exception):
+        # fmt: off
+        @Tx.prim_func(tirx=True)
+        def func(A: Tx.Buffer((1,))):
+            with Tx.kernel():
+                cb_m, cb_n = Tx.cta_id([2, 2], parent="cluster")
+                bx = Tx.cta_id([1], parent="kernel")
+                tx = Tx.thread_id([128], parent="cta")
+                with Tx.thread():
+                    Tx.evaluate(bx + cb_m + cb_n + tx)
+        # fmt: on
+
+
 if __name__ == "__main__":
     tvm.testing.main()

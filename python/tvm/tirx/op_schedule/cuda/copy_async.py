@@ -25,6 +25,7 @@ from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
+from tvm.tirx.operator.op import CopyAsync
 from tvm.tirx.op_schedule import (
     ScheduleContext,
     register_dispatch,
@@ -166,7 +167,9 @@ def find_contiguous_region(layout: TileLayout) -> tuple:
         - contiguous_element_count: Total number of elements in the contiguous region
     """
     # Filter to memory-only shards with their original indices
-    indexed_shards = [(i, s) for i, s in enumerate(layout.shard) if s.axis.is_memory() and s.extent != 1]
+    indexed_shards = [
+        (i, s) for i, s in enumerate(layout.shard) if s.axis.is_memory() and s.extent != 1
+    ]
 
     if not indexed_shards:
         return [], 1
@@ -579,7 +582,8 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
     # ---------------------------------------------------------------------
-    dst_buffer_region, src_buffer_region = op_call.args
+    op_call = OpCall.downcast(op_call)
+    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     src: "Buffer" = src_buffer_region.buffer
     dst: "Buffer" = dst_buffer_region.buffer
 
@@ -645,7 +649,9 @@ def copy_tma_impl(
     else:
         cta_mask = 0
 
-    tensor_map = Tx.Var(g_buf.data.name + "_tensormap", dtype=Tx.handle("tensormap").type_annotation)
+    tensor_map = Tx.Var(
+        g_buf.data.name + "_tensormap", dtype=Tx.handle("tensormap").type_annotation
+    )
 
     if direction == "g2s":
         # get mbar from config

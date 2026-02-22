@@ -242,7 +242,7 @@ ffi::Optional<TileLayout> SwizzleLayoutNode::IsDirectSumRight(
     const ffi::Array<PrimExpr>& right_shape) const {
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, ffi::GetRef<SwizzleLayout>(this))) {
-      return comp.value()->tile_layout->IsDirectSumRight(comp.value()->tile_layout,
+      return comp.value()->tile_layout->IsDirectSumRight(sum_layout,
                                                         interleaved_shape, right_shape);
     }
   }
@@ -254,7 +254,7 @@ ffi::Optional<TLayout> SwizzleLayoutNode::IsDirectSumLeft(
     const ffi::Array<PrimExpr>& left_shape) const {
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, ffi::GetRef<SwizzleLayout>(this))) {
-      return comp.value()->tile_layout->IsDirectSumLeft(comp.value()->tile_layout,
+      return comp.value()->tile_layout->IsDirectSumLeft(sum_layout,
                                                        interleaved_shape, left_shape);
     }
   }

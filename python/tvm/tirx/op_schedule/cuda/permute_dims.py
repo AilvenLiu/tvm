@@ -20,6 +20,7 @@ from typing import Optional
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc, Buffer, BufferRegion
 from tvm.tir.stmt import OpCall
+from tvm.tirx.operator.op import PermuteDims
 from tvm.tirx.op_schedule import (
     ScheduleContext,
     register_dispatch,
@@ -32,14 +33,15 @@ def validate_deepgemm_permute_dims(
     op_call: OpCall,
     sctx: ScheduleContext,
 ) -> bool:
-    if isinstance(op_call.args[0], Buffer):
-        buffer: Buffer = op_call.args[0]
+    op_call = OpCall.downcast(op_call)
+    if isinstance(op_call.buffer, Buffer):
+        buffer: Buffer = op_call.buffer
         extent = buffer.shape
-    elif isinstance(op_call.args[0], BufferRegion):
-        buffer: Buffer = op_call.args[0].buffer
-        st, extent = get_st_extent(op_call.args[0])
+    elif isinstance(op_call.buffer, BufferRegion):
+        buffer: Buffer = op_call.buffer.buffer
+        st, extent = get_st_extent(op_call.buffer)
 
-    order = op_call.args[1]
+    order = op_call.order
     if sctx.exec_scope.name == "warp":
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
         ndim = len(order)
@@ -58,15 +60,15 @@ def vectorized_permute_dims_last_2d_impl(
     op_call: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-
-    if isinstance(op_call.args[0], Buffer):
-        buffer: Buffer = op_call.args[0]
+    op_call = OpCall.downcast(op_call)
+    if isinstance(op_call.buffer, Buffer):
+        buffer: Buffer = op_call.buffer
         extent = shape = buffer.shape
         st = [0] * len(extent)
-    elif isinstance(op_call.args[0], BufferRegion):
-        buffer: Buffer = op_call.args[0].buffer
+    elif isinstance(op_call.buffer, BufferRegion):
+        buffer: Buffer = op_call.buffer.buffer
         shape = buffer.shape
-        st, extent = get_st_extent(op_call.args[0])
+        st, extent = get_st_extent(op_call.buffer)
 
     M, N = extent[-2:]
     vec_len = op_call.config.get("vec_len")

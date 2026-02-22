@@ -26,6 +26,7 @@ from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
 from tvm.tirx.op_schedule import ScheduleContext, fail
+from tvm.tirx.operator.op import UnaryOp, UnaryOpWithBiasScale
 
 from ..common import MapOpType
 from .common import get_indices
@@ -49,8 +50,9 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     Schedule unary map operation on CUDA in shared memory.
     The destination and source regions must be of the same shape.
     """
-    _dst: BufferRegion = op.args[0]
-    _src: BufferRegion = op.args[1]
+    op = OpCall.downcast(op)
+    _dst: BufferRegion = op.output
+    _src: BufferRegion = op.input
 
     # Check CUDA and CTA context, and supported op types.
     if sctx.exec_scope.name != "cta":
@@ -112,9 +114,9 @@ def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule unary map operation on CUDA in shared memory with bias and scale."""
-
-    _bias: Optional[Union[BufferRegion, FloatImm]] = op.args[2]
-    _scale: Optional[FloatImm] = op.args[3]
+    op = OpCall.downcast(op)
+    _bias: Optional[Union[BufferRegion, FloatImm]] = op.bias
+    _scale: Optional[FloatImm] = op.scale
 
     if _bias is not None or _scale is not None:
         fail("bias/scale not supported for shared-memory unary map")
@@ -131,9 +133,9 @@ def unary_map_cuda_warp_logical_view_nd_impl(
     The destination and source regions must be of the same layout
     to ensure correctness.
     """
-
-    _dst: BufferRegion = op.args[0]
-    _src: BufferRegion = op.args[1]
+    op = OpCall.downcast(op)
+    _dst: BufferRegion = op.output
+    _src: BufferRegion = op.input
 
     dst, src = _dst.buffer, _src.buffer
     src_region, dst_region = _src.region, _dst.region
@@ -212,9 +214,9 @@ def unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule unary map operation on CUDA on warp-level logical tensor with bias and scale."""
-
-    _bias: Optional[Union[BufferRegion, FloatImm]] = op.args[2]
-    _scale: Optional[FloatImm] = op.args[3]
+    op = OpCall.downcast(op)
+    _bias: Optional[Union[BufferRegion, FloatImm]] = op.bias
+    _scale: Optional[FloatImm] = op.scale
 
     if _bias is not None or _scale is not None:
         fail("bias/scale not supported for local tensor unary map")
@@ -230,12 +232,12 @@ def unary_cuda_impl(
     based on the storage scope of buffers.
     """
 
-    dst_buffer_region = op.args[0]
-    if dst_buffer_region.buffer.scope().startswith("shared"):
+    op = OpCall.downcast(op)
+    if op.output.buffer.scope().startswith("shared"):
         if unary_op in {MapOpType.SQRT, MapOpType.EXP, MapOpType.EXP2}:
             return unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
-    elif dst_buffer_region.buffer.scope() == "local":
+    elif op.output.buffer.scope() == "local":
         if unary_op in {MapOpType.SQRT, MapOpType.EXP, MapOpType.EXP2}:
             return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)

@@ -33,9 +33,8 @@ TileLayout RemoveUnitIters(TileLayout layout) {
   std::vector<Iter> new_shard;
   std::copy_if(layout->shard.begin(), layout->shard.end(), std::back_inserter(new_shard),
                [](const Iter& iter) { return !is_one(iter->extent); });
-  // if new_shard is empty, add a unit iter
-  if (new_shard.empty()) {
-    // TODO(@bohan): does it matter which axis we use?
+  // if new_shard is empty, add a unit iter (using axis from original shard)
+  if (new_shard.empty() && !layout->shard.empty()) {
     new_shard.push_back(Iter(1, 1, layout->shard[0]->axis));
   }
   new_layout->shard = new_shard;

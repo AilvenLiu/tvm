@@ -43,12 +43,12 @@ class BufferReplacer(StmtExprMutator):
     Also replace the data of the buffer with another var.
     """
 
-    def __init__(self, buffer_map: Dict[Buffer, Buffer] = {}, var_map: Dict[Var, Var] = {}):
+    def __init__(self, buffer_map: Dict[Buffer, Buffer] = None, var_map: Dict[Var, Var] = None):
         super().__init__()
-        self.buffer_map = buffer_map
-        self.var_map = var_map
+        self.buffer_map = buffer_map if buffer_map is not None else {}
+        self.var_map = var_map if var_map is not None else {}
         self.buffer_attr_var_mutated = False
-        for old_buffer, new_buffer in buffer_map.items():
+        for old_buffer, new_buffer in self.buffer_map.items():
             self.var_map[old_buffer.data] = new_buffer.data
 
     def mutate_buffer(self, buffer: Buffer):

@@ -392,6 +392,8 @@ def gemm_async(
     C = _to_region(C)
     A = _to_region(A)
     B = _to_region(B)
+    if (SFA is None) != (SFB is None):
+        raise ValueError("SFA and SFB must both be provided or both be None")
     if SFA is not None and SFB is not None:
         SFA = _to_region(SFA)
         SFB = _to_region(SFB)

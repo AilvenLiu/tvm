@@ -25,6 +25,7 @@ from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.layout import S, TileLayout, TLane, TCol, tid_in_wg
 from tvm.tir.stmt import OpCall
 from tvm.runtime import DataType
+from tvm.tirx.operator.op import Copy
 from tvm.tirx.op_schedule import (
     ScheduleContext,
     register_dispatch,
@@ -50,7 +51,8 @@ def copy_default_impl(
     The implementation serves as a fallback for copy operations that uses a single thread
     to move data element by element.
     """
-    dst_buffer_region, src_buffer_region = op_call.args
+    op_call = OpCall.downcast(op_call)
+    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
 
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
@@ -137,7 +139,8 @@ def _scope_allowed(
     sctx: ScheduleContext,
     allowed_pairs: Iterable[Tuple[str, str]] = DEFAULT_ALLOWED_PAIRS,
 ):
-    dst_buffer_region, src_buffer_region = op_call.args[:2]
+    op_call = OpCall.downcast(op_call)
+    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     src_scope = src_buffer_region.buffer.scope()
     dst_scope = dst_buffer_region.buffer.scope()
 
@@ -164,7 +167,8 @@ def _is_valid_copy(op_call: OpCall, sctx: ScheduleContext):
 
 def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
     # mirror get_vec_len inputs
-    dst_buffer_region, src_buffer_region = op_call.args[:2]
+    op_call = OpCall.downcast(op_call)
+    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     if sctx.exec_scope.name == "cta":
         tx = sctx.launch_params["threadIdx.x"].dom.extent
     elif sctx.exec_scope.name == "thread":
@@ -221,8 +225,11 @@ def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_default_impl(op_call, sctx)
 
 
-def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False) -> Optional[PrimFunc]:
-    dst_buffer_region, src_buffer_region = op_call.args[:2]
+def copy_tmem_local_impl(
+    op_call: OpCall, sctx: ScheduleContext, async_op=False
+) -> Optional[PrimFunc]:
+    op_call = OpCall.downcast(op_call)
+    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
 
@@ -285,7 +292,9 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     offset = tmem_st[1]
     assert analyzer.can_prove_equal(tvm.tir.floormod(offset, elem_per_32b), 0)
     offset_32b = tvm.tir.floordiv(offset, elem_per_32b)
-    assert analyzer.can_prove_equal(tmem_extent[1], width), f"tmem_extent[1]: {tmem_extent[1]}, width: {width}"
+    assert analyzer.can_prove_equal(
+        tmem_extent[1], width
+    ), f"tmem_extent[1]: {tmem_extent[1]}, width: {width}"
 
     # assert analyzer.can_prove_equal(local_st[1], 0)
     assert analyzer.can_prove_equal(local_extent[1], width)
@@ -336,5 +345,7 @@ def copy_schedule_tmem_local(op_call: OpCall, sctx: ScheduleContext) -> Optional
         ),
     ],
 )
-def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_async_schedule_tmem_local_async(
+    op_call: OpCall, sctx: ScheduleContext
+) -> Optional[PrimFunc]:
     return copy_tmem_local_impl(op_call, sctx, async_op=True)

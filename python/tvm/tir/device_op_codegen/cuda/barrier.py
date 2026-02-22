@@ -27,7 +27,7 @@ def codegen_ptx_bar_arrive(name_bar_id, thread_count):
     func_name = "tvm_builtin_ptx_bar_arrive"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
-    asm volatile("bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
+    asm volatile("bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count) : "memory");
 }}
 """
     return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
@@ -38,7 +38,7 @@ def codegen_ptx_bar_sync(name_bar_id, thread_count):
     func_name = "tvm_builtin_ptx_bar_sync"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
-    asm volatile("bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
+    asm volatile("bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count) : "memory");
 }}
 """
     return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
@@ -58,7 +58,7 @@ def codegen_ptx_fence_proxy(scope):
 
     source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-  __asm__ __volatile__("fence.proxy{ptx_scope};");
+  __asm__ __volatile__("fence.proxy{ptx_scope};" : : : "memory");
 }}
 """
     return cuda_func_call(func_name, source_code=source_code)
@@ -69,7 +69,7 @@ def codegen_ptx_fence_mbarrier_init_release_cluster():
     func_name = "tvm_builtin_ptx_fence_mbarrier_init_release_cluster"
     source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile("fence.mbarrier_init.release.cluster;");
+    asm volatile("fence.mbarrier_init.release.cluster;" : : : "memory");
 }}
 """
     return cuda_func_call(func_name, source_code=source_code)
@@ -136,7 +136,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int thread_count) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.init.shared.b64 [%0], %1;"
-    :: "r"(barrier_addr_int), "r"(thread_count)
+    :: "r"(barrier_addr_int), "r"(thread_count) : "memory"
   );
 }}
 """
@@ -153,7 +153,7 @@ __forceinline__ __device__ void {func_name}(void* barrier) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.arrive.shared.b64 _, [%0];"
-    :: "r"(barrier_addr_int)
+    :: "r"(barrier_addr_int) : "memory"
   );
 }}
 """
@@ -172,7 +172,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int cta_id, int pred)
       "@p mbarrier.arrive.shared::cluster.b64  _, [remAddr32];\\n"
       "}}\\n"
       :
-      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred));
+      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred) : "memory");
 }}
 """
         return cuda_func_call(func_name, bar, cta_id, pred, source_code=source_code)
@@ -188,7 +188,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int byte_count) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
-    :: "r"(barrier_addr_int), "r"(byte_count)
+    :: "r"(barrier_addr_int), "r"(byte_count) : "memory"
   );
 }}
 """
@@ -207,7 +207,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int byte_count, int c
       "@p mbarrier.arrive.expect_tx.shared::cluster.b64  _, [remAddr32], %3;\\n"
       "}}\\n"
       :
-      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred), "r"(byte_count));
+      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred), "r"(byte_count) : "memory");
 }}
 """
         return cuda_func_call(func_name, bar, byte_count, cta_id, pred, source_code=source_code)
@@ -235,7 +235,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int phase) {{
       ::
       "r"(barrier_addr_int),
       "r"(phase),
-      "r"(ticks)
+      "r"(ticks) : "memory"
   );
 }}
 """

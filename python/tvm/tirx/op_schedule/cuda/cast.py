@@ -26,6 +26,7 @@ from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, IntImm, PrimFunc
 from tvm.tir.layout import TileLayout
 from tvm.tir.stmt import OpCall
+from tvm.tirx.operator.op import Cast
 from tvm.tirx.op_schedule import (
     ScheduleContext,
     register_dispatch,
@@ -101,6 +102,7 @@ def _get_layout_thread_local_partition(layout):
 
     # Group thread dimensions by axis
     from collections import defaultdict
+
     thread_groups_dict = defaultdict(list)
     for idx in thread_dim_indices:
         thread_groups_dict[shard[idx].axis].append(idx)
@@ -265,9 +267,15 @@ def validate_cast_local_view(
     dst_region_extents = [r.extent for r in dst_buffer_region.region]
     if len(src_region_extents) != len(dst_region_extents):
         return False
-    if not all(analyzer.can_prove_equal(s, d) for s, d in zip(src_region_extents, dst_region_extents)):
+    if not all(
+        analyzer.can_prove_equal(s, d) for s, d in zip(src_region_extents, dst_region_extents)
+    ):
         return False
-    if (src.layout.size() != dst.layout.size()) or src.layout.is_swizzle() or dst.layout.is_swizzle():
+    if (
+        (src.layout.size() != dst.layout.size())
+        or src.layout.is_swizzle()
+        or dst.layout.is_swizzle()
+    ):
         return False
     if not isinstance(src.layout, TileLayout) or not isinstance(dst.layout, TileLayout):
         return False
@@ -286,7 +294,10 @@ def validate_cast_local_view(
             return False
         for dim_idx, it in enumerate(layout.shard):
             if it.axis.is_thread():
-                if not (analyzer.can_prove(st[dim_idx] == 0) and analyzer.can_prove_equal(ext[dim_idx], it.extent)):
+                if not (
+                    analyzer.can_prove(st[dim_idx] == 0)
+                    and analyzer.can_prove_equal(ext[dim_idx], it.extent)
+                ):
                     return False
 
     # Slice → Canonicalize
@@ -341,8 +352,7 @@ def _resolve_thread_var(axis, sctx):
     if axis_name:
         axis_name_lower = axis_name.lower()
         for key in sctx.launch_params:
-            if (axis_name_lower in key.lower() or
-                (axis_name == "tx" and "threadIdx.x" in key)):
+            if axis_name_lower in key.lower() or (axis_name == "tx" and "threadIdx.x" in key):
                 return sctx.launch_params[key].var
 
     if "threadIdx.x" in sctx.launch_params:
@@ -378,7 +388,9 @@ def cast_local_view_impl(
     for axis in src_thread_groups.keys():
         var = _resolve_thread_var(axis, sctx)
         if var is None:
-            fail(f"Cannot find thread var for axis {axis} in launch_params: {list(sctx.launch_params.keys())}")
+            fail(
+                f"Cannot find thread var for axis {axis} in launch_params: {list(sctx.launch_params.keys())}"
+            )
         thread_vars[axis] = var
 
     ndim = len(src_extent)
@@ -397,7 +409,9 @@ def cast_local_view_impl(
             thread_decomp_info = {
                 "var": next(iter(thread_vars.values())),
                 "extents": [src_layout.shard[dim_idx].extent for dim_idx, _ in thread_dims_ordered],
-                "dim_to_pos": {dim_idx: pos for pos, (dim_idx, _) in enumerate(thread_dims_ordered)},
+                "dim_to_pos": {
+                    dim_idx: pos for pos, (dim_idx, _) in enumerate(thread_dims_ordered)
+                },
                 "ordered_dims": thread_dims_ordered,
             }
 
@@ -536,7 +550,9 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
         predicate(
             "validate_cast_local_view",
             lambda op, sctx: (
-                validate_cast_local_view(op.args[0], op.args[1], sctx),
+                validate_cast_local_view(
+                    OpCall.downcast(op).output, OpCall.downcast(op).input, sctx
+                ),
                 "validate_cast_local_view failed",
             ),
         ),
@@ -550,7 +566,8 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
     ],
 )
 def cast_dispatch_local_view(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
-    return cast_local_view_impl(op_call.args[0], op_call.args[1], sctx)
+    op_call = OpCall.downcast(op_call)
+    return cast_local_view_impl(op_call.output, op_call.input, sctx)
 
 
 @register_dispatch(
@@ -562,7 +579,7 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc
         predicate(
             "validate_cast_op",
             lambda op, sctx: (
-                validate_cast_op(op.args[0], op.args[1], sctx),
+                validate_cast_op(OpCall.downcast(op).output, OpCall.downcast(op).input, sctx),
                 "validate_cast_op failed",
             ),
         ),
@@ -576,4 +593,5 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc
     ],
 )
 def cast_dispatch_thread_wise(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
-    return cast_thread_wise_impl(op_call.args[0], op_call.args[1], sctx)
+    op_call = OpCall.downcast(op_call)
+    return cast_thread_wise_impl(op_call.output, op_call.input, sctx)

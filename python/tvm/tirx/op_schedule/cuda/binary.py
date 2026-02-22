@@ -28,6 +28,7 @@ from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.expr import FloatImm
 from tvm.tirx.op_schedule import ScheduleContext, fail
+from tvm.tirx.operator.op import BinaryOp
 
 from ..common import MapOpType
 from .common import get_indices
@@ -66,9 +67,10 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     For non-commutative ops (SUB, FDIV), only _src2 can be a FloatImm and if both are buffers,
     only broadcasting of _src2 to _src1 is supported.
     """
-    _dst: BufferRegion = op.args[0]
-    _src1: Union[BufferRegion, FloatImm] = op.args[1]
-    _src2: Union[BufferRegion, FloatImm] = op.args[2]
+    op = OpCall.downcast(op)
+    _dst: BufferRegion = op.output
+    _src1: Union[BufferRegion, FloatImm] = op.lhs
+    _src2: Union[BufferRegion, FloatImm] = op.rhs
 
     if sctx.exec_scope.name != "cta":
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")
@@ -218,10 +220,10 @@ def binary_map_cuda_warp_logical_view_nd_impl(
 
     More layouts can be supported in the future.
     """
-
-    _dst: BufferRegion = op.args[0]
-    _src1: Union[BufferRegion, FloatImm] = op.args[1]
-    _src2: Union[BufferRegion, FloatImm] = op.args[2]
+    op = OpCall.downcast(op)
+    _dst: BufferRegion = op.output
+    _src1: Union[BufferRegion, FloatImm] = op.lhs
+    _src2: Union[BufferRegion, FloatImm] = op.rhs
 
     # Ensure at least one source is not a constant.
     CONST = None
@@ -349,7 +351,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     # 5. (ROW_RED, ROW_RED, const)
 
     # WGMMA layout check
-    atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+    atom = Tx.TileLayout(Tx.S[(1, 2):(2, 1)])
     warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
@@ -360,7 +362,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             return None
 
     # ROW_RED layout check
-    red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
+    red_atom = Tx.TileLayout(Tx.S[(1, 1):(1, 1)])
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     def check_row_red(buf):
@@ -452,10 +454,10 @@ def binary_cuda_impl(
     based on the storage scope of buffers.
     """
 
-    dst_buffer_region = op.args[0]
-    if dst_buffer_region.buffer.scope().startswith("shared"):
+    op = OpCall.downcast(op)
+    if op.output.buffer.scope().startswith("shared"):
         return binary_map_cuda_shared_nd_sync_cta_impl(op, binary_op, sctx)
-    elif dst_buffer_region.buffer.scope() == "local":
+    elif op.output.buffer.scope() == "local":
         return binary_map_cuda_warp_logical_view_nd_impl(op, binary_op, sctx)
 
     fail("unsupported buffer scope for binary op")

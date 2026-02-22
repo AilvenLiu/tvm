@@ -28,6 +28,7 @@ from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail, register_dispatch, predicate
+from tvm.tirx.operator.op import ReduceOp
 
 from ..common import ReduceOpType
 
@@ -57,7 +58,8 @@ def _exec_scope_ok(op: OpCall, sctx: ScheduleContext, expected_scopes: list[str]
 
 def _dtype_ok(op: OpCall, sctx: ScheduleContext, expected_dtype: str):
     """Check if src buffer dtype matches."""
-    _, src_buffer_region = op.args[:2]
+    op = OpCall.downcast(op)
+    src_buffer_region = op.input
     dtype = src_buffer_region.buffer.dtype
     ok = dtype == expected_dtype
     return (ok, None if ok else f"dtype {dtype} != {expected_dtype}")
@@ -74,7 +76,8 @@ def _sm_version_ok(op: OpCall, sctx: ScheduleContext, min_version: int):
 
 def _reduction_len_ok(op: OpCall, sctx: ScheduleContext, min_len: int):
     """Check if reduction_len >= min_len."""
-    _, src_buffer_region = op.args[:2]
+    op = OpCall.downcast(op)
+    src_buffer_region = op.input
     src_extent = [r.extent for r in src_buffer_region.region]
     reduction_len = functools.reduce(operator.mul, src_extent, 1)
     ok = reduction_len >= min_len
@@ -83,7 +86,8 @@ def _reduction_len_ok(op: OpCall, sctx: ScheduleContext, min_len: int):
 
 def _dst_len_ok(op: OpCall, sctx: ScheduleContext, expected_len: int):
     """Check if dst_len == expected_len."""
-    dst_buffer_region = op.args[0]
+    op = OpCall.downcast(op)
+    dst_buffer_region = op.output
     dst_extent = [r.extent for r in dst_buffer_region.region]
     dst_len = functools.reduce(operator.mul, dst_extent, 1)
     ok = dst_len == expected_len
@@ -92,7 +96,8 @@ def _dst_len_ok(op: OpCall, sctx: ScheduleContext, expected_len: int):
 
 def _src_ndim_ok(op: OpCall, sctx: ScheduleContext, expected_ndim: int):
     """Check if src buffer is expected_ndim-dimensional."""
-    _, src_buffer_region = op.args[:2]
+    op = OpCall.downcast(op)
+    src_buffer_region = op.input
     src_extent = [r.extent for r in src_buffer_region.region]
     ok = len(src_extent) == expected_ndim
     return (ok, None if ok else f"src ndim {len(src_extent)} != {expected_ndim}")
@@ -100,14 +105,17 @@ def _src_ndim_ok(op: OpCall, sctx: ScheduleContext, expected_ndim: int):
 
 def _local_scope_match(op: OpCall, sctx: ScheduleContext):
     """Check if both src and dst are local scope with matching dtype."""
-    dst_buffer_region, src_buffer_region = op.args[:2]
+    op = OpCall.downcast(op)
+    dst_buffer_region, src_buffer_region = op.output, op.input
     src, dst = src_buffer_region.buffer, dst_buffer_region.buffer
-    ok = all([
-        src.scope() == "local",
-        dst.scope() == "local",
-        src.dtype == dst.dtype,
-        sctx.is_cuda(),
-    ])
+    ok = all(
+        [
+            src.scope() == "local",
+            dst.scope() == "local",
+            src.dtype == dst.dtype,
+            sctx.is_cuda(),
+        ]
+    )
     if not ok:
         return (False, "src/dst must be local scope with matching dtype on CUDA")
     return (True, None)
@@ -362,7 +370,9 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
     reduction_len = functools.reduce(operator.mul, src_extent, 1)
 
     op_func = reduce_op_table[reduce_op]
-    reduce3_func = Tx.ptx.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else Tx.ptx.reduce3_min_f32
+    reduce3_func = (
+        Tx.ptx.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else Tx.ptx.reduce3_min_f32
+    )
 
     src_base = src_st[0]
     num_full_chunks = reduction_len // 8
@@ -548,10 +558,10 @@ def reduction_cuda_warp_logical_view_impl(
     if src.layout.is_swizzle() or dst.layout.is_swizzle():
         fail("swizzle layout unsupported for local reduction")
 
-    atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+    atom = Tx.TileLayout(Tx.S[(1, 2):(2, 1)])
     warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-    red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
+    red_atom = Tx.TileLayout(Tx.S[(1, 1):(1, 1)])
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     shuffle = Tx.bool(config.get("thread_reduce", False))
@@ -637,8 +647,8 @@ def reduction_cuda_impl(
     based on the storage scope of buffers.
     """
 
-    # FIXME: correctly handle the axes field
-    dst_buffer_region, src_buffer_region, axes, accum = op.args
+    op = OpCall.downcast(op)
+    dst_buffer_region, src_buffer_region, accum = op.output, op.input, op.accum
     config = op.config
 
     if src_buffer_region.buffer.scope().startswith("shared"):
@@ -683,23 +693,28 @@ _optimized_impl_table = {
     ReduceOpType.MIN: ("3input_maxmin", reduction_cuda_local_thread_3input_maxmin_impl),
 }
 
-for op_name, op_type in [("sum", ReduceOpType.SUM), ("max", ReduceOpType.MAX), ("min", ReduceOpType.MIN)]:
+for op_name, op_type in [
+    ("sum", ReduceOpType.SUM),
+    ("max", ReduceOpType.MAX),
+    ("min", ReduceOpType.MIN),
+]:
     variant_name, optimized_impl = _optimized_impl_table[op_type]
 
     # Register optimized dispatch (sm_100a+, float32, thread-level local reduction)
     @register_dispatch(
-        op_name, "cuda", variant=variant_name, priority=10,
+        op_name,
+        "cuda",
+        variant=variant_name,
+        priority=10,
         when=_optimized_local_reduction_predicates,
     )
     def _optimized_dispatch(
         op: OpCall, sctx: ScheduleContext, _impl=optimized_impl, _op_type=op_type
     ) -> PrimFunc:
-        dst_buffer_region, src_buffer_region, _, accum = op.args
-        return _impl(dst_buffer_region, src_buffer_region, accum, _op_type, sctx)
+        op = OpCall.downcast(op)
+        return _impl(op.output, op.input, op.accum, _op_type, sctx)
 
     # Register default fallback dispatch
     @register_dispatch(op_name, "cuda", variant="default", priority=0)
-    def _default_dispatch(
-        op: OpCall, sctx: ScheduleContext, _op_type=op_type
-    ) -> PrimFunc:
+    def _default_dispatch(op: OpCall, sctx: ScheduleContext, _op_type=op_type) -> PrimFunc:
         return reduction_cuda_impl(op, _op_type, sctx)

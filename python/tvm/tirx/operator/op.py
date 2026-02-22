@@ -690,7 +690,7 @@ class PermuteDims(OpCall):
     @property
     def buffer(self) -> PrimExpr:
         """Get the source expressions (inputs) of the operator."""
-        return self.buffer
+        return self.args[0]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""

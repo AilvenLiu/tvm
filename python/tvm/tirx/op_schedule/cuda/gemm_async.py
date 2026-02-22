@@ -27,7 +27,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.tir.stmt import OpCall, AllocBuffer, SeqStmt, Evaluate
 from tvm.tir.layout import S, R, TileLayout, ComposeLayout, TLane, TCol
 from tvm.tirx.op_schedule import ScheduleContext, register_dispatch, predicate
-from tvm.tirx.operator.op import KernelReplacePoint
+from tvm.tirx.operator.op import GemmAsync, KernelReplacePoint
 from .common import single_thread, validate_gemm_op, get_st_extent
 from .copy_async import SwizzleMode, tma_atom_layout, tma_atom_shape
 
@@ -141,12 +141,12 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         ValueError: If buffer scopes are invalid (C must be tmem, A/B must be shared).
         AssertionError: If shape/layout constraints are not satisfied.
     """
-    # Detect block-scaled vs regular by arg count
-    is_block_scaled = len(op_call.args) == 8
+    op_call = OpCall.downcast(op_call)
+    is_block_scaled = op_call.is_block_scaled
 
-    C_buffer_region: tvm.tir.BufferRegion = op_call.args[0]
-    A_buffer_region: tvm.tir.BufferRegion = op_call.args[1]
-    B_buffer_region: tvm.tir.BufferRegion = op_call.args[2]
+    C_buffer_region: tvm.tir.BufferRegion = op_call.output
+    A_buffer_region: tvm.tir.BufferRegion = op_call.lhs
+    B_buffer_region: tvm.tir.BufferRegion = op_call.rhs
     C_buffer, A_buffer, B_buffer = (
         C_buffer_region.buffer,
         A_buffer_region.buffer,
@@ -197,8 +197,8 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     # Parse SFA/SFB and transA/transB/accum based on arg layout
     if is_block_scaled:
-        SFA_buffer_region, SFB_buffer_region = op_call.args[3:5]
-        transA, transB, accum = op_call.args[5:8]
+        SFA_buffer_region, SFB_buffer_region = op_call.sfa, op_call.sfb
+        transA, transB, accum = op_call.transA, op_call.transB, op_call.accum
         SFA_buffer: tvm.tir.Buffer = SFA_buffer_region.buffer
         SFB_buffer: tvm.tir.Buffer = SFB_buffer_region.buffer
         SFA_scope, SFB_scope = SFA_buffer.scope(), SFB_buffer.scope()
@@ -231,7 +231,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         _validate_sf_tmem_layout(SFA_slice_layout, SFA_rows, SFA_K_total, sfa_sf_mma_k, "SFA")
         _validate_sf_tmem_layout(SFB_slice_layout, SFB_rows, SFB_K_total, sfb_sf_mma_k, "SFB")
     else:
-        transA, transB, accum = op_call.args[3:6]
+        transA, transB, accum = op_call.transA, op_call.transB, op_call.accum
 
     cta_group = op_call.config.get("cta_group", 1)
     assert cta_group in [1, 2], f"tcgen05 schedule expected cta_group=1 or 2, got {cta_group}"

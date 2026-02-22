@@ -183,6 +183,46 @@ def test_opcall_downcast_tolerant():
     assert result is not None
 
 
+def test_buffer_replacer_no_shared_default():
+    """Regression test for F4: BufferReplacer default dicts must not be shared."""
+    from tvm.tirx.transform.common import BufferReplacer
+
+    r1 = BufferReplacer()
+    r2 = BufferReplacer()
+    A = decl_buffer((64,), "float32")
+    B = decl_buffer((64,), "float32")
+    r1.buffer_map[A] = B
+    # r2 must not see r1's mutation
+    assert len(r2.buffer_map) == 0
+
+
+def test_permute_dims_buffer_property():
+    """Regression test for F2: PermuteDims.buffer should return args[0], not recurse."""
+    from tvm.tirx.operator.op import PermuteDims
+
+    A = decl_buffer((64, 64), "float32", scope="global")
+    pd = PermuteDims(A[0:64, 0:64], [1, 0])
+    # This would stack overflow before the fix
+    buf = pd.buffer
+    assert buf is not None
+
+
+def test_gemm_async_partial_scale_factor():
+    """Regression test for F7: gemm_async must reject partial scale factors."""
+    from tvm.script.ir_builder.tir.tirx import gemm_async
+
+    A = decl_buffer((64, 64), "float16", scope="shared")
+    B = decl_buffer((64, 64), "float16", scope="shared")
+    C = decl_buffer((64, 64), "float16", scope="shared")
+    SF = decl_buffer((64,), "float16", scope="shared")
+
+    with pytest.raises(ValueError, match="SFA and SFB must both be provided or both be None"):
+        gemm_async(C[:, :], A[:, :], B[:, :], SFA=SF[:])
+
+    with pytest.raises(ValueError, match="SFA and SFB must both be provided or both be None"):
+        gemm_async(C[:, :], A[:, :], B[:, :], SFB=SF[:])
+
+
 if __name__ == "__main__":
     test_copy()
     test_fill()
@@ -195,3 +235,6 @@ if __name__ == "__main__":
     test_tx_dynamic_op_with_workspace()
     test_tx_existing_op_not_overridden()
     test_opcall_downcast_tolerant()
+    test_buffer_replacer_no_shared_default()
+    test_permute_dims_buffer_property()
+    test_gemm_async_partial_scale_factor()
