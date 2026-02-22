@@ -84,6 +84,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
     EPI_N = 64
     TMEM_LD_N = 8
+    DTYPE_SIZE = a_type.bits // 8  # 2 for fp16/bf16
 
     A_layout = tma_shared_layout(
         a_type, SwizzleMode.SWIZZLE_128B_ATOM, (PIPE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K)
@@ -167,7 +168,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                         Tx.copy_async(Asmem[stage, 1, :, :], A[m_st + CTA_GROUP * BLK_M : m_st + (CTA_GROUP + 1) * BLK_M, k_st : k_st + BLK_K], **tma_config)
                         Tx.copy_async(Bsmem[stage, :, :], B[n_st : n_st + BLK_N, k_st : k_st + BLK_K], **tma_config)
                         if cbx == 0:
-                            tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * F16_SIZE) # signal CTA-0 the issue of tma
+                            tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * DTYPE_SIZE) # signal CTA-0 the issue of tma
 
                     @Tx.inline
                     def tma_load():
