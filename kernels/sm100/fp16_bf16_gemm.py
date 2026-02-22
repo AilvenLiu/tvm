@@ -138,7 +138,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             if wg_id == 0 and warp_id == 0:
                 Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=512, cta_group=CTA_GROUP)
 
-            Tx.ptx.fence.proxy("shared")
+            Tx.ptx.fence.proxy_async("shared::cta")
             Tx.ptx.fence.mbarrier_init()
             Tx.cuda.cluster_sync()
 
@@ -238,7 +238,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     for no in Tx.unroll(MMA_N // EPI_N):
                         with Tx.thread():
                             Tx.copy(Dsmem[wg_id, warp_id * 32 + lane_id, :], Dreg_16b[no * EPI_N : (no + 1) * EPI_N])
-                            Tx.ptx.fence.proxy(scope="shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                         Tx.cuda.warpgroup_sync(wg_id + 10)
 
                         # smem -> gmem

@@ -323,7 +323,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             SFA_tmem = Tx.decl_buffer((128, sf_mma_k * MMA_K_BLOCKS), "float8_e4m3fn", scope="tmem", allocated_addr=TMEM_SFA, layout=sf_tmem_layout(128, sf_mma_k, MMA_K_BLOCKS, dtype="float8_e4m3fn"))
             SFB_tmem = Tx.decl_buffer((128 * SFB_n_chunks, sf_mma_k * MMA_K_BLOCKS), "float8_e4m3fn", scope="tmem", allocated_addr=TMEM_SFB, layout=sf_tmem_layout(128 * SFB_n_chunks, sf_mma_k, MMA_K_BLOCKS, dtype="float8_e4m3fn"))
 
-            Tx.ptx.fence.proxy("shared")
+            Tx.ptx.fence.proxy_async("shared::cta")
             Tx.ptx.fence.mbarrier_init()
             Tx.cuda.cluster_sync()
 
@@ -492,7 +492,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                             row_st = output_smem.elem_offset_of([epi_wb_state.stage, tid_in_wg, 0])
                             for ni in Tx.unroll(EPI_TILE // 8):
                                 copy_128b(pointer_offset(output_smem.ptr_to([0, 0, 0]), row_st + row_sw_offset.apply(ni * 8)), reg_16b.ptr_to([ni * 8]))
-                            Tx.ptx.fence.proxy(scope="shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.cuda.warpgroup_sync(10)
 
                             # launch tma copy from smem to gmem

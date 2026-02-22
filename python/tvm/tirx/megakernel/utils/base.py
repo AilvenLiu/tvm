@@ -156,7 +156,7 @@ class SmemManager:
             self.shared_count[0] = 0
         Tx.tvm_storage_sync("shared")
         Tx.ptx.fence.mbarrier_init()
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
 
     # wrapper for pool allocator
     # method: "shared" -> wait_all / arrive_all

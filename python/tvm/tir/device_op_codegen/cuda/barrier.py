@@ -44,29 +44,51 @@ __forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {
     return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
 
 
-@register_codegen("ptx_fence_proxy")
-def codegen_ptx_fence_proxy(scope):
+@register_codegen("ptx_fence")
+def codegen_ptx_fence(sem, scope):
+    sem = parse_str(sem)
     scope = parse_str(scope)
-    func_name = f"tvm_builtin_ptx_fence_proxy_{scope}"
 
-    if scope == "shared":
-        ptx_scope = ".async.shared::cta"
-    elif scope == "global":
-        ptx_scope = ".async.global"
-    else:
-        raise ValueError(f"Invalid scope for ptx_fence_proxy: {scope}")
+    valid_sems = ("sc", "acq_rel")
+    valid_scopes = ("cta", "cluster", "gpu", "sys")
+    if sem not in valid_sems:
+        raise ValueError(f"Invalid sem for ptx_fence: {sem}, expected one of {valid_sems}")
+    if scope not in valid_scopes:
+        raise ValueError(f"Invalid scope for ptx_fence: {scope}, expected one of {valid_scopes}")
 
+    func_name = f"tvm_builtin_ptx_fence_{sem}_{scope}"
     source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-  __asm__ __volatile__("fence.proxy{ptx_scope};" : : : "memory");
+  __asm__ __volatile__("fence.{sem}.{scope};" : : : "memory");
 }}
 """
     return cuda_func_call(func_name, source_code=source_code)
 
 
-@register_codegen("ptx_fence_mbarrier_init_release_cluster")
-def codegen_ptx_fence_mbarrier_init_release_cluster():
-    func_name = "tvm_builtin_ptx_fence_mbarrier_init_release_cluster"
+@register_codegen("ptx_fence_proxy_async")
+def codegen_ptx_fence_proxy_async(space=""):
+    space = parse_str(space)
+
+    valid_spaces = ("", "global", "shared::cta", "shared::cluster")
+    if space not in valid_spaces:
+        raise ValueError(
+            f"Invalid space for ptx_fence_proxy_async: {space}, expected one of {valid_spaces}"
+        )
+
+    space_suffix = f".{space}" if space else ""
+    space_name = f"_{space.replace('::', '_')}" if space else ""
+    func_name = f"tvm_builtin_ptx_fence_proxy_async{space_name}"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+  __asm__ __volatile__("fence.proxy.async{space_suffix};" : : : "memory");
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_fence_mbarrier_init")
+def codegen_ptx_fence_mbarrier_init():
+    func_name = "tvm_builtin_ptx_fence_mbarrier_init"
     source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
     asm volatile("fence.mbarrier_init.release.cluster;" : : : "memory");

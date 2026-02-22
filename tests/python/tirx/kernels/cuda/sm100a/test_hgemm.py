@@ -242,7 +242,7 @@ def test_hgemm():
 
                 Tx.cuda.cluster_sync()
                 Tx.cuda.cta_sync()
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
@@ -363,7 +363,7 @@ def test_hgemm():
                                 with Tx.thread():
                                     Tx.copy(D_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
                                 Tx.cuda.warpgroup_sync(wg_id)
-                                Tx.ptx.fence.proxy(scope="shared")
+                                Tx.ptx.fence.proxy_async("shared::cta")
                                 # st to gmem via event
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start: Tx.let = (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M

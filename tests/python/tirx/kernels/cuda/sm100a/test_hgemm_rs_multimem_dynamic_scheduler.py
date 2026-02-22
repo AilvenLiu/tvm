@@ -321,7 +321,7 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
                         if not self.p_single_cta or cbx == 0:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
 
     @Tx.inline
     def advance(self):
@@ -726,7 +726,7 @@ def test_hgemm_rs():
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
                                      layout=TileLayout(S[(128, N_COLS) : (1@TCol, 1@TLane)]))
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
 
@@ -876,7 +876,7 @@ def test_hgemm_rs():
                                             for vec in Tx.vectorized(8):
                                                 D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
                                         Tx.cuda.warpgroup_sync(wg_id)
-                                        Tx.ptx.fence.proxy(scope="shared")
+                                        Tx.ptx.fence.proxy_async("shared::cta")
                                         # st to gmem
                                         if lane_id == 0 and warp_id == 0:
                                             Tx.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([wg_id, 0, 0]),

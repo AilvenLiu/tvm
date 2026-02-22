@@ -105,7 +105,7 @@ def get_rmsnorm_kernel(hidden_size):
                             sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                         sum_sq_smem[ty] = sum_sq[0]
                         Tx.ptx.bar.sync(1, bdx * bdy)
-                        Tx.ptx.fence.proxy("shared")
+                        Tx.ptx.fence.proxy_async("shared::cta")
                         # reduce sum through different warps
                         if ty == 0:
                             if tx < bdy:
@@ -116,7 +116,7 @@ def get_rmsnorm_kernel(hidden_size):
                                 sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                             sum_sq_smem[0] = sum_sq[0]
                         Tx.ptx.bar.sync(1, bdx * bdy)
-                        Tx.ptx.fence.proxy("shared")
+                        Tx.ptx.fence.proxy_async("shared::cta")
                         # rms norm
                         rms_norm[0] = Tx.rsqrt(sum_sq_smem[0] / hidden_size + EPS)
 

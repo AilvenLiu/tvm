@@ -181,7 +181,7 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
                         if not self.p_single_cta or cbx == 0:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
 
     @Tx.inline
     def advance(self):
@@ -407,7 +407,7 @@ class ReduceScatter:
                                     with Tx.thread():
                                         Tx.copy(C_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
                                     Tx.cuda.warpgroup_sync(wg_id+1)
-                                    Tx.ptx.fence.proxy(scope="shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                     if lane_id == 0 and warp_id == 0:
                                         Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
                                         Tx.ptx.cp_async.bulk.commit_group()
@@ -554,7 +554,7 @@ class ReduceScatter:
                             for j in Tx.vectorized(8):
                                 output_smem[m_in_smem, n_in_smem * 8 + j] = reg_fp16[j]
                         Tx.cuda.warpgroup_sync(1)
-                        Tx.ptx.fence.proxy(scope="shared")
+                        Tx.ptx.fence.proxy_async("shared::cta")
                         if tid_in_wg == 0:
                             Tx.ptx.cp_async.bulk.tensor.s2g(
                                 2,

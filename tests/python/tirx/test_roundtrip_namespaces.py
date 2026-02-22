@@ -30,7 +30,7 @@ def test_roundtrip_tir_namespaces_minimal():
         Tx.ptx.wgmma.commit_group()
         Tx.cuda.cluster_sync()
         Tx.ptx.cp_async.wait_group(0)
-        Tx.ptx.fence.proxy("async")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.printf("ok")
         Tx.nvshmem.quiet()
         Tx.nki.identity(A[0, 0], 1)

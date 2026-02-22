@@ -456,7 +456,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                     bar_s0_s1_sequence.init(32)
                     bar_tmem_dealloc.init(1)
 
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.cta_sync()
                 if wg_id == 2:
@@ -1047,7 +1047,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 Tx.copy(O_smem[i_q, tid_in_wg, d_tile * TMEM_EPI_LD_SIZE : d_tile * TMEM_EPI_LD_SIZE + TMEM_EPI_LD_SIZE], o_row_f16, vec_len=8)
 
                                         profiler.end(ProfileEventType.EpiLDTMEM, tid_in_wg == 0)
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
 
                                     # arrive epi_full
                                     bar_corr_epi_full.arrive(i_q)

@@ -3580,20 +3580,43 @@ def ptx_cp_async_mbarrier_arrive(barrier_id):
     return call_intrin("", "tir.ptx_cp_async_mbarrier_arrive", barrier_id)
 
 
-def ptx_fence_proxy(scope: str):
-    """TVM intrinsic to call cuda::ptx::fence_proxy_async
+def ptx_fence(sem: str, scope: str):
+    """TVM intrinsic for PTX fence instruction.
+
+    Generates: fence.{sem}.{scope};
 
     Parameters
     ----------
+    sem : str
+        The semantics of the fence. One of "sc", "acq_rel".
     scope : str
-        The scope of the fence.
+        The scope of the fence. One of "cta", "cluster", "gpu", "sys".
 
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fence_proxy", scope)
+    return call_intrin("", "tir.ptx_fence", sem, scope)
+
+
+def ptx_fence_proxy_async(space: str = ""):
+    """TVM intrinsic for PTX fence.proxy.async instruction.
+
+    Generates: fence.proxy.async[.{space}];
+
+    Parameters
+    ----------
+    space : str
+        The address space qualifier. One of "", "global", "shared::cta", "shared::cluster".
+        Empty string means no qualifier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_fence_proxy_async", space)
 
 
 def ptx_mbarrier_init(bar, thread_count):
@@ -4036,15 +4059,17 @@ def ptx_elect_sync():
     return call_intrin("uint32", "tir.ptx_elect_sync")
 
 
-def ptx_fence_mbarrier_init_release_cluster():
-    """TVM intrinsic to call fence.mbarrier_init.release.cluster;
+def ptx_fence_mbarrier_init():
+    """TVM intrinsic for PTX fence.mbarrier_init.release.cluster instruction.
+
+    Generates: fence.mbarrier_init.release.cluster;
 
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fence_mbarrier_init_release_cluster")
+    return call_intrin("", "tir.ptx_fence_mbarrier_init")
 
 
 def ptx_fetch_register(bits, reg_name):

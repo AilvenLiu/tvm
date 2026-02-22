@@ -197,7 +197,7 @@ def test_tcgen05_cp_ld_roundtrip():
                 # GMEM -> SMEM
                 with Tx.cta():
                     Tx.copy(A_smem[:, :], A[:, :])
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread():
@@ -331,7 +331,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                 with Tx.cta():
                     Tx.copy(A_smem[:, :], A[:, :])
                     Tx.copy(B_smem[:, :], B[:, :])
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread():

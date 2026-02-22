@@ -85,7 +85,7 @@ def test_hgemm_hopper_ws_cooperative():
     @Tx.inline
     def tma_store(n_tile, C_smem: tvm.tir.Buffer, C_map, m_glb_offset, n_glb_offset, tid):
         # make sure smem write is visible to TMA
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.bar.sync(0, 256)
         with Tx.thread()[tid == 128]:
             # only 1 thread in 2 consumers write to TMA
@@ -392,7 +392,7 @@ def test_hgemm_hopper_no_ws():
 
     @Tx.inline
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
             Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)

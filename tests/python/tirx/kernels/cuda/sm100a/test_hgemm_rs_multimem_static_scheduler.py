@@ -203,7 +203,7 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
                         if not self.p_single_cta or cbx == 0:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
 
     @Tx.inline
     def advance(self):
@@ -497,7 +497,7 @@ def test_hgemm_rs():
                                         for vec in Tx.vectorized(8):
                                             C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
                                     Tx.cuda.warpgroup_sync(wg_id+1)
-                                    Tx.ptx.fence.proxy(scope="shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                     if lane_id == 0 and warp_id == 0:
                                         Tx.ptx.cp_async.bulk.tensor.s2g(4, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, i * EPI_TILE, 0, n_idx, m_idx * 4 + wg_id * 2 + cbx)
                                         Tx.ptx.cp_async.bulk.commit_group()

@@ -208,7 +208,7 @@ def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
                 A_shared = Tx.alloc_shared([N], "float16")
                 for i in Tx.vectorized(N):
                     A_shared[i] = 5.0
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)
                 Tx.ptx.cp_async.commit_group()
                 Tx.ptx.cp_async.wait_group(0)

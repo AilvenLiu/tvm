@@ -266,7 +266,7 @@ class DynamicTileScheduler(TileSchedulerBase):
             self.p2c_dequeue_barrier.init(1)
             self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
         Tx.tvm_storage_sync("shared")
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.fence.mbarrier_init()
 
     @Tx.inline

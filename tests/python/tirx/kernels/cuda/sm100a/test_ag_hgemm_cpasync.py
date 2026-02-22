@@ -292,7 +292,7 @@ class Pipeline:
                             Tx.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
                         if not self.p_single_cta or cbx == 0:
                             Tx.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
 
     @Tx.inline
     def advance(self):
@@ -610,7 +610,7 @@ def test_ag_hgemm():
                 Tx.ptx.barrier.cluster.arrive()
                 Tx.ptx.barrier.cluster.wait()
                 Tx.cuda.cta_sync()
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
 
@@ -740,7 +740,7 @@ def test_ag_hgemm():
                                         with Tx.thread():
                                             Tx.copy(D_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
                                         Tx.cuda.warpgroup_sync(wg_id)
-                                        Tx.ptx.fence.proxy(scope="shared")
+                                        Tx.ptx.fence.proxy_async("shared::cta")
                                         # st to gmem
                                         with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                             m_st = Tx.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)

@@ -186,11 +186,18 @@ TVM_DLL const Op& ptx_cp_async_wait_group();
 TVM_DLL const Op& ptx_cp_async_mbarrier_arrive();
 
 /*!
- * \brief tvm instrinsics to call cuda::ptx::fence_proxy_sync
+ * \brief PTX fence instruction: fence.{sem}.{scope}
  *
- * cuda_fence_proxy_sync(StringImm scope)
+ * ptx_fence(StringImm sem, StringImm scope)
  */
-TVM_DLL const Op& ptx_fence_proxy();
+TVM_DLL const Op& ptx_fence();
+
+/*!
+ * \brief PTX fence.proxy.async instruction: fence.proxy.async[.{space}]
+ *
+ * ptx_fence_proxy_async(StringImm space)
+ */
+TVM_DLL const Op& ptx_fence_proxy_async();
 
 /*!
  * \brief tvm instrinsics to call mbarrier.init.shared::cta.b64
@@ -321,11 +328,11 @@ TVM_DLL const Op& ptx_barrier_cluster_wait();
 TVM_DLL const Op& ptx_elect_sync();
 
 /*!
- * \brief tvm instrinsics to call fence.mbarrier_init.release.cluster
+ * \brief PTX fence.mbarrier_init.release.cluster instruction
  *
- * ptx_fence_mbarrier_init_release_cluster()
+ * ptx_fence_mbarrier_init()
  */
-TVM_DLL const Op& ptx_fence_mbarrier_init_release_cluster();
+TVM_DLL const Op& ptx_fence_mbarrier_init();
 
 /*!
  * \brief tvm instrinsics to fetch PTX pre-defined registers

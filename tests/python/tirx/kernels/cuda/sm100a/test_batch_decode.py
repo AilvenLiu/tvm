@@ -352,7 +352,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             # fetch kv-offset
                             for kt in Tx.unroll(TILE_PER_BDX):
                                 fetch_kv_offset(kt, kv_head_id_beg, ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                             sync_blk()
 
                             for kp in Tx.unroll(PIPE_DEPTH):
@@ -392,7 +392,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     for kt in Tx.unroll(TILE_PER_BDX):
                                         fetch_kv_offset(kt, kv_head_id_beg,
                                                         (ki + PIPE_DEPTH) * TILE_PER_BDX * BDY * BDZ  + ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
 
                                 # compute qk
                                 Tx.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for K
@@ -472,7 +472,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 for kb in Tx.unroll(HEAD_PER_CTA):
                                     epi_md[tz, ty, kb, 0] = m[kb, 0]
                                     epi_md[tz, ty, kb, 1] = d[kb, 0]
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.cuda.cta_sync()
                             # merge o through different tz
                             if tz == 0:
@@ -595,12 +595,12 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         lse_tmp_smem_load[ty, tx] = lse_tmp_global[new_beg_batch_idx[0] + ki * BDY + ty * BDX + tx, head_idx[0]]
                                     else:
                                         lse_tmp_smem_load[ty, tx] = 0.0
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                     Tx.ptx.bar.sync(2, BDX * BDY)
 
                                 Tx.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
                                 Tx.ptx.bar.sync(2, BDX * BDY)
-                                Tx.ptx.fence.proxy("shared")
+                                Tx.ptx.fence.proxy_async("shared::cta")
 
                                 for kv in Tx.serial(VEC_SIZE):
                                     o_tmp[kv] = o_tmp_smem[ki % PIPE_DEPTH, ty, tx * VEC_SIZE + kv]
@@ -632,7 +632,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             d[0] = 1.0
                             for kv in Tx.serial(VEC_SIZE):
                                 o[kv] = 0.0
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.ptx.bar.sync(2, BDX * BDY)
                             if ty == 0:
                                 for ky in Tx.serial(BDY):

@@ -385,7 +385,7 @@ def test_fp16_fused_attn():
 
     @Tx.inline
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
             Tx.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)

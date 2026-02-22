@@ -2599,11 +2599,16 @@ class BarrierClusterNamespace:
 
 
 class FenceNamespace:
-    """The Fence instruction submodule."""
+    """PTX fence instruction submodule."""
 
     def __init__(self):
-        self.mbarrier_init = _op_wrapper(_tir_op.ptx_fence_mbarrier_init_release_cluster)
-        self.proxy = _op_wrapper(_tir_op.ptx_fence_proxy)
+        self.proxy_async = _op_wrapper(_tir_op.ptx_fence_proxy_async)
+        self.mbarrier_init = _op_wrapper(_tir_op.ptx_fence_mbarrier_init)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.ptx_fence)(*args, **kwds)
+
+    __tir_call_op_name__ = "ptx_fence"
 
 
 class CUDANamespace:

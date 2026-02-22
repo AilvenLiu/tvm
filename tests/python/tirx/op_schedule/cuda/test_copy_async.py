@@ -256,7 +256,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
                 mbar_ptr: Tx.let = mbarrier.ptr_to([0])
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread()[0:1]:
@@ -370,7 +370,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                 phase = 0
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbarrier.ptr_to([0]), 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 for stage in range(n):
@@ -381,7 +381,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                     Tx.ptx.mbarrier.try_wait(mbarrier.ptr_to([0]), phase)
                     phase = phase ^ 1
 
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.cuda.cta_sync()
                     with Tx.cta():
                         Tx.copy(B[*r_gmem(stage)], A_smem[*r_smem])
@@ -483,7 +483,7 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
 
                 for stage in range(n):
                     Tx.copy(A_smem[*r_smem], A[*r_gmem(stage)])
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     with Tx.thread()[0:1]:
                         Tx.copy_async(B[*r_gmem(stage)], A_smem[*r_smem], dispatch="tma", cache_hint=cache_hint)
                         Tx.ptx.cp_async.bulk.commit_group()
@@ -586,7 +586,7 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
 
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread()[0:1]:
@@ -594,7 +594,7 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
                     Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
                 Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
 
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
                 with Tx.cta():
                     Tx.copy(B[*r_gmem], A_smem[*r_smem])
@@ -709,7 +709,7 @@ def test_copy_g2s_tma_4d_axis_reorder(task, dtype="float16", swizzle_len=3):
 
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread()[0:1]:
@@ -717,7 +717,7 @@ def test_copy_g2s_tma_4d_axis_reorder(task, dtype="float16", swizzle_len=3):
                     Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
                 Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
 
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
                 with Tx.cta():
                     Tx.copy(B[*r_gmem], A_smem[*r_smem])
@@ -928,7 +928,7 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
 
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.thread()[0:1]:
@@ -936,7 +936,7 @@ def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_le
                     Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
 
                 Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 with Tx.cta():
@@ -1036,7 +1036,7 @@ def test_copy_g2s_tma_symbolic_dimension(dtype, swizzle_len):
 
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 # Copy with pipeline index (like hgemm pattern)
@@ -1052,7 +1052,7 @@ def test_copy_g2s_tma_symbolic_dimension(dtype, swizzle_len):
 
                     Tx.ptx.mbarrier.try_wait(mbar_ptr, ks % 2)
 
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 # Copy back to global for verification
@@ -1141,7 +1141,7 @@ def test_copy_g2s_tma_3d_with_view(dtype, swizzle_len):
 
                 with Tx.thread()[0:1]:
                     Tx.ptx.mbarrier.init(mbar_ptr, 1)
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 # Copy with pipeline and block loop (like flash attention pattern)
@@ -1159,7 +1159,7 @@ def test_copy_g2s_tma_3d_with_view(dtype, swizzle_len):
                 Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
 
 
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.cta_sync()
 
                 # Copy back to global for verification

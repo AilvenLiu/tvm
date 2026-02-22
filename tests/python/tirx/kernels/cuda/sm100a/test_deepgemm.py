@@ -242,7 +242,7 @@ def deepgemm(
                 Tx.cuda.warp_sync()
 
             # sync
-            Tx.ptx.fence.proxy("shared")
+            Tx.ptx.fence.proxy_async("shared::cta")
             Tx.ptx.fence.mbarrier_init()
             Tx.cuda.cluster_sync()
             Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
@@ -321,7 +321,7 @@ def deepgemm(
                                     Tx.permute_dims(SFA_smem[ks], [0, 2, 1])
                                     Tx.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
                                     Tx.permute_dims(SFB_smem[ks, 4:], [0, 2, 1])
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                 # mark that transpose is completed
                                 trans2mma_bar.arrive(ks)
 
@@ -449,7 +449,7 @@ def deepgemm(
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 ld2mma_bar.arrive(tmem_idx)
 
-                            Tx.ptx.fence.proxy(scope="shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.cuda.warpgroup_sync(10)
 
                             # smem -> gmem

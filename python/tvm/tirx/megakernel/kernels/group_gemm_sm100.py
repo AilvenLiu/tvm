@@ -188,7 +188,7 @@ class GroupGEMMTile(GemmTile):
                         Tx.ptx.tcgen05.fence.before_thread_sync()
                         self.ld2mma_bar.arrive(self.tmem_idx)
 
-                    Tx.ptx.fence.proxy(scope="shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.cuda.warpgroup_sync(10)
                     # smem -> gmem
                     for i in range(self.EPI_TILE * self.BLK_N // (128 * self.VEC_LEN)):

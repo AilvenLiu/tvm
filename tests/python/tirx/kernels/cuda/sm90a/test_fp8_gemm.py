@@ -88,7 +88,7 @@ def test_fp8_gemm_hopper_no_ws():
 
     @Tx.inline
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
-        Tx.ptx.fence.proxy("shared")
+        Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
             Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)

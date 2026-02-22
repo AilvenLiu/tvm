@@ -162,7 +162,7 @@ class GateUpSiluTile(GemmTile):
                     Tx.ptx.tcgen05.fence.before_thread_sync()
                     self.ld2mma_bar.arrive(self.tmem_idx)
 
-                Tx.ptx.fence.proxy(scope="shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.warpgroup_sync(10)
                 # smem -> gmem
                 with Tx.thread(parent="warpgroup")[tid_in_wg == 0]:

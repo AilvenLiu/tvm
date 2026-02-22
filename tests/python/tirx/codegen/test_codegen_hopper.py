@@ -240,6 +240,23 @@ def test_ptx_elect_sync():
 
 
 @tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("sem,scope", [("sc", "cta"), ("acq_rel", "gpu"), ("sc", "sys")])
+def test_ptx_fence(sem, scope):
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func(A: Tx.Buffer((1))):
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                Tx.ptx.fence(sem, scope)
+    # fmt: on
+
+    src, mod = _get_source(func)
+    assert f"fence.{sem}.{scope};" in src
+
+
+@tvm.testing.requires_cuda_compute_version(9)
 def test_fence_proxy_async():
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -248,8 +265,8 @@ def test_fence_proxy_async():
             bx = Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([128], parent="cta")
             with Tx.thread():
-                Tx.ptx.fence.proxy("global")
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("global")
+                Tx.ptx.fence.proxy_async("shared::cta")
 
     # fmt: on
 
@@ -300,14 +317,14 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
                             phase = 0
                             if threadIdx == 0:
                                 Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                                Tx.ptx.fence.proxy("shared")
+                                Tx.ptx.fence.proxy_async("shared::cta")
                                 Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, *coord)
                                 Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                             Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                             phase = phase ^ 1
 
                             Tx.cuda.cta_sync()
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
 
                             if threadIdx == 0:
                                 Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord)
@@ -388,14 +405,14 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
                             phase = 0
                             if threadIdx == 0:
                                 Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                                Tx.ptx.fence.proxy("shared")
+                                Tx.ptx.fence.proxy_async("shared::cta")
                                 Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, *coord)
                                 Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                                 Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                             phase = phase ^ 1
 
                             Tx.cuda.cta_sync()
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
 
                             if threadIdx == 0:
                                 Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord)
@@ -473,7 +490,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                                 if tx == 0:
                                     # leader thread in each CTA
                                     Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                     Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                                     if clusterCtaIdx == 0:
                                         # only the first CTA in the cluster does the copy, and then multicast
@@ -482,7 +499,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                                 Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                                 phase = phase ^ 1
                                 Tx.cuda.cta_sync()
-                                Tx.ptx.fence.proxy("shared")
+                                Tx.ptx.fence.proxy_async("shared::cta")
 
                                 if bx == 2:
                                     if tx == 0:
@@ -555,7 +572,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                                 if tx == 0:
                                     # leader thread in each CTA
                                     Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                                    Tx.ptx.fence.proxy("shared")
+                                    Tx.ptx.fence.proxy_async("shared::cta")
                                     Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                                     if clusterCtaIdx == 0:
                                         Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord0[::-1])),
@@ -633,7 +650,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
                     if tx == 0:
                         for i in Tx.serial(0, elems):
                             A_smem[i] = i
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.cuda.cta_sync()
 
                     if tx == 0:
@@ -722,7 +739,7 @@ def test_wgmma_ss_nt():
                     phase = 0
                     if tx == 0:
                         Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.cuda.cta_sync()
                     # load A and B to smem
                     if tx == 0:
@@ -887,7 +904,7 @@ def test_wgmma_rs_nt():
                     # init bar, and make sure it's visible to all threads and async proxy
                     if tx == 0:
                         Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.cuda.cta_sync()
                     # load B to smem
                     if tx == 0:

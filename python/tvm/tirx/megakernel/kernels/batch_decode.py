@@ -275,7 +275,7 @@ class DecodeTile(Tile):
                         kv_head_id_beg,
                         ((tx * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt,
                     )
-                Tx.ptx.fence.proxy("shared")
+                Tx.ptx.fence.proxy_async("shared::cta")
                 _sync_blk()
 
                 for kp in Tx.unroll(self.pipe_depth):
@@ -349,7 +349,7 @@ class DecodeTile(Tile):
                                         + kt
                                     ),
                                 )
-                            Tx.ptx.fence.proxy("shared")
+                            Tx.ptx.fence.proxy_async("shared::cta")
 
                         # compute qk
                         Tx.ptx.cp_async.wait_group(2 * self.pipe_depth - 1)  # wait for K
@@ -490,7 +490,7 @@ class DecodeTile(Tile):
                         for kb in Tx.unroll(self.loop_inner):
                             self.epi_md[tz, ty, kb, 0] = self.m[kb, 0]
                             self.epi_md[tz, ty, kb, 1] = self.d[kb, 0]
-                    Tx.ptx.fence.proxy("shared")
+                    Tx.ptx.fence.proxy_async("shared::cta")
                     Tx.tvm_storage_sync("shared")
                     # merge o through different tz
                     if tz == 0:

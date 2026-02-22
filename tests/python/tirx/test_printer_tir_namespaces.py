@@ -76,8 +76,13 @@ def test_printer_ptx_more():
         "Tx.ptx.cp_async.bulk.wait_group(0, Tx.bool(True))",
     )
     _assert_print(tir.op.ptx_cp_async_mbarrier_arrive(0), "Tx.ptx.cp_async.mbarrier.arrive(0)")
-    _assert_print(tir.op.ptx_fence_proxy("async"), 'Tx.ptx.fence.proxy("async")')
-    _assert_print(tir.op.ptx_fence_mbarrier_init_release_cluster(), "Tx.ptx.fence.mbarrier_init()")
+    _assert_print(tir.op.ptx_fence("acq_rel", "gpu"), 'Tx.ptx.fence("acq_rel", "gpu")')
+    _assert_print(tir.op.ptx_fence("sc", "cta"), 'Tx.ptx.fence("sc", "cta")')
+    _assert_print(
+        tir.op.ptx_fence_proxy_async("shared::cta"), 'Tx.ptx.fence.proxy_async("shared::cta")'
+    )
+    _assert_print(tir.op.ptx_fence_proxy_async("global"), 'Tx.ptx.fence.proxy_async("global")')
+    _assert_print(tir.op.ptx_fence_mbarrier_init(), "Tx.ptx.fence.mbarrier_init()")
     _assert_print(tir.op.ptx_elect_sync(), "Tx.ptx.elect_sync()")
     _assert_print(
         tir.op.ptx_ld_global_acquire(r, s),

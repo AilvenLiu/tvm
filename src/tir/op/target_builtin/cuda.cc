@@ -90,7 +90,10 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_wait_group)
 TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_mbarrier_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_fence_proxy)
+TIR_DEFINE_BUILTIN_FUNC(ptx_fence)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(ptx_fence_proxy_async)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(ptx_mbarrier_init)
@@ -138,7 +141,7 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_barrier_cluster_wait)
 TIR_DEFINE_BUILTIN_FUNC(ptx_elect_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_fence_mbarrier_init_release_cluster)
+TIR_DEFINE_BUILTIN_FUNC(ptx_fence_mbarrier_init)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(ptx_fetch_register)
