@@ -131,9 +131,15 @@ def tir_kernel(M: int, N: int, K: int):
     TILE_M_NUM = M // (BLK_M * CTA_GROUP)
     TILE_N_NUM = math.ceil(N / (BLK_N * CTA_GROUP))
 
-    A_layout = tma_shared_layout(a_type, SwizzleMode.SWIZZLE_128B_ATOM, (SMEM_PIPE_DEPTH, BLK_M, BLK_K))
-    B_layout = tma_shared_layout(b_type, SwizzleMode.SWIZZLE_128B_ATOM, (SMEM_PIPE_DEPTH, BLK_N, BLK_K))
-    D_layout = tma_shared_layout(d_type, SwizzleMode.SWIZZLE_64B_ATOM, (TMEM_PIPE_DEPTH, BLK_M, EPI_TILE))
+    A_layout = tma_shared_layout(
+        a_type, SwizzleMode.SWIZZLE_128B_ATOM, (SMEM_PIPE_DEPTH, BLK_M, BLK_K)
+    )
+    B_layout = tma_shared_layout(
+        b_type, SwizzleMode.SWIZZLE_128B_ATOM, (SMEM_PIPE_DEPTH, BLK_N, BLK_K)
+    )
+    D_layout = tma_shared_layout(
+        d_type, SwizzleMode.SWIZZLE_64B_ATOM, (TMEM_PIPE_DEPTH, BLK_M, EPI_TILE)
+    )
 
     SFA_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFA // 32, 32) : (BLK_SFA, 32, 1)])
     SFB_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFB // 32, 32) : (BLK_SFB, 32, 1)])
@@ -148,11 +154,37 @@ def tir_kernel(M: int, N: int, K: int):
     K_ITERS = BLK_K // MMA_K  # 4 MMA iterations per pipe stage
     K_PER_PIPE = sf_mma_k * K_ITERS  # 4 SF elements per pipe stage
     M_sf_sfb = BLK_SFB // 32  # 8 row chunks for N > 128
-    SFA_tmem_layout = TileLayout(S[(TMEM_PIPE_DEPTH, M_sf, 32, K_ITERS) : (M_sf * sfa_epc @ TCol, sfa_epc @ TCol, 1 @ TLane, 0 @ TCol)] + R[4 : 32 @ TLane])
-    SFB_tmem_layout = TileLayout(S[(TMEM_PIPE_DEPTH, M_sf_sfb, 32, K_ITERS) : (M_sf_sfb * sfb_epc @ TCol, sfb_epc @ TCol, 1 @ TLane, 0 @ TCol)] + R[4 : 32 @ TLane])
+    SFA_tmem_layout = TileLayout(
+        S[
+            (TMEM_PIPE_DEPTH, M_sf, 32, K_ITERS) : (
+                M_sf * sfa_epc @ TCol,
+                sfa_epc @ TCol,
+                1 @ TLane,
+                0 @ TCol,
+            )
+        ]
+        + R[4 : 32 @ TLane]
+    )
+    SFB_tmem_layout = TileLayout(
+        S[
+            (TMEM_PIPE_DEPTH, M_sf_sfb, 32, K_ITERS) : (
+                M_sf_sfb * sfb_epc @ TCol,
+                sfb_epc @ TCol,
+                1 @ TLane,
+                0 @ TCol,
+            )
+        ]
+        + R[4 : 32 @ TLane]
+    )
 
     @Tx.prim_func(tirx=True)
-    def kernel(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), D: Tx.Buffer((M, N), d_type), SFA: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, M), "uint32"), SFB: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, N), "uint32")):
+    def kernel(
+        A: Tx.Buffer((M, K), a_type),
+        B: Tx.Buffer((N, K), b_type),
+        D: Tx.Buffer((M, N), d_type),
+        SFA: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, M), "uint32"),
+        SFB: Tx.Buffer((math.ceil(K / QUANT_SIZE) // 4, N), "uint32"),
+    ):
         # fmt: off
         with Tx.kernel():
             cbx, cby = Tx.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
@@ -435,8 +467,12 @@ def profile_gemm(M: int, N: int, K: int, kernel, warmup: int, repeat: int):
         C_tir = tir_gemm(A_fp8, B_fp8, sfa_pack, sfb_pack, C_ref, kernel, warmup, repeat)
         C_deepgemm = deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, warmup, repeat, A_origin, B_origin)
 
-    assert calc_diff(C_tir, C_ref.to("cuda")) < 1e-3
-    assert calc_diff(C_deepgemm, C_ref.to("cuda")) < 1e-3
+    diff_tir_ref = calc_diff(C_tir, C_ref.to("cuda"))
+    diff_deepgemm_ref = calc_diff(C_deepgemm, C_ref.to("cuda"))
+    diff_tir_deepgemm = calc_diff(C_tir, C_deepgemm)
+    assert diff_tir_ref < 1e-3, f"TIR vs Reference difference: {diff_tir_ref:.6f}"
+    assert diff_deepgemm_ref < 1e-3, f"Deepgemm vs Reference difference: {diff_deepgemm_ref:.6f}"
+    assert diff_tir_deepgemm < 1e-3, f"TIR vs Deepgemm difference: {diff_tir_deepgemm:.6f}"
 
 
 if __name__ == "__main__":
