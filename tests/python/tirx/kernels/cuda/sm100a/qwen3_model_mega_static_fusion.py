@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import json
 from argparse import ArgumentParser
 from pathlib import Path
@@ -53,8 +70,10 @@ TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/hongyij/qwen3-mg-debug/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
-DEBUG_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
+MEGA_LIB_PATH = (
+    f"/home/hongyij/qwen3-mg-debug/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
+)
+DEBUG_PATH = "/home/hongyij/qwen3-mg-debug"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -471,7 +490,7 @@ def get_qwen3_megakernel_mod():
                     model_layers_0_self_attn_o_proj_weight1,
                     model_layers_0_post_attention_layernorm_weight1,
                     model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
-                    model_norm_weight1,    
+                    model_norm_weight1,
                 )
             tuple_3 = (
                 etensor_qkv_partial,
@@ -490,8 +509,8 @@ def get_qwen3_megakernel_mod():
             layer_res = cls.megakernel(
                 input0,
                 input1,
-                tuple_1, 
-                tuple_2, 
+                tuple_1,
+                tuple_2,
                 tuple_3,
             )
             R.output(layer_res)
@@ -719,7 +738,8 @@ def get_qwen3_megakernel_batch_decode_func():
     mg_model = get_qwen3_megakernel_mod()
     mg_model = relax.transform.StaticHorizontalFusion("megakernel")(mg_model)
     mg_model.update_func(
-        mg_model.get_global_var("gen_exec_queue"), attach_attr(mg_model["gen_exec_queue"], "gen_exec_queue")
+        mg_model.get_global_var("gen_exec_queue"),
+        attach_attr(mg_model["gen_exec_queue"], "gen_exec_queue"),
     )
     mg_model.update_func(
         mg_model.get_global_var("persistent_kernel_megakernel"),

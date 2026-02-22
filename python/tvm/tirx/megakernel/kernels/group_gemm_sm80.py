@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import tvm
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout
@@ -13,8 +30,10 @@ def int_cell(value):
         Tx.buffer_store(buf.buffer, value, 0)
     return buf
 
+
 def get_permuted_offset(stride, i, j):
     return i * stride + (j ^ (i % 8))
+
 
 def advance_offset_by_column(step_size: int, offset, step_idx: int):
     if not (step_size == 2 or step_size == 4 or step_size % 8 == 0):
@@ -27,12 +46,14 @@ def advance_offset_by_column(step_size: int, offset, step_idx: int):
     else:  # This condition implies step_size % 8 == 0
         return offset + step_size
 
+
 def advance_offset_by_row(step_size: int, row_stride: int, offset):
     if not (step_size == 4 or step_size % 8 == 0):
         raise ValueError(f"Unsupported step_size: {step_size}. Must be 4 or a multiple of 8.")
     if step_size % 8 == 0:
         return offset + step_size * row_stride
     return (offset ^ 0x4) + step_size * row_stride
+
 
 def half_to_float(x):
     func_name = "tvm_builtin_half_to_float"
@@ -42,6 +63,7 @@ return __half2float(x);
 }}
 """
     return Tx.cuda.func_call(func_name, x, source_code=source_code, return_type="float32")
+
 
 # fmt: off
 @Tx.inline
@@ -61,6 +83,7 @@ def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b
             Tx.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                     C_mma.ptr_to([4]), A_mma.ptr_to([0]), B_mma.ptr_to([2]), C_mma.ptr_to([4]))
 # fmt: on
+
 
 class GroupGEMMTile(Tile):
 
@@ -130,13 +153,30 @@ class GroupGEMMTile(Tile):
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         start_offset = smem_manager.pool_allocator.offset
-        A_smem = smem_manager.alloc([self.num_stages * self.BLK_M * self.BLK_K], "float16", align=16, name="A_smem")
-        B_smem = smem_manager.alloc([self.num_stages * self.BLK_N * self.BLK_K], "float16", align=16, name="B_smem")
+        A_smem = smem_manager.alloc(
+            [self.num_stages * self.BLK_M * self.BLK_K], "float16", align=16, name="A_smem"
+        )
+        B_smem = smem_manager.alloc(
+            [self.num_stages * self.BLK_N * self.BLK_K], "float16", align=16, name="B_smem"
+        )
         smem_manager.pool_allocator.move_base_to(start_offset)
         C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
 
     @Tx.inline
-    def run(self, m_idx, n_idx, k_idx, A, B, C, topk_weights, topk_ids, sorted_tok_ids, expert_ids, num_tokens_post_pad):
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        A,
+        B,
+        C,
+        topk_weights,
+        topk_ids,
+        sorted_tok_ids,
+        expert_ids,
+        num_tokens_post_pad,
+    ):
         with Tx.cta():
             wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")

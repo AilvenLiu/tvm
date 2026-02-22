@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import tvm
 from tvm.script import tirx as Tx
 
@@ -9,11 +26,13 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES, F32_BYTES
 def upcast_size(dtype):
     return 128 // tvm.DataType(dtype).bits
 
+
 def int_var(name, val=None):
     buf = Tx.alloc_local([1], "int32", name=name)
     if val is not None:
         Tx.buffer_store(buf, val, 0)
     return buf
+
 
 def float_var(name, val=None):
     buf = Tx.alloc_local([1], "float32", name=name)
@@ -21,8 +40,10 @@ def float_var(name, val=None):
         Tx.buffer_store(buf, val, 0)
     return buf
 
+
 def size_of(dtype):
     return tvm.DataType(dtype).bits // 8
+
 
 def ptx_exp2(x):
     func_name = "tvm_builtin_ptx_exp2"
@@ -89,6 +110,7 @@ def cast_load(v, vec_len, buf, *indices):
             v_tmp[i] = buffer_load
         Tx.cast(v[:], v_tmp[:])
 
+
 @Tx.inline
 def cast_store(v, vec_len, buf, *indices):
     with Tx.thread():
@@ -96,6 +118,7 @@ def cast_store(v, vec_len, buf, *indices):
         Tx.cast(v_tmp[:], v[:])
         for i in Tx.vectorized(vec_len):
             Tx.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
+
 
 class BatchMergeTile(Tile):
 
@@ -152,7 +175,12 @@ __syncwarp();
 """
         return Tx.cuda.func_call(func_name, source_code=source_code)
 
-    def __init__(self, head_dim, num_key_value_heads, num_attention_heads,):
+    def __init__(
+        self,
+        head_dim,
+        num_key_value_heads,
+        num_attention_heads,
+    ):
         super().__init__()
         self.head_dim = head_dim
         self.kv_heads = num_key_value_heads
@@ -162,12 +190,18 @@ __syncwarp();
         self.bdx = self.head_dim // self.vec_size
         assert KernelConfig.NUM_THREADS % self.bdx == 0
         self.bdy = 32 // self.bdx
-        self.smem_size = (self.num_warps * self.num_smem_stages * self.bdy * self.head_dim * F16_BYTES +
-                            KernelConfig.NUM_THREADS * F32_BYTES)
+        self.smem_size = (
+            self.num_warps * self.num_smem_stages * self.bdy * self.head_dim * F16_BYTES
+            + KernelConfig.NUM_THREADS * F32_BYTES
+        )
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        self.v_smem = smem_manager.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16", name="v_smem")
+        self.v_smem = smem_manager.alloc(
+            [self.num_warps, self.num_smem_stages, self.bdy, self.head_dim],
+            "float16",
+            name="v_smem",
+        )
         self.s_smem = smem_manager.alloc([self.num_warps, 32], "float32", name="s_smem")
 
     @Tx.inline
@@ -201,54 +235,116 @@ __syncwarp();
                 if worker_id[0] < num_qo_len_local[0] * self.kv_heads:
                     with Tx.thread():
                         self._warp_sync()
-                        packed_qo_idx = int_var(name="packed_qo_idx", val=Tx.floormod(worker_id[0], num_qo_len_local[0]))
-                        kv_head_idx = int_var(name="kv_head_idx", val=Tx.floordiv(worker_id[0], num_qo_len_local[0]))
-                        qo_head_idx = int_var(name="qo_head_idx", val=Tx.floormod(packed_qo_idx[0], self.gqa_group_size))
+                        packed_qo_idx = int_var(
+                            name="packed_qo_idx", val=Tx.floormod(worker_id[0], num_qo_len_local[0])
+                        )
+                        kv_head_idx = int_var(
+                            name="kv_head_idx", val=Tx.floordiv(worker_id[0], num_qo_len_local[0])
+                        )
+                        qo_head_idx = int_var(
+                            name="qo_head_idx",
+                            val=Tx.floormod(packed_qo_idx[0], self.gqa_group_size),
+                        )
 
-                        partial_idx_to_offset = Tx.meta_var(lambda off: (merge_indptr_tvm[packed_qo_idx[0]] + off) * self.kv_heads + kv_head_idx[0])
-                        merge_idx_to_offset = Tx.meta_var((merge_o_indices_tvm[packed_qo_idx[0]] * self.kv_heads + kv_head_idx[0]) * self.gqa_group_size + qo_head_idx[0])
+                        partial_idx_to_offset = Tx.meta_var(
+                            lambda off: (merge_indptr_tvm[packed_qo_idx[0]] + off) * self.kv_heads
+                            + kv_head_idx[0]
+                        )
+                        merge_idx_to_offset = Tx.meta_var(
+                            (merge_o_indices_tvm[packed_qo_idx[0]] * self.kv_heads + kv_head_idx[0])
+                            * self.gqa_group_size
+                            + qo_head_idx[0]
+                        )
 
                         state = Tx.meta_var(self.State(self.vec_size))
                         state.init()
 
-                        num_index_sets = int_var(name="num_index_sets", val=merge_indptr_tvm[packed_qo_idx[0] + 1] - merge_indptr_tvm[packed_qo_idx[0]])
+                        num_index_sets = int_var(
+                            name="num_index_sets",
+                            val=merge_indptr_tvm[packed_qo_idx[0] + 1]
+                            - merge_indptr_tvm[packed_qo_idx[0]],
+                        )
 
                         # prelogue
                         for it in range(self.num_smem_stages):
                             with Tx.thread():
                                 Tx.ptx.cp_async(
                                     self.v_smem.ptr_to([warp_id, it, ty[0], tx[0] * self.vec_size]),
-                                    partial_o_tvm.ptr_to([partial_idx_to_offset(it * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
-                                    cp_size=16, prefetch_size=128,
-                                    predicate=it * self.bdy + ty[0] < num_index_sets[0]
+                                    partial_o_tvm.ptr_to(
+                                        [
+                                            partial_idx_to_offset(it * self.bdy + ty[0])
+                                            * self.head_dim
+                                            + tx[0] * self.vec_size
+                                        ]
+                                    ),
+                                    cp_size=16,
+                                    prefetch_size=128,
+                                    predicate=it * self.bdy + ty[0] < num_index_sets[0],
                                 )
                                 Tx.ptx.cp_async.commit_group()
 
                         for it in Tx.serial(ceildiv(num_index_sets[0], self.bdy)):
                             with Tx.thread():
                                 if it % self.bdx == 0:
-                                    self.s_smem[warp_id, ty[0] * self.bdx + tx[0]] = Tx.if_then_else(
-                                        it * self.bdy + (ty[0] * self.bdx + tx[0]) < num_index_sets[0],
-                                        partial_lse_tvm[partial_idx_to_offset(it * self.bdy + ty[0] * self.bdx + tx[0])],
-                                        Tx.float32(0)
+                                    self.s_smem[
+                                        warp_id, ty[0] * self.bdx + tx[0]
+                                    ] = Tx.if_then_else(
+                                        it * self.bdy + (ty[0] * self.bdx + tx[0])
+                                        < num_index_sets[0],
+                                        partial_lse_tvm[
+                                            partial_idx_to_offset(
+                                                it * self.bdy + ty[0] * self.bdx + tx[0]
+                                            )
+                                        ],
+                                        Tx.float32(0),
                                     )
                                     self._warp_sync()
                                 Tx.ptx.cp_async.wait_group(self.num_smem_stages - 1)
                                 self._warp_sync()
 
                                 v = Tx.alloc_local([self.vec_size], "float32")
-                                cast_load(v, self.vec_size, self.v_smem, warp_id, it % self.num_smem_stages, ty[0], tx[0] * self.vec_size)
+                                cast_load(
+                                    v,
+                                    self.vec_size,
+                                    self.v_smem,
+                                    warp_id,
+                                    it % self.num_smem_stages,
+                                    ty[0],
+                                    tx[0] * self.vec_size,
+                                )
 
                                 if it * self.bdy + ty[0] < num_index_sets[0]:
-                                    s = float_var(name="s", val=self.s_smem[warp_id, (it % self.bdx) * self.bdy + ty[0]])
+                                    s = float_var(
+                                        name="s",
+                                        val=self.s_smem[
+                                            warp_id, (it % self.bdx) * self.bdy + ty[0]
+                                        ],
+                                    )
                                     state.merge(v, s[0], 1)
                                 self._warp_sync()
 
                                 Tx.ptx.cp_async(
-                                    self.v_smem.ptr_to([warp_id, (it % self.num_smem_stages), ty[0], tx[0] * self.vec_size]),
-                                    partial_o_tvm.ptr_to([partial_idx_to_offset((it + self.num_smem_stages) * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
-                                    cp_size=16, prefetch_size=128,
-                                    predicate=(it + self.num_smem_stages) * self.bdy + ty[0] < num_index_sets[0]
+                                    self.v_smem.ptr_to(
+                                        [
+                                            warp_id,
+                                            (it % self.num_smem_stages),
+                                            ty[0],
+                                            tx[0] * self.vec_size,
+                                        ]
+                                    ),
+                                    partial_o_tvm.ptr_to(
+                                        [
+                                            partial_idx_to_offset(
+                                                (it + self.num_smem_stages) * self.bdy + ty[0]
+                                            )
+                                            * self.head_dim
+                                            + tx[0] * self.vec_size
+                                        ]
+                                    ),
+                                    cp_size=16,
+                                    prefetch_size=128,
+                                    predicate=(it + self.num_smem_stages) * self.bdy + ty[0]
+                                    < num_index_sets[0],
                                 )
                                 Tx.ptx.cp_async.commit_group()
 
@@ -257,7 +353,15 @@ __syncwarp();
 
                         @Tx.inline
                         def warp_sync_state():
-                            cast_store(state.o, self.vec_size, self.v_smem, warp_id, 0, ty[0], tx[0] * self.vec_size)
+                            cast_store(
+                                state.o,
+                                self.vec_size,
+                                self.v_smem,
+                                warp_id,
+                                0,
+                                ty[0],
+                                tx[0] * self.vec_size,
+                            )
                             self.s_smem[warp_id, ty[0]] = state.get_lse()
                             state.init()
                             self._warp_sync()
@@ -266,16 +370,30 @@ __syncwarp();
                                 with Tx.thread():
                                     s = float_var(name="s", val=self.s_smem[warp_id, it])
                                     v = Tx.alloc_local([self.vec_size], "float32")
-                                    cast_load(v, self.vec_size, self.v_smem, warp_id, 0, it, tx[0] * self.vec_size)
+                                    cast_load(
+                                        v,
+                                        self.vec_size,
+                                        self.v_smem,
+                                        warp_id,
+                                        0,
+                                        it,
+                                        tx[0] * self.vec_size,
+                                    )
                                     state.merge(v, s[0], 1)
 
                         state.normalize()
-                        if (self.bdy > 1):
+                        if self.bdy > 1:
                             warp_sync_state()
                             state.normalize()
 
                         final_o_buf_2d = final_o_tvm.view(-1, self.head_dim)
-                        cast_store(state.o, self.vec_size, final_o_buf_2d, merge_idx_to_offset, tx[0] * self.vec_size)
+                        cast_store(
+                            state.o,
+                            self.vec_size,
+                            final_o_buf_2d,
+                            merge_idx_to_offset,
+                            tx[0] * self.vec_size,
+                        )
 
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()

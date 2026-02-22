@@ -34,11 +34,22 @@ MAX_TASK_TYPE = 1 << 5
 MAX_M_IDX = 1 << 13
 MAX_N_IDX = 1 << 10
 MAX_K_IDX = 1 << 4
+
+
 def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
     if host:
         if debug:
-            assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
-        return np.int64([task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)]).astype(np.int32).item()
+            assert (
+                task_type < MAX_TASK_TYPE
+                and m_idx < MAX_M_IDX
+                and n_idx < MAX_N_IDX
+                and k_idx < MAX_K_IDX
+            )
+        return (
+            np.int64([task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)])
+            .astype(np.int32)
+            .item()
+        )
     else:
         if debug:
             Tx.cuda.trap_when_assert_failed(task_type < MAX_TASK_TYPE)
@@ -46,6 +57,7 @@ def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
             Tx.cuda.trap_when_assert_failed(n_idx < MAX_N_IDX)
             Tx.cuda.trap_when_assert_failed(k_idx < MAX_K_IDX)
         return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)
+
 
 unpack_from_32bit_code = """
 __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* task_type_ptr, int32_t* m_idx_ptr, int32_t* n_idx_ptr, int32_t* k_idx_ptr) {
@@ -73,8 +85,10 @@ def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr)
 def is_power_of_two(n: Tx.int32):
     return tvm.tir.all(n > 0, Tx.bitwise_and(n, n - 1) == 0)
 
+
 def next_power_of_two(x):
     return 1 << (x - 1).bit_length()
+
 
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
@@ -123,33 +137,46 @@ def silu(x):
         return_type="float32",
     )
 
+
 def threadfence_block():
     return Tx.cuda.func_call(
-        "threadfence_block", source_code="""
+        "threadfence_block",
+        source_code="""
 __forceinline__ __device__ void threadfence_block() {
   __threadfence_block();
 }
-""")
+""",
+    )
+
 
 def any_sync(mask, pred):
     return Tx.cuda.func_call(
-        "any_sync", mask, pred, source_code=f"""
+        "any_sync",
+        mask,
+        pred,
+        source_code=f"""
 __forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
   return __any_sync(mask, pred);
 }}
-""", return_type="int32"
+""",
+        return_type="int32",
     )
+
 
 def gt(lhs, rhs):
     return Tx.cuda.func_call(
-        "gt", lhs, rhs, source_code=f"""
+        "gt",
+        lhs,
+        rhs,
+        source_code=f"""
 __forceinline__ __device__ bool gt(int32_t a, int32_t b) {{
     return a > b;
 }}
-""", return_type="bool"
+""",
+        return_type="bool",
     )
-    
-    
+
+
 def mbarrier_try_wait(mbarrier, phase):
     return Tx.cuda.func_call(
         "tvm_builtin_ptx_mbarrier_try_wait",
@@ -171,7 +198,8 @@ __forceinline__ __device__ bool tvm_builtin_ptx_mbarrier_try_wait(void* barrier,
 
   return static_cast<bool>(waitComplete);
 }
-""", return_type="bool",
+""",
+        return_type="bool",
     )
 
 
@@ -272,6 +300,7 @@ __forceinline__ __device__ void stg_remote(int32_t v, void* dst_addr, int32_t pe
 """
     return Tx.cuda.func_call("stg_remote", v, dst_addr, pe, source_code=func)
 
+
 def stg_local(v, dst_addr, pe):
     func = """
     __forceinline__ __device__ void stg_local(int32_t v, void* dst_addr, int32_t pe) {
@@ -283,6 +312,7 @@ def stg_local(v, dst_addr, pe):
     """
     return Tx.cuda.func_call("stg_local", v, dst_addr, pe, source_code=func)
 
+
 def stg(v, dst_addr, pe):
     if is_const_minus_one(pe):
         return stg_local(v, dst_addr, pe)
@@ -291,7 +321,7 @@ def stg(v, dst_addr, pe):
 
 
 @Tx.inline
-def while_ld_global_acquire(addr, task_info): 
+def while_ld_global_acquire(addr, task_info):
     Tx.cuda.func_call(
         "while_ld_global_acquire",
         addr,
@@ -304,9 +334,9 @@ __forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* 
     asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
   }}
 }}
-"""
-    )   
-  
+""",
+    )
+
 
 @Tx.inline
 def sts(value, dst_addr):
@@ -321,18 +351,19 @@ __forceinline__ __device__ void sts(int32_t v, void* dst_addr) {
                  : "l"(dst_addr), "r"(v)
                  : "memory");
 }
-"""
+""",
     )
-    
+
 
 f_init_const = lambda c: lambda *args: c
+
 
 def f_init_unmatched_dim(dim_len, in_par_size, out_par_size):
     def f_init(i):
         start_out_par = i * out_par_size
         end_out_par = Tx.min(dim_len, (i + 1) * out_par_size)
         return (end_out_par - 1) // in_par_size - start_out_par // in_par_size + 1
-    
+
     return f_init
 
 

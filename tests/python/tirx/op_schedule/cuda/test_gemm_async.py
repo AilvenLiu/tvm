@@ -170,7 +170,7 @@ def test_gemm_tcgen05_cta_group_1(task):
             bx = Tx.cta_id([1], parent="kernel")
             wg_id = Tx.warpgroup_id([1], parent="cta")
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
-            
+
             A_smem = Tx.alloc_buffer(A_shape, A_dtype, scope="shared", layout=A_layout)
             B_smem = Tx.alloc_buffer(B_shape, B_dtype, scope="shared", layout=B_layout)
             tmem_addr = Tx.alloc_shared([1], "uint32")
@@ -201,7 +201,7 @@ def test_gemm_tcgen05_cta_group_1(task):
                 Tx.ptx.tcgen05.commit(mma_mbar.ptr_to([0]), cta_group=1)
             Tx.ptx.mbarrier.try_wait(mma_mbar.ptr_to([0]), 0)
             Tx.cuda.cta_sync()
-            
+
             Tx.ptx.tcgen05.fence.after_thread_sync()
             C_reg = Tx.alloc_local(width, dtype=C_dtype)
             C_view = C_reg.view(128, width, layout=TileLayout(S[(128, width) : (1@axis_tid_in_wg, 1)]))

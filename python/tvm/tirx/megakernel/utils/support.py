@@ -31,7 +31,14 @@ from tvm.tirx.megakernel.utils.utils import ceildiv, pack_into_32bit
 from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, event_type_names
 from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
 from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
-from tvm.tirx.megakernel.kernels import GemmTile, GroupGEMMTileSM100, SplitKReduceTile, AllreduceTile, SiluMultiplyTile, GateUpSiluTile
+from tvm.tirx.megakernel.kernels import (
+    GemmTile,
+    GroupGEMMTileSM100,
+    SplitKReduceTile,
+    AllreduceTile,
+    SiluMultiplyTile,
+    GateUpSiluTile,
+)
 
 
 def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_task_num):
@@ -41,21 +48,30 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
     for m in range(attn_task_num):
         bs_idx = q_indptr[m]
         kv_idx = kv_head_idx[m]
-        inverse_info[kv_idx * batch_size + bs_idx].append((m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER)
-    for m in range(attn_task_num, ceildiv(attn_task_num, KernelConfig.WG_NUMBER) * KernelConfig.WG_NUMBER):
-        inverse_info[(m - attn_task_num) % (batch_size * kv_head_num)].append((m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER) # align attn_task_num
+        inverse_info[kv_idx * batch_size + bs_idx].append(
+            (m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER
+        )
+    for m in range(
+        attn_task_num, ceildiv(attn_task_num, KernelConfig.WG_NUMBER) * KernelConfig.WG_NUMBER
+    ):
+        inverse_info[(m - attn_task_num) % (batch_size * kv_head_num)].append(
+            (m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER
+        )  # align attn_task_num
     inverse_indptr = [0 for _ in range(MAX_TOTAL_NUM_WORKERS)]
     inverse_indices = [0 for _ in range(MAX_TOTAL_NUM_WORKERS)]
     for i in range(batch_size * kv_head_num):
         inverse_indptr[i + 1] = inverse_indptr[i] + len(inverse_info[i])
         for j in range(len(inverse_info[i])):
             inverse_indices[inverse_indptr[i] + j] = inverse_info[i][j]
-    assert inverse_indptr[batch_size * kv_head_num] == ceildiv(attn_task_num, KernelConfig.WG_NUMBER) * KernelConfig.WG_NUMBER
+    assert (
+        inverse_indptr[batch_size * kv_head_num]
+        == ceildiv(attn_task_num, KernelConfig.WG_NUMBER) * KernelConfig.WG_NUMBER
+    )
 
     DEV = tvm.cuda(0)
     return (
         tvm.runtime.tensor(np.array(inverse_indptr, dtype=np.int32), DEV),
-        tvm.runtime.tensor(np.array(inverse_indices, dtype=np.int32), DEV)
+        tvm.runtime.tensor(np.array(inverse_indices, dtype=np.int32), DEV),
     )
 
 
@@ -84,7 +100,14 @@ def push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=F
             central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
 
-def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_num, scheduler: Literal["static", "dynamic"]):
+def generate_exec_queue(
+    batch_size,
+    attn_task_num,
+    config,
+    WORLD_SIZE,
+    etensor_num,
+    scheduler: Literal["static", "dynamic"],
+):
     """The execution queue generation function for layer testing use."""
     INTERMEDIATE_SIZE = config["INTERMEDIATE_SIZE"] // WORLD_SIZE
     NUM_ATTENTION_HEADS = config["NUM_ATTENTION_HEADS"] // WORLD_SIZE
@@ -103,11 +126,13 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
 
         # qkv projection
         for n_idx in range(
-            ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N)
+            ceildiv(
+                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N
+            )
         ):
             for k_idx in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
-        
+
         for i in range(KernelConfig.SM_NUMBER):
             central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
 
@@ -139,7 +164,8 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
             # merge
             for m_idx in range(
                 ceildiv(
-                    batch_size * NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+                    batch_size * NUM_ATTENTION_HEADS,
+                    KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER,
                 )
             ):
                 central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION_MERGE.value))
@@ -152,7 +178,8 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
         if WORLD_SIZE > 1:
             # o reduction
             m_split_o_proj_reduce = min(
-                batch_size, KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT)
+                batch_size,
+                KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT),
             )
             n_tile_o_proj_reduce = (
                 ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
@@ -166,7 +193,9 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
 
             # o allreduce
             for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
-                for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
+                for n_idx in range(
+                    ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)
+                ):
                     central_queue.append((m_idx, n_idx, 0, JobType.O_ALLREDUCE.value))
 
         # add rmsnorm
@@ -187,7 +216,14 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
                 for n_idx in range(INTERMEDIATE_SIZE // GemmTile.BLK_N):
                     for k_idx in range(config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]):
                         central_queue.append((0, n_idx, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
-                        central_queue.append((0, n_idx + INTERMEDIATE_SIZE // GemmTile.BLK_N, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
+                        central_queue.append(
+                            (
+                                0,
+                                n_idx + INTERMEDIATE_SIZE // GemmTile.BLK_N,
+                                k_idx,
+                                JobType.GEMM_GATE_UP_PROJ.value,
+                            )
+                        )
 
                 # gate_up reduce
                 m_split_gate_up_proj_reduce = min(
@@ -212,10 +248,13 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
             if WORLD_SIZE > 1:
                 # down_proj_reduce
                 m_split_down_proj_reduce = min(
-                    KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT), batch_size
+                    KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT),
+                    batch_size,
                 )
                 n_tile = (
-                    ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
+                    ceildiv(
+                        SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce)
+                    )
                     * SplitKReduceTile.N_UNIT
                 )
                 m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
@@ -226,7 +265,9 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
 
                 # down_proj_allreduce
                 for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
-                    for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
+                    for n_idx in range(
+                        ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)
+                    ):
                         central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))
 
         # add_rms_norm
@@ -252,7 +293,14 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
         # init etensor
         for i in range(etensor_num):
             exec_queue.enqueue(JobType.INIT_ETENSOR.value, i, 0, 0)
-        for n in reversed(range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N))):
+        for n in reversed(
+            range(
+                ceildiv(
+                    (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"],
+                    GemmTile.BLK_N,
+                )
+            )
+        ):
             for k in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 exec_queue.enqueue(JobType.GEMM_QKV_PROJ.value, 0, n, k)
         torch.cuda.nvtx.range_pop()
@@ -269,11 +317,16 @@ def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
         else:
             return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
     else:
-        return Tx.if_then_else(batch_size * topk < num_experts, batch_size * topk * moe_blk_m, (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m)
+        return Tx.if_then_else(
+            batch_size * topk < num_experts,
+            batch_size * topk * moe_blk_m,
+            (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m,
+        )
 
 
 def get_max_blocks_padded_relaxed(batch_size, topk, num_experts, moe_blk_m):
     return batch_size * topk // moe_blk_m + (num_experts + 1)
+
 
 def generate_etensor_unmatched_dim(i, dim_len, in_par_size, out_par_size):
     start_out_par = i * out_par_size
@@ -287,8 +340,8 @@ def generate_exec_queue_moe(
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
-                (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
-            )
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
+        )
         central_queue = []
         # init etensor
         for i in range(etensor_num):
@@ -322,8 +375,6 @@ def generate_exec_queue_moe(
         return exec_queue
 
 
-
-
 class ProfilerHandler:
     def __init__(self):
         self.counter = 0
@@ -345,10 +396,14 @@ class ProfilerHandler:
                     file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}.perfetto-trace"
                 else:
                     file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}-rank{rank}.perfetto-trace"
-                export_to_perfetto_trace(profiler_buffer[layer_id].numpy(), file_name, event_type_names)
+                export_to_perfetto_trace(
+                    profiler_buffer[layer_id].numpy(), file_name, event_type_names
+                )
                 print(f"Exported layer {layer_id} to {file_name}")
 
+
 profiler_handler = ProfilerHandler()
+
 
 @tvm_ffi.register_global_func("megakernel.export_trace")
 def export_trace(profiler_buffer, rank):

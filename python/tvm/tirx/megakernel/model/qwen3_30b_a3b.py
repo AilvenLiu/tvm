@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import json
 from argparse import ArgumentParser
 from pathlib import Path
@@ -65,7 +82,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
                 before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                
+
                 # MoE intermediate buffers
                 gating_output = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_EXPERTS]), dtype="float32", runtime_device_index=0)
                 topk_weights = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_EXPERTS_PER_TOK]), dtype="float32", runtime_device_index=0)
@@ -78,7 +95,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 reordered_hidden_state = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 gate_up_output = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.INTERMEDIATE_SIZE * 2]), dtype="float16", runtime_device_index=0)
                 silu_mul_output = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                
+
                 output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
 
@@ -137,7 +154,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                         Tx.reads(lv4[v_i0, v_i1, v_i2])
                         Tx.writes(compute[v_i0, v_i1, v_i2])
                         compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
-                        
+
             @Tx.prim_func(private=True)
             def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
                 Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
@@ -492,7 +509,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
                 before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                
+
                 # MoE intermediate buffers
                 gating_output = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_EXPERTS]), dtype="float32", runtime_device_index=0)
                 topk_weights = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_EXPERTS_PER_TOK]), dtype="float32", runtime_device_index=0)
@@ -505,7 +522,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
                 reordered_hidden_state = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 gate_up_output = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.INTERMEDIATE_SIZE * 2]), dtype="float16", runtime_device_index=0)
                 silu_mul_output = R.builtin.alloc_tensor(R.shape([max_num_tokens_padded, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                
+
                 output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
                 profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
                 exec_queue = R.call_pure_packed(

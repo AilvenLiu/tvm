@@ -294,5 +294,3 @@ __forceinline__ __device__ uint32_t {func_name}(uint32_t addr, int row_offset, i
     return cuda_func_call(
         func_name, addr, row_offset, col_offset, source_code=source_code, return_type="uint32"
     ), ["get_tmem_addr"]
-
-

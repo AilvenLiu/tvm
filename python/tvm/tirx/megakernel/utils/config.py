@@ -28,6 +28,7 @@ F128_BYTES = 16
 # Paged kv-cache config
 KV_LAYOUT = "HND"
 
+
 class KernelConfig:
     # global constant
     M_CLUSTER = 1
@@ -38,7 +39,8 @@ class KernelConfig:
     SM_NUMBER = 148
     CTA_GROUP = M_CLUSTER
     MAX_SMEM_SIZE = 232448
-    
+
+
 class JobType(Enum):
     V_REDUCE_APPEND = 0
     K_REDUCE_RMS_ROPE_APPEND = 1
@@ -72,7 +74,8 @@ class JobType(Enum):
 
     # end
     END = 31
-    
+
+
 class ProfileEventType(Enum):
     GEMM_GATE_UP_PROJ = 0
     SPLIT_SILU_MULTIPLY = 1
@@ -129,6 +132,7 @@ class ProfileEventType(Enum):
     INIT_ETENSOR = 52
     WAIT_ETENSOR_INIT = 53
     END = 54
+
 
 map_job_type_to_profile_event_type = {
     JobType.GEMM_GATE_UP_PROJ.value: ProfileEventType.GEMM_GATE_UP_PROJ,
@@ -242,7 +246,6 @@ qwen3_32b_config = {
     "HEAD_DIM": 128,
     "RMS_NORM_EPS": 1e-6,
     "ROPE_THETA": 1000000,
-
     "SPLIT_QKV_PROJECT_DICT": {1: 3, 4: 4, 8: 4},
     "SPLIT_O_PROJECT_DICT": {1: 3, 4: 3, 8: 2},
     "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT": {1: 1, 4: 1, 8: 2},
@@ -267,13 +270,14 @@ llama3_1b_config = {
         "HIGH_FREQ_FACTOR": 4.0,
         "LOW_FREQ_FACTOR": 1.0,
         "ORIGINAL_MAX_POSITION_EMBEDDINGS": 8192,
-        "ROPE_TYPE": "llama3"
+        "ROPE_TYPE": "llama3",
     },
     "SPLIT_QKV_PROJECT_DICT": {1: 8, 4: -1, 8: -1},
     "SPLIT_O_PROJECT_DICT": {1: 8, 4: -1, 8: -1},
     "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT": {1: 1, 4: -1, 8: -1},
     "DOWN_PROJ_SPLIT_K_FACTOR_DICT": {1: 9, 4: -1, 8: -1},
 }
+
 
 @tvm.register_global_func("tirx.megakernel.get_model_config")
 def get_model_config(model_name: str) -> Dict[str, Any]:

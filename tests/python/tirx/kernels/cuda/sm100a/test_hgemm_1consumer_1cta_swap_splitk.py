@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import math
 from enum import Enum
 
@@ -147,7 +164,6 @@ def get_hgemm_kernel(dim_n, dim_k):
 
     @Tx.meta_class
     class Barriers:
-
         def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
             self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
                 (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
@@ -166,7 +182,6 @@ def get_hgemm_kernel(dim_n, dim_k):
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
 
     class BarTMA2MMA(Barriers):
-
         @Tx.inline
         def arrive(self, idx, expected_bytes):
             Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
@@ -176,19 +191,16 @@ def get_hgemm_kernel(dim_n, dim_k):
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
     class BarMMA2LD(Barriers):
-
         @Tx.inline
         def arrive(self, idx):
             Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
 
     class BarMMA2TMA(Barriers):
-
         @Tx.inline
         def arrive(self, idx):
             Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
 
     class BarLD2MMA(Barriers):
-
         @Tx.inline
         def arrive(self, idx):
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
@@ -201,7 +213,9 @@ def get_hgemm_kernel(dim_n, dim_k):
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
         Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_N, BLK_K) : (BLK_N * BLK_K, BLK_K, 1)]),
     )
-    D_layout = Tx.TileLayout(Tx.S[(TMEM_PIPE_DEPTH, EPI_TILE, MMA_N) : (EPI_TILE * MMA_N, MMA_N, 1)])
+    D_layout = Tx.TileLayout(
+        Tx.S[(TMEM_PIPE_DEPTH, EPI_TILE, MMA_N) : (EPI_TILE * MMA_N, MMA_N, 1)]
+    )
 
     # fmt: off
     @Tx.prim_func(tirx=True)

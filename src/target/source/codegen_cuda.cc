@@ -197,7 +197,7 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
       os << " __launch_bounds__(" << threadIdx_ext_int->value << ", 1)";
     } else {
       os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
-    }  
+    }
   }
 }
 

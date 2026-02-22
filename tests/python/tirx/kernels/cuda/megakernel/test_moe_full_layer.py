@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import argparse
 import math
 import tempfile
@@ -17,16 +34,29 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 
-from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig, qwen3_30b_a3b_config, JobType, event_type_names
+from tvm.tirx.megakernel.utils.config import (
+    ProfileEventType,
+    KernelConfig,
+    qwen3_30b_a3b_config,
+    JobType,
+    event_type_names,
+)
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SmemManager
 from tvm.tirx.megakernel.utils.utils import get_source, ceildiv
 from tvm.tirx.megakernel.utils import static_scheduler, dynamic_scheduler
 from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
 from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirx.megakernel.kernels import (
-    AddRMSNormTile, RMSNormTile, AllreduceTile, BatchAttnTile, BatchMergeTile,
-    GemmTile, SplitKReduceTile, SplitKReduceRMSnormRopeQTile,
-    SplitKReduceRMSnormRopeAppendKTile, SplitKReduceAppendVTile
+    AddRMSNormTile,
+    RMSNormTile,
+    AllreduceTile,
+    BatchAttnTile,
+    BatchMergeTile,
+    GemmTile,
+    SplitKReduceTile,
+    SplitKReduceRMSnormRopeQTile,
+    SplitKReduceRMSnormRopeAppendKTile,
+    SplitKReduceAppendVTile,
 )
 from tvm.tirx.megakernel.utils.support import (
     generate_exec_queue,
@@ -158,14 +188,16 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             predicate=self.world_size > 1,
         )
         self.attn_add_rms_tile = self._add_tile(
-            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size > 1 
-            else RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), 
-            ProfileEventType.ATTN_ADD_RMS_NORM
+            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE)
+            if self.world_size > 1
+            else RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE),
+            ProfileEventType.ATTN_ADD_RMS_NORM,
         )
         self.mlp_add_rms_norm_tile = self._add_tile(
-            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size > 1
+            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE)
+            if self.world_size > 1
             else RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE),
-            ProfileEventType.MLP_ADD_RMS_NORM
+            ProfileEventType.MLP_ADD_RMS_NORM,
         )
         MegaKernelMOE._set_tiles(self, batch_size, low_batch)
 
@@ -215,7 +247,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_attn_mlp, lambda notify_idx: (1, -1, 0,),
+                    self.evt_attn_mlp,
+                    lambda notify_idx: (
+                        1,
+                        -1,
+                        0,
+                    ),
                     lambda trigger_idx: (
                         lambda push_idx: (
                             JobType.MOE_GATING.value,
@@ -224,15 +261,28 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             push_idx // self.GATING_SPLIT_K_FACTOR,
                             push_idx % self.GATING_SPLIT_K_FACTOR,
                         )
-                    ), "warpgroup", "warpgroup"
+                    ),
+                    "warpgroup",
+                    "warpgroup",
                 )
             if self.world_size == 1:
                 self.tile_scheduler.wait(self.evt_attn_add_rms, 0, wait_level="cta")
-                Tx.cuda.thread_fence() # ensure previous tma-reduce are visible
+                Tx.cuda.thread_fence()  # ensure previous tma-reduce are visible
             else:
-                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE, wait_level="cta")
-            self.run_tile(self.attn_add_rms_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
-                            hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
+                self.tile_scheduler.wait(
+                    self.evt_attn_add_rms,
+                    self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE,
+                    wait_level="cta",
+                )
+            self.run_tile(
+                self.attn_add_rms_tile,
+                self.tile_scheduler.m_idx,
+                self.tile_scheduler.n_idx,
+                self.tile_scheduler.k_idx,
+                hidden_state_attn_mlp_global,
+                residual_global,
+                attn_add_rms_weight_global,
+            )
             # FIXME: this only works for num experts <= 1024
             if tid * 4 < self.NUM_EXPERTS:
                 for vec in Tx.vectorized(4):
@@ -241,19 +291,33 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             if tid * 8 < self.HIDDEN_SIZE:
                 for vec in Tx.vectorized(8):
                     output_global[self.tile_scheduler.m_idx, tid * 8 + vec] = 0
-            self.tile_scheduler.notify(self.evt_attn_mlp, lambda notify_idx: (1, -1, 0), scope="cta")
+            self.tile_scheduler.notify(
+                self.evt_attn_mlp, lambda notify_idx: (1, -1, 0), scope="cta"
+            )
 
     @Tx.inline
     def task_impl_moe_gating(self, A, B, output, is_dynamic_sch):
         with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_gating, lambda notify_idx: (1, -1, 0,),
+                    self.evt_gating,
+                    lambda notify_idx: (
+                        1,
+                        -1,
+                        0,
+                    ),
                     lambda trigger_idx: (
                         lambda push_idx: (
-                            JobType.MOE_TOPK_SOFTMAX.value, self.topk_softmax.PERSISTENT_SM_NUMBER, push_idx, 0, 0
+                            JobType.MOE_TOPK_SOFTMAX.value,
+                            self.topk_softmax.PERSISTENT_SM_NUMBER,
+                            push_idx,
+                            0,
+                            0,
                         )
-                    ), "warpgroup", "warpgroup", scope_id=0
+                    ),
+                    "warpgroup",
+                    "warpgroup",
+                    scope_id=0,
                 )
             self.tile_scheduler.wait(self.evt_attn_mlp, 0, wait_level="warp")
             self.run_tile(
@@ -261,15 +325,21 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.m_idx,
                 self.tile_scheduler.n_idx,
                 self.tile_scheduler.k_idx,
-                A, B, output,
+                A,
+                B,
+                output,
                 self.profiler,
             )
-            self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
+            self.tile_scheduler.notify(
+                self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0
+            )
 
     @Tx.inline
     def task_impl_moe_group_gemm_down(
         self,
-        A, B, output,
+        A,
+        B,
+        output,
         batch_size,
         expert_ids_global,
         topk_weights_flattened,
@@ -283,10 +353,23 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0,),
+                    self.evt_group_gemm_down,
+                    lambda notify_idx: (
+                        1,
+                        -1,
+                        0,
+                    ),
                     lambda trigger_idx: (
-                        lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, batch_size, push_idx, 0, 0)
-                    ), "warpgroup", "warpgroup"
+                        lambda push_idx: (
+                            JobType.MLP_ADD_RMS_NORM.value,
+                            batch_size,
+                            push_idx,
+                            0,
+                            0,
+                        )
+                    ),
+                    "warpgroup",
+                    "warpgroup",
                 )
             wait_idx = Tx.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
             self.tile_scheduler.wait(self.evt_group_gemm_gate_up, wait_idx, wait_level="warp")
@@ -300,14 +383,21 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         self.tile_scheduler.m_idx,
                         self.tile_scheduler.n_idx * down_proj_task_size + i,
                         self.tile_scheduler.k_idx,
-                        A, B, output,
+                        A,
+                        B,
+                        output,
                         expert_ids_global,
                         topk_weights_flattened,
                         sorted_token_ids_global,
                         num_valid_tokens_global,
                         self.profiler,
                     )
-            self.tile_scheduler.notify(self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
+            self.tile_scheduler.notify(
+                self.evt_group_gemm_down,
+                lambda notify_idx: (1, -1, 0),
+                scope="warpgroup",
+                scope_id=0,
+            )
 
     @Tx.inline
     def task_impl_mlp_add_rms_norm(
@@ -320,10 +410,17 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         with Tx.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_end, lambda notify_idx: (1, -1, 0,),
+                    self.evt_end,
+                    lambda notify_idx: (
+                        1,
+                        -1,
+                        0,
+                    ),
                     lambda trigger_idx: (
                         lambda push_idx: (JobType.END.value, KernelConfig.SM_NUMBER, 0, 0, 0)
-                    ), "cta", "cta"
+                    ),
+                    "cta",
+                    "cta",
                 )
             self.tile_scheduler.wait(self.evt_group_gemm_down, 0, wait_level="cta")
             self.run_tile(
@@ -419,7 +516,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             Union[static_scheduler.StaticTileScheduler, dynamic_scheduler.DynamicTileScheduler]
         ],
     ):
- 
+
         # Initialize tiles
         self.set_tiles(batch_size, BLK_M, low_batch)
         self.host_init_all()
@@ -445,7 +542,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.class_init_all(self.smem_manager)
 
                 # Initialize event tensors
-                attn_task_num = Tx.meta_var(work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER])
+                attn_task_num = Tx.meta_var(
+                    work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]
+                )
                 self.set_events(
                     issubclass(Scheduler, DynamicTileScheduler),
                     batch_size,
@@ -453,12 +552,22 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     Semaphore,
                     etensor_workspace_global,
                 )
-                
+
                 # initialize tile scheduler and smem_manager
                 if issubclass(Scheduler, static_scheduler.StaticTileScheduler):
-                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)
+                    self.init_tile_scheduler(
+                        False, Scheduler, "layer", exec_queue, self.smem_manager
+                    )
                 else:
-                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)
+                    self.init_tile_scheduler(
+                        True,
+                        Scheduler,
+                        exec_task,
+                        exec_head,
+                        exec_tail,
+                        self.smem_manager,
+                        self.profiler,
+                    )
                 self.smem_manager.init()
 
                 topk_ids_flattened = topk_indices_global.view(-1)
@@ -553,7 +662,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM),
                             o_proj_weight_global,
                             partial_o_global if self.world_size > 1 else residual_global,
-                            is_dynamic_sch
+                            is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                         self.task_impl_gemm_o_reduce(
@@ -589,7 +698,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             hidden_state_attn_mlp_global,
                             gate_weight_global,
                             gating_output_global,
-                            is_dynamic_sch
+                            is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
                         self.task_impl_moe_topk_softmax(
@@ -597,7 +706,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             topk_weights_global,
                             topk_indices_global,
                             is_dynamic_sch,
-                            renormalize=True
+                            renormalize=True,
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
                         self.task_impl_moe_align(
@@ -675,7 +784,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             hidden_state_ptr: Tx.handle,
             residual_ptr: Tx.handle,
             output_ptr: Tx.handle,
-            
+
             # Attention weights
             qkv_proj_weight_ptr: Tx.handle,
             o_proj_weight_ptr: Tx.handle,
@@ -683,12 +792,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             k_rms_weight_ptr: Tx.handle,
             attn_add_rms_weight_ptr: Tx.handle,
             mlp_add_rms_weight_ptr: Tx.handle,
-            
+
             # MoE weights
             gate_weight_ptr: Tx.handle,
             grp_gate_up_weight_ptr: Tx.handle,
             grp_down_weight_ptr: Tx.handle,
-            
+
             # Attention: page cache, cos_sin cache and plan info
             cos_sin_cache_ptr: Tx.handle,
             rope_pos_ptr: Tx.handle,
@@ -711,7 +820,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             merge_o_indices_ptr: Tx.handle,
             inverse_indptr_ptr: Tx.handle,
             inverse_indices_ptr: Tx.handle,
-            
+
             # Attention intermediate buffer
             partial_qkv_ptr: Tx.handle,
             qkv_ptr: Tx.handle,
@@ -721,7 +830,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             partial_o_ptr: Tx.handle,
             before_o_allreduce_ptr: Tx.handle,
             hidden_state_attn_mlp_ptr: Tx.handle,
-            
+
             # MoE intermediate buffer
             gating_output_ptr: Tx.handle,
             topk_weights_ptr: Tx.handle,
@@ -734,7 +843,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             reordered_hidden_state_ptr: Tx.handle,
             gate_up_output_ptr: Tx.handle,
             silu_mul_output_ptr: Tx.handle,
-            
+
             # event tensors
             etensor_workspace_ptr: Tx.handle,
             # Execution queue
@@ -744,19 +853,19 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             profiler_buffer: Tx.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
             Tx.func_attr({"global_symbol": "main", "target": Tx.target("cuda")})
-            
+
             # Match buffer
             batch_size = Tx.int32()
             cos_sin_cache_len = Tx.int32()
             max_page_num = Tx.int32()
             total_page_num = Tx.int32()
             attn_tile_num = Tx.int32()
-            
+
             # Input and output
             hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
             residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16" if self.world_size > 1 else "float32", scope="global")
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
-            
+
             # Attention weights
             qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE], "float16", scope="global")
             o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM], "float16", scope="global")
@@ -764,12 +873,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
             attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
             mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
-            
+
             # MoE weights
             gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
             grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
             grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            
+
             # Attention: page cache, kv cache and plan info
             cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")
             rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
@@ -792,7 +901,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
             inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
             inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            
+
             # Attention intermediate buffer
             partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM], "float32", scope="global")
             qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM], "float16", scope="global")
@@ -802,7 +911,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE], "float32", scope="global")
             before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
             hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            
+
             # MoE intermediate buffer
             gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
             topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
@@ -816,16 +925,16 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
             gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
             silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            
+
             # event tensor
             etensor_workspace_size = Tx.int32()
             etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
-            
+
             # Execution queue
             queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
             queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
             queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
-            
+
             @Tx.inline
             def run(BLK_M, low_batch, down_proj_task_size):
                 self.fused_body(
@@ -841,7 +950,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     partial_qkv_global, qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global,
                     partial_o_global, before_o_allreduce_global, hidden_state_attn_mlp_global,
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global,
-                    expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global 
+                    expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global
                     reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global,
                     etensor_workspace_global,
                     profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global,
@@ -868,7 +977,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             hidden_state_ptr: Tx.handle,
             residual_ptr: Tx.handle,
             output_ptr: Tx.handle,
-            
+
             # Attention weights
             qkv_proj_weight_ptr: Tx.handle,
             o_proj_weight_ptr: Tx.handle,
@@ -876,12 +985,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             k_rms_weight_ptr: Tx.handle,
             attn_add_rms_weight_ptr: Tx.handle,
             mlp_add_rms_weight_ptr: Tx.handle,
-            
+
             # MoE weights
             gate_weight_ptr: Tx.handle,
             grp_gate_up_weight_ptr: Tx.handle,
             grp_down_weight_ptr: Tx.handle,
-            
+
             # Attention: page cache, cos_sin cache and plan info
             cos_sin_cache_ptr: Tx.handle,
             rope_pos_ptr: Tx.handle,
@@ -904,7 +1013,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             merge_o_indices_ptr: Tx.handle,
             inverse_indptr_ptr: Tx.handle,
             inverse_indices_ptr: Tx.handle,
-            
+
             # Attention intermediate buffer
             partial_qkv_ptr: Tx.handle,
             qkv_ptr: Tx.handle,
@@ -914,7 +1023,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             partial_o_ptr: Tx.handle,
             before_o_allreduce_ptr: Tx.handle,
             hidden_state_attn_mlp_ptr: Tx.handle,
-            
+
             # MoE intermediate buffer
             gating_output_ptr: Tx.handle,
             topk_weights_ptr: Tx.handle,
@@ -927,7 +1036,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             reordered_hidden_state_ptr: Tx.handle,
             gate_up_output_ptr: Tx.handle,
             silu_mul_output_ptr: Tx.handle,
-            
+
             # event tensors
             etensor_workspace_ptr: Tx.handle,
             # Execution queue
@@ -935,18 +1044,18 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             profiler_buffer: Tx.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
         ):
             Tx.func_attr({"global_symbol": "main", "target": Tx.target("cuda")})
-            
+
             # Match buffer
             batch_size = Tx.int32()
             cos_sin_cache_len = Tx.int32()
             max_page_num = Tx.int32()
             total_page_num = Tx.int32()
-            
+
             # Input and output
             hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
             residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16" if self.world_size > 1 else "float32", scope="global")
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
-            
+
             # Attention weights
             qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE], "float16", scope="global")
             o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM], "float16", scope="global")
@@ -954,12 +1063,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
             attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
             mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
-            
+
             # MoE weights
             gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
             grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
             grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            
+
             # Attention: page cache, kv cache and plan info
             cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")
             rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
@@ -982,7 +1091,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
             inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
             inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            
+
             # Attention intermediate buffer
             partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM], "float32", scope="global")
             qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM], "float16", scope="global")
@@ -992,7 +1101,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE], "float32", scope="global")
             before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
             hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            
+
             # MoE intermediate buffer
             gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
             topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
@@ -1006,14 +1115,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
             gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
             silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            
+
             # event tensor
             etensor_workspace_size = Tx.int32()
             etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
-            
+
             # Execution queue
             exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
-            
+
             @Tx.inline
             def run(BLK_M, low_batch):
                 self.fused_body(
@@ -1029,14 +1138,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     partial_qkv_global, qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global,
                     partial_o_global, before_o_allreduce_global, hidden_state_attn_mlp_global,
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global,
-                    expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global 
+                    expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global
                     reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global,
                     etensor_workspace_global,
                     profiler_buffer, exec_queue, None, None, None,
                     BLK_M, 1, low_batch, False,
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
-            
+
             if batch_size <= 32:
                 run(32, True)
             elif batch_size <= 64:
@@ -1296,7 +1405,9 @@ def prepare_data(batch_size, seq_len, mk: MegaKernelMOEFullLayer):
         ),
         axis=1,
     ).reshape(-1)
-    arg_dict["shuffled_grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"][:, new_order_indices, :]
+    arg_dict["shuffled_grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"][
+        :, new_order_indices, :
+    ]
 
     arg_dict["grp_down_weight"] = _correct_weight_tensor_view(
         torch.zeros(
@@ -1339,7 +1450,9 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
             tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             # Dynamic scheduler
-            exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, mk.num_etensors[True],  "dynamic")
+            exec_queue = generate_exec_queue(
+                None, None, mk.config, mk.world_size, mk.num_etensors[True], "dynamic"
+            )
             for i in range(REPEAT):
                 tvm_arg_dict[f"queue_tasks_{i}"] = tvm.runtime.tensor(exec_queue.tasks, DEV)
                 tvm_arg_dict[f"queue_head_{i}"] = tvm.runtime.tensor(exec_queue.head, DEV)
@@ -1399,11 +1512,15 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
             tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
         tvm_arg_dict["append_pos"] = tvm.runtime.tensor(append_pos, device=DEV)
 
-        tvm_arg_dict["etensor_workspace"] = tvm.runtime.tensor(np.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=np.int32), device=DEV)
+        tvm_arg_dict["etensor_workspace"] = tvm.runtime.tensor(
+            np.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=np.int32), device=DEV
+        )
 
         # Prepare per-iteration buffers
         for i in range(REPEAT):
-            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=DEV)
+            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(
+                arg_dict["residual"].to(torch.float32), device=DEV
+            )
 
         tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
@@ -1570,7 +1687,9 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                     f"{scheduler}-moe-full-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                     event_type_names,
                 )
-            return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy().astype(np.float16)
+            return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy().astype(
+                np.float16
+            )
 
     def std(arg_dict, use_prefill, mk: MegaKernelMOEFullLayer):
         """Standard reference implementation combining attention and MoE"""
@@ -1807,7 +1926,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 enable_pdl=False,
             )
 
-            return  output.cpu().numpy(), std_arg_dict["residual"].cpu().numpy()
+            return output.cpu().numpy(), std_arg_dict["residual"].cpu().numpy()
 
         output = func()
         ms = bench(func, warmup=10, repeat=30, proton_name=f"std-use_prefill={use_prefill}")

@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import tvm.script.tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile
@@ -28,7 +45,6 @@ class RopeTile(Tile):
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
-
     def _alloc_local(self):
         self.idx = Tx.alloc_local([1], "int32", name="idx")
         self.cos = Tx.alloc_local([self.vec_size], "float32", name="cos")
@@ -37,7 +53,6 @@ class RopeTile(Tile):
         self.qk_vec32 = Tx.alloc_local([self.vec_size], "float32", name="qk_vec32")
         self.qk_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="qk_vec32_other")
         self.mask = Tx.alloc_local([1], "uint32", name="mask")
-
 
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, qkv, cos_sin_cache, rope_pos):

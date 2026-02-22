@@ -38,13 +38,13 @@ from .common import get_indices, get_st_extent, get_vec_len
 
 def _get_sublayout_from_region(layout, buffer_shape, region_st, region_extent):
     """Get sublayout by slicing the layout with the buffer region.
-    
+
     Args:
         layout: The buffer's TileLayout.
         buffer_shape: The buffer's shape.
         region_st: Region start indices.
         region_extent: Region extents.
-    
+
     Returns:
         Sublayout if slicing succeeds, otherwise the original layout.
     """
@@ -57,14 +57,14 @@ def _get_sublayout_from_region(layout, buffer_shape, region_st, region_extent):
 
 def _get_layout_thread_local_partition(layout):
     """Extract thread and local dimension info from layout.
-    
+
     Returns:
         tuple | None: On success, (thread_groups, local_dim_indices, local_extents).
             - thread_groups: dict {axis: (dim_indices, extents)} for each thread axis
             - local_dim_indices: list of dimension indices for local (memory) axes
             - local_extents: list of extents for local dimensions
             Returns None if layout is not supported.
-    
+
     Validates:
         - No stride==0 on thread dims (broadcast/overlap = cross-thread semantics)
         - Local dims may have arbitrary strides (alignment uses actual layout strides)
@@ -77,41 +77,41 @@ def _get_layout_thread_local_partition(layout):
     """
     if not isinstance(layout, TileLayout):
         return None
-    
+
     shard = getattr(layout, "shard", None)
     if not shard:
         return None
-    
+
     # Partition dimensions into thread and local (memory) axes
     thread_dim_indices = [i for i, it in enumerate(shard) if it.axis.is_thread()]
     local_dim_indices = [i for i, it in enumerate(shard) if not it.axis.is_thread()]
-    
+
     if not thread_dim_indices or not local_dim_indices:
         return None
-    
+
     analyzer = Analyzer()
     for idx in thread_dim_indices:
         if analyzer.can_prove_equal(shard[idx].stride, 0):
             return None
-    
+
     # Replica must not contain thread axes
     replica = getattr(layout, "replica", None)
     if replica and any(it.axis.is_thread() for it in replica):
         return None
-    
+
     # Group thread dimensions by axis
     from collections import defaultdict
     thread_groups_dict = defaultdict(list)
     for idx in thread_dim_indices:
         thread_groups_dict[shard[idx].axis].append(idx)
-    
+
     thread_groups = {}
-    
+
     for axis, dim_indices in thread_groups_dict.items():
         dim_indices = sorted(dim_indices)
         extents = [shard[i].extent for i in dim_indices]
         thread_groups[axis] = (dim_indices, extents)
-    
+
     local_extents = [shard[i].extent for i in local_dim_indices]
     return (thread_groups, local_dim_indices, local_extents)
 
@@ -161,7 +161,7 @@ def _cast_layout_supported_for_local(layout) -> bool:
 
 def _compute_linear_offset(region_st, local_dims, layout):
     """Compute linear offset using layout's actual strides.
-    
+
     Physical offset = sum(region_st[dim] * layout.shard[dim].stride) for all local dims.
     """
     offset = 0
@@ -333,21 +333,21 @@ def _resolve_thread_var(axis, sctx):
             axis_name = str(axis)
         except Exception:
             axis_name = ""
-    
+
     for key, itervar in sctx.launch_params.items():
         if getattr(itervar.var, "name", "") == axis_name:
             return itervar.var
-    
+
     if axis_name:
         axis_name_lower = axis_name.lower()
         for key in sctx.launch_params:
-            if (axis_name_lower in key.lower() or 
+            if (axis_name_lower in key.lower() or
                 (axis_name == "tx" and "threadIdx.x" in key)):
                 return sctx.launch_params[key].var
-    
+
     if "threadIdx.x" in sctx.launch_params:
         return sctx.launch_params["threadIdx.x"].var
-    
+
     return None
 
 

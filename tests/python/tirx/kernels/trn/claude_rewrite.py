@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 
 """
 This script is a workaround for a bug in the Neuron compiler.
@@ -7,6 +24,7 @@ import os
 import hashlib
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 
 def extract_output(text):
     start_tag = "<output_start>"
@@ -28,25 +46,27 @@ def extract_output(text):
 
 
 def rewrite_program(program, func_name):
-  if not os.path.exists("cache"):
-    os.makedirs("cache")
-  program_hash = hashlib.sha256(program.encode()).hexdigest()
-  if os.path.exists(f"cache/output_{func_name}_{program_hash}.txt"):
-    # Read content from the cache if it exists
-    with open(f"cache/output_{func_name}_{program_hash}.txt", "r") as file:
-      content_str = file.read()
-    print("Cache loaded successfully")
-  else:
-    print("Cache not found, rewriting program, this may take a while...")
-    print(f"original program: {program}")
-    client = anthropic.Anthropic(
-        api_key=ANTHROPIC_API_KEY,
-    )
-    message = client.messages.create(
-        model="claude-3-7-sonnet-20250219",
-        max_tokens=30000,
-        messages=[
-            {"role": "user", "content": f"""
+    if not os.path.exists("cache"):
+        os.makedirs("cache")
+    program_hash = hashlib.sha256(program.encode()).hexdigest()
+    if os.path.exists(f"cache/output_{func_name}_{program_hash}.txt"):
+        # Read content from the cache if it exists
+        with open(f"cache/output_{func_name}_{program_hash}.txt", "r") as file:
+            content_str = file.read()
+        print("Cache loaded successfully")
+    else:
+        print("Cache not found, rewriting program, this may take a while...")
+        print(f"original program: {program}")
+        client = anthropic.Anthropic(
+            api_key=ANTHROPIC_API_KEY,
+        )
+        message = client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=30000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""
             Below is a DSL program. For each psum tensor (variable allocated using nl.ndarray(..., buffer=ncc.psum.mod_alloc)), do the following things:
     1. Find out nisa.nc_matmul instructions that uses this tensor as output. For each appearance, calculate the tripcount by multipling the extent of all the spatial loops above it.
     We define spatial loop and reduction loop as follows (slightly different from normal understanding):
@@ -104,17 +124,18 @@ def rewrite_program(program, func_name):
         ```
             {program}
         ```
-            """}
-        ],
-        thinking={
-            "type": "enabled",
-            "budget_tokens": 10000,
-        },
-        timeout=900
-    )
+            """,
+                }
+            ],
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 10000,
+            },
+            timeout=900,
+        )
 
-    content_str = message.content[1].text
-    with open(f"cache/output_{func_name}_{program_hash}.txt", "w") as f:
-        f.write(content_str)
+        content_str = message.content[1].text
+        with open(f"cache/output_{func_name}_{program_hash}.txt", "w") as f:
+            f.write(content_str)
 
-  return extract_output(content_str)
+    return extract_output(content_str)

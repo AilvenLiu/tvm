@@ -708,4 +708,3 @@ class GenericOp(OpCall):
         self.__init_handle_by_constructor__(
             _ffi_api.OpCall, resolved_op, args, workspace, config, dispatch
         )
-

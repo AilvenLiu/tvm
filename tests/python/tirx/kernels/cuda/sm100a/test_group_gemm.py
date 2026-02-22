@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import numpy as np
 import pytest
 import torch
@@ -192,9 +209,14 @@ def test_group_gemm(task):
         )
 
         sorted_token_ids_tvm = torch_to_tvm(sorted_token_ids[: num_tokens_post_padded.item()])
-        valid_num_tokens = torch.empty(num_tokens_post_padded.item() // MAX_BLK_M, dtype=torch.int32)
+        valid_num_tokens = torch.empty(
+            num_tokens_post_padded.item() // MAX_BLK_M, dtype=torch.int32
+        )
         for i in range(num_tokens_post_padded.item() // MAX_BLK_M):
-            valid_num_tokens[i] = torch.sum((sorted_token_ids[i * MAX_BLK_M:(i + 1) * MAX_BLK_M] >= 0) & (sorted_token_ids[i * MAX_BLK_M:(i + 1) * MAX_BLK_M] < batch_size * top_k))
+            valid_num_tokens[i] = torch.sum(
+                (sorted_token_ids[i * MAX_BLK_M : (i + 1) * MAX_BLK_M] >= 0)
+                & (sorted_token_ids[i * MAX_BLK_M : (i + 1) * MAX_BLK_M] < batch_size * top_k)
+            )
         valid_num_tokens_tvm = torch_to_tvm(valid_num_tokens.cuda())
         expert_ids_tvm = torch_to_tvm(expert_ids)
         num_tokens_post_padded_tvm = torch_to_tvm(num_tokens_post_padded)
@@ -204,7 +226,7 @@ def test_group_gemm(task):
             top_k,
             intermediate_size * 2,
             acc_output=False,
-            low_batch=batch_size<2048,
+            low_batch=batch_size < 2048,
         )
         grp_gemm2 = get_group_gemm_kernel(
             intermediate_size,
@@ -363,6 +385,7 @@ def test_group_gemm(task):
         np.testing.assert_allclose(out2_tir, out2_sglang, rtol=2e-2, atol=2e-2)
     except Exception as e:
         print(e)
+
 
 if __name__ == "__main__":
     for config in test_configs:

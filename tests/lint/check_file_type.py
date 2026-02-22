@@ -57,6 +57,7 @@ ALLOW_EXTENSION = {
     "rst",
     "css",
     "html",
+    "ipynb",
     # ios
     "pbxproj",
     "plist",

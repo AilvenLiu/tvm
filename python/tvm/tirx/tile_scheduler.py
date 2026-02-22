@@ -234,7 +234,9 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
             self._FULL_GROUPS = self._M_TILE_ROWS // l2_group_size
         else:
             # Dynamic expressions for runtime M
-            self._M_TILE_ROWS = Tx.truncdiv(self._num_m_tiles + self._cluster_m - 1, self._cluster_m)
+            self._M_TILE_ROWS = Tx.truncdiv(
+                self._num_m_tiles + self._cluster_m - 1, self._cluster_m
+            )
             self._FULL_GROUPS = Tx.truncdiv(self._M_TILE_ROWS, self._l2_group_size)
 
         self._TAIL_ROWS = self._M_TILE_ROWS - self._FULL_GROUPS * l2_group_size
@@ -243,12 +245,20 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
         # For serpentine mode: precompute block counts
         if serpentine:
             self._N_BLOCKS = n_tile_cols // l2_group_size  # full blocks in N
-            self._M_BLOCKS = self._M_TILE_ROWS // l2_group_size if is_static_m else Tx.truncdiv(self._M_TILE_ROWS, l2_group_size)
+            self._M_BLOCKS = (
+                self._M_TILE_ROWS // l2_group_size
+                if is_static_m
+                else Tx.truncdiv(self._M_TILE_ROWS, l2_group_size)
+            )
             self._BLOCK_SIZE = l2_group_size * l2_group_size  # tiles per block
             self._FULL_BLOCK_TILES = self._M_BLOCKS * self._N_BLOCKS * self._BLOCK_SIZE
             # Residual tiles (not covered by full blocks)
             self._RESIDUAL_N = n_tile_cols - self._N_BLOCKS * l2_group_size
-            self._RESIDUAL_M = self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size if is_static_m else self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
+            self._RESIDUAL_M = (
+                self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
+                if is_static_m
+                else self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
+            )
 
     # fmt: off
     @Tx.inline
@@ -690,7 +700,7 @@ class FlashAttentionLPTScheduler(BaseTileScheduler):
 
     The LPT aspect comes from reversing m_block order: lower Q blocks have more
     KV blocks to process due to causal masking, so processing them first balances load.
-    
+
     The scheduler is only applied to non-persistent kernels.
 
     L2 Swizzle: Groups consecutive batch*head indices together for L2 locality.

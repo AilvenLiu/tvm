@@ -1,8 +1,26 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import KernelConfig, Tile
 from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.megakernel.utils.config import F16_BYTES
+
 
 class AppendKVTile(Tile):
 
@@ -37,7 +55,6 @@ class AppendKVTile(Tile):
         self.pos = Tx.alloc_local([1], "int32", name="pos")
         self.vec = Tx.alloc_local([self.vec_size], "float16", name="vec")
 
-
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):
         with Tx.cta():
@@ -58,9 +75,7 @@ class AppendKVTile(Tile):
                     head_idx = Tx.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
                     if batch_idx < self.batch_size and head_idx < self.kv_heads:
 
-                        self.pos[0] = Tx.cuda.ldg(
-                            Tx.address_of(pos_map[batch_idx]), "int32"
-                        )
+                        self.pos[0] = Tx.cuda.ldg(Tx.address_of(pos_map[batch_idx]), "int32")
                         page_id = Tx.meta_var(self.pos[0] // self.page_size)
                         offset = Tx.meta_var(self.pos[0] % self.page_size)
                         for vec in Tx.vectorized(self.vec_size):
@@ -70,8 +85,6 @@ class AppendKVTile(Tile):
                                 stx + vec,
                             ]
                         for vec in Tx.vectorized(self.vec_size):
-                            kv_cache[page_id, k_idx, head_idx, offset, stx + vec] = (
-                                self.vec[vec]
-                            )
+                            kv_cache[page_id, k_idx, head_idx, offset, stx + vec] = self.vec[vec]
 
                     self.idx[0] += self.bdy

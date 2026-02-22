@@ -1,4 +1,20 @@
-# Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 # Redistribution and use in source and binary forms, with or without
@@ -938,11 +954,7 @@ class PersistentDenseGemmKernel:
             # Partition for epilogue
             #
             epi_tidx = tidx
-            (
-                tiled_copy_t2r,
-                tTR_tAcc_base,
-                tTR_rAcc,
-            ) = self.epilog_tmem_copy_and_partition(
+            (tiled_copy_t2r, tTR_tAcc_base, tTR_rAcc,) = self.epilog_tmem_copy_and_partition(
                 epi_tidx, tCtAcc_base, tCgC, epi_tile, use_2cta_instrs
             )
 
@@ -965,11 +977,7 @@ class PersistentDenseGemmKernel:
                     bSG_gC_partitioned,
                 ) = self.epilog_gmem_copy_and_partition(epi_tidx, tma_atom_c, tCgC, epi_tile, sC)
             else:
-                (
-                    simt_atom,
-                    tTR_rC,
-                    tTR_gC_partitioned,
-                ) = self.epilog_gmem_copy_and_partition(
+                (simt_atom, tTR_rC, tTR_gC_partitioned,) = self.epilog_gmem_copy_and_partition(
                     epi_tidx, tiled_copy_t2r, tCgC, epi_tile, sC
                 )
 

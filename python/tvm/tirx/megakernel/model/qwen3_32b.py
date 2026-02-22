@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import Literal
 
 from tvm.script import ir as I
@@ -102,7 +119,7 @@ def get_qwen3_megakernel_relax_mod(
                         Tx.reads(lv4[v_i0, v_i1, v_i2])
                         Tx.writes(compute[v_i0, v_i1, v_i2])
                         compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
-                        
+
             @Tx.prim_func(private=True)
             def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
                 Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
@@ -304,7 +321,7 @@ def get_qwen3_megakernel_relax_mod(
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
                     rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
                     rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
-                        
+
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)
                     o_layer2 = call_qwen3_layer(o_layer1[0], o_layer1[1], 2)
@@ -540,7 +557,7 @@ def get_qwen3_megakernel_relax_mod(
                         Tx.reads(lv4[v_i0, v_i1, v_i2])
                         Tx.writes(compute[v_i0, v_i1, v_i2])
                         compute[v_i0, v_i1, v_i2] = Tx.Cast("float32", lv4[v_i0, v_i1, v_i2])
-                        
+
             @Tx.prim_func(private=True)
             def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
                 Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
@@ -733,7 +750,7 @@ def get_qwen3_megakernel_relax_mod(
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
                     rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
                     rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
-                    
+
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)
                     o_layer2 = call_qwen3_layer(o_layer1[0], o_layer1[1], 2)

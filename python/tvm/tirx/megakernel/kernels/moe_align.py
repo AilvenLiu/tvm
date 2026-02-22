@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile, SmemManager
@@ -6,7 +23,6 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class MOEAlignTile(Tile):
-
     def __init__(self, num_experts, numel, block_size, pad_sorted_token_ids=False):
         super().__init__()
         self.num_experts = num_experts
@@ -24,7 +40,9 @@ class MOEAlignTile(Tile):
         self.warp_sums = smem_manager.alloc(
             [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32", name="warp_sums"
         )
-        self.s_total_tokens_post_pad = smem_manager.alloc([1], "int32", name="s_total_tokens_post_pad")
+        self.s_total_tokens_post_pad = smem_manager.alloc(
+            [1], "int32", name="s_total_tokens_post_pad"
+        )
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
@@ -95,7 +113,9 @@ class MOEAlignTile(Tile):
                 idx[0] += KernelConfig.NUM_THREADS
             Tx.tvm_storage_sync("shared")
             if tid < self.num_experts:
-                padded_count: Tx.let = ceildiv(self.shared_counts[tid], self.block_size) * self.block_size
+                padded_count: Tx.let = (
+                    ceildiv(self.shared_counts[tid], self.block_size) * self.block_size
+                )
                 self.scan_buf[tid] = padded_count
             elif tid < self.scan_size:
                 self.scan_buf[tid] = 0
@@ -107,7 +127,9 @@ class MOEAlignTile(Tile):
             Tx.tvm_storage_sync("shared")
             num_warps_for_scan = Tx.meta_var(ceildiv(self.scan_size, 32))
             if warp_id == 0:
-                val: Tx.let = Tx.if_then_else(lane_id < num_warps_for_scan, self.warp_sums[lane_id], 0)
+                val: Tx.let = Tx.if_then_else(
+                    lane_id < num_warps_for_scan, self.warp_sums[lane_id], 0
+                )
                 self.warp_exclusive_scan(val, sum_val)
                 if lane_id == num_warps_for_scan - 1:
                     self.prefix[self.num_experts] = sum_val[0] + val
@@ -176,9 +198,13 @@ class CountAndSortExpertTokens(Tile):
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        self.s_rank_post_pad = smem_manager.alloc([KernelConfig.NUM_THREADS], "int64", name="s_rank_post_pad")
+        self.s_rank_post_pad = smem_manager.alloc(
+            [KernelConfig.NUM_THREADS], "int64", name="s_rank_post_pad"
+        )
         self.fetched_data = smem_manager.alloc(
-            [self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16", name="fetched_data"
+            [self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE],
+            "float16",
+            name="fetched_data",
         )
 
     def init(self, smem_manager: SmemManager):

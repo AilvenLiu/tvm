@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import Literal
 from tvm.script import tirx as Tx
 
@@ -35,7 +52,6 @@ __forceinline__ __device__ void red_f32_v4(float* address, float* reg) {
 
 
 class GroupGEMMTile(GemmTile):
-
     def __init__(
         self,
         N,
@@ -56,8 +72,8 @@ class GroupGEMMTile(GemmTile):
             a_type,
             b_type,
             1,
-            BLK_M=-1, # does not matter because we will set it later
-            MMA_M=-1, # does not matter because we will set it later
+            BLK_M=-1,  # does not matter because we will set it later
+            MMA_M=-1,  # does not matter because we will set it later
             out_type="float16" if not acc_output else "float32",
             low_batch=low_batch,
             prefetch_on=prefetch_on,
@@ -81,23 +97,34 @@ class GroupGEMMTile(GemmTile):
         self.num_tokens_in_block = Tx.local_scalar("int32", name="num_tokens_in_block")
         self.eid = Tx.local_scalar("int32", name="eid")
         Tx.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
-    
+
     @Tx.inline
     def _tma(self, ks, buf, buf_name: Literal["A", "B"], mn_st, k_st, tma_config, predicate=True):
-        if predicate:          
+        if predicate:
             if buf_name == "A":
-                Tx.copy_async(self.A_smem[ks, 0 : self.BLK_M, :], buf[mn_st : mn_st + self.BLK_M, k_st : k_st + self.BLK_K], **tma_config)
+                Tx.copy_async(
+                    self.A_smem[ks, 0 : self.BLK_M, :],
+                    buf[mn_st : mn_st + self.BLK_M, k_st : k_st + self.BLK_K],
+                    **tma_config,
+                )
             elif buf_name == "B":
-                Tx.copy_async(self.B_smem[ks, 0 : self.BLK_N, :], buf[self.eid, mn_st : mn_st + self.BLK_N, k_st : k_st + self.BLK_K], **tma_config)
+                Tx.copy_async(
+                    self.B_smem[ks, 0 : self.BLK_N, :],
+                    buf[self.eid, mn_st : mn_st + self.BLK_N, k_st : k_st + self.BLK_K],
+                    **tma_config,
+                )
             else:
                 Tx.cuda.trap_when_assert_failed(False)
 
     @classmethod
     def class_init(cls, smem_manager: SmemManager):
         super().class_init(smem_manager)
-        cls.smem_sorted_token_ids = smem_manager.alloc([cls.MAX_BLK_M], "int32", name="smem_sorted_token_ids", method="persistent")
-        cls.smem_routing_weights = smem_manager.alloc([cls.MAX_BLK_M], "float32", name="smem_routing_weights", method="persistent")
-
+        cls.smem_sorted_token_ids = smem_manager.alloc(
+            [cls.MAX_BLK_M], "int32", name="smem_sorted_token_ids", method="persistent"
+        )
+        cls.smem_routing_weights = smem_manager.alloc(
+            [cls.MAX_BLK_M], "float32", name="smem_routing_weights", method="persistent"
+        )
 
     @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
@@ -112,7 +139,9 @@ class GroupGEMMTile(GemmTile):
                 if tid_in_wg < self.M_pad_size:
                     idx = self.sorted_token_ids[m_idx * self.M_pad_size + tid_in_wg]
                     self.smem_sorted_token_ids[tid_in_wg] = idx
-                    self.smem_routing_weights[tid_in_wg] = Tx.if_then_else(idx < self.numel, self.routing_weights[idx], 0.0)
+                    self.smem_routing_weights[tid_in_wg] = Tx.if_then_else(
+                        idx < self.numel, self.routing_weights[idx], 0.0
+                    )
                 Tx.cuda.warpgroup_sync(10)
                 if warp_id == 0:
                     self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
@@ -127,16 +156,33 @@ class GroupGEMMTile(GemmTile):
                 Tx.ptx.tcgen05.fence.after_thread_sync()
 
                 for ko in Tx.unroll(self.MMA_M // self.EPI_TILE):
-                    self.stage = (self.tile_idx * self.MMA_M // self.EPI_TILE + ko) % self.TMEM_PIPE_DEPTH
+                    self.stage = (
+                        self.tile_idx * self.MMA_M // self.EPI_TILE + ko
+                    ) % self.TMEM_PIPE_DEPTH
                     # tmem -> rf (ld) -> smem
                     for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                         with Tx.warpgroup():
-                            reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(S[(128, self.TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
-                            col_st = Tx.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
+                            reg_wg = self.reg.view(
+                                128,
+                                self.TMEM_LD_SIZE,
+                                layout=TileLayout(
+                                    S[(128, self.TMEM_LD_SIZE) : (1 @ axis_tid_in_wg, 1)]
+                                ),
+                            )
+                            col_st = Tx.meta_var(
+                                self.tmem_idx * self.M_pad_size
+                                + ko * self.EPI_TILE
+                                + ki * self.TMEM_LD_SIZE
+                            )
                             Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                         with Tx.thread():
                             st = Tx.meta_var(ki * self.TMEM_LD_SIZE)
-                            Tx.copy(self.output_smem[self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg], self.reg[:])
+                            Tx.copy(
+                                self.output_smem[
+                                    self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg
+                                ],
+                                self.reg[:],
+                            )
                     # the tmem can be overwritten
                     if ko == self.MMA_M // self.EPI_TILE - 1:
                         Tx.ptx.tcgen05.fence.before_thread_sync()
@@ -160,14 +206,34 @@ class GroupGEMMTile(GemmTile):
                                 o_reg_f32[v] = self.output_smem[self.stage, row_idx, col_idx + v]
                             for v in Tx.unroll(self.VEC_LEN):
                                 o_reg_f16[v] = Tx.cast(o_reg_f32[v] * routing_weight, "float16")
-                            Tx.cuda.func_call("red_f16_v4", Tx.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), Tx.address_of(o_reg_f16[0]), source_code=red_f16)
+                            Tx.cuda.func_call(
+                                "red_f16_v4",
+                                Tx.address_of(
+                                    output[
+                                        reordered_row_idx // self.top_k,
+                                        n_idx * self.BLK_N + col_idx,
+                                    ]
+                                ),
+                                Tx.address_of(o_reg_f16[0]),
+                                source_code=red_f16,
+                            )
                         else:
                             o_reg = Tx.alloc_buffer([self.VEC_LEN], "float32", scope="local")
                             for v in range(self.VEC_LEN):
                                 o_reg[v] = self.output_smem[self.stage, row_idx, col_idx + v]
                             for v in Tx.unroll(self.VEC_LEN):
                                 o_reg[v] = o_reg[v] * routing_weight
-                            Tx.cuda.func_call("red_f32_v4", Tx.address_of(output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), Tx.address_of(o_reg[0]), source_code=red_f32)
+                            Tx.cuda.func_call(
+                                "red_f32_v4",
+                                Tx.address_of(
+                                    output[
+                                        reordered_row_idx // self.top_k,
+                                        n_idx * self.BLK_N + col_idx,
+                                    ]
+                                ),
+                                Tx.address_of(o_reg[0]),
+                                source_code=red_f32,
+                            )
                 Tx.cuda.warpgroup_sync(10)
                 self.tile_idx += 1
                 if warp_id == 0:
@@ -179,12 +245,31 @@ class GroupGEMMTile(GemmTile):
         self.MMA_M = BLK_M
 
     @Tx.inline
-    def run(self, m_idx, n_idx, k_idx, A, B, output, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, profiler = None):
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        A,
+        B,
+        output,
+        expert_ids,
+        routing_weights,
+        sorted_token_ids,
+        valid_num_tokens,
+        profiler=None,
+    ):
         self.set_moe_info(expert_ids, routing_weights, sorted_token_ids)
         self._alloc_local(m_idx)
         if valid_num_tokens is not None:
             self.num_tokens_in_block = valid_num_tokens[m_idx]
-        num_tokens_in_block = Tx.meta_var(self.num_tokens_in_block if valid_num_tokens is not None else 32 if self.low_batch else self.M_pad_size)
+        num_tokens_in_block = Tx.meta_var(
+            self.num_tokens_in_block
+            if valid_num_tokens is not None
+            else 32
+            if self.low_batch
+            else self.M_pad_size
+        )
         with Tx.cta():
             tid = Tx.thread_id([256], parent="cta")
             if num_tokens_in_block <= 32:
@@ -227,7 +312,13 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
             method="exclusive",
         )
         self.D_layout = Tx.TileLayout(
-            Tx.S[(GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2) : (GemmTile.EPI_TILE * GemmTile.MMA_N // 2, GemmTile.MMA_N // 2, 1)]
+            Tx.S[
+                (GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2) : (
+                    GemmTile.EPI_TILE * GemmTile.MMA_N // 2,
+                    GemmTile.MMA_N // 2,
+                    1,
+                )
+            ]
         )
         self.output_smem = smem_manager.alloc(
             (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N // 2),

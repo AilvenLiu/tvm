@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile
@@ -14,7 +31,17 @@ class SplitKReduceRMSnormRopeQTile(Tile):
     loop_inner = 1
     min_bdy = 1
 
-    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim, split_k_factor, h_tile=1, use_rms_norm=True):
+    def __init__(
+        self,
+        batch_size,
+        rms_norm_eps,
+        qo_heads,
+        kv_heads,
+        head_dim,
+        split_k_factor,
+        h_tile=1,
+        use_rms_norm=True,
+    ):
         super().__init__()
         self.rms_norm_eps = rms_norm_eps
         self.qo_heads = qo_heads
@@ -32,7 +59,6 @@ class SplitKReduceRMSnormRopeQTile(Tile):
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
-
     def _alloc_local(self):
         self.idx = Tx.alloc_local([1], "int32", name="idx")
         self.pos = Tx.alloc_local([1], "int32", name="pos")
@@ -46,7 +72,6 @@ class SplitKReduceRMSnormRopeQTile(Tile):
         self.q_vec = Tx.alloc_local([self.vec_size], "float16", name="q_vec")
         self.q_vec32 = Tx.alloc_local([self.vec_size], "float32", name="q_vec32")
         self.q_vec32_other = Tx.alloc_local([self.vec_size], "float32", name="q_vec32_other")
-
 
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, partial, qkv, q_weight, rope_pos, cos_sin_cache):
@@ -62,7 +87,9 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                 half_dim = Tx.meta_var(self.head_dim // 2)
                 group_in_warp = Tx.meta_var(32 // self.bdx)
                 cache_stx = Tx.meta_var(st % half_dim)
-                handle_num = Tx.meta_var(Tx.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile)
+                handle_num = Tx.meta_var(
+                    Tx.min(self.m_tile, self.batch_size - m_idx * self.m_tile) * self.h_tile
+                )
                 self.idx[0] = ty
                 while self.idx[0] < handle_num:
                     self.pos[0] = rope_pos[batch_idx]
@@ -72,7 +99,10 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                     for kv in Tx.unroll(self.vec_size):
                         self.q_vec32[kv] = 0.0
                     for kt in Tx.serial(self.split_k_factor):
-                        Tx.copy(self.q_vec32_other[:], partial[kt, batch_idx, qkv_stx:qkv_stx + self.vec_size])
+                        Tx.copy(
+                            self.q_vec32_other[:],
+                            partial[kt, batch_idx, qkv_stx : qkv_stx + self.vec_size],
+                        )
                         for kv in Tx.unroll(self.vec_size):
                             self.q_vec32[kv] += self.q_vec32_other[kv]
                     remain = handle_num - self.idx[0] // group_in_warp * group_in_warp
@@ -92,13 +122,23 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                         # rms norm
                         self.rms_norm[0] = rsqrt(self.sum_sq[0] / self.head_dim + self.rms_norm_eps)
                         # handle the weight
-                        Tx.copy(self.weight_vec[:], q_weight[st:st + self.vec_size])
+                        Tx.copy(self.weight_vec[:], q_weight[st : st + self.vec_size])
                         Tx.cast(self.weight_vec_f32[:], self.weight_vec[:])
                         for kv in Tx.unroll(self.vec_size):
-                            self.q_vec32[kv] = self.q_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
+                            self.q_vec32[kv] = (
+                                self.q_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
+                            )
                     # load cache
-                    Tx.copy(self.cos[:], cos_sin_cache[self.pos[0], cache_stx:cache_stx + self.vec_size])
-                    Tx.copy(self.sin[:], cos_sin_cache[self.pos[0], half_dim + cache_stx:half_dim + cache_stx + self.vec_size])
+                    Tx.copy(
+                        self.cos[:],
+                        cos_sin_cache[self.pos[0], cache_stx : cache_stx + self.vec_size],
+                    )
+                    Tx.copy(
+                        self.sin[:],
+                        cos_sin_cache[
+                            self.pos[0], half_dim + cache_stx : half_dim + cache_stx + self.vec_size
+                        ],
+                    )
                     # shuffle q value
                     for kv in Tx.serial(self.vec_size):
                         self.q_vec32_other[kv] = Tx.tvm_warp_shuffle_xor(
@@ -107,11 +147,17 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                     # compute rope
                     if st < half_dim:
                         for kv in Tx.unroll(self.vec_size):
-                            self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] - self.q_vec32_other[kv] * self.sin[kv]
+                            self.q_vec32[kv] = (
+                                self.q_vec32[kv] * self.cos[kv]
+                                - self.q_vec32_other[kv] * self.sin[kv]
+                            )
                     else:
                         for kv in Tx.unroll(self.vec_size):
-                            self.q_vec32[kv] = self.q_vec32[kv] * self.cos[kv] + self.q_vec32_other[kv] * self.sin[kv]
+                            self.q_vec32[kv] = (
+                                self.q_vec32[kv] * self.cos[kv]
+                                + self.q_vec32_other[kv] * self.sin[kv]
+                            )
                     # store q
                     Tx.cast(self.q_vec[:], self.q_vec32[:])
-                    Tx.copy(qkv[batch_idx, head_idx, st:st + self.vec_size], self.q_vec[:])
+                    Tx.copy(qkv[batch_idx, head_idx, st : st + self.vec_size], self.q_vec[:])
                     self.idx[0] += self.bdy

@@ -267,7 +267,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
             warp_id_ = Tx.warp_id([NUM_WARPS], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
             tid_in_wg = Tx.thread_id([128], parent="warpgroup")
-            
+
             warp_id: Tx.int32
             warp_id = Tx.cuda.func_call("canonical_warp_idx_sync", return_type="int32", source_code=warp_id_func_source)
 
@@ -430,7 +430,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                     for k_tile in Tx.serial(K_TILES):
                         execute_mma(mma_state.stage, mma_state.phase)
                         mma_state.move_to_next_stage()
-                    
+
                     with Tx.thread()[Tx.ptx.elect_sync()]:
                         acc_full.arrive(acc_state.stage, cta_group=CTA_GROUP, cta_mask=pair_mask)
                     acc_state.move_to_next_stage()
@@ -446,7 +446,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                     cta_n: Tx.let = n_idx * CLUSTER_N + cb_n
                     m_st: Tx.let = cta_m * CTA_M
                     out_n_st: Tx.let = cta_n * MMA_N
-                    
+
                     @Tx.inline
                     def epilogue(stage, phase):
                         # wait for accumulator to finish
@@ -463,7 +463,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                                     col_st = MMA_N - (no + 1) * EPI_TILE
                                 else:
                                     col_st = MMA_N - EPI_TILE + no * EPI_TILE
-                                    
+
                             cast_layout = TileLayout(S[(CTA_M, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)])
                             for ni in Tx.unroll(EPI_TILE // TMEM_LD_SIZE):
                                 with Tx.warpgroup():
@@ -494,7 +494,7 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
                                 copy_128b(pointer_offset(output_smem.ptr_to([0, 0, 0]), row_st + row_sw_offset.apply(ni * 8)), reg_16b.ptr_to([ni * 8]))
                             Tx.ptx.fence.proxy(scope="shared")
                             Tx.cuda.warpgroup_sync(10)
-                            
+
                             # launch tma copy from smem to gmem
                             out_n: Tx.int32
                             if SFB_N == 128:
@@ -511,9 +511,9 @@ __forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
 
                     epilogue(epi_state.stage, epi_state.phase)
                     epi_state.move_to_next_stage()
-                    
+
                     tile_scheduler.next_tile()
-            
+
                 with Tx.thread()[tid_in_wg == 0]:
                     Tx.ptx.cp_async.bulk.wait_group(0)
                 Tx.cuda.warpgroup_sync(10)

@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import functools
 import json
 import random
@@ -5,7 +22,11 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import List
 import pytest
-pytest.skip("Skipping pytest for tests/python/tirx/kernels/cuda/megakernel/test_model.py.", allow_module_level=True)
+
+pytest.skip(
+    "Skipping pytest for tests/python/tirx/kernels/cuda/megakernel/test_model.py.",
+    allow_module_level=True,
+)
 
 import numpy as np
 import torch
@@ -360,7 +381,7 @@ def test(args):
     vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
     params = get_params(named_params, vm)
     decrease_bs = set(random.sample(range(1, SEQ_LEN + 1), BATCH_SIZE))
-    
+
     def test_qwen3_model(
         get_global_func,
         batch_decode_func,
@@ -538,7 +559,10 @@ def test(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="Qwen3-32B", choices=["Qwen3-32B", "Qwen3-30B-A3B", "Llama3-1B"]
+        "--model",
+        type=str,
+        default="Qwen3-32B",
+        choices=["Qwen3-32B", "Qwen3-30B-A3B", "Llama3-1B"],
     )
     parser.add_argument("--tp-size", type=int, default=1, choices=[1, 4, 8])
     parser.add_argument("--profiler-on", action="store_true", default=False)

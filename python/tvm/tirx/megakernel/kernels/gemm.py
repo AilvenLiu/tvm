@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import Literal
 
 import tvm
@@ -12,7 +29,6 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType, F16
 
 
 class BarTMA2MMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
@@ -23,28 +39,27 @@ class BarTMA2MMA(Barriers):
 
 
 class BarMMA2LD(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=KernelConfig.CTA_GROUP)
 
 
 class BarMMA2TMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=KernelConfig.CTA_GROUP)
 
 
 class BarLD2MMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
+
 ########################################################################
 # F16-lowM GEMM Megakernel-Tile
 ########################################################################
+
 
 class GemmTile(Tile):
     SMEM_PIPE_DEPTH = 6
@@ -68,7 +83,21 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, use_tma_reduce=False, low_batch=True, prefetch_on=False, profiler_on=False):
+    def __init__(
+        self,
+        N,
+        K,
+        a_type,
+        b_type,
+        split_k_factor,
+        BLK_M,
+        MMA_M,
+        out_type=None,
+        use_tma_reduce=False,
+        low_batch=True,
+        prefetch_on=False,
+        profiler_on=False,
+    ):
         super().__init__()
         self.BLK_M = BLK_M
         self.MMA_M = MMA_M
@@ -78,7 +107,9 @@ class GemmTile(Tile):
         self.b_type = b_type
         assert a_type == "float16", "only float16 is supported for now"
         assert b_type == "float16", "only float16 is supported for now"
-        assert not (use_tma_reduce and split_k_factor == 1), "use_tma_reduce when split_k_factor == 1 is not supported"
+        assert not (
+            use_tma_reduce and split_k_factor == 1
+        ), "use_tma_reduce when split_k_factor == 1 is not supported"
         if out_type is None:
             self.out_type = "float32" if split_k_factor > 1 or use_tma_reduce else "float16"
         else:
@@ -93,10 +124,22 @@ class GemmTile(Tile):
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
         self.M_pad_size = BLK_M
         self.A_layout = tma_shared_layout(
-            a_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K)
+            a_type,
+            SwizzleMode.SWIZZLE_128B_ATOM,
+            (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
         )
-        self.B_layout = tma_shared_layout(b_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K))
-        self.D_layout = Tx.TileLayout(Tx.S[(self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N) : (self.EPI_TILE * self.MMA_N, self.MMA_N, 1)])
+        self.B_layout = tma_shared_layout(
+            b_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K)
+        )
+        self.D_layout = Tx.TileLayout(
+            Tx.S[
+                (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N) : (
+                    self.EPI_TILE * self.MMA_N,
+                    self.MMA_N,
+                    1,
+                )
+            ]
+        )
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
@@ -132,7 +175,9 @@ class GemmTile(Tile):
         # alloc local memory
         self.reg = Tx.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         if self.out_type == "float16":
-            self.reg_fp16 = Tx.alloc_buffer((self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16")
+            self.reg_fp16 = Tx.alloc_buffer(
+                (self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16"
+            )
         self.tmem_idx = Tx.local_scalar("int32", name="tmem_idx")
         self.tmem_phase = Tx.local_scalar("int32", name="tmem_phase")
         self.stage = Tx.local_scalar("int32", name="stage")
@@ -144,7 +189,9 @@ class GemmTile(Tile):
         # use GemmTile instead of cls to avoid re-allocating memory for different subclasses
         # TODO: this cannot be generalized if there are multiple subclasses of GemmTile
         #       we need to delete these members in class_finalize, and only alloc when there are no members
-        GemmTile.tmem_addr = smem_manager.alloc([1], "uint32", name="tmem_addr", method="persistent")
+        GemmTile.tmem_addr = smem_manager.alloc(
+            [1], "uint32", name="tmem_addr", method="persistent"
+        )
         GemmTile.tma2mma_bar = BarTMA2MMA(smem_manager, cls.SMEM_PIPE_DEPTH, True)
         GemmTile.mma2tma_bar = BarMMA2TMA(smem_manager, cls.SMEM_PIPE_DEPTH, False)
         GemmTile.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)
@@ -152,7 +199,14 @@ class GemmTile(Tile):
         # alloc local memory
         GemmTile.tile_idx = Tx.local_scalar("int32", "tile_idx")
         GemmTile.phase = Tx.alloc_buffer((1,), "int32", scope="local", name="phase")
-        GemmTile.tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]), name="tmem")
+        GemmTile.tmem = Tx.decl_buffer(
+            (128, 512),
+            "float32",
+            scope="tmem",
+            allocated_addr=0,
+            layout=TileLayout(S[(128, 512) : (1 @ TLane, 1 @ TCol)]),
+            name="tmem",
+        )
 
     @classmethod
     @Tx.inline
@@ -196,11 +250,19 @@ class GemmTile(Tile):
 
     @Tx.inline
     def _tma(self, ks, buf, buf_name: Literal["A", "B"], mn_st, k_st, tma_config, predicate=True):
-        if predicate:          
+        if predicate:
             if buf_name == "A":
-                Tx.copy_async(self.A_smem[ks, 0 : self.BLK_M, :], buf[mn_st : mn_st + self.BLK_M, k_st : k_st + self.BLK_K], **tma_config)
+                Tx.copy_async(
+                    self.A_smem[ks, 0 : self.BLK_M, :],
+                    buf[mn_st : mn_st + self.BLK_M, k_st : k_st + self.BLK_K],
+                    **tma_config,
+                )
             elif buf_name == "B":
-                Tx.copy_async(self.B_smem[ks, 0 : self.BLK_N, :], buf[mn_st : mn_st + self.BLK_N, k_st : k_st + self.BLK_K], **tma_config)
+                Tx.copy_async(
+                    self.B_smem[ks, 0 : self.BLK_N, :],
+                    buf[mn_st : mn_st + self.BLK_N, k_st : k_st + self.BLK_K],
+                    **tma_config,
+                )
             else:
                 Tx.cuda.trap_when_assert_failed(False)
 
@@ -224,7 +286,9 @@ class GemmTile(Tile):
             Tx.ptx.tcgen05.fence.after_thread_sync()
 
             for ko in Tx.unroll(self.MMA_M // self.EPI_TILE):
-                self.stage = (self.tile_idx * self.MMA_M // self.EPI_TILE + ko) % self.TMEM_PIPE_DEPTH
+                self.stage = (
+                    self.tile_idx * self.MMA_M // self.EPI_TILE + ko
+                ) % self.TMEM_PIPE_DEPTH
                 # wait the smem to be free
                 if ko >= self.TMEM_PIPE_DEPTH:
                     if lane_id == 0 and warp_id == 0:
@@ -234,16 +298,36 @@ class GemmTile(Tile):
                 # tmem -> rf (ld) -> smem
                 for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                     with Tx.warpgroup():
-                        reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(S[(128, self.TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
-                        col_st = Tx.meta_var(self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
+                        reg_wg = self.reg.view(
+                            128,
+                            self.TMEM_LD_SIZE,
+                            layout=TileLayout(
+                                S[(128, self.TMEM_LD_SIZE) : (1 @ axis_tid_in_wg, 1)]
+                            ),
+                        )
+                        col_st = Tx.meta_var(
+                            self.tmem_idx * self.M_pad_size
+                            + ko * self.EPI_TILE
+                            + ki * self.TMEM_LD_SIZE
+                        )
                         Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                     with Tx.thread():
                         st = Tx.meta_var(ki * self.TMEM_LD_SIZE)
                         if self.out_type == "float16":
                             Tx.cast(self.reg_fp16[:], self.reg[:])
-                            Tx.copy(self.output_smem[self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg], self.reg_fp16[:])
+                            Tx.copy(
+                                self.output_smem[
+                                    self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg
+                                ],
+                                self.reg_fp16[:],
+                            )
                         else:
-                            Tx.copy(self.output_smem[self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg], self.reg[:])
+                            Tx.copy(
+                                self.output_smem[
+                                    self.stage, st : st + self.TMEM_LD_SIZE, tid_in_wg
+                                ],
+                                self.reg[:],
+                            )
                 # the tmem can be overwritten
                 if ko == self.MMA_M // self.EPI_TILE - 1:
                     Tx.ptx.tcgen05.fence.before_thread_sync()
@@ -256,16 +340,26 @@ class GemmTile(Tile):
                     m_st = Tx.meta_var(m_idx * self.M_pad_size + ko * self.EPI_TILE)
                     n_st = Tx.meta_var(n_idx * self.BLK_N)
                     tma_config = Tx.meta_var(
-                        {"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP} | 
-                        ({"cache_hint": "evict_last" if self.low_batch else ""} if self.split_k_factor > 1 else {}) |
-                        ({"use_tma_reduce": "add"} if self.use_tma_reduce else {})
+                        {"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP}
+                        | (
+                            {"cache_hint": "evict_last" if self.low_batch else ""}
+                            if self.split_k_factor > 1
+                            else {}
+                        )
+                        | ({"use_tma_reduce": "add"} if self.use_tma_reduce else {})
                     )
                     if self.split_k_factor > 1 and not self.use_tma_reduce:
-                        Tx.copy_async(output[k_idx, m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N],
-                                      self.output_smem[self.stage, :, :], **tma_config)
+                        Tx.copy_async(
+                            output[k_idx, m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N],
+                            self.output_smem[self.stage, :, :],
+                            **tma_config,
+                        )
                     else:
-                        Tx.copy_async(output[m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N],
-                                      self.output_smem[self.stage, :, :], **tma_config)
+                        Tx.copy_async(
+                            output[m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N],
+                            self.output_smem[self.stage, :, :],
+                            **tma_config,
+                        )
                     Tx.ptx.cp_async.bulk.commit_group()
             if tid_in_wg:
                 Tx.ptx.cp_async.bulk.wait_group(0)
@@ -289,9 +383,14 @@ class GemmTile(Tile):
                         @Tx.inline
                         def tma_stage(ks, k_st, first_stage):
                             self.mma2tma_bar.wait(ks, self.phase[0])
-                            B_tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP, 
-                                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
-                                                    "cache_hint": "evict_first" if self.low_batch else ""})
+                            B_tma_config = Tx.meta_var(
+                                {
+                                    "dispatch": "tma",
+                                    "cta_group": KernelConfig.CTA_GROUP,
+                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                    "cache_hint": "evict_first" if self.low_batch else "",
+                                }
+                            )
                             A_tma_config = Tx.meta_var(
                                 {
                                     "dispatch": "tma",
@@ -304,40 +403,70 @@ class GemmTile(Tile):
                                 profiler.start(ProfileEventType.TMA, lane_id == 0)
                             if first_stage:
                                 self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
-                            self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, A_tma_config)                 
+                            self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, A_tma_config)
                             if not self.prefetch_on and first_stage:
                                 self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
-                            self._tma(ks, B, "B", n_idx * self.BLK_N, k_st, B_tma_config, predicate=tvm.tir.Not(self.prefetch_on and first_stage))
+                            self._tma(
+                                ks,
+                                B,
+                                "B",
+                                n_idx * self.BLK_N,
+                                k_st,
+                                B_tma_config,
+                                predicate=tvm.tir.Not(self.prefetch_on and first_stage),
+                            )
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.TMA, lane_id == 0)
-                            self.tma2mma_bar.arrive(ks, KernelConfig.CTA_GROUP * self.BLK_K * (self.BLK_M + self.BLK_N) * F16_BYTES)
+                            self.tma2mma_bar.arrive(
+                                ks,
+                                KernelConfig.CTA_GROUP
+                                * self.BLK_K
+                                * (self.BLK_M + self.BLK_N)
+                                * F16_BYTES,
+                            )
 
                         with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                             k_offset = k_idx * self.TILE_K
                             for ko in Tx.serial(self.PIPE_CIRCLE_NUM):
                                 for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
-                                    tma_stage(ks, (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset, ko == 0)
+                                    tma_stage(
+                                        ks,
+                                        (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
+                                        ko == 0,
+                                    )
                                 self.phase[0] = self.phase[0] ^ 1
                             if self.PIPE_REMAIN_NUM > 0:
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
-                                    tma_stage(ks, (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset, self.PIPE_CIRCLE_NUM == 0)
+                                    tma_stage(
+                                        ks,
+                                        (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks)
+                                        * self.BLK_K
+                                        + k_offset,
+                                        self.PIPE_CIRCLE_NUM == 0,
+                                    )
                                 # for unaligned cases
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM, self.SMEM_PIPE_DEPTH):
                                     self.mma2tma_bar.wait(ks, self.phase[0])
                                     self.tma2mma_bar.arrive_only(ks)
                                 self.phase[0] = self.phase[0] ^ 1
 
-                        Tx.ptx.bar.sync(13, 64) # notify warp 6 to release smem chunks
+                        Tx.ptx.bar.sync(13, 64)  # notify warp 6 to release smem chunks
 
                     elif warp_id == 0:
                         # MMA
 
                         descI: Tx.uint32
                         Tx.ptx.tcgen05.encode_instr_descriptor(
-                            Tx.address_of(descI), "float32",
-                            self.a_type, self.b_type,
-                            self.MMA_N, self.MMA_M, self.MMA_K,
-                            False, False, KernelConfig.CTA_GROUP,
+                            Tx.address_of(descI),
+                            "float32",
+                            self.a_type,
+                            self.b_type,
+                            self.MMA_N,
+                            self.MMA_M,
+                            self.MMA_K,
+                            False,
+                            False,
+                            KernelConfig.CTA_GROUP,
                         )
 
                         @Tx.inline
@@ -352,10 +481,19 @@ class GemmTile(Tile):
                             if self.profiler_on:
                                 profiler.start(ProfileEventType.MMA, lane_id == 0)
                             Tx.gemm_async(
-                                self.tmem[:, self.tmem_idx * self.M_pad_size: self.tmem_idx * self.M_pad_size + self.BLK_N],
-                                self.B_smem[ks, :, :], self.A_smem[ks, :, :],
-                                accum=acc, dispatch="tcgen05",
-                                cta_group=KernelConfig.CTA_GROUP, descI=descI
+                                self.tmem[
+                                    :,
+                                    self.tmem_idx
+                                    * self.M_pad_size : self.tmem_idx
+                                    * self.M_pad_size
+                                    + self.BLK_N,
+                                ],
+                                self.B_smem[ks, :, :],
+                                self.A_smem[ks, :, :],
+                                accum=acc,
+                                dispatch="tcgen05",
+                                cta_group=KernelConfig.CTA_GROUP,
+                                descI=descI,
                             )
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.MMA, lane_id == 0)
@@ -376,8 +514,16 @@ class GemmTile(Tile):
                                     if not self.wait_complete:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
                                         # Tx.ptx.tcgen05.fence.after_thread_sync()
-                                    if self.PIPE_REMAIN_NUM > 0 or ko != self.PIPE_REMAIN_NUM - 1 or ks != self.SMEM_PIPE_DEPTH - 1:
-                                        mbar_try_wait((ks + 1) % self.SMEM_PIPE_DEPTH, self.phase[0] ^ (1 if ks == self.SMEM_PIPE_DEPTH - 1 else 0))
+                                    if (
+                                        self.PIPE_REMAIN_NUM > 0
+                                        or ko != self.PIPE_REMAIN_NUM - 1
+                                        or ks != self.SMEM_PIPE_DEPTH - 1
+                                    ):
+                                        mbar_try_wait(
+                                            (ks + 1) % self.SMEM_PIPE_DEPTH,
+                                            self.phase[0]
+                                            ^ (1 if ks == self.SMEM_PIPE_DEPTH - 1 else 0),
+                                        )
                                     mma_stage(ks, not (ko == 0 and ks == 0))
 
                                 self.phase[0] = self.phase[0] ^ 1
@@ -388,7 +534,9 @@ class GemmTile(Tile):
                                         self.tma2mma_bar.wait(ks, self.phase[0])
                                         # Tx.ptx.tcgen05.fence.after_thread_sync()
                                     if ks != self.PIPE_REMAIN_NUM - 1:
-                                        mbar_try_wait((ks + 1) % self.SMEM_PIPE_DEPTH, self.phase[0])
+                                        mbar_try_wait(
+                                            (ks + 1) % self.SMEM_PIPE_DEPTH, self.phase[0]
+                                        )
                                     mma_stage(ks, not (self.PIPE_CIRCLE_NUM == 0 and ks == 0))
 
                                 # ensure that all mma is issued
@@ -412,7 +560,7 @@ class GemmTile(Tile):
                         self.phase[0] = self.phase[0] ^ (self.PIPE_CIRCLE_NUM & 1)
                         if self.PIPE_REMAIN_NUM > 0:
                             self.phase[0] = self.phase[0] ^ 1
-                        Tx.ptx.bar.sync(13, 64) # wait warp 7 to finish
+                        Tx.ptx.bar.sync(13, 64)  # wait warp 7 to finish
                         for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
                             self.mma2tma_bar.wait(ks, self.phase[0])
                             self.smem_manager.arrive_specific(lane_id, self.B_smem, ks)
@@ -439,10 +587,22 @@ class GemmTile(Tile):
                         if self.profiler_on:
                             profiler.start(ProfileEventType.TMA, lane_id == 0)
                         with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
-                            tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP,
-                                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
-                                                    "cache_hint": "evict_first" if self.low_batch else ""})
-                            self._tma(ks, B, "B", n_idx * self.BLK_N, self.stage * self.BLK_K + k_offset, tma_config)
+                            tma_config = Tx.meta_var(
+                                {
+                                    "dispatch": "tma",
+                                    "cta_group": KernelConfig.CTA_GROUP,
+                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                    "cache_hint": "evict_first" if self.low_batch else "",
+                                }
+                            )
+                            self._tma(
+                                ks,
+                                B,
+                                "B",
+                                n_idx * self.BLK_N,
+                                self.stage * self.BLK_K + k_offset,
+                                tma_config,
+                            )
                         if self.profiler_on:
                             profiler.end(ProfileEventType.TMA, lane_id == 0)
 

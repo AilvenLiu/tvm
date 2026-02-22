@@ -487,7 +487,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     TVM_FFI_ICHECK_EQ(qk_head_dim, config["HEAD_DIM"].cast<int>());
     TVM_FFI_ICHECK_EQ(v_head_dim, config["HEAD_DIM"].cast<int>());
     model_name_ = model_name;
-    
 
     retrieve_ret_.reserve(11);
     Tensor etensor_workspace_host = Tensor::Empty({megakernel::kEtensorWorkspaceSize},

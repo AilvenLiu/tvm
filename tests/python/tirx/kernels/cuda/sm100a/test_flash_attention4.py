@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import os
 from functools import partial
 import numpy as np
@@ -627,7 +644,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                                 use_a_tmem=True, cta_group=CTA_GROUP,
                                                 enable_input_d=should_accumulate,
                                             )
-                                        
+
 
                                         # MMAs k=1..5 (before barrier wait)
                                         for k in Tx.unroll(1, 6):
@@ -827,7 +844,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     for chunk_idx in Tx.unroll(BLK_N // SOFTMAX_LD_CHUNK):
                                         Tx.copy_async(s_chunk[:, chunk_idx * SOFTMAX_LD_CHUNK : (chunk_idx + 1) * SOFTMAX_LD_CHUNK], tmem[:, tmem_col_s + chunk_idx * SOFTMAX_LD_CHUNK : tmem_col_s + chunk_idx * SOFTMAX_LD_CHUNK + SOFTMAX_LD_CHUNK])
 
-                                    # Apply causal mask if needed 
+                                    # Apply causal mask if needed
                                     if apply_mask:
                                         apply_causal_mask(s_chunk_buf, m_block_idx, i_kv)
 
@@ -931,7 +948,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                 # Update n_block_max after Phase 1
                                 n_block_max_after_p1: Tx.let = n_block_max - 1
 
-                                # Phase 2: Blocks with partial causal masking 
+                                # Phase 2: Blocks with partial causal masking
                                 # These are blocks in [n_block_min_causal, n_block_max - 1)
                                 num_phase2_blocks: Tx.let = Tx.max(n_block_max_after_p1 - n_block_min_causal, 0)
                                 for i in Tx.serial(num_phase2_blocks, annotations={"disable_unroll": True}):
@@ -1095,7 +1112,9 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
         Q_tir, K_tir, V_tir = Q, K, V
         O_tir = torch.zeros_like(Q)
 
-        prim_func = get_flash_attention4_kernel(BATCH, SEQ_Q, SEQ_KV, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM, is_causal=is_causal)
+        prim_func = get_flash_attention4_kernel(
+            BATCH, SEQ_Q, SEQ_KV, NUM_QO_HEADS, NUM_KV_HEADS, HEAD_DIM, is_causal=is_causal
+        )
         mod = get_source(prim_func)
 
         dev = tvm.cuda(0)
@@ -1345,7 +1364,11 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
         qo_indptr = torch.tensor([0, SEQ_Q], device="cuda:0", dtype=torch.int32)
         kv_indptr = torch.tensor([0, SEQ_KV], device="cuda:0", dtype=torch.int32)
         prefill_wrapper.plan(
-            qo_indptr, kv_indptr, num_qo_heads=NUM_QO_HEADS, num_kv_heads=NUM_KV_HEADS, head_dim_qk=HEAD_DIM
+            qo_indptr,
+            kv_indptr,
+            num_qo_heads=NUM_QO_HEADS,
+            num_kv_heads=NUM_KV_HEADS,
+            head_dim_qk=HEAD_DIM,
         )
         q_torch = Q.clone().reshape(-1, NUM_QO_HEADS, HEAD_DIM).cuda()
         k_torch = K.clone().reshape(-1, NUM_KV_HEADS, HEAD_DIM).cuda()
@@ -1451,7 +1474,7 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
 if __name__ == "__main__":
     test_flash_attention4(8192, 32, 8, is_causal=False)
     test_flash_attention4(8192, 32, 8, is_causal=True)
-    # TODO: causal attention for non-GQA kernel is still 10% slower than FA4. 
+    # TODO: causal attention for non-GQA kernel is still 10% slower than FA4.
     # likely due to register pressure issue
     test_flash_attention4(8192, 32, 32, is_causal=True)
     test_flash_attention4(8192, 32, 32, is_causal=False)

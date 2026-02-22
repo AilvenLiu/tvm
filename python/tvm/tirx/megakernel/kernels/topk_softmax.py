@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import tvm
 from tvm.script import tirx as Tx
 
@@ -13,7 +30,9 @@ class TopkSoftmaxTile(Tile):
     bdx = 32
     bdy = KernelConfig.NUM_THREADS // bdx
 
-    def __init__(self, num_experts: Tx.int32, num_tokens: Tx.int32, topk: Tx.int32, dtype="float32"):
+    def __init__(
+        self, num_experts: Tx.int32, num_tokens: Tx.int32, topk: Tx.int32, dtype="float32"
+    ):
         super().__init__()
         Tx.Assert(
             is_power_of_two(num_experts),
@@ -98,7 +117,9 @@ class TopkSoftmaxTile(Tile):
         self.thread_max = Tx.alloc_local([1], self.dtype, name="thread_max")
         self.row_sum = Tx.alloc_local([1], "float32", name="row_sum")
         self.reciprocal_row_sum = Tx.alloc_local([1], "float32", name="reciprocal_row_sum")
-        self.row_sum_for_renormalize = Tx.alloc_local([1], "float32", name="row_sum_for_renormalize")
+        self.row_sum_for_renormalize = Tx.alloc_local(
+            [1], "float32", name="row_sum_for_renormalize"
+        )
         self.col = Tx.alloc_local([1], "int32", name="col")
         self.max_val = Tx.alloc_local([1], "float32", name="max_val")
         self.expert = Tx.alloc_local([1], "int32", name="expert")

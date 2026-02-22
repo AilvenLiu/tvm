@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import Any, Dict
 
 from tvm.script import tirx as Tx
@@ -8,7 +25,6 @@ from tvm.tirx.megakernel.utils.config import KernelConfig, F32_BYTES
 
 
 class DecodeMergeTile(Tile):
-
     @classmethod
     def class_config_init(cls, problem_config: Dict[str, Any], use_device_call=False):
         cls.use_device_call = use_device_call
@@ -53,7 +69,10 @@ class DecodeMergeTile(Tile):
         # allocate the smem
         offset = smem_manager.pool_allocator.offset
         self.o_tmp_smem = smem_manager.alloc(
-            [self.bdz, self.pipe_depth, self.bdy, self.head_dim], "float32", align=16, name="o_tmp_smem"
+            [self.bdz, self.pipe_depth, self.bdy, self.head_dim],
+            "float32",
+            align=16,
+            name="o_tmp_smem",
         )
         self.lse_tmp_smem_load = smem_manager.alloc(
             [self.bdz, self.bdy, self.bdx], "float32", name="lse_tmp_smem_load"
@@ -62,7 +81,9 @@ class DecodeMergeTile(Tile):
             self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy], name="lse_tmp_smem_use"
         )
         smem_manager.pool_allocator.move_base_to(offset)
-        self.o_epi_smem = smem_manager.alloc([self.bdz, self.bdy, self.head_dim], "float32", name="o_epi_smem")
+        self.o_epi_smem = smem_manager.alloc(
+            [self.bdz, self.bdy, self.head_dim], "float32", name="o_epi_smem"
+        )
         self.lse_epi_smem = smem_manager.alloc([self.bdz, self.bdy], "float32", name="lse_epi_smem")
 
         # allocate the reg

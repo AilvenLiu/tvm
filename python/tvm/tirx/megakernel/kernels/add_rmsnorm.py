@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from tvm.script import tirx as Tx
 
 from tvm.tirx.megakernel.utils.base import Tile, SmemManager
@@ -16,11 +33,16 @@ class AddRMSNormTile(Tile):
         super().__init__()
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
+
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
-        self.x_smem = smem_manager.alloc([self.loop_inner * self.hidden_size], name="x_smem", dtype="float32")
-        self.sum_sq_smem = smem_manager.alloc([self.loop_inner, self.bdy], name="sum_sq_smem", dtype="float32")
+        self.x_smem = smem_manager.alloc(
+            [self.loop_inner * self.hidden_size], name="x_smem", dtype="float32"
+        )
+        self.sum_sq_smem = smem_manager.alloc(
+            [self.loop_inner, self.bdy], name="sum_sq_smem", dtype="float32"
+        )
 
     def _alloc_local(self):
         # alloc local memory
@@ -153,6 +175,7 @@ class AddRMSNormTile(Tile):
                 self.smem_manager.advance()
     # fmt: on
 
+
 class RMSNormTile(Tile):
     vec_size = 16 // F16_BYTES
     loop_inner = 1
@@ -164,6 +187,7 @@ class RMSNormTile(Tile):
         super().__init__()
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
+
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory

@@ -514,7 +514,7 @@ class VMShapeLowerMutator
         match_op = builtin_match_shape_;
         args.push_back(PrimValue::Int64(item.pattern.size()));
       }
-      
+
       for (PrimExpr expr : item.pattern) {
         auto [code, rvalue] = MakeMatchArgs(expr, require_value_computed);
         all_nop = all_nop && code == MatchShapeCode::kNoOp;

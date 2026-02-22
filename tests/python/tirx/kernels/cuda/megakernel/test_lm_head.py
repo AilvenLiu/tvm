@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import argparse
 import numpy as np
 import torch
@@ -9,13 +26,14 @@ from tvm.tirx.megakernel.utils.utils import ceildiv, get_source_func
 from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.kernels import GemmTile
 
+
 def prepare_data(batch_size, N, K):
     A = torch.randn((batch_size, K), dtype=torch.float16)
     B = torch.randn((N, K), dtype=torch.float16)
     return A, B
 
-class LMHeadLayer:
 
+class LMHeadLayer:
     def __init__(self, N, K):
         self.N = N
         self.K = K
@@ -43,7 +61,9 @@ class LMHeadLayer:
 
     @Tx.inline
     def body(self, A, B, out, blk_m):
-        gemm_tile = GemmTile(self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m)
+        gemm_tile = GemmTile(
+            self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m
+        )
         gemm_tile.host_init()
         with Tx.kernel():
             bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
@@ -70,7 +90,9 @@ class LMHeadLayer:
             batch_size = Tx.int32()
             A_global = Tx.match_buffer(A_ptr, [batch_size, self.K], dtype="float16", scope="global")
             B_global = Tx.match_buffer(B_ptr, [self.N, self.K], dtype="float16", scope="global")
-            out_global = Tx.match_buffer(out_ptr, [batch_size, self.N], dtype="float16", scope="global")
+            out_global = Tx.match_buffer(
+                out_ptr, [batch_size, self.N], dtype="float16", scope="global"
+            )
             if batch_size <= 32:
                 self.body(A_global, B_global, out_global, 32)
             elif batch_size <= 64:
@@ -80,13 +102,19 @@ class LMHeadLayer:
 
         return lm_head_gemm
 
+
 def test(batch_size, N, K, mod):
     A, B = prepare_data(batch_size, N, K)
     target = tvm.target.Target("cuda")
 
     def std():
         out = torch.empty((batch_size, N), dtype=torch.float16).to("cuda")
-        ms = bench(lambda: torch.matmul(A.to("cuda"), B.to("cuda").T, out=out), warmup=10, repeat=30, proton_name="std")
+        ms = bench(
+            lambda: torch.matmul(A.to("cuda"), B.to("cuda").T, out=out),
+            warmup=10,
+            repeat=30,
+            proton_name="std",
+        )
         print(f"std: {ms:.3f} ms")
         return out.cpu().numpy()
 
@@ -105,14 +133,25 @@ def test(batch_size, N, K, mod):
         out_tir = tir()
         np.testing.assert_allclose(out_std, out_tir, rtol=1e-3, atol=1e-2)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
-    parser.add_argument("--model", type=str, default="qwen3_32b", choices=["qwen3_32b", "llama3_1b"],
-                        help="The supporting model.")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="qwen3_32b",
+        choices=["qwen3_32b", "llama3_1b"],
+        help="The supporting model.",
+    )
     parser.add_argument("--N", type=int, default=128256, help="The N dimension.")
     parser.add_argument("--K", type=int, default=2048, help="The K dimension.")
-    parser.add_argument("--batch-size", type=int, nargs='+', default=[1, 3, 7, 15, 31, 63, 127, 128],
-                        help="The batch size.")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        nargs="+",
+        default=[1, 3, 7, 15, 31, 63, 127, 128],
+        help="The batch size.",
+    )
     args = parser.parse_args()
 
     lm_head = LMHeadLayer(args.N, args.K)
