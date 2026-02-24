@@ -81,22 +81,38 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const LetStmtNode* op) final {
-    // Detect warp_id_in_cta LetStmt introduced by the scope ID resolver
     if (op->var->name_hint == "warp_id_in_cta") {
-      warp_id_in_cta_var_ = op->var;
-      warp_id_in_cta_value_ = op->value;
       IterVar warp_iv(Range::FromMinExtent(0, 1), op->var, kThreadIndex, "warp_id_in_cta");
       launch_params_["warp_id_in_cta"] = warp_iv;
     }
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  /*! \brief Resolve an ExecScopeSlice into IfThenElse(condition, ExecScopeStmt(plain_scope, body)) */
+  Stmt ResolveSliceToIfThenElse(const ExecScopeSlice& scope_slice, const Stmt& body) {
+    auto scope = ScopePair(scope_slice->parent, scope_slice->name);
+    int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
+                      ? 1
+                      : scope_slice->slices.as<Array<Range>>().value().size();
+    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
+        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
+    ICHECK_EQ(resolved.size(), out_dim);
+    auto plain_scope = ExecScope::Create(scope_slice->name);
+    Stmt inner = ExecScopeStmt(plain_scope, body);
+    if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
+      return IfThenElse(select_cond.value(), inner);
+    }
+    auto slices = scope_slice->slices.as<Array<Range>>().value();
+    PrimExpr cond = Bool(true);
+    for (size_t i = 0; i < slices.size(); i++) {
+      cond = cond && resolved[i] >= slices[i]->min &&
+             resolved[i] < slices[i]->extent + slices[i]->min;
+    }
+    return IfThenElse(cond, inner);
+  }
+
   Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
     auto exec_scope = op->exec_scope;
-    bool is_kernel = exec_scope->Is("kernel");
-    if (is_kernel) {
-      need_warp_id_in_cta_letstmt_ = false;
-    }
 
     // Check for scope_partition AttrStmt wrapping the body
     auto stripped_body = StripBodyAttr(op->body, attr::tirx_scope_partition);
@@ -129,110 +145,28 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         body = LetStmt(let_stmts[i].first, let_stmts[i].second, body);
       }
 
-      // If this node is also a scope_slice, continue to resolve the slice
-      // (don't return yet — fall through to scope_slice handling below)
+      // If this node is also a scope_slice, resolve it
       auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
       if (scope_slice_opt.has_value()) {
-        auto scope_slice = scope_slice_opt.value();
-        auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-        int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
-                          ? 1
-                          : scope_slice->slices.as<Array<Range>>().value().size();
-        if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
-            launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
-          PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
-          warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
-          warp_id_in_cta_value_ = shuffled;
-          need_warp_id_in_cta_letstmt_ = true;
-          IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
-                          "warp_id_in_cta");
-          launch_params_["warp_id_in_cta"] = warp_iv;
-        }
-        Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
-            scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
-        ICHECK_EQ(resolved.size(), out_dim);
-        auto plain_scope = ExecScope::Create(scope_slice->name);
-        Stmt inner = ExecScopeStmt(plain_scope, body);
-        if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
-          return IfThenElse(select_cond.value(), inner);
-        } else {
-          auto slices = scope_slice->slices.as<Array<Range>>().value();
-          PrimExpr cond = Bool(true);
-          for (size_t i = 0; i < slices.size(); i++) {
-            cond = cond && resolved[i] >= slices[i]->min &&
-                   resolved[i] < slices[i]->extent + slices[i]->min;
-          }
-          return IfThenElse(cond, inner);
-        }
+        return ResolveSliceToIfThenElse(scope_slice_opt.value(), body);
       }
-
-      Stmt result = ExecScopeStmt(exec_scope, body);
-      if (is_kernel && need_warp_id_in_cta_letstmt_) {
-        auto exec_scope_stmt = result.as<ExecScopeStmtNode>();
-        result = ExecScopeStmt(exec_scope_stmt->exec_scope,
-                               LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(),
-                                       exec_scope_stmt->body));
-        need_warp_id_in_cta_letstmt_ = false;
-      }
-      return result;
+      return ExecScopeStmt(exec_scope, body);
     }
 
     // Check for scope_slice on the ExecScopeStmt
     auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
-    if (!scope_slice_opt.has_value()) {
-      // No scope slice — just visit body
+    if (scope_slice_opt.has_value()) {
       Stmt body = VisitStmt(op->body);
-      Stmt result = ExecScopeStmt(exec_scope, body);
-      if (is_kernel && need_warp_id_in_cta_letstmt_) {
-        // Wrap the body with the warp_id_in_cta LetStmt
-        auto exec_scope_stmt = result.as<ExecScopeStmtNode>();
-        result = ExecScopeStmt(exec_scope_stmt->exec_scope,
-                               LetStmt(warp_id_in_cta_var_.value(), warp_id_in_cta_value_.value(),
-                                       exec_scope_stmt->body));
-        need_warp_id_in_cta_letstmt_ = false;
-      }
-      return result;
+      return ResolveSliceToIfThenElse(scope_slice_opt.value(), body);
     }
-    // Has scope slice — resolve it
-    auto scope_slice = scope_slice_opt.value();
-    auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-    int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
-                      ? 1
-                      : scope_slice->slices.as<Array<Range>>().value().size();
-    if (ScopeIdResolveTable::NeedWarpIdInCta(scope_slice->name) &&
-        launch_params_.find("warp_id_in_cta") == launch_params_.end()) {
-      PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params_);
-      warp_id_in_cta_var_ = Var("warp_id_in_cta", shuffled.dtype());
-      warp_id_in_cta_value_ = shuffled;
-      need_warp_id_in_cta_letstmt_ = true;
-      IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var_.value(), kThreadIndex,
-                      "warp_id_in_cta");
-      launch_params_["warp_id_in_cta"] = warp_iv;
-    }
-    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
-        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
-    ICHECK_EQ(resolved.size(), out_dim);
-    auto plain_scope = ExecScope::Create(scope_slice->name);
+
+    // No scope slice — just visit body
     Stmt body = VisitStmt(op->body);
-    Stmt inner = ExecScopeStmt(plain_scope, body);
-    if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
-      return IfThenElse(select_cond.value(), inner);
-    } else {
-      auto slices = scope_slice->slices.as<Array<Range>>().value();
-      PrimExpr cond = Bool(true);
-      for (size_t i = 0; i < slices.size(); i++) {
-        cond = cond && resolved[i] >= slices[i]->min &&
-               resolved[i] < slices[i]->extent + slices[i]->min;
-      }
-      return IfThenElse(cond, inner);
-    }
+    return ExecScopeStmt(exec_scope, body);
   }
 
   LaunchParams launch_params_;
   const Target& target_;
-  ffi::Optional<Var> warp_id_in_cta_var_;
-  ffi::Optional<PrimExpr> warp_id_in_cta_value_;
-  bool need_warp_id_in_cta_letstmt_ = false;
 };
 
 namespace {

@@ -217,6 +217,17 @@ class CUDAWrappedFunc {
       attrs.push_back(attr);
     }
 
+    // 1b) Preferred cluster (CUDA 12.8+, cudaLaunchAttributePreferredClusterDimension)
+    if (wl.preferred_cluster_dim(0) != 1 || wl.preferred_cluster_dim(1) != 1 ||
+        wl.preferred_cluster_dim(2) != 1) {
+      CUlaunchAttribute attr{};
+      attr.id = CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION;
+      attr.value.clusterDim.x = wl.preferred_cluster_dim(0);
+      attr.value.clusterDim.y = wl.preferred_cluster_dim(1);
+      attr.value.clusterDim.z = wl.preferred_cluster_dim(2);
+      attrs.push_back(attr);
+    }
+
     // 2) Programmatic stream serialization
     if (launch_param_config_.use_programtic_dependent_launch()) {
       CUlaunchAttribute attr{};

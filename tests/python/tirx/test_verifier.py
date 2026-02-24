@@ -192,6 +192,36 @@ def test_scope_slice():
     verify(test6)
 
 
+def test_scope_slice_1d_validation():
+    """Regression test: warp/warpgroup slices must be 1D.
+
+    Before the fix, a 2D slice on a warp scope would only be caught late during lowering.
+    The fix adds early validation in ExecScopeFrameSlice, symmetric with the existing
+    ScopeId 1D extent check.
+    """
+    with pytest.raises(Exception):
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def warp_2d_slice():
+            with Tx.kernel():
+                with Tx.cta():
+                    with Tx.warp()[0:2, 0:1]:
+                        with Tx.thread():
+                            pass
+        # fmt: on
+
+    with pytest.raises(Exception):
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def warpgroup_2d_slice():
+            with Tx.kernel():
+                with Tx.cta():
+                    with Tx.warpgroup()[0:2, 0:1]:
+                        with Tx.thread():
+                            pass
+        # fmt: on
+
+
 def test_scope_partition():
     # fmt: off
     @Tx.prim_func(tirx=True, check_well_formed=False)
@@ -349,10 +379,10 @@ def test_scope_id_consistency():
     with pytest.raises(Exception, match="Inconsistent extents for scope"):
         verify(test3)
     verify(test4)
-    with pytest.raises(Exception, match="Inconsistent extents for scope"):
+    with pytest.raises(Exception, match="Inconsistent extents|non-divisible extents"):
         verify(test5)
     verify(test6)
-    with pytest.raises(Exception, match="Inconsistent extents for scope"):
+    with pytest.raises(Exception, match="Inconsistent extents|non-divisible extents"):
         verify(test7)
 
 
@@ -449,6 +479,44 @@ def test_device_func():
         verify(test2, device_func=True)
     with pytest.raises(Exception, match="Only one root scope is allowed in device function"):
         verify(test3, device_func=True)
+
+
+def test_preferred_cluster_validation():
+    # fmt: off
+    # Valid: cluster→cta with preferred_extents matching size
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test1() -> None:
+        with Tx.kernel():
+            cbx, cby = Tx.cta_id([2, 1], parent="cluster", preferred=[2, 2])
+            tx = Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                Tx.evaluate(cbx + cby + tx)
+
+    # Invalid: preferred size doesn't match extents size (caught at verify time)
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def test2() -> None:
+        with Tx.kernel():
+            cbx, cby = Tx.cta_id([2, 1], parent="cluster", preferred=[2])
+            tx = Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                Tx.evaluate(cbx + cby + tx)
+    # fmt: on
+
+    verify(test1)
+    with pytest.raises(Exception, match="preferred_extents must have the same size"):
+        verify(test2)
+
+    # Invalid: preferred on a non-cluster→cta scope (caught at IR build time)
+    with pytest.raises(Exception):
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def test3() -> None:
+            with Tx.kernel():
+                bx = Tx.cta_id([128], parent="kernel", preferred=[256])
+                tx = Tx.thread_id([128], parent="cta")
+                with Tx.thread():
+                    Tx.evaluate(bx + tx)
+        # fmt: on
 
 
 if __name__ == "__main__":

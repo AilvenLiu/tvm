@@ -225,6 +225,9 @@ struct ThreadScope {
     } else if (s.compare(0, 14, "clusterCtaIdx.") == 0) {
       r.rank = 2;
       r.dim_index = static_cast<int>(s[14] - 'x');
+    } else if (s.compare(0, 23, "preferredClusterCtaIdx.") == 0) {
+      r.rank = 3;
+      r.dim_index = static_cast<int>(s[23] - 'x');
     } else {
       TVM_FFI_THROW(InternalError) << "Unknown threadscope " << s;
     }
@@ -243,8 +246,8 @@ struct ThreadScope {
 
 /*! \brief workload specification */
 struct ThreadWorkLoad {
-  // array, first three are thread configuration.
-  size_t work_size[9];
+  // work_size layout: [0-2] grid, [3-5] block, [6-8] cluster, [9-11] preferred_cluster
+  size_t work_size[12];
   // Dynamic shared memory allocation size in bytes.
   size_t dyn_shmem_size{0};
   /*!
@@ -259,9 +262,14 @@ struct ThreadWorkLoad {
   inline size_t grid_dim(size_t i) const { return work_size[i]; }
   /*!
    * \param i The cluster dimension.
-   * \return i-th thread dim
+   * \return i-th cluster dim
    */
   inline size_t cluster_dim(size_t i) const { return work_size[i + 6]; }
+  /*!
+   * \param i The preferred cluster dimension.
+   * \return i-th preferred cluster dim
+   */
+  inline size_t preferred_cluster_dim(size_t i) const { return work_size[i + 9]; }
 };
 
 /*! \brief Launch parameters configuration */
@@ -269,7 +277,7 @@ class LaunchParamConfig {
  public:
   void Init(size_t base, const ffi::Array<ffi::String>& launch_param_tags) {
     base_ = base;
-    std::vector<bool> filled(9, false);
+    std::vector<bool> filled(12, false);
     for (size_t i = 0; i < launch_param_tags.size(); ++i) {
       std::string tag(launch_param_tags[i]);
       if (tag == launch_param::kUseDynamicSharedMemoryTag) {
@@ -296,7 +304,7 @@ class LaunchParamConfig {
   // extract workload from arguments.
   ThreadWorkLoad Extract(ffi::PackedArgs args) const {
     ThreadWorkLoad w;
-    std::fill(w.work_size, w.work_size + 9, 1);
+    std::fill(w.work_size, w.work_size + 12, 1);
     const TVMFFIAny* raw_args = reinterpret_cast<const TVMFFIAny*>(args.data());
 
     for (size_t i = 0; i < arg_index_map_.size(); ++i) {

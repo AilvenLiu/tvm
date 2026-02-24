@@ -594,8 +594,8 @@ def cluster_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
     return ret
 
 
-def cta_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
-    ret = _ffi_api.CtaId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def cta_id(extents: List[Union[PrimExpr, int]], parent: str, preferred=None) -> List[Var]:
+    ret = _ffi_api.CtaId(extents, parent, preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret

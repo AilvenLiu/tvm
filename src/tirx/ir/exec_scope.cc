@@ -26,6 +26,13 @@
 namespace tvm {
 namespace tirx {
 
+namespace {
+/*! \brief ExecScope order from highest to lowest */
+const std::unordered_map<ffi::String, int> ScopeOrder = {
+    {"world", 0},     {"kernel", 1}, {"cluster", 2}, {"cta", 3},
+    {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
+}  // namespace
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   ExecScopeNode::RegisterReflection();
   ExecScopeSliceNode::RegisterReflection();
@@ -49,7 +56,13 @@ bool ExecScope::Valid(const ffi::String& name) { return ScopeOrder.find(name) !=
 
 bool ExecScopeNode::Is(const ffi::String& name) const { return name == this->name; }
 
-bool ExecScopeNode::Is(const ExecScope& other) const { return Is(other->name); }
+bool ExecScopeNode::Is(const ExecScope& other) const {
+  // Both must be the same concrete type (both plain or both slice)
+  if (this->IsInstance<ExecScopeSliceNode>() != other->IsInstance<ExecScopeSliceNode>()) {
+    return false;
+  }
+  return Is(other->name);
+}
 
 bool ExecScopeNode::Higher(const ffi::String& other) const {
   CHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
@@ -124,13 +137,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 // ScopeIdDef
-ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope) {
+ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope,
+                        ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
   auto n = ffi::make_object<ScopeIdDefNode>();
   CHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
                                        << ids.size() << " and " << extents.size();
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
   n->scope = std::move(scope);
+  n->preferred_extents = std::move(preferred_extents);
   data_ = std::move(n);
 }
 
@@ -145,10 +160,12 @@ PrimExpr ScopeIdDef::fused_extent() const {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ScopeIdDef",
-                        [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope) {
-                          return ScopeIdDef(vars, extents, scope);
-                        });
+  refl::GlobalDef().def(
+      "tirx.ScopeIdDef",
+      [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope,
+         ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
+        return ScopeIdDef(vars, extents, scope, preferred_extents);
+      });
 }
 
 bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
@@ -166,13 +183,28 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
     }
   };
 
-  for (const auto& def : defs) insert_id(def);
+  for (const auto& def : defs) {
+    if (def->preferred_extents.defined()) {
+      CHECK(def->scope->parent == "cluster" && def->scope->cur == "cta")
+          << "ValueError: preferred_extents is only valid for cluster→cta scope, got "
+          << def->scope->parent << "→" << def->scope->cur;
+      CHECK_EQ(def->preferred_extents.value().size(), def->extents.size())
+          << "ValueError: preferred_extents must have the same size as extents, got "
+          << def->preferred_extents.value().size() << " vs " << def->extents.size();
+    }
+    insert_id(def);
+  }
 
   while (!queue.empty()) {
     auto head = queue.front();
     queue.pop();
 
-    for (const auto& [_, def] : id_set) {
+
+    // Snapshot to avoid iterator invalidation on insert
+    std::vector<ScopeIdDef> snapshot;
+    snapshot.reserve(id_set.size());
+    for (const auto& [_, def] : id_set) snapshot.push_back(def);
+    for (const auto& def : snapshot) {
       for (auto op : {Compose, Compliment}) {
         if (auto result = op(head, def)) insert_id(result.value());
         if (auto result = op(def, head)) insert_id(result.value());
@@ -191,15 +223,26 @@ ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) 
 
 ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (is_zero(rhs.fused_extent())) return std::nullopt;
+  arith::Analyzer ana;
+  auto try_compliment = [&](PrimExpr lhs_ext, PrimExpr rhs_ext,
+                            ScopePair scope) -> ffi::Optional<ScopeIdDef> {
+    if (ana.CanProve(floormod(lhs_ext, rhs_ext) == 0)) {
+      return ScopeIdDef({Var("")}, {floordiv(lhs_ext, rhs_ext)}, scope);
+    }
+    CHECK(!ana.CanProve(floormod(lhs_ext, rhs_ext) != 0))
+        << "ValueError: scope " << scope << " has non-divisible extents: " << lhs_ext
+        << " is not divisible by " << rhs_ext;
+    return std::nullopt;
+  };
   if (lhs->scope->parent == rhs->scope->parent &&
       ExecScope::Create(rhs->scope->cur)->Higher(lhs->scope->cur)) {
-    return ScopeIdDef({Var("")}, {floordiv(lhs.fused_extent(), rhs.fused_extent())},
-                      ScopePair(rhs->scope->cur, lhs->scope->cur));
+    return try_compliment(lhs.fused_extent(), rhs.fused_extent(),
+                          ScopePair(rhs->scope->cur, lhs->scope->cur));
   }
   if (lhs->scope->cur == rhs->scope->cur &&
       ExecScope::Create(lhs->scope->parent)->Higher(rhs->scope->parent)) {
-    return ScopeIdDef({Var("")}, {floordiv(lhs.fused_extent(), rhs.fused_extent())},
-                      ScopePair(lhs->scope->parent, rhs->scope->parent));
+    return try_compliment(lhs.fused_extent(), rhs.fused_extent(),
+                          ScopePair(lhs->scope->parent, rhs->scope->parent));
   }
   return std::nullopt;
 }
@@ -336,5 +379,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirxxxxxxxxxx
 }  // namespace tvm

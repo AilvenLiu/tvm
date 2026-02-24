@@ -259,13 +259,19 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (auto scope_id : scope_id_def->def_ids) {
               lhs.push_back(DefineVar(scope_id, *frame, d));
             }
-            ExprDoc rhs =
-                TIR(d, scope_id_def->scope->cur + "_id")
-                    ->Call({d->AsDoc<ExprDoc>(scope_id_def->extents,
-                                             scope_p->Attr("scope_id_def")->Attr("extents"))},
-                           {"parent"},
-                           {LiteralDoc::Str(scope_id_def->scope->parent,
-                                           scope_p->Attr("scope_id_def")->Attr("parent"))});
+            ffi::Array<ExprDoc> call_args = {d->AsDoc<ExprDoc>(
+                scope_id_def->extents, scope_p->Attr("scope_id_def")->Attr("extents"))};
+            ffi::Array<ffi::String> kwarg_keys = {"parent"};
+            ffi::Array<ExprDoc> kwarg_vals = {LiteralDoc::Str(
+                scope_id_def->scope->parent, scope_p->Attr("scope_id_def")->Attr("parent"))};
+            if (scope_id_def->preferred_extents.defined()) {
+              kwarg_keys.push_back("preferred");
+              kwarg_vals.push_back(d->AsDoc<ExprDoc>(
+                  scope_id_def->preferred_extents.value(),
+                  scope_p->Attr("scope_id_def")->Attr("preferred_extents")));
+            }
+            ExprDoc rhs = TIR(d, scope_id_def->scope->cur + "_id")
+                              ->Call(call_args, kwarg_keys, kwarg_vals);
             (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
           }
 

@@ -207,6 +207,14 @@ ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
       << "InternalError: ExecScope frame must have an execution scope";
   TVM_FFI_ICHECK(!frame->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
       << "InternalError: ExecScope frame already has an execution scope slice";
+  auto scope_name = frame->exec_scope.value()->name;
+  if (scope_name == "warp" || scope_name == "warpgroup") {
+    if (auto ranges = slice.as<ffi::Array<Range>>()) {
+      TVM_FFI_ICHECK_EQ(ranges.value().size(), 1)
+          << "ValueError: " << scope_name << " scope only supports 1D slices, got "
+          << ranges.value().size() << "D";
+    }
+  }
   frame->exec_scope =
       tvm::tirx::ExecScopeSlice(slice, frame->scope_slice_extents, frame->scope_slice_parent,
                                frame->exec_scope.value()->name);
@@ -254,6 +262,11 @@ ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String par
                               << "but no ExecScopeFrame was found";
   auto exec_scope = es_frame.value()->exec_scope;
   TVM_FFI_ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame has no exec_scope";
+  if (cur == "warp" || cur == "warpgroup") {
+    TVM_FFI_ICHECK_EQ(extents.size(), 1)
+        << "ValueError: " << cur << " scope only supports 1D extents, got " << extents.size()
+        << "D";
+  }
   ffi::Array<tvm::tirx::Var> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::Var(""));
@@ -273,7 +286,27 @@ ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String p
   return ScopeId(extents, parent, "T.cluster_id", "cluster");
 }
 
-ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent,
+                                 ffi::Optional<ffi::Array<PrimExpr>> preferred) {
+  if (preferred.defined()) {
+    TVM_FFI_ICHECK(parent == "cluster")
+        << "ValueError: preferred is only valid when parent=\"cluster\", got parent=\"" << parent
+        << "\"";
+    ffi::Optional<ExecScopeFrame> es_frame = IRBuilder::Current()->FindFrame<ExecScopeFrame>();
+    TVM_FFI_ICHECK(es_frame.defined()) << "InternalError: T.cta_id must be called inside an execution "
+                                  "scope, but no ExecScopeFrame was found";
+    auto exec_scope = es_frame.value()->exec_scope;
+    TVM_FFI_ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame has no exec_scope";
+    ffi::Array<tvm::tirx::Var> scope_ids;
+    for (size_t i = 0; i < extents.size(); ++i) {
+      scope_ids.push_back(tvm::tirx::Var(""));
+    }
+    const_cast<tvm::tirx::ExecScopeNode*>(exec_scope.value().as<tvm::tirx::ExecScopeNode>())
+        ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(scope_ids, extents,
+                                                       tvm::tirx::ScopePair(parent, "cta"),
+                                                       preferred));
+    return scope_ids;
+  }
   return ScopeId(extents, parent, "T.cta_id", "cta");
 }
 
@@ -865,7 +898,7 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
       tvm::tirx::BufferNode* buffer =
           const_cast<tvm::tirx::BufferNode*>(node.as<tvm::tirx::BufferNode>());
       if (!buffer->name.empty() && buffer->name != std::string(name)) {
-        LOG(FATAL) << "Buffer name conflict: buffer was created with name \""
+        TVM_FFI_THROW(InternalError) << "Buffer name conflict: buffer was created with name \""
                    << buffer->name << "\", but the parser is trying to rename it to \""
                    << name << "\". Remove the explicit `name=` argument and let the parser "
                    << "auto-name the buffer from the LHS variable.";
@@ -948,7 +981,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Thread", Thread)
       .def("script.ir_builder.tir.KernelId", KernelId)
       .def("script.ir_builder.tir.ClusterId", ClusterId)
-      .def("script.ir_builder.tir.CtaId", CtaId)
+      .def("script.ir_builder.tir.CtaId",
+           [](ffi::Array<PrimExpr> extents, ffi::String parent,
+              ffi::Optional<ffi::Array<PrimExpr>> preferred) {
+             return CtaId(extents, parent, preferred);
+           })
       .def("script.ir_builder.tir.WarpgroupId", WarpgroupId)
       .def("script.ir_builder.tir.WarpId", WarpId)
       .def("script.ir_builder.tir.ThreadId", ThreadId)
@@ -1135,7 +1172,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 }
 
-}  // namespace tirxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

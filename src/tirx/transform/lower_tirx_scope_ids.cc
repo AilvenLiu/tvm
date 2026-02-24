@@ -118,16 +118,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
     std::vector<std::pair<Var, PrimExpr>> scope_lets;
 
-    // Check if any scope needs warp_id_in_cta
-    bool need_warp_id = false;
-    for (const auto& def : scope_id_def) {
-      if (ScopeIdResolveTable::NeedWarpIdInCta(def->scope->cur)) {
-        need_warp_id = true;
-        break;
-      }
-    }
-
-    if (need_warp_id) {
+    if (launch_params.count("threadIdx.x") > 0) {
       PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params);
       Var warp_id_in_cta_var("warp_id_in_cta", shuffled.dtype());
       scope_lets.push_back({warp_id_in_cta_var, shuffled});
@@ -202,10 +193,25 @@ class ScopeIdDefResolver : public StmtExprMutator {
       CHECK_EQ(target->kind->default_device_type, kDLCUDA)
           << "ValueError: cluster is only supported in CUDA";
       add_launch_param(ScopePair("cluster", "cta"), "clusterCtaIdx.");
+      // Preferred cluster size (CUDA 12.8+)
+      const auto& cta_def = (*it).second;
+      if (cta_def->preferred_extents.defined()) {
+        const auto& pref = cta_def->preferred_extents.value();
+        for (size_t i = 0; i < pref.size(); i++) {
+          std::string tag = "preferredClusterCtaIdx." + std::string(1, 'x' + i);
+          IterVar iv(Range::FromMinExtent(0, pref[i]), Var(tag), IterVarType::kThreadIndex, tag);
+          launch_params->insert({ffi::String(tag), iv});
+        }
+      }
       add_launch_param(ScopePair("kernel", "cta"), "blockIdx.");
     }
     // threadIdx.x, threadIdx.y, threadIdx.z
     add_launch_param(ScopePair("cta", "thread"), "threadIdx.");
+    if (!id_set.empty()) {
+      CHECK(launch_params->count("threadIdx.x") > 0)
+          << "ValueError: kernel has no thread launch parameters. "
+          << "At minimum, declare cta→thread extent (e.g., Tx.thread_id([128]))";
+    }
   }
 
   /*! \brief The launch params of current kernel scope */

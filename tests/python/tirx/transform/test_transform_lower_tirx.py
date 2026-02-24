@@ -584,6 +584,7 @@ def test_lower_scope_id():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
         bx: Tx.let[Tx.int32] = blockIdx_x
         by: Tx.let[Tx.int32] = blockIdx_y
         bz: Tx.let[Tx.int32] = blockIdx_z
@@ -1044,6 +1045,7 @@ def test_lower_decl_buffer_access_ptr():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
         bx: Tx.let[Tx.int32] = blockIdx_x
         tx: Tx.let[Tx.int32] = threadIdx_x
         with Tx.kernel():
@@ -1072,6 +1074,7 @@ def test_lower_separate_scope_id_def():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
         tx: Tx.let[Tx.int32] = threadIdx_x
         bx: Tx.let[Tx.int32] = blockIdx_x
         with Tx.kernel():
@@ -1104,6 +1107,7 @@ def test_lower_buffer_offset():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
         tx: Tx.let[Tx.int32] = threadIdx_x
         bx: Tx.let[Tx.int32] = blockIdx_x
         with Tx.kernel():
@@ -1260,6 +1264,71 @@ def test_scope_id_compliment_no_div_by_zero():
                 with Tx.thread():
                     Tx.evaluate(bx + cb_m + cb_n + tx)
         # fmt: on
+
+
+def test_scope_id_compliment_non_divisible():
+    """Regression test: Compliment must error on provably non-divisible extents.
+
+    cta->thread=100 and cta->warp=3 would produce warp->thread = floordiv(100, 3) = 33,
+    which is semantically wrong. The fix detects this and raises an error.
+    """
+    with pytest.raises(Exception):
+        # fmt: off
+        @Tx.prim_func(tirx=True)
+        def func():
+            with Tx.kernel():
+                bx = Tx.cta_id([1], parent="kernel")
+                wid = Tx.warp_id([3], parent="cta")
+                tx = Tx.thread_id([100], parent="cta")
+                with Tx.thread():
+                    Tx.evaluate(bx + wid + tx)
+        # fmt: on
+
+
+def test_empty_kernel_no_thread_id():
+    """Regression test: kernel with ScopeIdDefs but no thread launch params must error early.
+
+    Before the fix, this would crash late in codegen with poor diagnostics.
+    """
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.kernel():
+            bx = Tx.cta_id([32], parent="kernel")
+            with Tx.cta():
+                with Tx.thread():
+                    Tx.evaluate(bx)
+    # fmt: on
+    with pytest.raises(Exception, match="kernel has no thread launch parameters"):
+        with tvm.target.Target("cuda"):
+            LowerTIRx()(tvm.IRModule({"main": func}))
+
+
+def test_lower_preferred_cluster():
+    # fmt: off
+    @Tx.prim_func(private=True, tirx=True)
+    def before() -> None:
+        with Tx.kernel():
+            bx = Tx.cta_id([8], parent="kernel")
+            cbx, cby = Tx.cta_id([2, 1], parent="cluster", preferred=[2, 2])
+            tx = Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                Tx.evaluate(bx + cbx + cby + tx)
+    # fmt: on
+
+    with tvm.target.Target("cuda"):
+        after_mod = LowerTIRx()(tvm.IRModule({"main": before}))
+    after_str = str(after_mod["main"])
+
+    # Fallback cluster size
+    assert 'launch_thread("clusterCtaIdx.x", 2)' in after_str
+    assert 'launch_thread("clusterCtaIdx.y", 1)' in after_str
+    # Preferred cluster size
+    assert 'launch_thread("preferredClusterCtaIdx.x", 2)' in after_str
+    assert 'launch_thread("preferredClusterCtaIdx.y", 2)' in after_str
+    # Variables resolve to clusterCtaIdx registers
+    assert "clusterCtaIdx_x" in after_str
+    assert "clusterCtaIdx_y" in after_str
 
 
 if __name__ == "__main__":
