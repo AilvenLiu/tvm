@@ -61,7 +61,7 @@ def test_lower_view_get():
                     # B[i] = in_buf[i]
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(2)
+                        A_local = B.local(2)
                         for i in Tx.vectorized(2):
                             A_local[i] = Tx.float32(in_buf[lane_id * 2 + i])
                 # write A into out
@@ -71,7 +71,7 @@ def test_lower_view_get():
                     # out[i] = B[i]
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(2)
+                        A_local = B.local(2)
                         for i in Tx.vectorized(2):
                             out[lane_id * 2 + i] = Tx.float32(A_local[i])
 
@@ -132,7 +132,7 @@ def test_lower_view_get():
                     B = A.view(16, 16, layout=B_layout)
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(2, 2, 2)
+                        A_local = B.local(2, 2, 2)
                         for i in Tx.unroll(4):
                             for j in Tx.vectorized(2):
                                 A_local[i // 2, i % 2, j] = in_buf[i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j]
@@ -142,7 +142,7 @@ def test_lower_view_get():
                     B = A.view(16, 16, layout=B_layout)
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(8)
+                        A_local = B.local(8)
                         for i in Tx.vectorized(2):
                             out[lane_id // 4 * 8 + i // 2 * 8 + lane_id % 4, lane_id % 4 * 2 + i % 2] = A_local[i]
 
@@ -210,7 +210,7 @@ def test_lower_view_get():
                     A = acc.view(128, 128, layout=layout)
                     with Tx.thread():
                         # done by each thread
-                        acc_local = A.storage(16, 2, 2, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
+                        acc_local = A.local(16, 2, 2, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
                         for i in Tx.serial(128 // 8):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
@@ -222,7 +222,7 @@ def test_lower_view_get():
                     A = acc.view(128, 128, layout=layout)
                     with Tx.thread():
                         # done by each thread
-                        acc_local = A.storage(64, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
+                        acc_local = A.local(64, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
                         for i in Tx.serial(128 // 8):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
@@ -506,10 +506,10 @@ def test_lower_tirx_keep_different_swizzle():
                     # B[i] = in_buf[i]
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(2)
+                        A_local = B.local(2)
                         A_local[0] = Tx.float32(in_buf[lane_id * 2])
                         # done by each thread
-                        A_local_1 = B_1.storage(2)
+                        A_local_1 = B_1.local(2)
                         A_local_1[1] = Tx.float32(in_buf[lane_id * 2 + 1])
                 """
                 write A into out
@@ -521,10 +521,10 @@ def test_lower_tirx_keep_different_swizzle():
                     # out[i] = B[i]
                     with Tx.thread():
                         # done by each thread
-                        A_local = B.storage(2)
+                        A_local = B.local(2)
                         out[lane_id * 2] = Tx.float32(A_local[0])
                         # done by each thread
-                        A_local_1 = B_1.storage(2)
+                        A_local_1 = B_1.local(2)
                         out[lane_id * 2 + 1] = Tx.float32(A_local_1[1])
 
     @Tx.prim_func(private=True, tirx=True)
@@ -1212,8 +1212,8 @@ def test_alloc_buffer_with_thread_axis_layout():
                     # Single-step alloc with thread-axis layout
                     reg_wg = Tx.alloc_buffer((128, 4), "float32", scope="local",
                                               layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ tid_in_wg, 1)]))
-                    # Access via .storage() to decompose thread and memory axes
-                    reg = reg_wg.storage(4)
+                    # Access via .local() to decompose thread and memory axes
+                    reg = reg_wg.local(4)
                     for i in Tx.serial(4):
                         reg[i] = out[lane_id + warp_id * 32, i]
 

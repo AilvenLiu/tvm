@@ -505,6 +505,38 @@ class BufferRegion(Object, Scriptable):
             new_region.append(self.region[i])
         return BufferRegion(self.buffer, new_region)
 
+    def partition(self, *, tile_shape=None, num_tiles=None, select=None):
+        """Sub-partition this buffer region into tiles and select one.
+
+        Enables chaining: ``buf.partition(select=...).partition(select=...)``.
+
+        Parameters
+        ----------
+        tile_shape : tuple of int/PrimExpr, optional
+            Each tile's size. Exactly one of tile_shape or num_tiles must be given.
+        num_tiles : tuple of int/PrimExpr, optional
+            Grid dimensions. Tile size derived as extent // num_tiles.
+        select : tuple of int/PrimExpr
+            Tile coordinate (required).
+        """
+        if select is None:
+            raise ValueError("BufferRegion.partition() requires select")
+        if (tile_shape is None) == (num_tiles is None):
+            raise ValueError("specify exactly one of tile_shape or num_tiles")
+        ndim = len(tile_shape) if tile_shape is not None else len(num_tiles)
+        if tile_shape is not None:
+            tile_sizes = list(tile_shape)
+        else:
+            tile_sizes = [self.region[i].extent // num_tiles[i] for i in range(ndim)]
+        new_region = []
+        for i, r in enumerate(self.region):
+            if i < ndim:
+                new_start = r.min + select[i] * tile_sizes[i]
+                new_region.append(Range.from_min_extent(new_start, tile_sizes[i]))
+            else:
+                new_region.append(r)
+        return BufferRegion(self.buffer, new_region)
+
 
 @tvm_ffi.register_object("tirx.MatchBufferRegion")
 class MatchBufferRegion(Object, Scriptable):

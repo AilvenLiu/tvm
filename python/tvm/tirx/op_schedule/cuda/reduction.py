@@ -592,8 +592,8 @@ def reduction_cuda_warp_logical_view_impl(
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl_shuffle_only():
             with Tx.thread():
-                src_local = src.storage(*local_shape)
-                dst_local = dst.storage(*local_shape)
+                src_local = src.local(*local_shape)
+                dst_local = dst.local(*local_shape)
                 for i in Tx.serial(num_rows):
                     if not is_same_buffer:
                         dst_local[i] = src_local[i]
@@ -620,8 +620,8 @@ def reduction_cuda_warp_logical_view_impl(
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
         with Tx.thread():
-            src_local = src.storage(*src_local_shape)
-            dst_local = dst.storage(*dst_local_shape)
+            src_local = src.local(*src_local_shape)
+            dst_local = dst.local(*dst_local_shape)
             for i in Tx.serial(num_rows):
                 # reduce within threads
                 if not accum:

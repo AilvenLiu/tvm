@@ -25,6 +25,7 @@ from typing import Any
 import tvm
 from tvm.ir import GlobalVar, PrimType
 from tvm.tirx import Buffer, IterVar, PrimExpr, TLayout, Var
+from tvm.tirx.stmt import BufferRegion
 
 from ...ir_builder import ir as I
 from ...ir_builder import tirx as T
@@ -144,6 +145,63 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         for i, v in enumerate(value):
             bind_assign_value(self, node, f"{var_name}_{i}", v)
         return value
+    elif isinstance(value, BufferRegion):
+        import functools  # pylint: disable=import-outside-toplevel
+
+        buf = value.buffer
+        region = value.region
+        new_shape = [r.extent for r in region]
+        # Try layout.slice() for new layout
+        sliced_layout = None
+        if buf.layout is not None:
+            range_pairs = [(r.min, r.min + r.extent) for r in region]
+            sliced_layout = buf.layout.slice(list(buf.shape), range_pairs)
+        if sliced_layout is not None:
+            new_buf = T.decl_buffer(
+                new_shape,
+                buf.dtype,
+                buf.data,
+                buf.strides,
+                buf.elem_offset,
+                None,
+                buf.scope(),
+                buf.data_alignment,
+                buf.offset_factor,
+                "",
+                buf.axis_separators,
+                sliced_layout,
+            )
+        else:
+            # Fallback: compute elem_offset for default/no layout
+            strides = []
+            for i in range(len(buf.shape)):
+                stride = functools.reduce(
+                    lambda x, y: x * y, buf.shape[i + 1 :], tvm.tirx.const(1, "int32")
+                )
+                strides.append(stride)
+            offset = tvm.tirx.const(0, "int32")
+            for i, r in enumerate(region):
+                offset = offset + r.min * strides[i]
+            new_elem_offset = buf.elem_offset + offset
+            new_buf = T.decl_buffer(
+                new_shape,
+                buf.dtype,
+                buf.data,
+                buf.strides,
+                new_elem_offset,
+                None,
+                buf.scope(),
+                buf.data_alignment,
+                buf.offset_factor,
+                "",
+                buf.axis_separators,
+                buf.layout,
+            )
+        # Preserve the original BufferRegion so that chained partition()
+        # can trace back to the root buffer instead of the matched sub-buffer.
+        new_buf._source_region = value
+        IRBuilder.name(var_name, new_buf)
+        return new_buf
     elif isinstance(value, Frame):
         value.add_callback(partial(value.__exit__, None, None, None))
         res = value.__enter__()
@@ -156,8 +214,8 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         return value
     else:
         if not isinstance(value, PrimExpr):
-            value = tvm.tir.const(value)
-        if not isinstance(value, tvm.tir.StringImm):
+            value = tvm.tirx.const(value)
+        if not isinstance(value, tvm.tirx.StringImm):
             # x = expr -> scalar (auto-typed from value)
             scalar = T.local_scalar(dtype=str(value.dtype), name=None)
             IRBuilder.name(var_name, scalar.scalar.buffer)
@@ -165,7 +223,7 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
             return scalar.scalar
         else:
             # StringImm: x = expr -> immutable Bind var
-            ann_var = tvm.tir.Var(var_name, value.dtype)
+            ann_var = tvm.tirx.Var(var_name, value.dtype)
             IRBuilder.name(var_name, ann_var)
             T.Bind(value, var=ann_var)
             return ann_var
@@ -460,9 +518,9 @@ def visit_ann_assign(self: Parser, node: doc.AnnAssign) -> None:
             self.report_error(node, "T.let annotation requires a value")
         if not isinstance(rhs, PrimExpr):
             if isinstance(rhs, str):
-                rhs = tvm.tir.StringImm(rhs)
+                rhs = tvm.tirx.StringImm(rhs)
             else:
-                rhs = tvm.tir.const(rhs)
+                rhs = tvm.tirx.const(rhs)
         if raw_ann.type_spec is not None:
             ann_var = raw_ann.as_var()
         else:

@@ -165,12 +165,11 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     tirx::BufferNode* writer;
     if (trn_layout && trn_layout->IsTrainium()) {
       ffi::Array<PrimExpr> new_shape =
-          buf.scope() == "trn.psum"
-              ? ffi::Array<PrimExpr>{trn_layout->GetSpan(ffi::String("Bank")),
-                                     trn_layout->GetSize(ffi::String("P")),
-                                     trn_layout->GetSpan(ffi::String("F"))}
-              : ffi::Array<PrimExpr>{trn_layout->GetSize(ffi::String("P")),
-                                     trn_layout->GetSpan(ffi::String("F"))};
+          buf.scope() == "trn.psum" ? ffi::Array<PrimExpr>{trn_layout->GetSpan(ffi::String("Bank")),
+                                                           trn_layout->GetSize(ffi::String("P")),
+                                                           trn_layout->GetSpan(ffi::String("F"))}
+                                    : ffi::Array<PrimExpr>{trn_layout->GetSize(ffi::String("P")),
+                                                           trn_layout->GetSpan(ffi::String("F"))};
       flattened = buf;
       writer = flattened.CopyOnWrite();
       writer->shape = new_shape;
@@ -293,11 +292,10 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
         }
         return res;
       }
-      if (auto tile = buffer->layout.value().as<TileLayoutNode>();
-          tile && tile->HasThreadAxis()) {
+      if (auto tile = buffer->layout.value().as<TileLayoutNode>(); tile && tile->HasThreadAxis()) {
         LOG(FATAL) << "Cannot lower direct BufferLoad/BufferStore on a buffer with thread-axis "
-                    << "layout: unable to verify that the coordinate matches the current thread. "
-                    << "Use .view() + .storage() to decompose thread and memory axes.";
+                   << "layout: unable to verify that the coordinate matches the current thread. "
+                   << "Use .view() + .local() to decompose thread and memory axes.";
       }
       auto res = buffer->layout.value()->Canonicalize()->Apply(indices, buffer->shape);
       ICHECK_EQ(res.size(), 1) << "Expected a single element offset";

@@ -1082,7 +1082,7 @@ def test_copy_g2s_tma_symbolic_dimension(dtype, swizzle_len):
         # Verify: B[ks, :, :] should equal A[0:BLK_M, ks*BLK_K:(ks+1)*BLK_K]
         B_ref = np.zeros((SMEM_PIPE_DEPTH, BLK_M, BLK_K), dtype=np_dtype)
         for ks in range(SMEM_PIPE_DEPTH):
-            B_ref[ks, :, :] = A_np[0:BLK_M, ks * BLK_K:(ks + 1) * BLK_K]
+            B_ref[ks, :, :] = A_np[0:BLK_M, ks * BLK_K : (ks + 1) * BLK_K]
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
@@ -1199,6 +1199,439 @@ def test_copy_g2s_tma_3d_with_view(dtype, swizzle_len):
 
         B_ref = np.zeros((32, 4, 64), dtype=np_dtype)
         B_ref[:, :, :] = Q_np[0, 0:32, 0:4, 0:64]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
+# ===========================================================================
+# Unit tests: directly call copy_tma_impl with constructed OpCall/ScheduleContext
+# ===========================================================================
+
+
+def _make_tma_call(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout, dtype="float16"):
+    """Helper to construct OpCall + ScheduleContext and call copy_tma_impl.
+
+    Returns the impl PrimFunc on success, raises DispatchFail on expected failure.
+    """
+    from tvm.ir import Range
+    from tvm.tir import Var
+    from tvm.tir.stmt import BufferRegion
+    from tvm.tir.exec_scope import ExecScope
+    from tvm.tirx.operator.op import CopyAsync
+    from tvm.tirx.op_schedule.schedule_context import ScheduleContext
+    from tvm.tirx.op_schedule.cuda.copy_async import copy_tma_impl
+
+    g_buf = tvm.tir.decl_buffer(g_shape, dtype, "A", layout=gmem_layout)
+    s_buf = tvm.tir.decl_buffer(s_shape, dtype, "A_smem", scope="shared.dyn", layout=smem_layout)
+
+    g_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in g_region]
+    s_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in s_region]
+
+    dst_br = BufferRegion(s_buf, s_ranges)
+    src_br = BufferRegion(g_buf, g_ranges)
+
+    mbar_ptr = Var("mbar_ptr", "handle")
+    op_call = CopyAsync(dst_br, src_br, config={"mbar": mbar_ptr, "cta_group": 1})
+
+    target = tvm.target.Target("cuda -arch=sm_90a")
+    sctx = ScheduleContext(target, ExecScope.create("thread"), {}, {})
+
+    return copy_tma_impl(op_call, sctx)
+
+
+def _count_tma_g2c(impl):
+    """Count TMA g2c calls in a PrimFunc (including loop multiplier)."""
+    counter = TMACounter()
+    counter.visit_stmt(impl.body)
+    return counter.total_tma_ops
+
+
+@pytest.mark.parametrize(
+    "g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout, expected",
+    [
+        # --- Transpose (column-major shared + row-major global) → DispatchFail ---
+        pytest.param(
+            (32, 64), ((0, 32), (0, 64)), (32, 64), ((0, 32), (0, 64)),
+            TileLayout(S[32, 64]), TileLayout(S[(32, 64):(1, 32)]),
+            "fail", id="transpose-32x64",
+        ),
+        pytest.param(
+            (64, 32), ((0, 64), (0, 32)), (64, 32), ((0, 64), (0, 32)),
+            TileLayout(S[64, 32]), TileLayout(S[(64, 32):(1, 64)]),
+            "fail", id="transpose-64x32",
+        ),
+        pytest.param(
+            (128, 64), ((0, 64), (0, 64)), (64, 64), ((0, 64), (0, 64)),
+            TileLayout(S[128, 64]), TileLayout(S[(64, 64):(1, 64)]),
+            "fail", id="transpose-partial-region",
+        ),
+        pytest.param(
+            (128, 64), ((64, 128), (0, 32)), (64, 32), ((0, 64), (0, 32)),
+            TileLayout(S[128, 64]), TileLayout(S[(64, 32):(1, 64)]),
+            "fail", id="transpose-partial-offset",
+        ),
+        # --- 4D global with unit dims → TMA works ---
+        pytest.param(
+            (2, 2, 128, 64), ((0, 1), (0, 1), (0, 128), (0, 64)),
+            (128, 64), ((0, 128), (0, 64)),
+            TileLayout(S[2, 2, 128, 64]).canonicalize(),
+            tma_shared_layout("float16", 3, (128, 64)),
+            1, id="multidim-4d-a",
+        ),
+        pytest.param(
+            (4, 64, 4, 128), ((0, 1), (0, 64), (0, 1), (0, 128)),
+            (64, 128), ((0, 64), (0, 128)),
+            TileLayout(S[4, 64, 4, 128]).canonicalize(),
+            tma_shared_layout("float16", 3, (64, 128)),
+            1, id="multidim-4d-b",
+        ),
+        # --- 3D row-major, all contiguous → 1 TMA ---
+        pytest.param(
+            (4, 32, 64), ((0, 4), (0, 32), (0, 64)),
+            (4, 32, 64), ((0, 4), (0, 32), (0, 64)),
+            TileLayout(S[4, 32, 64]), TileLayout(S[4, 32, 64]),
+            1, id="3d-full-contiguous",
+        ),
+        pytest.param(
+            (8, 16, 128), ((0, 4), (0, 16), (0, 128)),
+            (4, 16, 128), ((0, 4), (0, 16), (0, 128)),
+            TileLayout(S[8, 16, 128]), TileLayout(S[4, 16, 128]),
+            1, id="3d-partial-contiguous",
+        ),
+        # --- 3D with non-contiguous outer dim → 8 iterations ---
+        pytest.param(
+            (8, 32, 64), ((0, 8), (0, 32), (0, 64)),
+            (8, 32, 64), ((0, 8), (0, 32), (0, 64)),
+            TileLayout(S[8, 32, 64]),
+            TileLayout(S[(8, 32, 64):(4096, 64, 1)]),
+            8, id="3d-stride-gap-outer",
+        ),
+    ],
+)
+def test_copy_tma_impl(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout, expected):
+    """Unit test: directly call copy_tma_impl and verify TMA op count or DispatchFail."""
+    from tvm.tirx.op_schedule.dispatcher import DispatchFail
+
+    if expected == "fail":
+        with pytest.raises(DispatchFail, match="stride.*1"):
+            _make_tma_call(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout)
+    else:
+        impl = _make_tma_call(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout)
+        assert _count_tma_g2c(impl) == expected
+
+
+# ===========================================================================
+# GPU integration tests (end-to-end with data verification)
+# ===========================================================================
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize(
+    "task",
+    [
+        # (a) 4D global (2,2,128,64), copy (1,1,128,64) → 2D shared (128,64)
+        (
+            (2, 2, 128, 64),  # g_shape
+            ((0, 1), (0, 1), (0, 128), (0, 64)),  # g_region
+            (128, 64),  # s_shape
+            ((0, 128), (0, 64)),  # s_region
+            lambda dtype: tma_shared_layout(dtype, 3, (128, 64)),
+            1,  # expected_tma_ops
+        ),
+        # (b) 4D global (4,64,4,128), copy (1,64,1,128) → 2D shared (64,128)
+        (
+            (4, 64, 4, 128),
+            ((0, 1), (0, 64), (0, 1), (0, 128)),
+            (64, 128),
+            ((0, 64), (0, 128)),
+            lambda dtype: tma_shared_layout(dtype, 3, (64, 128)),
+            1,
+        ),
+    ],
+)
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_tma_multidim_partition(task, dtype):
+    """Test TMA copy with 4D global buffer and unit dims.
+
+    Exercises the is_trivial() removal: the 4D global layout is not trivial
+    but the copy should work since the unit dims don't affect contiguity.
+    Also tests that OOB detection correctly skips extent=1 dimensions.
+    """
+    g_shape, g_region, s_shape, s_region, layoutS_fn, expected_tma_ops = task
+    dev = tvm.cuda(0)
+    gmem_layout = TileLayout(S[g_shape]).canonicalize()
+    thread_cnt = 128
+
+    shared_layout = layoutS_fn(dtype)
+
+    total_bytes = (
+        functools.reduce(lambda acc, r: acc * (r[1] - r[0]), s_region, 1)
+        * tvm.DataType(dtype).bits
+        // 8
+    )
+
+    smem_bytes = functools.reduce(lambda acc, e: acc * e, s_shape, 1)
+    smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
+
+    r_smem = [slice(r[0], r[1]) for r in s_region]
+    r_gmem = [slice(r[0], r[1]) for r in g_region]
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def copy_async(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=gmem_layout)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=gmem_layout)
+
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
+
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+
+                with Tx.thread()[0:1]:
+                    Tx.ptx.mbarrier.init(mbar_ptr, 1)
+                Tx.ptx.fence.proxy("shared")
+                Tx.cuda.cta_sync()
+
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+                Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
+                Tx.cuda.cta_sync()
+
+                with Tx.cta():
+                    Tx.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+
+        # Verify TMA count
+        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        counter = TMACounter()
+        counter.visit_stmt(lowered["main"].body)
+        assert (
+            counter.total_tma_ops == expected_tma_ops
+        ), f"Expected {expected_tma_ops} TMA ops, got {counter.total_tma_ops}"
+
+        # Verify GPU correctness
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        B_ref = np.zeros(g_shape, dtype=np_dtype)
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize(
+    "task",
+    [
+        # (a) Full 3D copy, all contiguous → 1 TMA op
+        (
+            (4, 32, 64),  # g_shape
+            ((0, 4), (0, 32), (0, 64)),  # g_region
+            (4, 32, 64),  # s_shape
+            ((0, 4), (0, 32), (0, 64)),  # s_region
+            TileLayout(S[4, 32, 64]),  # smem_layout
+            1,  # expected_tma_ops
+        ),
+        # (b) Partial 3D copy, all dims contiguous → 1 TMA op
+        (
+            (8, 16, 128),
+            ((0, 4), (0, 16), (0, 128)),
+            (4, 16, 128),
+            ((0, 4), (0, 16), (0, 128)),
+            TileLayout(S[4, 16, 128]),
+            1,
+        ),
+    ],
+)
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_tma_3d_contiguous(task, dtype):
+    """Test row-major 3D TMA copy where all dims are contiguous (regression)."""
+    g_shape, g_region, s_shape, s_region, smem_layout, expected_tma_ops = task
+    dev = tvm.cuda(0)
+    gmem_layout = TileLayout(S[g_shape])
+    thread_cnt = 128
+
+    total_bytes = (
+        functools.reduce(lambda acc, r: acc * (r[1] - r[0]), s_region, 1)
+        * tvm.DataType(dtype).bits
+        // 8
+    )
+
+    smem_bytes = functools.reduce(lambda acc, e: acc * e, s_shape, 1)
+    smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
+
+    r_smem = [slice(r[0], r[1]) for r in s_region]
+    r_gmem = [slice(r[0], r[1]) for r in g_region]
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def copy_async(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=gmem_layout)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=gmem_layout)
+
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
+
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=smem_layout)
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+
+                with Tx.thread()[0:1]:
+                    Tx.ptx.mbarrier.init(mbar_ptr, 1)
+                Tx.ptx.fence.proxy("shared")
+                Tx.cuda.cta_sync()
+
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+                Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
+                Tx.cuda.cta_sync()
+
+                with Tx.cta():
+                    Tx.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+
+        # Verify TMA count
+        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        counter = TMACounter()
+        counter.visit_stmt(lowered["main"].body)
+        assert (
+            counter.total_tma_ops == expected_tma_ops
+        ), f"Expected {expected_tma_ops} TMA ops, got {counter.total_tma_ops}"
+
+        # Verify GPU correctness
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        B_ref = np.zeros(g_shape, dtype=np_dtype)
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_tma_partial_contiguous(dtype):
+    """Test 3D TMA copy where only inner dims are contiguous.
+
+    Shared layout has outer stride 4096 > 32*64=2048, so outer dim is
+    non-contiguous and becomes an iteration dimension → 8 TMA ops.
+    """
+    g_shape = (8, 32, 64)
+    g_region = ((0, 8), (0, 32), (0, 64))
+    s_shape = (8, 32, 64)
+    s_region = ((0, 8), (0, 32), (0, 64))
+    outer_stride = 4096
+    smem_layout = TileLayout(S[(8, 32, 64):(outer_stride, 64, 1)])
+    expected_tma_ops = 8
+
+    dev = tvm.cuda(0)
+    gmem_layout = TileLayout(S[g_shape])
+    thread_cnt = 128
+
+    total_bytes = (
+        functools.reduce(lambda acc, r: acc * (r[1] - r[0]), s_region, 1)
+        * tvm.DataType(dtype).bits
+        // 8
+    )
+
+    # Physical layout size: outer_stride * outer_extent gives conservative bound
+    smem_elems = outer_stride * s_shape[0]
+    smem_bytes = smem_elems * tvm.DataType(dtype).bits // 8
+
+    r_smem = [slice(r[0], r[1]) for r in s_region]
+    r_gmem = [slice(r[0], r[1]) for r in g_region]
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def copy_async(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=gmem_layout)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=gmem_layout)
+
+        with Tx.kernel():
+            bx = Tx.cta_id([1], parent="kernel")
+            tx = Tx.thread_id([thread_cnt], parent="cta")
+
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=smem_layout)
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+
+                with Tx.thread()[0:1]:
+                    Tx.ptx.mbarrier.init(mbar_ptr, 1)
+                Tx.ptx.fence.proxy("shared")
+                Tx.cuda.cta_sync()
+
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+                Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
+                Tx.cuda.cta_sync()
+
+                with Tx.cta():
+                    Tx.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+
+        # Verify TMA count
+        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        counter = TMACounter()
+        counter.visit_stmt(lowered["main"].body)
+        assert (
+            counter.total_tma_ops == expected_tma_ops
+        ), f"Expected {expected_tma_ops} TMA ops, got {counter.total_tma_ops}"
+
+        # Verify GPU correctness
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        B_ref = np.zeros(g_shape, dtype=np_dtype)
+        B_ref[*r_gmem] = A_np[*r_gmem]
         np.testing.assert_allclose(B_ref, B.numpy())
 
 

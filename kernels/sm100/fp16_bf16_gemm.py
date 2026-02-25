@@ -151,8 +151,6 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             tile_scheduler.init(bx // CTA_GROUP)
             m_idx = Tx.meta_var(tile_scheduler.m_idx)
             n_idx = Tx.meta_var(tile_scheduler.n_idx)
-            m_st = Tx.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
-            n_st = Tx.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
 
             if wg_id == 2:
                 if warp_id == 3:
@@ -161,19 +159,23 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     tma_phase.init(is_producer=True)
 
                     @Tx.inline
-                    def tma_load_stage(stage, k_st):
+                    def tma_load_stage(stage, k_tile):
                         mma2tma.wait(stage, tma_phase.phase) # both CTAs wait for the mma (issued by warp0/1 of CTA-0) to finish]
                         tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma2mma_cta0.ptr_to([stage])})
-                        Tx.copy_async(Asmem[stage, 0, :, :], A[m_st : m_st + BLK_M, k_st : k_st + BLK_K], **tma_config)
-                        Tx.copy_async(Asmem[stage, 1, :, :], A[m_st + CTA_GROUP * BLK_M : m_st + (CTA_GROUP + 1) * BLK_M, k_st : k_st + BLK_K], **tma_config)
-                        Tx.copy_async(Bsmem[stage, :, :], B[n_st : n_st + BLK_N, k_st : k_st + BLK_K], **tma_config)
+                        A_tile = A.partition(tile_shape=(NUM_CONSUMER * CTA_GROUP * BLK_M, BLK_K), select=(m_idx, k_tile))
+                        Tx.copy_async(Asmem[stage, 0, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx, 0)), **tma_config)
+                        Tx.copy_async(Asmem[stage, 1, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx + CTA_GROUP, 0)), **tma_config)
+                        Tx.copy_async(Bsmem[stage, :, :],
+                                      B.partition(tile_shape=(CTA_GROUP * BLK_N, BLK_K), select=(n_idx, k_tile))
+                                       .partition(tile_shape=(BLK_N, BLK_K), select=(cbx, 0)),
+                                      **tma_config)
                         if cbx == 0:
                             tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * DTYPE_SIZE) # signal CTA-0 the issue of tma
 
                     @Tx.inline
                     def tma_load():
                         for k_tile in Tx.serial(K_TILES):
-                            tma_load_stage(tma_phase.stage, k_tile * BLK_K)
+                            tma_load_stage(tma_phase.stage, k_tile)
                             tma_phase.move_to_next_stage()
 
                     with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
@@ -243,9 +245,10 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
                         # smem -> gmem
                         with Tx.thread(parent="warpgroup")[warp_id == 0 and lane_id == 0]:
-                            m_st_epi = Tx.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
-                            n_st_epi = Tx.meta_var(n_idx * MMA_N + no * EPI_N)
-                            Tx.copy_async(D[m_st_epi: m_st_epi + BLK_M, n_st_epi: n_st_epi + EPI_N], Dsmem[wg_id, :, :], dispatch="tma")
+                            D_tile = D.partition(tile_shape=(NUM_CONSUMER * CTA_GROUP * BLK_M, MMA_N), select=(m_idx, n_idx)) \
+                                      .partition(tile_shape=(CTA_GROUP * BLK_M, EPI_N), select=(wg_id, no)) \
+                                      .partition(tile_shape=(BLK_M, EPI_N), select=(cbx, 0))
+                            Tx.copy_async(D_tile, Dsmem[wg_id, :, :], dispatch="tma")
                             Tx.ptx.cp_async.bulk.commit_group()
                             Tx.ptx.cp_async.bulk.wait_group(0)
                         Tx.cuda.warpgroup_sync(wg_id + 10)

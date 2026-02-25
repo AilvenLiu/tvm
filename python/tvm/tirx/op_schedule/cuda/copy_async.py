@@ -30,6 +30,7 @@ from tvm.tirx.op_schedule import (
     ScheduleContext,
     register_dispatch,
     predicate,
+    fail,
 )
 from .common import (
     CopyInstType,
@@ -126,9 +127,7 @@ def get_swizzle_mode_from_layout(layout: TLayout) -> Optional[SwizzleMode]:
     elif isinstance(layout, SwizzleLayout):
         swizzle_len = layout.swizzle_len
     elif isinstance(layout, TileLayout):
-        if layout.is_trivial():
-            return SwizzleMode.SWIZZLE_NONE
-        return None
+        return SwizzleMode.SWIZZLE_NONE
     else:
         return None
 
@@ -308,13 +307,15 @@ def _decide_box_dim(
 ) -> tuple:
     """Decide box dimensions for TMA copy.
 
-    This function handles:
-    - Get swizzle mode from shared buffer layout
-    - Get tile layout from shared buffer (handle ComposeLayout/SwizzleLayout)
-    - Slice shared and global layouts to get copy region
-    - Group layouts by extents
-    - Compute box_dim from contiguous shards via compute_box_dim()
-    - Verify TMA atom divisibility
+    Handles transpose (smem column-major, gmem row-major) and multi-dim partition
+    buffers by validating that global strides ascend in the shared contiguity order.
+
+    Algorithm:
+    1. Group shared by g_ext, group global by shared shard extents (1:1 mapping)
+    2. Find contiguous region in shared (inner->outer by stride)
+    3. Extract corresponding global strides
+    4. Validate ascending stride order; trim box if violated
+    5. Build box_dim from remaining contiguous shards
 
     Parameters
     ----------
@@ -337,6 +338,8 @@ def _decide_box_dim(
         (swizzle_mode, box_dim, contiguous_indices, contiguous_extent,
          grouped_shared, grouped_global)
     """
+    analyzer = Analyzer()
+
     # Step 1: Get swizzle mode from shared buffer layout
     swizzle_mode = get_swizzle_mode_from_layout(s_buf.layout)
     if swizzle_mode is None:
@@ -358,14 +361,73 @@ def _decide_box_dim(
         raise ValueError("Cannot slice global memory layout for TMA copy")
 
     # Step 5: Group shared layout by global extents
-    grouped_shared, _ = sliced_shared.canonicalize().group(g_ext)
+    grouped_shared, s_seps = sliced_shared.canonicalize().group(g_ext)
 
     # Step 6: Group global layout by grouped_shared extents (1:1 shard mapping)
     grouped_extents = [s.extent for s in grouped_shared.shard]
     grouped_global, _ = sliced_global.canonicalize().group(grouped_extents)
 
-    # Step 7: Compute box_dim from contiguous shards (same algorithm for all swizzle modes)
-    box_dim, contiguous_indices, contiguous_extent = compute_box_dim(grouped_shared)
+    # Step 7a: Find contiguous region in shared (inner->outer by stride)
+    box_indices, _ = find_contiguous_region(grouped_shared)
+    # box_indices is in inner->outer order (lowest stride first)
+
+    # Step 7b: Validate ascending global strides at the g_ext group level.
+    # Shards within the same g_ext group may have non-ascending individual strides
+    # but together form a contiguous block. We validate that the *effective* stride
+    # (min global stride per g_ext group) ascends across groups.
+
+    # Map each shard index to its g_ext group
+    def _shard_to_group(shard_idx):
+        for g in range(len(s_seps) - 1):
+            if s_seps[g] <= shard_idx < s_seps[g + 1]:
+                return g
+        return -1
+
+    # Collect unique g_ext groups in inner→outer order, with their effective strides
+    seen_groups = {}  # group_id -> (min_global_stride, first_position_in_box)
+    for pos, idx in enumerate(box_indices):
+        g = _shard_to_group(idx)
+        g_stride = grouped_global.shard[idx].stride
+        if g not in seen_groups:
+            seen_groups[g] = (g_stride, pos)
+        else:
+            prev_stride, first_pos = seen_groups[g]
+            # Use the minimum stride within the group
+            if analyzer.can_prove_equal(tvm.tir.floormod(prev_stride, g_stride), 0):
+                seen_groups[g] = (g_stride, first_pos)
+
+    # Sort groups by their first appearance (inner→outer)
+    group_order = sorted(seen_groups.keys(), key=lambda g: seen_groups[g][1])
+    group_strides = [seen_groups[g][0] for g in group_order]
+
+    # Find the last valid group (ascending effective strides)
+    valid_group_count = len(group_strides)
+    for j in range(1, len(group_strides)):
+        prev_s = group_strides[j - 1]
+        cur_s = group_strides[j]
+        is_multiple = analyzer.can_prove_equal(tvm.tir.floormod(cur_s, prev_s), 0)
+        is_equal = analyzer.can_prove_equal(cur_s, prev_s)
+        if not is_multiple or is_equal:
+            valid_group_count = j
+            break
+
+    # Trim box_indices: keep only shards belonging to valid groups
+    valid_groups = set(group_order[:valid_group_count])
+    box_indices = [idx for idx in box_indices if _shard_to_group(idx) in valid_groups]
+
+    # Step 7c: Build box_dim (outer->inner) and contiguous_indices
+    box_indices_outer_to_inner = list(reversed(box_indices))
+    box_dim = [grouped_shared.shard[i].extent for i in box_indices_outer_to_inner]
+    contiguous_indices = box_indices_outer_to_inner
+
+    # Remove extent-1 entries
+    pairs = [(d, i) for d, i in zip(box_dim, contiguous_indices) if d != 1]
+    if pairs:
+        box_dim, contiguous_indices = [list(x) for x in zip(*pairs)]
+    else:
+        box_dim, contiguous_indices = [], []
+
+    contiguous_extent = functools.reduce(lambda a, b: a * b, box_dim, 1)
 
     # Step 8: Verify atom divisibility (only for swizzled layouts)
     if swizzle_mode != SwizzleMode.SWIZZLE_NONE:
@@ -448,6 +510,10 @@ def _decide_tma_global_strides_and_shape(
     # For each dimension, check if the highest shard could be OOB
     oob_info = []  # List of (stride, extent) tuples
     for dim in range(len(g_buf.shape)):
+        # Skip dimensions with extent=1 — they can't be OOB
+        if analyzer.can_prove_equal(g_ext[dim], 1):
+            continue
+
         # Get the logically highest (first) shard for this dimension
         highest_shard_idx = g_buf_separators[dim]
         highest_shard = g_buf_grouped.shard[highest_shard_idx]
@@ -484,6 +550,17 @@ def _decide_tma_global_strides_and_shape(
         if not is_duplicate:
             raw_strides.insert(0, second_stride)
             box_dim.insert(0, 1)
+    # If the box doesn't include a stride=1 (contiguous) global dimension, TMA cannot
+    # handle this configuration. This happens for transpose layouts (e.g., column-major
+    # shared with row-major global) where the box only covers non-innermost global dims.
+    # TMA deposits data linearly in shared memory and cannot reorder elements, so we must
+    # fall back to non-bulk-copy.
+    if raw_strides and not any(analyzer.can_prove_equal(s, 1) for s in raw_strides):
+        fail(
+            "TMA box does not include the contiguous (stride=1) global dimension. "
+            "Transpose layouts require non-bulk-copy."
+        )
+
     assert len(box_dim) <= 5, f"only support up to 5 dimensions for TMA copy"
 
     # Step 12: Sort strides for shape computation
@@ -601,11 +678,6 @@ def copy_tma_impl(
         raise ValueError(
             f"Unsupported combination of src and dst scopes: src={src_scope} dst={dst_scope}"
         )
-
-    # For now, we require that the global side layout is trivial.
-    # TODO(bohan): support strided global memory in the future.
-    if not g_buf.layout.is_trivial():
-        raise ValueError(f"Global buffer layout is not trivial: {g_buf.layout}")
 
     # ---------------------------------------------------------------------
     # Region metadata

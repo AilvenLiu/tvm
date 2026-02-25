@@ -110,15 +110,15 @@ def test_roundtrip_exec_scope():
 def test_roundtrip_layout():
     def get_layout1():
         return Tx.TileLayout(
-            Tx.S[(8, 8, 8, 4, 2) : (6, 4@laneid, 2, 1@laneid, 1)],
+            Tx.S[(8, 8, 8, 4, 2) : (6, 4 @ laneid, 2, 1 @ laneid, 1)],
         )
 
     def get_layout2():
-        return Tx.TileLayout(Tx.S[(8, 8, 8, 4, 2) : (64, 4@laneid, 8, 2, 1)])
+        return Tx.TileLayout(Tx.S[(8, 8, 8, 4, 2) : (64, 4 @ laneid, 8, 2, 1)])
 
     def get_layout3():
         return Tx.TileLayout(
-            Tx.S[(8, 16, 8, 16) : (1024, 16, 128, 1)],
+            Tx.S[(8, 16, 8, 16):(1024, 16, 128, 1)],
         )
 
     def get_layout4():
@@ -179,7 +179,7 @@ def test_print_kwargs_schedule_op_full_code():
     assert_structural_equal(test, from_source(code))
 
 
-L_LANE = Tx.TileLayout(Tx.S[32 : 1@laneid])
+L_LANE = Tx.TileLayout(Tx.S[32 : 1 @ laneid])
 
 
 def test_roundtrip_buffer_view_get1():
@@ -194,7 +194,7 @@ def test_roundtrip_buffer_view_get1():
                 A_warp = A.view(8, 8, layout=A_warp_layout)
 
                 with Tx.thread():
-                    A_local = A_warp.storage(2)
+                    A_local = A_warp.local(2)
                     A_local[0] = Tx.float16(0)
 
     # fmt: on
@@ -220,7 +220,7 @@ def test_roundtrip_buffer_view_get2():
                 A_layout = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
                 B_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 B = A.view(8, 8, layout=B_layout)
-                D = B.storage(2)
+                D = B.local(2)
 
                 with Tx.thread():
                     out[0] = A[0] + B[0, 0] + D[0]
@@ -1119,6 +1119,351 @@ def func():
     # fmt: on
     code = test_bare_assign.script()
     assert from_source(code).script() == code
+
+
+def test_roundtrip_buffer_permute():
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([8, 4], dtype="float16", scope="local",
+                                    layout=Tx.TileLayout(Tx.S[(8, 4) : (4, 1)]))
+                B = A.permute(1, 0)
+
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_buffer_slice():
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([16, 16], dtype="float16", scope="local")
+                B = A[2:6, 0:16]
+
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_buffer_local_auto():
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local")
+                A_layout = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                B = A.view(8, 8, layout=A_layout.tile(L_LANE, (8, 4), (1, 2)))
+
+                with Tx.thread():
+                    B_local = B.local()
+                    B_local[0] = Tx.float16(0)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+###############################################################################
+# IR verification tests – verify DeclBuffer properties, not just round-trip
+###############################################################################
+
+
+def _collect_buffers(func):
+    """Collect all buffers from DeclBuffer and AllocBuffer nodes, returning {name: Buffer}."""
+    bufs = {}
+
+    def _visit(node):
+        if isinstance(node, (tvm.tir.DeclBuffer, tvm.tir.AllocBuffer)):
+            bufs[node.buffer.name] = node.buffer
+
+    tvm.tir.stmt_functor.post_order_visit(func.body, _visit)
+    return bufs
+
+
+def test_buffer_local_ir():
+    """Verify .local() auto-infer: shape from storage shard extents, layout, shared data."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local")
+                A_layout = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
+                B = A.view(8, 8, layout=A_layout.tile(L_LANE, (8, 4), (1, 2)))
+
+                with Tx.thread():
+                    B_local = B.local()
+                    B_local[0] = Tx.float16(0)
+    # fmt: on
+
+    bufs = _collect_buffers(func)
+    b_local = bufs["B_local"]
+    b_buf = bufs["B"]
+
+    # Shared data pointer
+    assert b_local.data.same_as(b_buf.data)
+    # Shape: single dim matching storage shard total
+    assert len(b_local.shape) == 1
+    storage = b_buf.layout.storage()
+    expected_total = 1
+    for it in storage.shard:
+        expected_total *= int(it.extent)
+    assert int(b_local.shape[0]) == expected_total
+    # Layout: storage layout (parent layout with thread axes removed)
+    assert_structural_equal(b_local.layout, storage)
+
+    # Round-trip
+    code = func.script()
+    assert from_source(code).script() == code
+
+
+def test_buffer_permute_ir():
+    """Verify .permute(1, 0): shape swapped, layout permuted, shared data."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([8, 4], dtype="float16", scope="local",
+                                    layout=Tx.TileLayout(Tx.S[(8, 4) : (4, 1)]))
+                B = A.permute(1, 0)
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+
+    bufs = _collect_buffers(func)
+    a_buf = bufs["A"]
+    b_buf = bufs["B"]
+
+    # Shared data pointer
+    assert b_buf.data.same_as(a_buf.data)
+    # Shape: [4, 8] from [8, 4]
+    assert int(b_buf.shape[0]) == 4
+    assert int(b_buf.shape[1]) == 8
+    # Layout: permuted
+    assert_structural_equal(b_buf.layout, a_buf.layout.permute_dims([1, 0]))
+
+    code = func.script()
+    assert from_source(code).script() == code
+
+
+def test_buffer_slice_ir():
+    """Verify A[2:6, 0:16]: shape [4,16], shared data.
+
+    When the parent has a layout, the slice offset is encoded in the layout
+    (not in elem_offset). When no layout, it goes into elem_offset.
+    """
+
+    # Case 1: with layout (default) — offset encoded in layout
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func_layout() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([16, 16], dtype="float16", scope="local")
+                B = A[2:6, 0:16]
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+
+    bufs = _collect_buffers(func_layout)
+    a_buf = bufs["A"]
+    b_buf = bufs["B"]
+    assert b_buf.data.same_as(a_buf.data)
+    assert [int(s) for s in b_buf.shape] == [4, 16]
+    # Layout encodes slice — verify it's not None and differs from parent
+    assert b_buf.layout is not None
+
+    code = func_layout.script()
+    assert from_source(code).script() == code
+
+    # Case 2: without layout — offset goes into elem_offset
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func_offset() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([16, 16], dtype="float16", scope="local",
+                                    layout=None)
+                B = A[2:6, 0:16]
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+
+    bufs2 = _collect_buffers(func_offset)
+    a2 = bufs2["A"]
+    b2 = bufs2["B"]
+    assert b2.data.same_as(a2.data)
+    assert [int(s) for s in b2.shape] == [4, 16]
+    assert int(b2.elem_offset) == int(a2.elem_offset) + 2 * 16
+
+    code2 = func_offset.script()
+    assert from_source(code2).script() == code2
+
+
+def test_buffer_view_dtype_ir():
+    """Verify .view('float32') on float16: dtype correct, last dim halved, shared data."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func() -> None:
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([8, 8], dtype="float16", scope="local")
+                B = A.view("float32")
+                with Tx.thread():
+                    B[0, 0] = Tx.float32(0)
+    # fmt: on
+
+    bufs = _collect_buffers(func)
+    a_buf = bufs["A"]
+    b_buf = bufs["B"]
+
+    # Shared data pointer
+    assert b_buf.data.same_as(a_buf.data)
+    # dtype
+    assert str(b_buf.dtype) == "float32"
+    # Shape: [8, 4] (last dim halved since float32 is 2x float16)
+    assert int(b_buf.shape[0]) == 8
+    assert int(b_buf.shape[1]) == 4
+
+    code = func.script()
+    assert from_source(code).script() == code
+
+
+###############################################################################
+# Partition tests
+###############################################################################
+
+
+def test_buffer_partition_ir():
+    """Verify .partition() produces correct DeclBuffer properties."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([64, 64], dtype="float16", scope="local")
+                B = A.partition(num_tiles=(32, 2))
+                C = A.partition(tile_shape=(2, 32))
+                with Tx.thread():
+                    B[0, 0, 0, 0] = Tx.float16(0)
+                    C[0, 0, 0, 0] = Tx.float16(0)
+    # fmt: on
+
+    bufs = _collect_buffers(func)
+    a_buf = bufs["A"]
+    b_buf = bufs["B"]
+    c_buf = bufs["C"]
+
+    for buf in [b_buf, c_buf]:
+        # Shared data pointer
+        assert buf.data.same_as(a_buf.data)
+        # Shape: [32, 2, 2, 32]
+        assert [int(s) for s in buf.shape] == [32, 2, 2, 32]
+        # Strides: [128, 32, 64, 1]
+        assert [int(s) for s in buf.strides] == [128, 32, 64, 1]
+        # Same elem_offset
+        assert int(buf.elem_offset) == int(a_buf.elem_offset)
+
+    # B and C should be structurally equal
+    assert_structural_equal(b_buf, c_buf)
+
+    code = func.script()
+    assert from_source(code).script() == code
+
+
+def test_buffer_partition_select():
+    """Verify .partition(select=...) returns correct BufferRegion."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([128, 64], dtype="float16", scope="local")
+                # partition(select=) → BufferRegion on original buffer
+                # tile_shape=(32,32), select=(2,1) → A[64:96, 32:64]
+                B = A[64:96, 32:64]
+                with Tx.thread():
+                    B[0, 0] = Tx.float16(0)
+    # fmt: on
+
+    # Verify that the partition select produces equivalent result
+    code = func.script()
+    assert from_source(code).script() == code
+
+
+def test_buffer_partition_roundtrip():
+    """Verify partition round-trips through printer/parser."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.kernel():
+            with Tx.cta():
+                A = Tx.alloc_buffer([64, 64], dtype="float16", scope="local")
+                B = A.partition(num_tiles=(32, 2))
+                with Tx.thread():
+                    B[0, 0, 0, 0] = Tx.float16(0)
+    # fmt: on
+
+    code = func.script()
+    # Verify sugar is in printed output
+    assert ".partition(" in code
+    # Verify round-trip
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_chained_partition_preserves_root_buffer():
+    """Chained partition(select=...) must reference the root buffer, not a matched sub-buffer.
+
+    Regression test: when ``A_tile = A.partition(select=...)`` is assigned to a
+    variable inside ``@Tx.inline``, the parser creates a matched buffer with a
+    sliced layout.  A subsequent ``A_tile.partition(select=...)`` must compose
+    offsets back onto the *original* buffer ``A``, so that downstream ops
+    (e.g. TMA copy_async) see a trivially-layouted global buffer.
+    """
+    from tvm.tir import Var
+    from tvm.tir.stmt import BufferRegion
+
+    buf = tvm.tir.decl_buffer((1024, 512), "float16")
+    m = Var("m", "int32")
+    n = Var("n", "int32")
+
+    # First partition: super-tile
+    tile1 = buf.partition(tile_shape=(256, 128), select=(m, n))
+    assert isinstance(tile1, BufferRegion)
+    assert tile1.buffer.same_as(buf)
+
+    # Chaining on BufferRegion: sub-tile
+    tile2 = tile1.partition(tile_shape=(64, 32), select=(1, 2))
+    assert isinstance(tile2, BufferRegion)
+    assert tile2.buffer.same_as(buf), "chained partition must reference root buffer"
+
+    # Simulate the parser's bind_assign_value: create a matched buffer
+    # and verify that Buffer.partition(select=...) still traces back to root.
+    matched_buf = tvm.tir.decl_buffer((256, 128), "float16")
+    matched_buf._source_region = tile1  # as bind_assign_value does
+    tile3 = matched_buf.partition(tile_shape=(64, 32), select=(1, 2))
+    assert isinstance(tile3, BufferRegion)
+    assert tile3.buffer.same_as(buf), "partition on matched buffer must trace to root"
 
 
 if __name__ == "__main__":

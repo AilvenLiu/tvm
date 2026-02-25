@@ -368,20 +368,33 @@ class Buffer(Object, Scriptable):
                 self.layout if layout is None else layout,
             )
 
-    def storage(self, *shape, layout=None) -> "Buffer":
-        """Create a new view of the mapped storage of the current thread
-        given a logical buffer with multi-threading layout.
+    def local(self, *shape, layout=None) -> "Buffer":
+        """Create a thread-local view of this buffer.
+
+        When called with no shape arguments, auto-infers a 1D shape from
+        the layout's non-thread component (i.e. ``layout.storage().shard``).
 
         Parameters
         ----------
         shape : tuple of Expr
-            The shape of the storage for indexing.
+            The shape of the local view for indexing. If omitted, a 1D
+            shape is computed automatically.
+
+        layout : optional
+            Override layout. If None, uses the storage layout
+            (parent layout with thread axes removed).
 
         Returns
         -------
-        storage : DeclBufferFrame
-            The corresponding storage buffer.
+        local : DeclBufferFrame
+            The corresponding local buffer.
         """
+        if not shape:
+            local_layout = self.layout.storage()
+            total = functools.reduce(
+                lambda x, y: x * y, [it.extent for it in local_layout.shard], 1
+            )
+            shape = (total,)
         return tvm.script.ir_builder.tir.decl_buffer(
             shape,
             self.dtype,
@@ -395,6 +408,119 @@ class Buffer(Object, Scriptable):
             "",
             self.axis_separators,
             self.layout.storage() if layout is None else layout,
+        )
+
+    def permute(self, *dims) -> "Buffer":
+        """Permute the dimensions of the buffer.
+
+        Parameters
+        ----------
+        dims : tuple of int
+            The permutation of dimensions.
+
+        Returns
+        -------
+        permuted : DeclBufferFrame
+            The buffer with permuted dimensions.
+        """
+        new_shape = [self.shape[d] for d in dims]
+        new_layout = self.layout.permute_dims(list(dims))
+        return tvm.script.ir_builder.tir.decl_buffer(
+            new_shape,
+            self.dtype,
+            self.data,
+            self.strides,
+            self.elem_offset,
+            None,
+            self.scope(),
+            self.data_alignment,
+            self.offset_factor,
+            "",
+            self.axis_separators,
+            new_layout,
+        )
+
+    def partition(self, *, tile_shape=None, num_tiles=None, select=None):
+        """Partition buffer into a grid of tiles.
+
+        Exactly one of tile_shape or num_tiles must be provided.
+        - Without select: returns DeclBuffer with shape (*grid, *tile) and strides.
+        - With select: returns BufferRegion on the original buffer for the tile
+          at the given coordinate.
+
+        Parameters
+        ----------
+        tile_shape : tuple of int/PrimExpr, optional
+            Each tile's size. Grid dims derived as shape // tile_shape.
+        num_tiles : tuple of int/PrimExpr, optional
+            Grid dimensions. Tile size derived as shape // num_tiles.
+        select : tuple of int/PrimExpr, optional
+            Tile coordinate. If given, returns a BufferRegion on the original buffer.
+        """
+        if (tile_shape is None) == (num_tiles is None):
+            raise ValueError("specify exactly one of tile_shape or num_tiles")
+        ndim = len(tile_shape) if tile_shape is not None else len(num_tiles)
+        if tile_shape is not None:
+            tile_sizes = list(tile_shape)
+            num_tiles_list = [self.shape[i] // tile_sizes[i] for i in range(ndim)]
+        else:
+            num_tiles_list = list(num_tiles)
+            tile_sizes = [self.shape[i] // num_tiles_list[i] for i in range(ndim)]
+
+        if select is not None:
+            from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
+
+            # If this buffer was created from a BufferRegion (via bind_assign_value),
+            # compose the partition offset with the source region so the result
+            # references the root buffer, not this intermediate matched buffer.
+            source_region = getattr(self, "_source_region", None)
+            if source_region is not None:
+                new_region = []
+                for i, r in enumerate(source_region.region):
+                    if i < ndim:
+                        new_start = r.min + select[i] * tile_sizes[i]
+                        new_region.append(Range.from_min_extent(new_start, tile_sizes[i]))
+                    else:
+                        new_region.append(r)
+                return BufferRegion(source_region.buffer, new_region)
+
+            region = []
+            for i in range(len(self.shape)):
+                if i < ndim:
+                    start = select[i] * tile_sizes[i]
+                    region.append(Range.from_min_extent(start, tile_sizes[i]))
+                else:
+                    region.append(Range.from_min_extent(0, self.shape[i]))
+            return BufferRegion(self, region)
+
+        # Build shape: (*grid, *tile, *remaining)
+        new_shape = num_tiles_list + tile_sizes + list(self.shape[ndim:])
+
+        # Compute original row-major strides
+        orig_strides = []
+        for i in range(len(self.shape)):
+            stride = functools.reduce(
+                lambda x, y: x * y, self.shape[i + 1 :], tvm.tir.const(1, "int32")
+            )
+            orig_strides.append(stride)
+
+        # Grid strides: grid_strides[i] = tile_size[i] * orig_strides[i]
+        grid_strides = [tile_sizes[i] * orig_strides[i] for i in range(ndim)]
+        new_strides = grid_strides + orig_strides
+
+        return tvm.script.ir_builder.tir.decl_buffer(
+            new_shape,
+            self.dtype,
+            self.data,
+            new_strides,
+            self.elem_offset,
+            None,
+            self.scope(),
+            self.data_alignment,
+            self.offset_factor,
+            "",
+            self.axis_separators,
+            self.layout,
         )
 
     def __getitem__(self, indices):
@@ -449,7 +575,6 @@ class Buffer(Object, Scriptable):
                 else:
                     expr_indices.append(index)
             return BufferLoad(self, expr_indices)
-
 
 
 def decl_buffer(
