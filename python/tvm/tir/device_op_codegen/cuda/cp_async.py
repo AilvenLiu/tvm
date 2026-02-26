@@ -158,9 +158,12 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     if cache_hint != "":
         cache_hint = parse_str(cache_hint)
 
-    # Check if multicast is enabled (cta_mask != 0)
-    is_cta_mask_zero = isinstance(cta_mask, tvm.tir.IntImm) and int(cta_mask) == 0
-    is_multicast = not is_cta_mask_zero
+    # Check if multicast is enabled (popcount(cta_mask) > 1)
+    # cta_mask=0 means no mask, cta_mask=1 means unicast (only CTA 0) — both are non-multicast.
+    # Multicast requires cluster launch mode, so only emit .multicast::cluster when multiple CTAs
+    # are targeted (i.e., more than one bit set).
+    is_unicast = isinstance(cta_mask, tvm.tir.IntImm) and bin(int(cta_mask)).count("1") <= 1
+    is_multicast = not is_unicast
 
     func_name = (
         f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"

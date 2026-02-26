@@ -1109,7 +1109,7 @@ def codegen_ptx_tcgen05_commit(bar, cta_group, cta_mask):
     if cta_group not in [1, 2]:
         raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
 
-    is_multicast = not (isinstance(cta_mask, tvm.tir.IntImm) and int(cta_mask) == 0)
+    is_multicast = not (isinstance(cta_mask, tvm.tir.IntImm) and bin(int(cta_mask)).count("1") <= 1)
 
     if is_multicast:
         multicast_str = ".multicast::cluster"

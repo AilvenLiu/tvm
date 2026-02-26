@@ -778,6 +778,68 @@ def copy_tma_impl(
                 multiplier = tvm.tir.floordiv(shard.stride, tma_stride)
                 shard_to_tma[(dim, local_idx)] = (tma_idx, multiplier)
 
+    # When swizzle or OOB detection creates TMA dimensions that don't
+    # directly match any shard in g_buf_grouped, split the containing
+    # shard so every TMA stride has a corresponding shard entry.  This
+    # keeps the shard-based coordinate decomposition working for all cases.
+    _matched_tma = set(tma_idx for tma_idx, _ in shard_to_tma.values())
+    _unmatched_tma = [i for i in range(tma_rank) if i not in _matched_tma]
+
+    if _unmatched_tma:
+        # Build mutable shard lists per dimension: [[stride, extent], ...]
+        _dim_shards = []
+        for dim in range(len(g_buf.shape)):
+            shards = []
+            for si in range(g_buf_separators[dim], g_buf_separators[dim + 1]):
+                s = g_buf_grouped.shard[si]
+                shards.append([int(s.stride), int(s.extent)])
+            _dim_shards.append(shards)
+
+        # Split shards to cover each unmatched TMA stride
+        for ui in _unmatched_tma:
+            ts = int(tma_g_strides[ui])
+            for dim in range(len(g_buf.shape)):
+                for si, (s, e) in enumerate(_dim_shards[dim]):
+                    if s < ts < s * e and ts % s == 0 and e % (ts // s) == 0:
+                        factor = ts // s
+                        _dim_shards[dim][si : si + 1] = [[ts, e // factor], [s, factor]]
+                        break
+                else:
+                    continue
+                break
+
+        # Rebuild separators
+        g_buf_separators = [0]
+        for dim in range(len(g_buf.shape)):
+            g_buf_separators.append(g_buf_separators[-1] + len(_dim_shards[dim]))
+
+        # Build refined shard list with .stride / .extent attributes
+        class _Shard:
+            __slots__ = ("stride", "extent")
+
+            def __init__(self, stride, extent):
+                self.stride, self.extent = stride, extent
+
+        _refined_shards = []
+        for dim in range(len(g_buf.shape)):
+            for s, e in _dim_shards[dim]:
+                _refined_shards.append(_Shard(s, e))
+
+        # Replace shard accessor for coordinate decomposition
+        g_buf_grouped_shards = _refined_shards
+
+        # Rebuild shard_to_tma with refined shards
+        shard_to_tma = {}
+        for dim in range(len(g_buf.shape)):
+            for local_idx in range(len(_dim_shards[dim])):
+                s = _dim_shards[dim][local_idx][0]
+                tma_idx, tma_stride = find_matching_tma_idx(s, tma_g_strides, analyzer)
+                if tma_idx is not None:
+                    multiplier = tvm.tir.floordiv(s, tma_stride)
+                    shard_to_tma[(dim, local_idx)] = (tma_idx, multiplier)
+    else:
+        g_buf_grouped_shards = g_buf_grouped.shard
+
     def compute_offsets_and_tma_coords(loop_vars):
         """Compute s_offset and tma_coords from loop variables.
 
@@ -805,7 +867,7 @@ def copy_tma_impl(
             divisor = 1
             for local_idx in range(num_shards - 1, -1, -1):
                 global_shard_idx = g_buf_separators[dim] + local_idx
-                shard = g_buf_grouped.shard[global_shard_idx]
+                shard = g_buf_grouped_shards[global_shard_idx]
 
                 # Multi-radix decomposition
                 shard_coord = (
