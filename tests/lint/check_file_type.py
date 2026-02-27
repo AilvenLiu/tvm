@@ -41,6 +41,7 @@ ALLOW_EXTENSION = {
     "sh",
     "py",
     # configurations
+    "cfg",
     "mk",
     "in",
     "cmake",
