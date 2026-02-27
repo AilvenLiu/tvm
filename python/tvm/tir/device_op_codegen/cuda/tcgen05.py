@@ -167,6 +167,7 @@ __forceinline__ __device__ void {func_name}(uint32_t src_addr, uint32_t row_offs
         "[%{src_placeholder}]{imm_arg};\\n"
         :  {reg_operands}
         :  "r"(get_tmem_addr(src_addr, row_offset, col_offset))
+        :
     );
 }}
 """

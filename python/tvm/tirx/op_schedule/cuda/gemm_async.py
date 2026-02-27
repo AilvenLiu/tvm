@@ -267,7 +267,6 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     K = int(A_extent[-2] if transA else A_extent[-1])
 
     # tcgen05 MMA hardware constraints
-    MMA_M = 128  # Fixed M dimension for tcgen05 MMA
     # K dimension per MMA iteration depends on A/B dtype
     if A_type == "float4_e2m1fn":
         MMA_K = 64
@@ -278,7 +277,10 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     MMA_N_MIN = 8 if cta_group == 1 else 16  # Minimum N dimension
     MMA_N_MAX = 256  # Maximum N dimension
 
-    assert M == MMA_M, f"tcgen05 schedule expected M={MMA_M}, got {M}"
+    if cta_group == 1:
+        assert M in (64, 128), f"tcgen05: M must be 64 or 128 for cta_group=1, got {M}"
+    else:
+        assert M in (128, 256), f"tcgen05: M must be 128 or 256 for cta_group=2, got {M}"
     assert N >= MMA_N_MIN, f"tcgen05 schedule expected N >= {MMA_N_MIN}, got {N}"
     assert N <= MMA_N_MAX, f"tcgen05 schedule expected N <= {MMA_N_MAX}, got {N}"
     assert N % MMA_N_MIN == 0, f"tcgen05 schedule expected N % {MMA_N_MIN} == 0, got {N}"
