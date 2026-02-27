@@ -1,0 +1,67 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+entries:
+  - created: '2026-02-27'
+    id: M-20260227-0001
+    path: entries/M-20260227-0001.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - requirements
+      - user-intent
+    title: Counting ops instead of structural comparison when user explicitly asked for assert_structural_equal
+    updated: '2026-02-27'
+  - created: '2026-02-27'
+    id: M-20260227-0002
+    path: entries/M-20260227-0002.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - golden
+      - readability
+    title: JSON golden blobs are not readable golden tests
+    updated: '2026-02-27'
+  - created: '2026-02-27'
+    id: M-20260227-0003
+    path: entries/M-20260227-0003.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - golden
+      - debugging
+    title: Verify actual IR output before writing expected values
+    updated: '2026-02-27'
+tags:
+  debugging:
+    - M-20260227-0003
+  golden:
+    - M-20260227-0002
+    - M-20260227-0003
+  readability:
+    - M-20260227-0002
+  requirements:
+    - M-20260227-0001
+  testing:
+    - M-20260227-0001
+    - M-20260227-0002
+    - M-20260227-0003
+  user-intent:
+    - M-20260227-0001

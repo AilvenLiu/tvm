@@ -1,0 +1,38 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The PTX intrinsic call arguments for TMA operations:\n\nptx_cp_async_bulk_tensor_global_to_cluster (g2c):\n  args\
+    \ = [dim, dst_ptr, mbar_ptr, tensormap, *coords, cta_mask, cta_group, cache_hint]\n  where len(coords) == dim, cta_mask\
+    \ is typically 0, cta_group is 1 or 2\n\nptx_cp_async_bulk_tensor_shared_to_global (s2g):\n  args = [dim, src_ptr, tensormap,\
+    \ *coords, cache_hint]\n  where len(coords) == dim\n\ndim (tma_rank) is NOT the tensor ndim — it's len(box_dim) from the\
+    \ TMA decomposition.\nFor swizzle_len>=1 2D tensors, tma_rank is typically ndim+1 due to shard decomposition.\nFor swizzle_len=0,\
+    \ tma_rank may equal the flattened dimension count.\n\nCoords can be non-zero when g_region has non-zero start offsets\
+    \ (e.g., g_region=((64,88),(0,64))\nproduces coords=[0, 64]).\n"
+  summary: 'g2c args: (dim, addr, mbar, tensormap, *coords, cta_mask, cta_group, cache_hint); s2g args: (dim, addr, tensormap,
+    *coords, cache_hint). coords count must equal dim.'
+created: '2026-02-27'
+id: KB-20260227-0002
+scope:
+  - repo
+tags:
+  - tma
+  - ptx
+  - copy_async
+  - codegen
+title: TMA PTX call argument structure
+updated: '2026-02-27'

@@ -1,0 +1,49 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'test_copy_tma_3d_with_view tests the interaction between buffer.view() and TMA copy dispatch.
+
+    The view operation (Q_smem.view(2, 2, 32, 4, 64)) happens in the TVMScript IR builder,
+
+    producing a buffer with specific layout/strides that copy_tma_impl then processes.
+
+
+    This cannot be reproduced by _make_tma_call which constructs buffers from scratch — the
+
+    view-derived layout depends on the full IR builder pipeline. Therefore this test stays as
+
+    a standalone end-to-end GPU test in Section 3, separate from the parametrized unit tests.
+
+
+    Similarly, test_copy_tma_symbolic_dimension uses symbolic Var dimensions which require
+
+    the full TVMScript → LowerTIRx pipeline and cannot be unit-tested via _make_tma_call.
+
+    '
+  summary: Buffer view + TMA tests cannot be merged into parametrized unit tests because view semantics are resolved at the
+    IR builder level, not at copy_tma_impl level.
+created: '2026-02-27'
+id: ADR-20260227-0002
+scope:
+  - repo
+tags:
+  - testing
+  - tma
+  - buffer-view
+title: Keep test_copy_tma_3d_with_view as separate special-case test
+updated: '2026-02-27'

@@ -1,0 +1,74 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+entries:
+  - created: '2026-02-27'
+    id: KB-20260227-0001
+    path: entries/KB-20260227-0001.yaml
+    scope:
+      - repo
+    tags:
+      - tir
+      - testing
+      - assert_structural_equal
+      - copy_tma_impl
+    title: Programmatic TIR construction for golden IR tests
+    updated: '2026-02-27'
+  - created: '2026-02-27'
+    id: KB-20260227-0002
+    path: entries/KB-20260227-0002.yaml
+    scope:
+      - repo
+    tags:
+      - tma
+      - ptx
+      - copy_async
+      - codegen
+    title: TMA PTX call argument structure
+    updated: '2026-02-27'
+  - created: '2026-02-27'
+    id: KB-20260227-0003
+    path: entries/KB-20260227-0003.yaml
+    scope:
+      - repo
+    tags:
+      - tma
+      - layout
+      - copy_async
+    title: tma_shared_layout return type varies
+    updated: '2026-02-27'
+tags:
+  assert_structural_equal:
+    - KB-20260227-0001
+  codegen:
+    - KB-20260227-0002
+  copy_async:
+    - KB-20260227-0002
+    - KB-20260227-0003
+  copy_tma_impl:
+    - KB-20260227-0001
+  layout:
+    - KB-20260227-0003
+  ptx:
+    - KB-20260227-0002
+  testing:
+    - KB-20260227-0001
+  tir:
+    - KB-20260227-0001
+  tma:
+    - KB-20260227-0002
+    - KB-20260227-0003

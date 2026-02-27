@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Initial GOLDEN_PARAMS had wrong values for:
+
+    - dim (used ndim instead of tma_rank; actual dim = ndim + 1 due to shard decomposition)
+
+    - coords (assumed all zeros, but some cases have non-zero coords from g_region offsets)
+
+    - g2c arg structure (forgot cta_mask between coords and cta_group)
+
+    - layout stripping (didn''t handle SwizzleLayout → identity TileLayout case)
+
+
+    Each of these was caught only after running tests and reading error messages. A faster
+
+    approach: write a diagnostic script that dumps the actual call args for all cases first,
+
+    then use those values to populate GOLDEN_PARAMS. This was eventually done and immediately
+
+    fixed all remaining issues.
+
+    '
+  summary: Always dump and inspect the actual IR output first before hardcoding expected values — don't guess parameters like
+    dim, coords, or arg structure.
+created: '2026-02-27'
+id: M-20260227-0003
+scope:
+  - repo
+tags:
+  - testing
+  - golden
+  - debugging
+title: Verify actual IR output before writing expected values
+updated: '2026-02-27'

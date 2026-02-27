@@ -1,0 +1,40 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "Three approaches were evaluated for golden IR comparison in TMA codegen tests:\n\n1. TVMScript round-trip (@T.prim_func\
+    \ strings): REJECTED — parser/printer asymmetry,\n   free variables in host_init LetStmt, extra default args added by\
+    \ parser.\n\n2. JSON serialization (tvm.ir.save_json/load_json): REJECTED by user — 597KB opaque\n   blob with no readability.\n\
+    \n3. Programmatic TIR construction with GOLDEN_PARAMS dict: ACCEPTED — each case maps to\n   (impl_spec, encode_args)\
+    \ with readable numeric parameters. Builder functions\n   (_build_expected_impl, _build_expected_host_init) construct\
+    \ the IR from these params.\n\nBenefits of approach 3:\n- Parameters are human-readable inline in the test file\n- Structural\
+    \ patterns are factored into shared builders (simple/atom/stride-gap)\n- Easy to add new cases: just add a GOLDEN_PARAMS\
+    \ entry\n- assert_structural_equal(map_free_vars=True) gives exact structural verification\n\nTrade-off: builder functions\
+    \ add ~100 lines of code, but this is amortized across 35 cases\nand makes each case entry only 2-3 lines.\n"
+  summary: Use programmatic TIR node construction (PrimFunc, For, DeclBuffer, Call) with a readable parameter dict for golden
+    IR tests, rather than TVMScript strings or JSON serialization.
+created: '2026-02-27'
+id: ADR-20260227-0001
+scope:
+  - repo
+tags:
+  - testing
+  - tir
+  - golden
+  - assert_structural_equal
+title: Programmatic TIR construction over TVMScript round-trip for golden IR tests
+updated: '2026-02-27'

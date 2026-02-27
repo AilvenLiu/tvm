@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "TVMScript round-trip does NOT work for testing copy_tma_impl output because:\n(a) host_init LetStmt has free variables\
+    \ that can't be parsed as standalone PrimFunc\n(b) parser adds extra default args to g2c call that copy_tma_impl doesn't\
+    \ include\n(c) DeclBuffer with external data pointer fails VerifyWellFormed\n\nWorking approach: construct expected IR\
+    \ programmatically using TIR node constructors,\nthen use tvm.ir.assert_structural_equal(actual, expected, map_free_vars=True).\n\
+    map_free_vars=True is essential because Var objects (mbar_ptr, A_tensormap) differ\nbetween independent constructions.\n\
+    \nKey type details:\n- A_tensormap type: PointerType(TensorMapType(), \"global\") — from tvm.ir.type\n- PTX call dtype:\
+    \ \"\" (empty string) for g2c/s2g, \"int32\" for tvm_call_packed\n- Layout stripping mirrors to_tile_layout() in copy_async.py:\n\
+    \  ComposeLayout -> .tile_layout, SwizzleLayout -> TileLayout(S[shape]), TileLayout -> as-is\n"
+  summary: Use tvm.tir constructors (PrimFunc, For, DeclBuffer, Call, LetStmt) with assert_structural_equal(map_free_vars=True)
+    for golden IR comparison when TVMScript round-trip fails.
+created: '2026-02-27'
+id: KB-20260227-0001
+scope:
+  - repo
+tags:
+  - tir
+  - testing
+  - assert_structural_equal
+  - copy_tma_impl
+title: Programmatic TIR construction for golden IR tests
+updated: '2026-02-27'
