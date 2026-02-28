@@ -338,11 +338,11 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           // special case for scalar buffers
           if ((store->buffer.IsScalar(true) || store->buffer.IsScalar(false)) &&
               !store->predicate.defined()) {
-            // ICHECK(store->indices.size() == 1 && tirx::is_zero(store->indices[0]))
+            // TVM_FFI_ICHECK(store->indices.size() == 1 && tirx::is_zero(store->indices[0]))
             //     << "1-dim buffer with shape (1,) store with indices other than [0] is not "
             //        "supported";
             ffi::Optional<ExprDoc> doc = d->GetVarDoc(store->buffer);
-            ICHECK(doc.has_value())
+            TVM_FFI_ICHECK(doc.has_value())
                 << "buffer is not defined in the environment: " << store->buffer;
             return AssignDoc(doc.value(), value, std::nullopt);
           }
@@ -368,10 +368,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           // special case for scalar
           if ((load->buffer.IsScalar(true) || load->buffer.IsScalar(false)) &&
               !load->predicate.defined()) {
-            // ICHECK(load->indices.size() == 1 && tirx::is_zero(load->indices[0]))
+            // TVM_FFI_ICHECK(load->indices.size() == 1 && tirx::is_zero(load->indices[0]))
             //     << "Scalar buffer load with indices other than [0] is not supported";
             ffi::Optional<ExprDoc> doc = d->GetVarDoc(load->buffer);
-            ICHECK(doc.has_value())
+            TVM_FFI_ICHECK(doc.has_value())
                 << "Scalar buffer is not defined in the environment: " << load->buffer;
             return doc.value();
           }

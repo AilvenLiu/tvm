@@ -29,7 +29,7 @@ namespace tvm {
 namespace runtime {
 
 void* get_pointer(Tensor data, ffi::Shape index) {
-  ICHECK(data.IsContiguous()) << "data is not contiguous";
+  TVM_FFI_ICHECK(data.IsContiguous()) << "data is not contiguous";
   char* ptr = reinterpret_cast<char*>(data->data) + data->byte_offset;
   int64_t offset = 0;
   // stride may be null, use shape instead

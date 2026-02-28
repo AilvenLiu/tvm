@@ -44,7 +44,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 /******** Definition of Execution Scope ********/
 // ExecScope
 ExecScope::ExecScope(ffi::String name, ffi::Array<ScopeIdDef> scope_id_def) {
-  CHECK(Valid(name)) << "ValueError: Unknown scope name: " << name;
+  TVM_FFI_ICHECK(Valid(name)) << "ValueError: Unknown scope name: " << name;
   auto n = ffi::make_object<ExecScopeNode>();
   n->name = std::move(name);
   n->scope_id_def = std::move(scope_id_def);
@@ -66,8 +66,8 @@ bool ExecScopeNode::Is(const ExecScope& other) const {
 }
 
 bool ExecScopeNode::Higher(const ffi::String& other) const {
-  CHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
-  CHECK(ExecScope::Valid(other)) << "ValueError: Unknown scope name";
+  TVM_FFI_ICHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
+  TVM_FFI_ICHECK(ExecScope::Valid(other)) << "ValueError: Unknown scope name";
   return ScopeOrder.at(this->name) < ScopeOrder.at(other);
 }
 
@@ -94,10 +94,10 @@ ExecScopeSlice::ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
   n->extents = std::move(extents);
   if (extents.defined()) {
     if (auto slices_ = slices.as<ffi::Array<Range>>()) {
-      CHECK_EQ(slices_.value().size(), extents.value().size())
+      TVM_FFI_ICHECK_EQ(slices_.value().size(), extents.value().size())
           << "ValueError: Number of slices must match the number of extents";
     } else if (auto cond = slices.as<PrimExpr>()) {
-      CHECK_EQ(1, extents.value().size())
+      TVM_FFI_ICHECK_EQ(1, extents.value().size())
           << "ValueError: Number of select_cond must match the number of extents";
     }
   }
@@ -141,8 +141,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope,
                        ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
   auto n = ffi::make_object<ScopeIdDefNode>();
-  CHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
-                                       << ids.size() << " and " << extents.size();
+  TVM_FFI_ICHECK_EQ(ids.size(), extents.size())
+      << "ValueError: Number of dimensions must match, got " << ids.size() << " and "
+      << extents.size();
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
   n->scope = std::move(scope);
@@ -151,7 +152,7 @@ ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopeP
 }
 
 PrimExpr ScopeIdDef::fused_extent() const {
-  CHECK_GT(get()->extents.size(), 0) << "ValueError: Cannot get extent of empty scope";
+  TVM_FFI_ICHECK_GT(get()->extents.size(), 0) << "ValueError: Cannot get extent of empty scope";
   PrimExpr ret = get()->extents[0];
   for (size_t i = 1; i < get()->extents.size(); ++i) {
     ret = ret * get()->extents[i];
@@ -176,7 +177,7 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   auto insert_id = [&](const ScopeIdDef& id) {
     auto [it, inserted] = id_set.try_emplace(id->scope, id);
     if (!inserted) {
-      CHECK(ana.CanProveEqual(it->second.fused_extent(), id.fused_extent()))
+      TVM_FFI_ICHECK(ana.CanProveEqual(it->second.fused_extent(), id.fused_extent()))
           << "Inconsistent extents for scope " << id->scope;
     } else {
       queue.push(id);
@@ -185,10 +186,10 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
 
   for (const auto& def : defs) {
     if (def->preferred_extents.defined()) {
-      CHECK(def->scope->parent == "cluster" && def->scope->cur == "cta")
+      TVM_FFI_ICHECK(def->scope->parent == "cluster" && def->scope->cur == "cta")
           << "ValueError: preferred_extents is only valid for cluster→cta scope, got "
           << def->scope->parent << "→" << def->scope->cur;
-      CHECK_EQ(def->preferred_extents.value().size(), def->extents.size())
+      TVM_FFI_ICHECK_EQ(def->preferred_extents.value().size(), def->extents.size())
           << "ValueError: preferred_extents must have the same size as extents, got "
           << def->preferred_extents.value().size() << " vs " << def->extents.size();
     }
@@ -228,7 +229,7 @@ ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rh
     if (ana.CanProve(floormod(lhs_ext, rhs_ext) == 0)) {
       return ScopeIdDef({Var("")}, {floordiv(lhs_ext, rhs_ext)}, scope);
     }
-    CHECK(!ana.CanProve(floormod(lhs_ext, rhs_ext) != 0))
+    TVM_FFI_ICHECK(!ana.CanProve(floormod(lhs_ext, rhs_ext) != 0))
         << "ValueError: scope " << scope << " has non-divisible extents: " << lhs_ext
         << " is not divisible by " << rhs_ext;
     return std::nullopt;
@@ -251,7 +252,7 @@ ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(ffi::String parent,
                                                              ffi::String target_kind) {
   const auto& key = GetKey(ScopePair(parent, cur), target_kind);
   auto* table = Global();
-  CHECK(table->resolve_map_.count(key) == 0) << "Duplicate registration for " << key;
+  TVM_FFI_ICHECK(table->resolve_map_.count(key) == 0) << "Duplicate registration for " << key;
   return table->resolve_map_[key];
 }
 
@@ -261,7 +262,7 @@ ffi::Array<PrimExpr> ScopeIdResolveTable::Resolve(
   auto table = ScopeIdResolveTable::Global();
   const auto& key = GetKey(scope, target_kind);
   auto it = table->resolve_map_.find(key);
-  CHECK(it != table->resolve_map_.end()) << "Cannot resolve scope id for " << key;
+  TVM_FFI_ICHECK(it != table->resolve_map_.end()) << "Cannot resolve scope id for " << key;
   return it->second.func_(extents, out_dim, params);
 }
 
@@ -271,7 +272,7 @@ std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchPara
                                         bool allow_missing = false) {
   auto it = params.find(tag);
   if (it == params.end()) {
-    CHECK(allow_missing) << "Cannot find thread var: " << tag;
+    TVM_FFI_ICHECK(allow_missing) << "Cannot find thread var: " << tag;
     return {0, 1};
   }
   return {(*it).second->var, (*it).second->dom->extent};
@@ -319,7 +320,8 @@ TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
     .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_LE(out_dim, 3) << "ValueError: kernel->cluster can only have 3 dimensions for now";
+      TVM_FFI_ICHECK_LE(out_dim, 3)
+          << "ValueError: kernel->cluster can only have 3 dimensions for now";
       Array<PrimExpr> ret;
       for (size_t i = 0; i < out_dim; i++) {
         ret.push_back(tirx::Call(
@@ -336,13 +338,14 @@ TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
     });
 
 // Macro to reduce boilerplate for single-dimension checks and thread calculations
-#define REGISTER_1D_THREAD_SCOPE(from, to, divisor, modifier)                                     \
-  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                  \
-      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                    \
-              const LaunchParams& params) -> Array<PrimExpr> {                                    \
-        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now"; \
-        arith::Analyzer ana;                                                                      \
-        return {ana.Simplify(modifier(FloorDiv(GetLinearThreadIndex(params), divisor)))};         \
+#define REGISTER_1D_THREAD_SCOPE(from, to, divisor, modifier)                             \
+  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                          \
+      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,            \
+              const LaunchParams& params) -> Array<PrimExpr> {                            \
+        TVM_FFI_ICHECK_EQ(out_dim, 1)                                                     \
+            << "ValueError: " from "->" to " can only have 1 dimension for now";          \
+        arith::Analyzer ana;                                                              \
+        return {ana.Simplify(modifier(FloorDiv(GetLinearThreadIndex(params), divisor)))}; \
       })
 
 // Define common modifiers
@@ -353,13 +356,14 @@ auto mod32 = [](PrimExpr x) { return FloorMod(x, 32); };
 auto mod128 = [](PrimExpr x) { return FloorMod(x, 128); };
 
 // Warp-related scopes: resolve from warp_id_in_cta in launch params
-#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                                \
-  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                  \
-      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                    \
-              const LaunchParams& params) -> Array<PrimExpr> {                                    \
-        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now"; \
-        arith::Analyzer ana;                                                                      \
-        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))};               \
+#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                  \
+  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                    \
+      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,      \
+              const LaunchParams& params) -> Array<PrimExpr> {                      \
+        TVM_FFI_ICHECK_EQ(out_dim, 1)                                               \
+            << "ValueError: " from "->" to " can only have 1 dimension for now";    \
+        arith::Analyzer ana;                                                        \
+        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))}; \
       })
 
 REGISTER_1D_WARP_SCOPE("cta", "warpgroup", div4);

@@ -28,7 +28,7 @@ SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, boo
   n->swizzle_len = swizzle_len;
   n->atom_len = atom_len;
   n->swizzle_inner = swizzle_inner;
-  CHECK(n->VerifyWellFormed()) << "ValueError: The swizzle layout is not well-formed";
+  TVM_FFI_ICHECK(n->VerifyWellFormed()) << "ValueError: The swizzle layout is not well-formed";
   int swizzle_mask = (1 << swizzle_len) - 1;
   n->inner_mask = swizzle_mask;
   n->outer_mask = swizzle_mask << atom_len;
@@ -50,12 +50,14 @@ bool SwizzleLayoutNode::VerifyWellFormed() const {
 }
 
 PrimExpr SwizzleLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
-  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
+  TVM_FFI_ICHECK(!axis_name.has_value())
+      << "ValueError: axis_name is not supported for swizzle layout";
   return 1 << (per_element + swizzle_len + atom_len);
 }
 
 PrimExpr SwizzleLayoutNode::GetSpan(ffi::Optional<ffi::String> axis_name) const {
-  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
+  TVM_FFI_ICHECK(!axis_name.has_value())
+      << "ValueError: axis_name is not supported for swizzle layout";
   return GetSize();
 }
 

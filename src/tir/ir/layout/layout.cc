@@ -24,7 +24,7 @@ namespace tir {
 /**************** TLayout ****************/
 ffi::Map<ffi::String, PrimExpr> TLayoutNode::Apply(const ffi::Array<PrimExpr>& coord,
                                                    const ffi::Array<PrimExpr>& shape) const {
-  ICHECK_EQ(coord.size(), shape.size())
+  TVM_FFI_ICHECK_EQ(coord.size(), shape.size())
       << "ValueError: The size of coord and shape should be equal";
   return Apply(FlattenCoord(coord, shape));
 }

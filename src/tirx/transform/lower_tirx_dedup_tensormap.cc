@@ -65,7 +65,7 @@ inline const CallNode* AsCuTensorMapEncode(const EvaluateNode* eval) {
 
 // Extract the tensormap var and the key (arguments after the tensormap var)
 inline std::pair<ffi::Optional<Var>, ffi::Array<PrimExpr>> ExtractEncodeKey(const CallNode* call) {
-  ICHECK(call->op.same_as(builtin::tvm_call_packed()));
+  TVM_FFI_ICHECK(call->op.same_as(builtin::tvm_call_packed()));
   // args[0] is function name, args[1] is tensormap handle, rest are parameters
   if (call->args.size() < 2) return {ffi::Optional<Var>(), ffi::Array<PrimExpr>()};
   ffi::Optional<Var> tensormap;

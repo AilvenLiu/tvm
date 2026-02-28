@@ -26,7 +26,7 @@ ComposeLayout::ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B) {
   auto n = ffi::make_object<ComposeLayoutNode>();
   n->swizzle = layout_A;
   n->tile_layout = layout_B;
-  CHECK(n->VerifyWellFormed()) << "ValueError: The compose layout is not well-formed";
+  TVM_FFI_ICHECK(n->VerifyWellFormed()) << "ValueError: The compose layout is not well-formed";
 
   data_ = std::move(n);
 }
@@ -48,12 +48,14 @@ bool ComposeLayoutNode::VerifyWellFormed() const {
 }
 
 PrimExpr ComposeLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
-  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
+  TVM_FFI_ICHECK(!axis_name.has_value())
+      << "ValueError: axis_name is not supported for compose layout";
   return tile_layout->GetSize(axis_name);
 }
 
 PrimExpr ComposeLayoutNode::GetSpan(ffi::Optional<ffi::String> axis_name) const {
-  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
+  TVM_FFI_ICHECK(!axis_name.has_value())
+      << "ValueError: axis_name is not supported for compose layout";
   return tile_layout->GetSpan(axis_name);
 }
 
@@ -64,10 +66,10 @@ ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(ffi::Array<PrimExpr> co
 
 ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
   auto res = tile_layout->Apply(coord);
-  CHECK(res.size() == 1 && res.find("m") != res.end());
+  TVM_FFI_ICHECK(res.size() == 1 && res.find("m") != res.end());
   auto m = res["m"];
   auto swizzle_res = swizzle->Apply(m);
-  CHECK(swizzle_res.size() == 1 && swizzle_res.find("m") != swizzle_res.end());
+  TVM_FFI_ICHECK(swizzle_res.size() == 1 && swizzle_res.find("m") != swizzle_res.end());
   return swizzle_res;
 }
 

@@ -252,7 +252,7 @@ Break::Break(Span span) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.Break", [](Span span) { return Break(span); });
+  refl::GlobalDef().def("tirx.Break", [](Span span) { return Break(span); });
 }
 
 // Continue
@@ -264,7 +264,7 @@ Continue::Continue(Span span) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.Continue", [](Span span) { return Continue(span); });
+  refl::GlobalDef().def("tirx.Continue", [](Span span) { return Continue(span); });
 }
 
 // DeclBuffer
@@ -275,11 +275,11 @@ DeclBuffer::DeclBuffer(Buffer buffer, Span span) {
     scope = "global";
   }
   if (scope == "tmem") {
-    ICHECK_EQ(buffer->allocated_addr.size(), 1U)
+    TVM_FFI_ICHECK_EQ(buffer->allocated_addr.size(), 1U)
         << "ValueError: For `tmem` scope, DeclBuffer requires exactly one `allocated_addr` "
            "PrimExpr";
   } else if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
-    ICHECK(buffer->allocated_addr.empty())
+    TVM_FFI_ICHECK(buffer->allocated_addr.empty())
         << "ValueError: For `" << scope << "` scope, DeclBuffer does not accept `allocated_addr`";
   }
   ObjectPtr<DeclBufferNode> node = ffi::make_object<DeclBufferNode>();
@@ -594,7 +594,7 @@ AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
     LOG(FATAL) << "ValueError: AllocBuffer is not allowed for storage scope `tmem`";
   }
   if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
-    ICHECK(buffer->allocated_addr.empty())
+    TVM_FFI_ICHECK(buffer->allocated_addr.empty())
         << "ValueError: For `" << scope << "` scope, AllocBuffer does not accept `allocated_addr`";
   }
   ObjectPtr<AllocBufferNode> node = ffi::make_object<AllocBufferNode>();
@@ -606,7 +606,7 @@ AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
+  refl::GlobalDef().def("tirx.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
     return AllocBuffer(buffer, body, span);
   });
 }
@@ -631,8 +631,7 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   data_ = std::move(node);
 }
 
-SBlock::SBlock(ffi::String name_hint, Stmt body,
-               ffi::Array<Buffer> alloc_buffers, Span span) {
+SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Array<Buffer> alloc_buffers, Span span) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = {};
   node->reads = {};
@@ -649,22 +648,21 @@ SBlock::SBlock(ffi::String name_hint, Stmt body,
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tirx.SBlock",
-      [](ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
-         ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
-         ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
-         ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-         Span span) {
-        return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span);
-      });
+  refl::GlobalDef().def("tirx.SBlock",
+                        [](ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
+                           ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
+                           ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
+                           ffi::Array<MatchBufferRegion> match_buffers,
+                           ffi::Map<ffi::String, Any> annotations, Span span) {
+                          return SBlock(iter_vars, reads, writes, name_hint, body, init,
+                                        alloc_buffers, match_buffers, annotations, span);
+                        });
 }
 
 // ExecScopeStmt
 ExecScopeStmt::ExecScopeStmt(ExecScope exec_scope, Stmt body, Span span) {
-  ICHECK(exec_scope.defined());
-  ICHECK(body.defined());
+  TVM_FFI_ICHECK(exec_scope.defined());
+  TVM_FFI_ICHECK(body.defined());
   ObjectPtr<ExecScopeStmtNode> node = ffi::make_object<ExecScopeStmtNode>();
   node->exec_scope = std::move(exec_scope);
   node->body = std::move(body);
@@ -674,11 +672,9 @@ ExecScopeStmt::ExecScopeStmt(ExecScope exec_scope, Stmt body, Span span) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tir.ExecScopeStmt",
-      [](ExecScope exec_scope, Stmt body, Span span) {
-        return ExecScopeStmt(exec_scope, body, span);
-      });
+  refl::GlobalDef().def("tirx.ExecScopeStmt", [](ExecScope exec_scope, Stmt body, Span span) {
+    return ExecScopeStmt(exec_scope, body, span);
+  });
 }
 
 // BlockRealize
@@ -714,5 +710,5 @@ TVM_TIRX_REGISTER_OP("type_annotation")
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

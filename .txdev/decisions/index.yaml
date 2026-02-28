@@ -64,7 +64,22 @@ entries:
       - rebase
     title: Adopt parser-level fallback for `T.prim_func` keyword migration
     updated: '2026-02-28'
+  - created: '2026-02-28'
+    id: ADR-20260228-0003
+    path: entries/ADR-20260228-0003.yaml
+    scope:
+      - repo
+    tags:
+      - logging
+      - api
+      - compatibility
+      - tvm-ffi
+      - refactor
+    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check APIs
+    updated: '2026-02-28'
 tags:
+  api:
+    - ADR-20260228-0003
   api-evolution:
     - ADR-20260228-0002
   assert_structural_equal:
@@ -75,12 +90,17 @@ tags:
     - ADR-20260228-0001
   compatibility:
     - ADR-20260228-0002
+    - ADR-20260228-0003
   golden:
     - ADR-20260227-0001
+  logging:
+    - ADR-20260228-0003
   parser:
     - ADR-20260228-0002
   pre-commit:
     - ADR-20260228-0001
+  refactor:
+    - ADR-20260228-0003
   rebase:
     - ADR-20260228-0002
   testing:
@@ -92,6 +112,8 @@ tags:
     - ADR-20260227-0002
   tooling:
     - ADR-20260228-0001
+  tvm-ffi:
+    - ADR-20260228-0003
   tvmscript:
     - ADR-20260228-0002
   upstream-alignment:

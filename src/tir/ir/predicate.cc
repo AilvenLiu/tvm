@@ -29,7 +29,7 @@ namespace tir {
 TVM_FFI_STATIC_INIT_BLOCK() { PredicateNode::RegisterReflection(); }
 
 PrimExpr PredicateNode::Apply(const ffi::Array<PrimExpr>& indices) const {
-  ICHECK_EQ(indices.size(), vars.size());
+  TVM_FFI_ICHECK_EQ(indices.size(), vars.size());
 
   ffi::Map<Var, PrimExpr> vmap;
 

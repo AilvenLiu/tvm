@@ -100,8 +100,8 @@ class ScopeIdDefResolver : public StmtExprMutator {
       return ExecScopeStmt(scope, body);
     }
     // Kernel scope: resolve scope ids
-    ICHECK(!scope->Is("world")) << "TIRx Error: world scope is not supported at the moment";
-    ICHECK(!kernel_launch_params_.has_value())
+    TVM_FFI_ICHECK(!scope->Is("world")) << "TIRx Error: world scope is not supported at the moment";
+    TVM_FFI_ICHECK(!kernel_launch_params_.has_value())
         << "TIRx Error: nested kernel scopes are not supported";
 
     // Step 0: Gather the scope id defs from all nested scopes
@@ -109,7 +109,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
 
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
-    CHECK(verifier.Verify(scope_id_def)) << "Inconsistent ScopeIdDef";
+    TVM_FFI_ICHECK(verifier.Verify(scope_id_def)) << "Inconsistent ScopeIdDef";
 
     // Step 2: Extract kernel launch parameters
     LaunchParams launch_params;
@@ -132,7 +132,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
       auto resolved =
           ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
                                        target_->kind->name, kernel_launch_params_.value());
-      ICHECK_EQ(resolved.size(), def->extents.size())
+      TVM_FFI_ICHECK_EQ(resolved.size(), def->extents.size())
           << "Internal Error: Inconsistent resolved size " << resolved.size() << " vs "
           << def->extents.size();
       for (size_t i = 0; i < def->def_ids.size(); i++) {
@@ -173,7 +173,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
         return;
       }
       const auto& def = (*it).second;
-      CHECK_LE(def->extents.size(), 3) << "ValueError: Only up to 3 extents are supported";
+      TVM_FFI_ICHECK_LE(def->extents.size(), 3) << "ValueError: Only up to 3 extents are supported";
       for (size_t i = 0; i < def->extents.size(); i++) {
         std::string thread_tag = prefix + static_cast<char>('x' + i);
         IterVar iv(Range::FromMinExtent(0, def->extents[i]), Var(thread_tag),
@@ -189,8 +189,9 @@ class ScopeIdDefResolver : public StmtExprMutator {
     } else {
       // use cluster
       // clusterCtaIdx.x, clusterCtaIdx.y, clusterCtaIdx.z
-      CHECK(target->kind->name == "cuda") << "ValueError: cluster is only supported in CUDA";
-      CHECK_EQ(target->kind->default_device_type, kDLCUDA)
+      TVM_FFI_ICHECK(target->kind->name == "cuda")
+          << "ValueError: cluster is only supported in CUDA";
+      TVM_FFI_ICHECK_EQ(target->kind->default_device_type, kDLCUDA)
           << "ValueError: cluster is only supported in CUDA";
       add_launch_param(ScopePair("cluster", "cta"), "clusterCtaIdx.");
       // Preferred cluster size (CUDA 12.8+)
@@ -208,7 +209,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
     // threadIdx.x, threadIdx.y, threadIdx.z
     add_launch_param(ScopePair("cta", "thread"), "threadIdx.");
     if (!id_set.empty()) {
-      CHECK(launch_params->count("threadIdx.x") > 0)
+      TVM_FFI_ICHECK(launch_params->count("threadIdx.x") > 0)
           << "ValueError: kernel has no thread launch parameters. "
           << "At minimum, declare cta→thread extent (e.g., Tx.thread_id([128]))";
     }

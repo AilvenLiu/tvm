@@ -88,6 +88,19 @@ entries:
       - recovery
     title: Recover cleanly after pre-push hooks auto-rewrite the worktree
     updated: '2026-02-28'
+  - created: '2026-02-28'
+    id: KB-20260228-0004
+    path: entries/KB-20260228-0004.yaml
+    scope:
+      - repo
+    tags:
+      - logging
+      - refactor
+      - tvm-ffi
+      - rg
+      - validation
+    title: Zero-residual audit pattern for logging macro migration
+    updated: '2026-02-28'
 tags:
   assert_structural_equal:
     - KB-20260227-0001
@@ -105,6 +118,8 @@ tags:
     - KB-20260227-0003
   lint:
     - KB-20260228-0001
+  logging:
+    - KB-20260228-0004
   pre-commit:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -116,6 +131,10 @@ tags:
     - KB-20260228-0002
   recovery:
     - KB-20260228-0003
+  refactor:
+    - KB-20260228-0004
+  rg:
+    - KB-20260228-0004
   skip:
     - KB-20260228-0002
   testing:
@@ -126,6 +145,10 @@ tags:
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
+  tvm-ffi:
+    - KB-20260228-0004
+  validation:
+    - KB-20260228-0004
   workflow:
     - KB-20260228-0001
     - KB-20260228-0003

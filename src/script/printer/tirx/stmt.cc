@@ -93,7 +93,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
-          ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
+          TVM_FFI_ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
               << "Only TIRX ops can be used in tirx::tirx::OpCall";
           ffi::String name = op_names.get(op, op->name);
           if (bool(schedule_op_map.get(op, tvm::Bool(false))) ||
@@ -173,7 +173,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Bind>("", [](tirx::Bind stmt, AccessPath p, IRDocsifier d) -> Doc {
       bool concise = AllowConciseScoping(d, stmt);
       // Step 1. Type annotation
-      ICHECK(stmt->var->type_annotation.defined())
+      TVM_FFI_ICHECK(stmt->var->type_annotation.defined())
           << "Type annotation is required for variable: " << stmt->var->name_hint;
       ffi::Optional<ExprDoc> type_doc = d->AsDoc<ExprDoc>(stmt->var->type_annotation,  //
                                                           p->Attr("var")->Attr("type_annotation"));
@@ -543,8 +543,8 @@ ffi::Optional<ExprDoc> TryDeclBufferSugarWithParent(const tirx::Buffer& child, c
 
   // --- (e) Partition: child has 2*parent_ndim dims with grid+tile strides ---
   if (same_elem_offset && same_dtype && !parent->shape.empty() &&
-      child->shape.size() == 2 * parent->shape.size() &&
-      !child->strides.empty() && child->strides.size() == 2 * parent->shape.size()) {
+      child->shape.size() == 2 * parent->shape.size() && !child->strides.empty() &&
+      child->strides.size() == 2 * parent->shape.size()) {
     size_t ndim = parent->shape.size();
     // Compute parent's row-major strides
     std::vector<int64_t> parent_rm_strides(ndim);
@@ -590,8 +590,8 @@ ffi::Optional<ExprDoc> TryDeclBufferSugarWithParent(const tirx::Buffer& child, c
       if (is_partition) {
         ffi::Array<ExprDoc> tuple_elems;
         for (size_t i = 0; i < ndim; ++i) {
-          tuple_elems.push_back(d->AsDoc<ExprDoc>(
-              child->shape[i], p->Attr("buffer")->Attr("shape")->ArrayItem(i)));
+          tuple_elems.push_back(
+              d->AsDoc<ExprDoc>(child->shape[i], p->Attr("buffer")->Attr("shape")->ArrayItem(i)));
         }
         return pdoc->Attr("partition")->Call({}, {"num_tiles"}, {TupleDoc(tuple_elems)});
       }

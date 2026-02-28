@@ -121,7 +121,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       is_root = true;
     }
     if (!scope_stack_.empty()) {
-      ICHECK(root_.has_value()) << "TIRxError: root scope should be the highest scope";
+      TVM_FFI_ICHECK(root_.has_value()) << "TIRxError: root scope should be the highest scope";
       Verify(!scope->Higher(root_.value()))
           << "TIRxError: ExecScopeStmt at " << path << " has invalid exec_scope " << scope->name
           << " under " << root_.value()->name;
@@ -179,8 +179,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       if (erase_select_cond) scope_select_cond_.erase(slice->name);
       if (pop_scope) {
         auto it_slices = scope_slices_.find(slice->name);
-        ICHECK(it_slices != scope_slices_.end());
-        ICHECK(!it_slices->second.empty());
+        TVM_FFI_ICHECK(it_slices != scope_slices_.end());
+        TVM_FFI_ICHECK(!it_slices->second.empty());
         it_slices->second.pop_back();
       }
     }

@@ -31,7 +31,7 @@ TLayout TileLayoutNode::DirectSum(const TileLayout& left_in, const Array<PrimExp
   auto left = left_in->Canonicalize().as<TileLayout>().value();
   auto right = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
-  CHECK_EQ(left_shape.size(), right_shape.size())
+  TVM_FFI_ICHECK_EQ(left_shape.size(), right_shape.size())
       << "Left and right shape size must match for direct sum";
 
   // Group both layouts by their respective shapes
@@ -106,7 +106,7 @@ ffi::Optional<TileLayout> TileLayoutNode::IsDirectSumRight(
   TileLayout sum_layout = maybe_sum.value()->Canonicalize().as<TileLayout>().value();
   TileLayout right = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
-  CHECK_EQ(interleaved_shape.size(), right_shape.size() * 2)
+  TVM_FFI_ICHECK_EQ(interleaved_shape.size(), right_shape.size() * 2)
       << "Interleaved shape must have twice the rank of right_shape";
 
   auto [grouped_sum, sum_seps] = Group(sum_layout, interleaved_shape);
@@ -157,7 +157,7 @@ ffi::Optional<TLayout> TileLayoutNode::IsDirectSumLeft(
   TileLayout sum_layout = maybe_sum.value()->Canonicalize().as<TileLayout>().value();
   TileLayout left = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
-  CHECK_EQ(interleaved_shape.size(), left_shape.size() * 2)
+  TVM_FFI_ICHECK_EQ(interleaved_shape.size(), left_shape.size() * 2)
       << "Interleaved shape must have twice the rank of left_shape";
 
   auto [grouped_sum, sum_seps] = Group(sum_layout, interleaved_shape);
@@ -212,7 +212,7 @@ ffi::Optional<TileLayout> ComposeLayoutNode::IsDirectSumRight(
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, this->swizzle)) {
       return this->tile_layout->IsDirectSumRight(comp.value()->tile_layout, interleaved_shape,
-                                                right_shape);
+                                                 right_shape);
     }
   }
   return std::nullopt;
@@ -224,7 +224,7 @@ ffi::Optional<TLayout> ComposeLayoutNode::IsDirectSumLeft(
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, this->swizzle)) {
       return this->tile_layout->IsDirectSumLeft(comp.value()->tile_layout, interleaved_shape,
-                                               left_shape);
+                                                left_shape);
     }
   }
   return std::nullopt;
@@ -242,8 +242,8 @@ ffi::Optional<TileLayout> SwizzleLayoutNode::IsDirectSumRight(
     const ffi::Array<PrimExpr>& right_shape) const {
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, ffi::GetRef<SwizzleLayout>(this))) {
-      return comp.value()->tile_layout->IsDirectSumRight(sum_layout,
-                                                        interleaved_shape, right_shape);
+      return comp.value()->tile_layout->IsDirectSumRight(sum_layout, interleaved_shape,
+                                                         right_shape);
     }
   }
   return std::nullopt;
@@ -254,8 +254,7 @@ ffi::Optional<TLayout> SwizzleLayoutNode::IsDirectSumLeft(
     const ffi::Array<PrimExpr>& left_shape) const {
   if (auto comp = sum_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, ffi::GetRef<SwizzleLayout>(this))) {
-      return comp.value()->tile_layout->IsDirectSumLeft(sum_layout,
-                                                       interleaved_shape, left_shape);
+      return comp.value()->tile_layout->IsDirectSumLeft(sum_layout, interleaved_shape, left_shape);
     }
   }
   return std::nullopt;

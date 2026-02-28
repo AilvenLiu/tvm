@@ -151,9 +151,9 @@ inline DataType DTypeFromString(const std::string str) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.device_op_codegen.cuda.PTXDTypeFromString", [](const std::string& str) -> int {
-    return static_cast<int>(DTypeFromString(str));
-  });
+  refl::GlobalDef().def(
+      "tir.device_op_codegen.cuda.PTXDTypeFromString",
+      [](const std::string& str) -> int { return static_cast<int>(DTypeFromString(str)); });
 }
 
 /*!
@@ -163,9 +163,9 @@ inline std::string DTypeToString(DataType dtype) { return dtype_str[static_cast<
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.device_op_codegen.cuda.PTXDTypeToString", [](const int dtype) -> std::string {
-    return DTypeToString(static_cast<DataType>(dtype));
-  });
+  refl::GlobalDef().def(
+      "tir.device_op_codegen.cuda.PTXDTypeToString",
+      [](const int dtype) -> std::string { return DTypeToString(static_cast<DataType>(dtype)); });
 }
 
 /*!
@@ -178,7 +178,7 @@ inline uint32_t DTypeBits(DataType dtype) { return num_bits[static_cast<int>(dty
  */
 inline std::tuple<int, int, int> ParseMMAShape(const std::string& str) {
   size_t pos_m = str.find("m"), pos_n = str.find("n"), pos_k = str.find("k");
-  TVM_FFI_CHECK(pos_m != str.npos && pos_n != str.npos && pos_k != str.npos)
+  TVM_FFI_ICHECK(pos_m != str.npos && pos_n != str.npos && pos_k != str.npos)
       << "Cannot parse MMA shape " << str;
   int m = std::stoi(str.substr(pos_m + 1, pos_n - pos_m - 1)),
       n = std::stoi(str.substr(pos_n + 1, pos_k - pos_n - 1)), k = std::stoi(str.substr(pos_k + 1));
@@ -296,24 +296,26 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
     case DataType::kBFloat16:
     case DataType::kTensorFloat32:
     case DataType::kFloat64:
-      TVM_FFI_CHECK(dtype_a == dtype_b) << ab_not_match_err_str;
+      TVM_FFI_ICHECK(dtype_a == dtype_b) << ab_not_match_err_str;
       break;
     case DataType::kInt4:
     case DataType::kUInt4:
-      TVM_FFI_CHECK(dtype_b == DataType::kInt4 || dtype_b == DataType::kUInt4) << ab_not_match_err_str;
+      TVM_FFI_ICHECK(dtype_b == DataType::kInt4 || dtype_b == DataType::kUInt4)
+          << ab_not_match_err_str;
       break;
     case DataType::kInt8:
     case DataType::kUInt8:
-      TVM_FFI_CHECK(dtype_b == DataType::kInt8 || dtype_b == DataType::kUInt8) << ab_not_match_err_str;
+      TVM_FFI_ICHECK(dtype_b == DataType::kInt8 || dtype_b == DataType::kUInt8)
+          << ab_not_match_err_str;
       break;
     case DataType::kFloat8_e4m3fn:
     case DataType::kFloat8_e5m2:
-      TVM_FFI_CHECK(dtype_b == DataType::kFloat8_e4m3fn || dtype_b == DataType::kFloat8_e5m2)
+      TVM_FFI_ICHECK(dtype_b == DataType::kFloat8_e4m3fn || dtype_b == DataType::kFloat8_e5m2)
           << ab_not_match_err_str;
       break;
     default:
-      TVM_FFI_CHECK(false) << "Invalid multiplicand data types: " << DTypeToString(dtype_a)
-                   << DTypeToString(dtype_b);
+      TVM_FFI_ICHECK(false) << "Invalid multiplicand data types: " << DTypeToString(dtype_a)
+                            << DTypeToString(dtype_b);
   }
   // check a,b and c
   switch (dtype_a) {
@@ -322,31 +324,32 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
     case DataType::kUInt4:
     case DataType::kInt8:
     case DataType::kUInt8:
-      TVM_FFI_CHECK(dtype_c == DataType::kInt32)
+      TVM_FFI_ICHECK(dtype_c == DataType::kInt32)
           << "For multiplicand data type " << DTypeToString(dtype_a) << DTypeToString(dtype_b)
           << ", accumulator data type should be s32.";
       break;
     case DataType::kFloat16:
-      TVM_FFI_CHECK(dtype_c == DataType::kFloat16 || dtype_c == DataType::kFloat32)
+      TVM_FFI_ICHECK(dtype_c == DataType::kFloat16 || dtype_c == DataType::kFloat32)
           << "For multiplicand data type f16, accumulator data type should be f16/f32.";
       break;
     case DataType::kBFloat16:
     case DataType::kTensorFloat32:
-      TVM_FFI_CHECK(dtype_c == DataType::kFloat32)
+      TVM_FFI_ICHECK(dtype_c == DataType::kFloat32)
           << "For multiplicand data type bf16/tf32, accumulator data type can only be f32.";
       break;
     case DataType::kFloat64:
-      TVM_FFI_CHECK(dtype_c == DataType::kFloat64)
+      TVM_FFI_ICHECK(dtype_c == DataType::kFloat64)
           << "For multiplicand data type f64, accumulator data type can only be f64.";
       break;
     case DataType::kFloat8_e4m3fn:
     case DataType::kFloat8_e5m2:
-      TVM_FFI_CHECK(dtype_c == DataType::kFloat32)
+      TVM_FFI_ICHECK(dtype_c == DataType::kFloat32)
           << "For multiplicand data type e4m3/e5m2, accumulator data type can only be f32.";
       break;
     default:
-      TVM_FFI_CHECK(false) << "Invalid multiplicand/accumulator data types: " << DTypeToString(dtype_a)
-                   << DTypeToString(dtype_b) << DTypeToString(dtype_c) << ".";
+      TVM_FFI_ICHECK(false) << "Invalid multiplicand/accumulator data types: "
+                            << DTypeToString(dtype_a) << DTypeToString(dtype_b)
+                            << DTypeToString(dtype_c) << ".";
   }
 }
 
@@ -368,22 +371,23 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
 void CheckMMAConfigValidity(int m, int n, int k, LayoutType layout_a, LayoutType layout_b,
                             DataType dtype_a, DataType dtype_b, DataType dtype_c,
                             const std::string& bit_op, bool sparse, bool saturate) {
-  TVM_FFI_CHECK(bit_op == "xor" || bit_op == "and" || bit_op == "")
+  TVM_FFI_ICHECK(bit_op == "xor" || bit_op == "and" || bit_op == "")
       << "Unrecognized 1-bit operation " << bit_op << " , can only be xor/and.";
   bool use_bit_op = !bit_op.empty();
   if (use_bit_op) {
-    TVM_FFI_CHECK(dtype_a == DataType::kBit1) << "Bit operator is only compatible with 1-bit multiplicand.";
+    TVM_FFI_ICHECK(dtype_a == DataType::kBit1)
+        << "Bit operator is only compatible with 1-bit multiplicand.";
   }
   CheckMMADTypeCompatible(dtype_a, dtype_b, dtype_c);
   if (saturate) {
-    TVM_FFI_CHECK(dtype_a == DataType::kInt4 || dtype_a == DataType::kUInt4 || dtype_a == DataType::kInt8 ||
-          dtype_a == DataType::kUInt8)
+    TVM_FFI_ICHECK(dtype_a == DataType::kInt4 || dtype_a == DataType::kUInt4 ||
+                   dtype_a == DataType::kInt8 || dtype_a == DataType::kUInt8)
         << "Output saturation only applicable to multiplicand type s4/u4/s8/u8.";
   }
 
   if (!(m == 8 && n == 8 && k == 4 && dtype_a == ptx::DataType::kFloat16)) {
     // Only MMA on m8n8k4 for fp16 supports customized layouts.
-    TVM_FFI_CHECK(layout_a == LayoutType::kRowMajor && layout_b == LayoutType::kColumnMajor)
+    TVM_FFI_ICHECK(layout_a == LayoutType::kRowMajor && layout_b == LayoutType::kColumnMajor)
         << "Invalid layout combination " << LayoutTypeToString(layout_a) << ","
         << LayoutTypeToString(layout_b) << ".";
   }
@@ -396,7 +400,7 @@ void CheckMMAConfigValidity(int m, int n, int k, LayoutType layout_a, LayoutType
       break;
     }
   }
-  TVM_FFI_CHECK(match) << "Cannot find matched MMA configurations.";
+  TVM_FFI_ICHECK(match) << "Cannot find matched MMA configurations.";
 }
 
 /*!

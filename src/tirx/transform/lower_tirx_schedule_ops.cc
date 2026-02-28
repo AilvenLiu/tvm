@@ -151,7 +151,7 @@ class TIRxOpScheduler : public StmtExprMutator {
   Stmt VisitStmt_(const ForNode* op) final {
     // Collect the loop variables
     auto loop_var = Downcast<Var>(op->loop_var);
-    ICHECK(!var_range_map_.count(loop_var)) << "Internal Error: Duplicate loop variable";
+    TVM_FFI_ICHECK(!var_range_map_.count(loop_var)) << "Internal Error: Duplicate loop variable";
     var_range_map_.Set(loop_var, Range::FromMinExtent(op->min, op->extent));
     return StmtExprMutator::VisitStmt_(op);
   }
@@ -189,9 +189,10 @@ class TIRxOpScheduler : public StmtExprMutator {
   Stmt VisitStmt_(const tirx::OpCallNode* op) final {
     tirx::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
     static auto f_op_scheduler_ = ffi::Function::GetGlobal("tirx.f_op_scheduler");
-    ICHECK(f_op_scheduler_.has_value()) << "Internal Error: tirx.f_op_scheduler is not registered";
+    TVM_FFI_ICHECK(f_op_scheduler_.has_value())
+        << "Internal Error: tirx.f_op_scheduler is not registered";
     PrimFunc res = f_op_scheduler_.value()(ffi::GetRef<tirx::OpCall>(op), sctx).cast<PrimFunc>();
-    ICHECK(res.defined()) << "TIRx scheduler did not return a PrimFunc";
+    TVM_FFI_ICHECK(res.defined()) << "TIRx scheduler did not return a PrimFunc";
     // Implementation found, handle callbacks
     if (auto bufs = sctx->callbacks.Get(tirx::callback::kPrivateAlloc)) {
       auto buf_list = bufs.value().as<Array<Buffer>>().value();

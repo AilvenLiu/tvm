@@ -235,7 +235,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     // TODO(Lunderberg): Move the handling of boolean into a
     // dedicated pass.
     if (store_returns_bool) {
-      ICHECK_EQ(store->buffer->dtype, DataType::Int(8))
+      TVM_FFI_ICHECK_EQ(store->buffer->dtype, DataType::Int(8))
           << "Expected int8 backing array for boolean tensor";
       auto writer = store.CopyOnWrite();
       writer->value = tvm::cast(DataType::Int(8), store->value);
@@ -252,7 +252,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     // TODO(Lunderberg): Move the handling of boolean into a
     // dedicated pass.
     if (load_returns_bool) {
-      ICHECK_EQ(load->buffer->dtype, DataType::Int(8))
+      TVM_FFI_ICHECK_EQ(load->buffer->dtype, DataType::Int(8))
           << "Expected int8 backing array for boolean tensor";
       load.CopyOnWrite()->dtype = DataType::Int(8);
       return tvm::cast(DataType::Bool(), load);
@@ -298,17 +298,17 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
                    << "Use .view() + .local() to decompose thread and memory axes.";
       }
       auto res = buffer->layout.value()->Canonicalize()->Apply(indices, buffer->shape);
-      ICHECK_EQ(res.size(), 1) << "Expected a single element offset";
+      TVM_FFI_ICHECK_EQ(res.size(), 1) << "Expected a single element offset";
       return {analyzer_->Simplify((*res.begin()).second)};
     }
     auto flattened_indices = buffer->ElemOffset(indices, true);
-    ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
+    TVM_FFI_ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
     return {analyzer_->Simplify(flattened_indices[0])};
   }
 
   template <typename Node>
   Node VisitBufferAccess(Node node) {
-    ICHECK(node->buffer.defined());
+    TVM_FFI_ICHECK(node->buffer.defined());
     if (target_->kind->name == "trn" && !node->buffer->layout.defined()) {
       return node;
     }
@@ -333,7 +333,7 @@ class BufferOffsetRemover : public StmtExprMutator {
   PrimExpr VisitExpr_(const tirx::CallNode* call) final {
     if (call->op.same_as(tirx::builtin::buffer_offset())) {
       auto buffer_load = Downcast<BufferLoad>(call->args[0]);
-      ICHECK_EQ(buffer_load->indices.size(), 1) << "Expected a single index";
+      TVM_FFI_ICHECK_EQ(buffer_load->indices.size(), 1) << "Expected a single index";
       return buffer_load->indices[0];
     }
     return StmtExprMutator::VisitExpr_(call);
@@ -372,7 +372,7 @@ class BufferOffsetRemover : public StmtExprMutator {
 
   template <typename Node>
   Node VisitBufferAccess(Node node) {
-    ICHECK(node->buffer.defined());
+    TVM_FFI_ICHECK(node->buffer.defined());
     auto it = buffer_remap_.find(node->buffer);
     if (it != buffer_remap_.end()) {
       auto writer = node.CopyOnWrite();

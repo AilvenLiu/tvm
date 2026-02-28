@@ -1341,7 +1341,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
     // args[4]: dim_num (int or IntImm)
     // args[5...]: shape dimensions (PrimExpr)
 
-    ICHECK_GE(args.size(), 5) << "print_buffer expects at least 5 arguments";
+    TVM_FFI_ICHECK_GE(args.size(), 5) << "print_buffer expects at least 5 arguments";
 
     Var buffer_var = args[0].cast<Var>();
     DataType dtype = args[1].cast<DataType>();

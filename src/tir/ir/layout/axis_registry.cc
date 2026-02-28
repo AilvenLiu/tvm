@@ -30,7 +30,7 @@ namespace tir {
 ObjectPtr<Object> CreateAxis(const std::string& name) {
   // Hack use ffi::Any as exchange
   auto axis = Axis::Get(name);
-  ICHECK(axis.defined()) << "Cannot find axis '" << name << '\'';
+  TVM_FFI_ICHECK(axis.defined()) << "Cannot find axis '" << name << '\'';
   return ffi::details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(axis);
 }
 
@@ -87,15 +87,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::TypeAttrDef<AxisNode>()
-      .def("__data_to_json__",
-           [](const AxisNode* node) -> ffi::String { return node->name; })
+      .def("__data_to_json__", [](const AxisNode* node) -> ffi::String { return node->name; })
       .def("__data_from_json__", [](const ffi::String& name) -> Axis { return Axis::Get(name); });
 }
 
 // Axis
 Axis Axis::Get(const ffi::String& name) {
   const AxisRegEntry* reg = AxisRegistry::Global()->Get(name);
-  CHECK(reg != nullptr) << "Axis " << name << " is not registered";
+  TVM_FFI_ICHECK(reg != nullptr) << "Axis " << name << " is not registered";
   return reg->axis_;
 }
 
@@ -126,7 +125,7 @@ ffi::Array<ffi::String> AxisRegEntry::ListAxisNames() {
 template <typename ValueType>
 inline AxisRegEntry& AxisRegEntry::set_attr(const ffi::String& key, const ValueType& value,
                                             int plevel) {
-  ICHECK_GT(plevel, 0) << "plevel in set_attr must be greater than 0";
+  TVM_FFI_ICHECK_GT(plevel, 0) << "plevel in set_attr must be greater than 0";
   ffi::Any rv;
   rv = value;
   UpdateAttr(key, rv, plevel);

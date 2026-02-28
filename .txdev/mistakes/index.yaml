@@ -74,11 +74,27 @@ entries:
       - workflow
     title: Fixing a small API mismatch in a high-churn file caused avoidable lint fallout
     updated: '2026-02-28'
+  - created: '2026-02-28'
+    id: M-20260228-0003
+    path: entries/M-20260228-0003.yaml
+    scope:
+      - repo
+    tags:
+      - shell
+      - gh
+      - git
+      - process
+      - quoting
+    title: Using inline PR body with backticks in shell command
+    updated: '2026-02-28'
 tags:
   debugging:
     - M-20260227-0003
+  gh:
+    - M-20260228-0003
   git:
     - M-20260228-0001
+    - M-20260228-0003
   golden:
     - M-20260227-0002
     - M-20260227-0003
@@ -88,8 +104,11 @@ tags:
     - M-20260228-0001
   process:
     - M-20260228-0001
+    - M-20260228-0003
   python:
     - M-20260228-0002
+  quoting:
+    - M-20260228-0003
   quality:
     - M-20260228-0001
   rebase:
@@ -108,3 +127,5 @@ tags:
     - M-20260227-0001
   workflow:
     - M-20260228-0002
+  shell:
+    - M-20260228-0003

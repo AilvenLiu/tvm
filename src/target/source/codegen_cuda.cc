@@ -25,9 +25,8 @@
 
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/function.h>
-#include <tvm/s_tir/stmt.h>
-#include <tvm/tirx/index_map.h>
-#include <tvm/tirx/stmt_functor.h>
+#include <tvm/tir/index_map.h>
+#include <tvm/tir/stmt_functor.h>
 
 #include <cmath>
 #include <string>
@@ -57,7 +56,8 @@ std::string GetFP8Type(DataType type) {
   } else if (lanes == 16) {
     vec = "x16";
   } else {
-    TVM_FFI_THROW(InternalError) << "Only support scalar and vector types of width (2, 4, 8, 16) for FP8";
+    TVM_FFI_THROW(InternalError)
+        << "Only support scalar and vector types of width (2, 4, 8, 16) for FP8";
   }
   stream << "__nv_fp8";
   std::string suffix;
@@ -150,7 +150,8 @@ void CodeGenCUDA::PrintFunctionSignature(const ffi::String& function_name, const
   } else if (calling_conv == CallingConv::kDefault) {
     os << "extern \"C\" __device__ ";
   } else {
-    TVM_FFI_THROW(InternalError) << "Unsupported calling convention for cuda codegen: " << calling_conv;
+    TVM_FFI_THROW(InternalError) << "Unsupported calling convention for cuda codegen: "
+                                 << calling_conv;
   }
   CodeGenC::PrintFunctionSignature(function_name, func, os);
 }
@@ -204,7 +205,8 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 std::string CodeGenCUDA::Finish() {
   // Generate header
   auto header_generator = ffi::Function::GetGlobal("tir.device_op_codegen.cuda.header_generator");
-  TVM_FFI_ICHECK(header_generator.has_value()) << "tir.device_op_codegen.cuda.header_generator is not defined";
+  TVM_FFI_ICHECK(header_generator.has_value())
+      << "tir.device_op_codegen.cuda.header_generator is not defined";
   ffi::Array<ffi::String> tags;
   for (const auto& tag : codegen_tags_) tags.push_back(ffi::String(tag));
   std::string header = header_generator.value()(tags).cast<ffi::String>().operator std::string();
@@ -223,7 +225,7 @@ void CodeGenCUDA::VisitStmt_(const tirx::ForNode* op) {
     PrintIndent();
     stream << "#pragma unroll\n";
   }
-  if(op->annotations.count("disable_unroll")){
+  if (op->annotations.count("disable_unroll")) {
     PrintIndent();
     stream << "#pragma unroll 1\n";
   }
@@ -441,7 +443,8 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
           // s4.z is emitted as *(short2*)(&(i2.y)).x
           // s4.w is emitted as *(short2*)(&(i2.y)).y
           //
-          TVM_FFI_ICHECK_EQ(t.lanes() % 2, 0) << "only support even lane for shorT type with lanes > 4";
+          TVM_FFI_ICHECK_EQ(t.lanes() % 2, 0)
+              << "only support even lane for shorT type with lanes > 4";
           os << "int" << t.lanes() / 2;
         } else {
           fail = true;
@@ -693,8 +696,9 @@ void CodeGenCUDA::PrintStorageSync(const CallNode* op) {
 }
 
 void CodeGenCUDA::PrintStorageScope(const std::string& scope, std::ostream& os) {  // NOLINT(*)
-  TVM_FFI_ICHECK_NE(scope, "global") << "Cannot allocate global memory when targeting CUDA. You must pass "
-                                "all global arrays as input instead";
+  TVM_FFI_ICHECK_NE(scope, "global")
+      << "Cannot allocate global memory when targeting CUDA. You must pass "
+         "all global arrays as input instead";
   if (scope == "shared") {
     os << "__shared__ ";
   } else if (scope == "shared.dyn") {
@@ -722,7 +726,8 @@ std::string CodeGenCUDA::CastFromTo(std::string value, DataType from, DataType t
 void CodeGenCUDA::AddUtilFunction(const std::string& func_name, const std::string& code) {
   auto it = this->util_funcs_.find(func_name);
   if (it != this->util_funcs_.end()) {
-    TVM_FFI_CHECK_EQ(it->second, code) << "Function " << func_name << " already exists with different code";
+    TVM_FFI_ICHECK_EQ(it->second, code)
+        << "Function " << func_name << " already exists with different code";
     return;
   }
   this->util_funcs_.insert({func_name, code});
@@ -883,7 +888,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   if (auto opt_call_opt = op->op.as<Op>()) {
     Op call_op = opt_call_opt.value();
     auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.device_op_codegen.cuda.get_codegen");
-    TVM_FFI_ICHECK(codegen_getter.has_value()) << "tir.device_op_codegen.cuda.get_codegen is not registered";
+    TVM_FFI_ICHECK(codegen_getter.has_value())
+        << "tir.device_op_codegen.cuda.get_codegen is not registered";
     // either codegen is registered or not
     auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
     if (codegen.has_value()) {
@@ -1098,7 +1104,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int barrier_arr_id = Downcast<IntImm>(op->args[5])->value;
     int barrier_id = Downcast<IntImm>(op->args[6])->value;
     auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
+    TVM_FFI_ICHECK(it != barrier_count_.end()) << "Barrier array does not exist";
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBulkAsm(dst, dst_offset, src, src_offset, size, barrier);
@@ -1107,8 +1113,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
-    TVM_FFI_CHECK(barrier_id < it->second) << "Barrier id out of bounds";
+    TVM_FFI_ICHECK(it != barrier_count_.end()) << "Barrier array does not exist";
+    TVM_FFI_ICHECK(barrier_id < it->second) << "Barrier id out of bounds";
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBarrierAsm(barrier);
@@ -1156,10 +1162,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         tgt_dtype.lanes() * tgt_dtype.bits() == src_dtype.lanes() * src_dtype.bits()) {
       return CodeGenC::VisitExpr_(op, os);
     }
-    TVM_FFI_CHECK_EQ(tgt_dtype.lanes(), src_dtype.lanes())
+    TVM_FFI_ICHECK_EQ(tgt_dtype.lanes(), src_dtype.lanes())
         << "E2M1 float4 reinterpret expects source and target to have the same number of lanes. "
         << "Source dtype: " << src_dtype << ", Target dtype: " << tgt_dtype;
-    TVM_FFI_CHECK_EQ(tgt_dtype.bytes(), src_dtype.bytes())
+    TVM_FFI_ICHECK_EQ(tgt_dtype.bytes(), src_dtype.bytes())
         << "E2M1 float4 reinterpret expects source and target to have the same number of bytes. "
         << "Source dtype: " << src_dtype << ", Target dtype: " << tgt_dtype;
 
@@ -1216,7 +1222,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       }
       os << PrintExpr(tirx::Call(tgt_dtype, tirx::builtin::reinterpret(), {value}));
     } else {
-      TVM_FFI_THROW(InternalError) << "Invalid number of lanes for float4_e2m1fn reinterpret: " << lanes;
+      TVM_FFI_THROW(InternalError)
+          << "Invalid number of lanes for float4_e2m1fn reinterpret: " << lanes;
     }
     EndScope(ssa_scope);
   } else if (op->op.same_as(builtin::print_buffer())) {
@@ -1370,25 +1377,27 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 }
 
 void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
-  if (op->attr_key == s_tir::attr::fragment_shape) {
+  if (op->attr_key == tir::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* shape_str = op->value.as<StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
-  } else if (op->attr_key == s_tir::attr::fragment_layout) {
+  } else if (op->attr_key == tir::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* layout_str = op->value.as<StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
-  } else if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
+  } else if (op->attr_key == tir::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
-    TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For CUDA, the index of an async queue must be 0.";
+    TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
+        << "For CUDA, the index of an async queue must be 0.";
     this->VisitStmt(op->body);
     auto commit_group = Call(DataType::Void(), builtin::ptx_cp_async_commit_group(), {});
     this->VisitExpr(commit_group, this->stream);
     return;
-  } else if (op->attr_key == s_tir::attr::async_wait_queue_scope) {
+  } else if (op->attr_key == tir::attr::async_wait_queue_scope) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
     auto queue_id = wait_attrs.first.as<IntImmNode>();
-    TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For CUDA, the index of an async queue must be 0.";
+    TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
+        << "For CUDA, the index of an async queue must be 0.";
     auto wait_cnt = wait_attrs.second;
     auto wait_group = Call(DataType::Void(), builtin::ptx_cp_async_wait_group(), {wait_cnt});
     this->VisitExpr(wait_group, this->stream);
@@ -1401,29 +1410,27 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
   CodeGenC::VisitStmt_(op);
 }
 
-void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
-  TVM_FFI_ICHECK(op->buffer.defined());
-  std::string vid = AllocVarID(op->buffer->data.get());
+void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
+  TVM_FFI_ICHECK(!is_zero(op->condition));
+  std::string vid = AllocVarID(op->buffer_var.get());
 
   this->PrintIndent();
-  std::string scope = GetPtrStorageScope(op->buffer->data);
-  const VarNode* buffer = op->buffer->data.as<VarNode>();
-  DataType dtype = op->buffer->dtype;
-
+  std::string scope = GetPtrStorageScope(op->buffer_var);
+  const VarNode* buffer = op->buffer_var.as<VarNode>();
   if (scope.find("wmma.") == 0) {
     if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
-      TVM_FFI_ICHECK(dtype == DataType::Float(16) || dtype == DataType::Int(8) ||
-                     dtype == DataType::UInt(8) || dtype == DataType::Int(4) ||
-                     dtype == DataType::UInt(4) || dtype == DataType::Int(1) ||
-                     dtype == DataType::BFloat(16))
+      TVM_FFI_ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Int(8) ||
+                     op->dtype == DataType::UInt(8) || op->dtype == DataType::Int(4) ||
+                     op->dtype == DataType::UInt(4) || op->dtype == DataType::Int(1) ||
+                     op->dtype == DataType::BFloat(16))
           << "Matrix_a and matrix_b only support half or char or unsigned char "
           << "or uint4 or int4 or int1 type for now";
     } else {
-      TVM_FFI_ICHECK(dtype == DataType::Float(16) || dtype == DataType::Float(32) ||
-                     dtype == DataType::Int(32))
+      TVM_FFI_ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Float(32) ||
+                     op->dtype == DataType::Int(32))
           << "Accumulator only support half, float and int type for now";
     }
-    PrintWmmaScope(scope, dtype, buffer, stream);
+    PrintWmmaScope(scope, op->dtype, buffer, stream);
   } else {
     PrintStorageScope(scope, stream);
     if (scope != "shared.dyn") {
@@ -1435,35 +1442,28 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
         }
       }
     }
-    PrintType(dtype, stream);
+    PrintType(op->dtype, stream);
   }
 
   if (scope == "shared.dyn") {
     stream << ' ' << vid << "[];\n";
   } else {
-    // Compute constant_size from buffer shape
-    size_t constant_size = 1;
-    for (const auto& dim : op->buffer->shape) {
-      const IntImmNode* dim_imm = dim.as<IntImmNode>();
-      TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation for now";
-      constant_size *= dim_imm->value;
-    }
+    size_t constant_size = op->ConstantAllocationSize();
     TVM_FFI_ICHECK_GT(constant_size, 0) << "Can only handle constant size stack allocation for now";
 
     if (scope.find("wmma.") == 0) {
       constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
     }
-    if ((dtype == DataType::Int(4) || dtype == DataType::UInt(4) || dtype == DataType::Int(1)) &&
+    if ((op->dtype == DataType::Int(4) || op->dtype == DataType::UInt(4) ||
+         op->dtype == DataType::Int(1)) &&
         scope == "shared") {
-      constant_size = constant_size / (32 / dtype.bits());
+      constant_size = constant_size / (32 / op->dtype.bits());
     }
     stream << ' ' << vid << '[' << constant_size << "];\n";
   }
 
-  RegisterHandleType(op->buffer->data.get(), dtype);
-  if (op->annotations.count(tirx::attr::kVolatile)) {
-    MarkVolatile(op->buffer->data.get());
-  }
+  RegisterHandleType(op->buffer_var.get(), op->dtype);
+  this->PrintStmt(op->body);
 }
 
 void CodeGenCUDA::VisitStmt_(const EvaluateNode* op) {
@@ -1485,7 +1485,7 @@ void CodeGenCUDA::VisitStmt_(const EvaluateNode* op) {
 
 void CodeGenCUDA::VisitExpr_(const RampNode* op, std::ostream& os) {
   int lanes = op->dtype.lanes();
-  TVM_FFI_CHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
+  TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
   PrintVecConstructor(op->dtype, os);
   os << "(";
   for (int i = 0; i < lanes; i++) {
@@ -1627,7 +1627,7 @@ void CodeGenCUDA::VisitExpr_(const SelectNode* op, std::ostream& os) {
 
   // Codegen vector condition case by serializing the select op.
   TVM_FFI_ICHECK(op->false_value->dtype == op->dtype && op->true_value->dtype == op->dtype &&
-         op->dtype.lanes() == op->condition.dtype().lanes());
+                 op->dtype.lanes() == op->condition.dtype().lanes());
 
   std::string r_var = name_supply_->FreshName("_");
   this->PrintIndent();

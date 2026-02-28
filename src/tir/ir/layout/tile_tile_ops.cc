@@ -41,7 +41,7 @@ std::pair<TileLayout, std::vector<int64_t>> Group(TileLayout layout,
     while (shape_idx < shape.size() &&
            analyzer.CanProveEqual(floormod(prod, shape[shape_idx]), 0)) {
       PrimExpr c = floordiv(prod, shape[shape_idx]);
-      CHECK(analyzer.CanProveEqual(floormod(extent_i, c), 0))
+      TVM_FFI_ICHECK(analyzer.CanProveEqual(floormod(extent_i, c), 0))
           << "layout " << layout << " can not be grouped by shape " << shape;
       new_shard.push_back(Iter(floordiv(extent_i, c), stride_i * c, layout->shard[i]->axis));
       extent_i = c;
@@ -51,13 +51,13 @@ std::pair<TileLayout, std::vector<int64_t>> Group(TileLayout layout,
     }
     extent_i = analyzer.Simplify(extent_i);
     if (!is_one(extent_i)) {
-      CHECK(shape_idx < shape.size())
+      TVM_FFI_ICHECK(shape_idx < shape.size())
           << "layout " << layout << " can not be grouped by shape " << shape;
       new_shard.push_back(Iter(extent_i, stride_i, layout->shard[i]->axis));
     }
   }
 
-  CHECK(shape_idx == shape.size())
+  TVM_FFI_ICHECK(shape_idx == shape.size())
       << "layout " << layout << " can not be grouped by shape " << shape;
 
   auto* n = layout.CopyOnWrite();
@@ -79,7 +79,8 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
   auto outer = outer_in->Canonicalize().as<TileLayout>().value();
   auto inner = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
-  CHECK_EQ(outer_shape.size(), inner_shape.size()) << "Outer and inner shape size must match";
+  TVM_FFI_ICHECK_EQ(outer_shape.size(), inner_shape.size())
+      << "Outer and inner shape size must match";
 
   auto [grouped_outer, outer_seps] = Group(outer, outer_shape);
   auto [grouped_inner, inner_seps] = Group(inner, inner_shape);
@@ -105,8 +106,10 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
     outer = TileLayout(new_shard, outer->replica, outer->offset);
   }
 
-  CHECK(!outer_seps.empty()) << "Outer layout must only use split/reorder from logical scope";
-  CHECK(!inner_seps.empty()) << "Inner layout must only use split/reorder from logical scope";
+  TVM_FFI_ICHECK(!outer_seps.empty())
+      << "Outer layout must only use split/reorder from logical scope";
+  TVM_FFI_ICHECK(!inner_seps.empty())
+      << "Inner layout must only use split/reorder from logical scope";
 
   std::vector<Iter> tile_shard;
   for (size_t i = 0; i < outer_shape.size(); ++i) {
@@ -139,12 +142,12 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
 // Tiles a logical shape by a given factor array.
 ffi::Array<PrimExpr> TileShape(ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> factor,
                                bool is_inner) {
-  ICHECK_EQ(shape.size(), factor.size()) << "Shape and factor dimension must match.";
+  TVM_FFI_ICHECK_EQ(shape.size(), factor.size()) << "Shape and factor dimension must match.";
   arith::Analyzer analyzer;
 
   ffi::Array<PrimExpr> new_shape;
   for (int i = 0; i < static_cast<int>(shape.size()); ++i) {
-    ICHECK(analyzer.CanProveEqual(floormod(shape[i], factor[i]), 0))
+    TVM_FFI_ICHECK(analyzer.CanProveEqual(floormod(shape[i], factor[i]), 0))
         << "Shape[i] must be divisible by factor[i]";
 
     if (is_inner) {
@@ -208,7 +211,7 @@ TileLayout SplitAxesByScope(TileLayout layout, const ffi::String& split_scope) {
       offset.Set(split_iters[0]->axis, split_iters[0]->stride);
     } else {
       auto coord = SplitCoord(off, {split_iters[0]->extent, split_iters[1]->extent});
-      ICHECK(coord.size() == 2) << "Split coord size must be 2";
+      TVM_FFI_ICHECK(coord.size() == 2) << "Split coord size must be 2";
       offset.Set(split_iters[0]->axis, coord[0] * split_iters[0]->stride);
       offset.Set(split_iters[1]->axis, coord[1] * split_iters[1]->stride);
     }
@@ -252,15 +255,15 @@ ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
     return iter;
   };
 
-  CHECK_EQ(tiled_shape.size(), inner_shape.size())
+  TVM_FFI_ICHECK_EQ(tiled_shape.size(), inner_shape.size())
       << "Tiled shape size must match inner shape size";
 
   auto factored = TileShape(tiled_shape, inner_shape, true);
   auto [grouped_tiled, tiled_seps] = Group(tiled, factored);
-  CHECK(grouped_tiled.defined() && !tiled_seps.empty())
+  TVM_FFI_ICHECK(grouped_tiled.defined() && !tiled_seps.empty())
       << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
   auto [grouped_layout, inner_seps] = Group(layout, inner_shape);
-  CHECK(grouped_layout.defined() && !inner_seps.empty())
+  TVM_FFI_ICHECK(grouped_layout.defined() && !inner_seps.empty())
       << "tile layout group by shape failed, layout is " << layout << " and shape is "
       << inner_shape;
 
@@ -343,15 +346,15 @@ ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   }
 
   arith::Analyzer analyzer;
-  CHECK_EQ(tiled_shape.size(), outer_shape.size())
+  TVM_FFI_ICHECK_EQ(tiled_shape.size(), outer_shape.size())
       << "Tiled shape size must match outer shape size";
 
   auto factored = TileShape(tiled_shape, outer_shape, false);
   auto [grouped_tiled, tiled_seps] = Group(tiled, factored);
-  CHECK(grouped_tiled.defined() && !tiled_seps.empty())
+  TVM_FFI_ICHECK(grouped_tiled.defined() && !tiled_seps.empty())
       << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
   auto [grouped_layout, outer_seps] = Group(layout, outer_shape);
-  CHECK(grouped_layout.defined() && !outer_seps.empty())
+  TVM_FFI_ICHECK(grouped_layout.defined() && !outer_seps.empty())
       << "tile layout group by shape failed, layout is " << layout << " and shape is "
       << outer_shape;
 

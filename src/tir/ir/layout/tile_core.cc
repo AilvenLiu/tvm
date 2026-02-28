@@ -148,7 +148,8 @@ ffi::Map<ffi::String, PrimExpr> TileLayoutNode::Apply(PrimExpr coord) const {
 
 ffi::Map<ffi::String, PrimExpr> TileLayoutNode::Apply(Array<PrimExpr> coord) const {
   arith::Analyzer analyzer;
-  CHECK_EQ(coord.size(), shard.size()) << "Coordinate size must match the number of shard axes";
+  TVM_FFI_ICHECK_EQ(coord.size(), shard.size())
+      << "Coordinate size must match the number of shard axes";
   std::unordered_map<ffi::String, PrimExpr> result;
   for (size_t i = 0; i < shard.size(); ++i) {
     auto it = result.find(shard[i]->axis->name);
@@ -223,7 +224,7 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
 
     auto subscope_opt = axis->GetSubscope();
     auto scope_opt = axis->GetScope();
-    CHECK(subscope_opt.defined() && scope_opt.defined())
+    TVM_FFI_ICHECK(subscope_opt.defined() && scope_opt.defined())
         << "Thread axis " << axis->name << " has no subscope or scope";
 
     ffi::String subscope = subscope_opt.value()->name;
@@ -237,7 +238,8 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
     if (it == scope_map.end())
       scope_map[subscope] = scope;
     else
-      CHECK_EQ(it->second, scope) << "Ill-formed tile layout: conflicting scopes for " << subscope;
+      TVM_FFI_ICHECK_EQ(it->second, scope)
+          << "Ill-formed tile layout: conflicting scopes for " << subscope;
   };
 
   for (const auto& iter : shard) check_axis(iter->axis);
@@ -252,7 +254,7 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
     outer_most = it->second;
   }
 
-  CHECK_EQ(count, scope_map.size()) << "Ill-formed tile layout: disconnected scope chain";
+  TVM_FFI_ICHECK_EQ(count, scope_map.size()) << "Ill-formed tile layout: disconnected scope chain";
   return Tuple<ExecScope, ExecScope>{ExecScope::Create(inner_most.value()),
                                      ExecScope::Create(outer_most)};
 }

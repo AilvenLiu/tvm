@@ -107,10 +107,10 @@ void SBlockFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
 
   ffi::Optional<PrimFuncFrame> frame = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
-  ICHECK(frame.defined()) << "ValueError: Block must be defined within a PrimFunc";
+  TVM_FFI_ICHECK(frame.defined()) << "ValueError: Block must be defined within a PrimFunc";
 
   // Hard-disable SBlock in tirx=True context
-  CHECK(!frame.value()->is_tirx)
+  TVM_FFI_ICHECK(!frame.value()->is_tirx)
       << "ValueError: `T.sblock()` / `Tx.sblock()` is not allowed in tirx=True mode. "
          "Use `with Tx.kernel/cta/warp/thread(...)` for execution scopes and "
          "`T.attr(...)` for annotations instead.";
@@ -140,7 +140,8 @@ void SBlockFrameNode::ExitWithScope() {
 
 void ExecScopeFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
-  ICHECK(exec_scope.defined()) << "InternalError: ExecScopeFrame must have an execution scope";
+  TVM_FFI_ICHECK(exec_scope.defined())
+      << "InternalError: ExecScopeFrame must have an execution scope";
   tvm::tirx::Stmt body = AsStmt(stmts);
   AddToParent(tvm::tirx::ExecScopeStmt(exec_scope.value(), body));
 }
@@ -254,7 +255,8 @@ void ComposeOpFrameNode::ExitWithScope() {
   ffi::Array<ObjectRef> ops;
   for (const auto& stmt : stmts) {
     auto op_call = stmt.as<tvm::tirx::tirx::OpCallNode>();
-    ICHECK(op_call) << "ValueError: Only TIRx op calls allowed in ComposeOp. Violated by " << stmt;
+    TVM_FFI_ICHECK(op_call) << "ValueError: Only TIRx op calls allowed in ComposeOp. Violated by "
+                            << stmt;
     ops.push_back(ffi::GetRef<tvm::tirx::tirx::OpCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirx.compose_op");
@@ -280,7 +282,7 @@ void HintFrameNode::ExitWithScope() {
       tvm::tirx::AttrStmt(full_attrs, "tirx_hint", IntImm(DataType::Int(32), 1), AsStmt(stmts)));
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

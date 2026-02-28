@@ -22,15 +22,6 @@
  * TIRX statement nodes.
  */
 
-<<<<<<<< HEAD:src/tirx/ir/tirp_stmt.cc
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/op_attr_types.h>
-#include <tvm/tirx/tirp_op.h>
-
-namespace tvm {
-namespace tirx {
-namespace tirp {
-========
 #include <tvm/tir/op.h>
 #include <tvm/tir/op_attr_types.h>
 #include <tvm/tir/tirx_op.h>
@@ -38,22 +29,15 @@ namespace tirp {
 namespace tvm {
 namespace tir {
 namespace tirx {
->>>>>>>> bd927f10c7 (rename):src/tir/ir/tirx_stmt.cc
 
 TVM_FFI_STATIC_INIT_BLOCK() { OpCallNode::RegisterReflection(); }
 
 // OpCall
 OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
                ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
-<<<<<<<< HEAD:src/tirx/ir/tirp_stmt.cc
-  // Check if the op is a TIR+ op.
-  static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
-  ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";
-========
   // Check if the op is a TIRX op.
   static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-  ICHECK_EQ(tirx_op_map.count(op), 1) << "Only TIRX ops can be used in tir::tirx::OpCall";
->>>>>>>> bd927f10c7 (rename):src/tir/ir/tirx_stmt.cc
+  TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 1) << "Only TIRX ops can be used in tir::tirx::OpCall";
   // Construct the OpCall.
   ObjectPtr<OpCallNode> n = ffi::make_object<OpCallNode>();
   n->op = std::move(op);
@@ -79,11 +63,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tirx.OpCallCopyHandle", [](const OpCall& op) { return OpCall(op); });
 }
 
-<<<<<<<< HEAD:src/tirx/ir/tirp_stmt.cc
-}  // namespace tirxxxxp
-}  // namespace tirxxxx
-========
 }  // namespace tirx
 }  // namespace tir
->>>>>>>> bd927f10c7 (rename):src/tir/ir/tirx_stmt.cc
 }  // namespace tvm

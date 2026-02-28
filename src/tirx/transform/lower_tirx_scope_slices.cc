@@ -28,19 +28,20 @@
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
 =======
+#include <tvm/tirx/builtin.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
-#include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>> e003fe6cd1 ([Refactor] Decouple exec_scope from SBlock into independent ExecScopeStmt node (#469)):src/tir/transform/lower_tirx_scope_slices.cc
+>>>>>>> aa13d97399 (refactor(logging): remove compatibility adapters and migrate to new logging macros (#517)):src/tir/transform/lower_tirx_scope_slices.cc
 
 namespace tvm {
 namespace tirx {
@@ -74,7 +75,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     if (op->attr_key == tirx::attr::thread_extent) {
       auto iv = op->node.as<IterVar>();
-      ICHECK(iv.has_value()) << "Internal Error: thread_extent should annotate an IterVar";
+      TVM_FFI_ICHECK(iv.has_value()) << "Internal Error: thread_extent should annotate an IterVar";
       launch_params_[iv.value()->thread_tag] = iv.value();
     }
     return StmtExprMutator::VisitStmt_(op);
@@ -88,15 +89,16 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
-  /*! \brief Resolve an ExecScopeSlice into IfThenElse(condition, ExecScopeStmt(plain_scope, body)) */
+  /*! \brief Resolve an ExecScopeSlice into IfThenElse(condition, ExecScopeStmt(plain_scope, body))
+   */
   Stmt ResolveSliceToIfThenElse(const ExecScopeSlice& scope_slice, const Stmt& body) {
     auto scope = ScopePair(scope_slice->parent, scope_slice->name);
     int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
                       ? 1
                       : scope_slice->slices.as<Array<Range>>().value().size();
-    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(
-        scope, scope_slice->extents, out_dim, target_->kind->name, launch_params_);
-    ICHECK_EQ(resolved.size(), out_dim);
+    Array<PrimExpr> resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
+                                                            target_->kind->name, launch_params_);
+    TVM_FFI_ICHECK_EQ(resolved.size(), out_dim);
     auto plain_scope = ExecScope::Create(scope_slice->name);
     Stmt inner = ExecScopeStmt(plain_scope, body);
     if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
@@ -105,8 +107,8 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     auto slices = scope_slice->slices.as<Array<Range>>().value();
     PrimExpr cond = Bool(true);
     for (size_t i = 0; i < slices.size(); i++) {
-      cond = cond && resolved[i] >= slices[i]->min &&
-             resolved[i] < slices[i]->extent + slices[i]->min;
+      cond =
+          cond && resolved[i] >= slices[i]->min && resolved[i] < slices[i]->extent + slices[i]->min;
     }
     return IfThenElse(cond, inner);
   }
@@ -126,7 +128,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       }
 
       auto seq = inner_body.as<SeqStmt>();
-      CHECK(seq.has_value())
+      TVM_FFI_ICHECK(seq.has_value())
           << "TIRxError: ExecScopeStmt with scope partition has invalid body " << op->body;
       Array<Stmt> new_seq;
       for (const auto& stmt : seq.value()->seq) {
@@ -136,7 +138,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       Stmt body = new_seq[new_seq.size() - 1];
       for (int i = new_seq.size() - 2; i >= 0; i--) {
         auto if_then = new_seq[i].as<IfThenElse>();
-        CHECK(if_then.has_value() && !if_then.value()->else_case.defined())
+        TVM_FFI_ICHECK(if_then.has_value() && !if_then.value()->else_case.defined())
             << "TIRxError: ExecScopeStmt with scope partition has invalid body " << op->body;
         body = IfThenElse(if_then.value()->condition, if_then.value()->then_case, body);
       }
@@ -192,5 +194,5 @@ Pass LowerTIRxResolveScopeSlices() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
