@@ -51,6 +51,30 @@ entries:
       - copy_async
     title: tma_shared_layout return type varies
     updated: '2026-02-27'
+  - created: '2026-02-28'
+    id: KB-20260228-0001
+    path: entries/KB-20260228-0001.yaml
+    scope:
+      - repo
+    tags:
+      - pre-commit
+      - lint
+      - git
+      - workflow
+    title: Align .pre-commit-config.yaml from upstream with direct checkout
+    updated: '2026-02-28'
+  - created: '2026-02-28'
+    id: KB-20260228-0002
+    path: entries/KB-20260228-0002.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - xdist
+      - skip
+      - testing
+    title: Use junitxml to enumerate exact skipped tests under xdist
+    updated: '2026-02-28'
 tags:
   assert_structural_equal:
     - KB-20260227-0001
@@ -61,14 +85,29 @@ tags:
     - KB-20260227-0003
   copy_tma_impl:
     - KB-20260227-0001
+  git:
+    - KB-20260228-0001
   layout:
     - KB-20260227-0003
+  lint:
+    - KB-20260228-0001
+  pre-commit:
+    - KB-20260228-0001
   ptx:
     - KB-20260227-0002
+  pytest:
+    - KB-20260228-0002
+  skip:
+    - KB-20260228-0002
   testing:
     - KB-20260227-0001
+    - KB-20260228-0002
   tir:
     - KB-20260227-0001
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
+  workflow:
+    - KB-20260228-0001
+  xdist:
+    - KB-20260228-0002

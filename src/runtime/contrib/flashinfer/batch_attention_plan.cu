@@ -1,5 +1,23 @@
 /*
- * Copyright (c) 2023 by FlashInfer team.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/*
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,8 +130,8 @@ IntTuple BatchPrefillWithKVCachePlan(
       enable_cuda_graph,
       /*sizeof_dtype_o=*/2, stream);
 
-  CHECK(status == cudaSuccess) << "Failed to plan prefill with error: "
-                               << cudaGetErrorString(status);
+  TVM_FFI_ICHECK(status == cudaSuccess)
+      << "Failed to plan prefill with error: " << cudaGetErrorString(status);
 
   std::vector<int64_t> plan_info_vec = plan_info.ToVector();
   return IntTuple{plan_info_vec.begin(), plan_info_vec.end()};
@@ -132,7 +150,7 @@ Array<Any> BatchDecodeWithPagedKVCachePlan(
 
   DecodePlanInfo plan_info;
 
-  CHECK_EQ(head_dim_qk, head_dim_vo)
+  TVM_FFI_ICHECK_EQ(head_dim_qk, head_dim_vo)
       << "CUDA cores template only supports equal head dim for QK and VO, please use tensor "
          "cores template for different head dim";
 
@@ -160,8 +178,8 @@ Array<Any> BatchDecodeWithPagedKVCachePlan(
       num_qo_heads, page_size, enable_cuda_graph,
       /*stream=*/stream, work_estimation_func);
 
-  CHECK(status == cudaSuccess) << "BatchDecodeWithPagedKVCache failed with error "
-                               << cudaGetErrorString(status);
+  TVM_FFI_ICHECK(status == cudaSuccess)
+      << "BatchDecodeWithPagedKVCache failed with error " << cudaGetErrorString(status);
 
   std::vector<int64_t> plan_info_vec = plan_info.ToVector();
   int64_t padded_batch_size = plan_info_vec[0];
@@ -185,9 +203,8 @@ Array<Any> BatchDecodeWithPagedKVCachePlan(
   Tensor kv_chunk_size_ptr =
       int_workspace_buffer.CreateView({kv_chunk_size_ptr_size}, dtype,
                                       /*relative_byte_offset=*/kv_chunk_size_ptr_offset);
-  Tensor o_indptr_device =
-      int_workspace_buffer.CreateView({o_indptr_size}, dtype,
-                                      /*relative_byte_offset=*/o_inptr_offset);
+  Tensor o_indptr_device = int_workspace_buffer.CreateView({o_indptr_size}, dtype,
+                                                           /*relative_byte_offset=*/o_inptr_offset);
   Tensor o_indptr_host =
       page_locked_int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                                   /*relative_byte_offset=*/o_inptr_offset);
@@ -224,21 +241,20 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
       static_cast<IdType*>(kv_len->data) + kv_len->byte_offset / sizeof(IdType), batch_size,
       num_qo_heads, num_kv_heads, head_dim_o, causal, stream);
 
-  CHECK(status == cudaSuccess) << "BatchPagedAttentionPlan failed with error "
-                               << cudaGetErrorString(status);
+  TVM_FFI_ICHECK(status == cudaSuccess)
+      << "BatchPagedAttentionPlan failed with error " << cudaGetErrorString(status);
 
   constexpr uint32_t NUM_TASK_ARGS = 10;
   constexpr uint32_t NUM_SHARED_ARGS = 8;
   const int max_total_num_works = 1025;
   int num_clusters = 148;
-  const int max_num_kv_splits =
-      4 * num_clusters * 2 * (CTA_TILE_Q_SIZES[1]);
+  const int max_num_kv_splits = 4 * num_clusters * 2 * (CTA_TILE_Q_SIZES[1]);
   DataType int_dtype = DataType::Int(32);
   DataType fp16_dtype = DataType::Float(16);
   DataType fp32_dtype = DataType::Float(32);
 
   std::vector<int64_t> plan_info_vec = plan_info.ToVector();
-  CHECK_EQ(plan_info_vec.size(), NUM_SHARED_ARGS + NUM_TASKS * NUM_TASK_ARGS);
+  TVM_FFI_ICHECK_EQ(plan_info_vec.size(), NUM_SHARED_ARGS + NUM_TASKS * NUM_TASK_ARGS);
 
   std::vector<Any> ret;
   int64_t num_blks_x = plan_info_vec[0];
@@ -251,11 +267,11 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
     task_arrays.reserve(NUM_TASK_ARGS);
     int64_t q_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 0];
     Tensor q_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                       /*relative_byte_offset=*/q_indptr_offset);
+                                                      /*relative_byte_offset=*/q_indptr_offset);
     task_arrays.push_back(q_indptr);
     int64_t kv_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 1];
     Tensor kv_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                        /*relative_byte_offset=*/kv_indptr_offset);
+                                                       /*relative_byte_offset=*/kv_indptr_offset);
     task_arrays.push_back(kv_indptr);
     int64_t partial_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 2];
     Tensor partial_indptr =
@@ -264,23 +280,23 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
     task_arrays.push_back(partial_indptr);
     int64_t q_len_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 3];
     Tensor q_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                    /*relative_byte_offset=*/q_len_offset);
+                                                   /*relative_byte_offset=*/q_len_offset);
     task_arrays.push_back(q_len);
     int64_t kv_len_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 4];
     Tensor kv_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                     /*relative_byte_offset=*/kv_len_offset);
+                                                    /*relative_byte_offset=*/kv_len_offset);
     task_arrays.push_back(kv_len);
     int64_t q_start_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 5];
     Tensor q_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                      /*relative_byte_offset=*/q_start_offset);
+                                                     /*relative_byte_offset=*/q_start_offset);
     task_arrays.push_back(q_start);
     int64_t kv_start_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 6];
     Tensor kv_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                       /*relative_byte_offset=*/kv_start_offset);
+                                                      /*relative_byte_offset=*/kv_start_offset);
     task_arrays.push_back(kv_start);
     int64_t kv_end_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 7];
     Tensor kv_end = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                     /*relative_byte_offset=*/kv_end_offset);
+                                                    /*relative_byte_offset=*/kv_end_offset);
     task_arrays.push_back(kv_end);
     int64_t kv_head_idx_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 8];
     Tensor kv_head_idx =
@@ -293,14 +309,17 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
                                         /*relative_byte_offset=*/work_indptr_offset);
     task_arrays.push_back(work_indptr);
     // on the host meomory, needed by event generation of megakernel
-    Tensor q_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                                        /*relative_byte_offset=*/q_indptr_offset);
+    Tensor q_indptr_host =
+        page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+                                                    /*relative_byte_offset=*/q_indptr_offset);
     task_arrays.push_back(q_indptr_host);
-    Tensor kv_head_idx_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                                          /*relative_byte_offset=*/kv_head_idx_offset);
+    Tensor kv_head_idx_host =
+        page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+                                                    /*relative_byte_offset=*/kv_head_idx_offset);
     task_arrays.push_back(kv_head_idx_host);
-    Tensor work_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
-                                                                          /*relative_byte_offset=*/work_indptr_offset);
+    Tensor work_indptr_host =
+        page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+                                                    /*relative_byte_offset=*/work_indptr_offset);
     task_arrays.push_back(work_indptr_host);
     ret.push_back(Array<Tensor>(task_arrays));
   }
@@ -322,7 +341,7 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
   ret.push_back(merge_o_indices);
   int64_t num_qo_len_offset = plan_info_vec[7 + NUM_TASKS * NUM_TASK_ARGS];
   Tensor num_qo_len = int_workspace_buffer.CreateView({1}, int_dtype,
-                                                       /*relative_byte_offset=*/num_qo_len_offset);
+                                                      /*relative_byte_offset=*/num_qo_len_offset);
   ret.push_back(num_qo_len);
   return ret;
 }
@@ -330,9 +349,9 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
 void TopPSamplingFromProb(DLTensor* probs, DLTensor* output, DLTensor* top_p_arr,
                           uint64_t philox_seed, uint64_t philox_offset, uint64_t cuda_stream) {
   bool deterministic = true;
-  CHECK_EQ(probs->ndim, 2) << "Probs should have 2 dimensions";
-  CHECK_EQ(output->ndim, 1) << "Output should have 1 dimension";
-  CHECK_EQ(top_p_arr->ndim, 1) << "TopPArr should have 1 dimension";
+  TVM_FFI_ICHECK_EQ(probs->ndim, 2) << "Probs should have 2 dimensions";
+  TVM_FFI_ICHECK_EQ(output->ndim, 1) << "Output should have 1 dimension";
+  TVM_FFI_ICHECK_EQ(top_p_arr->ndim, 1) << "TopPArr should have 1 dimension";
   int64_t batch_size = output->shape[0];
   int64_t vocab_size = probs->shape[1];
 
@@ -343,8 +362,8 @@ void TopPSamplingFromProb(DLTensor* probs, DLTensor* output, DLTensor* top_p_arr
       static_cast<float*>(top_p_arr->data) + top_p_arr->byte_offset / sizeof(float), batch_size,
       /*top_p_val=*/0, vocab_size, deterministic, philox_seed, philox_offset,
       reinterpret_cast<cudaStream_t>(cuda_stream));
-  CHECK(status == cudaSuccess) << "SamplingFromProbs failed with error "
-                               << cudaGetErrorString(status);
+  TVM_FFI_ICHECK(status == cudaSuccess)
+      << "SamplingFromProbs failed with error " << cudaGetErrorString(status);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

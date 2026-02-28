@@ -49,12 +49,32 @@ entries:
       - debugging
     title: Verify actual IR output before writing expected values
     updated: '2026-02-27'
+  - created: '2026-02-28'
+    id: M-20260228-0001
+    path: entries/M-20260228-0001.yaml
+    scope:
+      - repo
+    tags:
+      - pre-commit
+      - git
+      - process
+      - quality
+    title: Bypassing hooks with --no-verify before resolving blockers
+    updated: '2026-02-28'
 tags:
   debugging:
     - M-20260227-0003
+  git:
+    - M-20260228-0001
   golden:
     - M-20260227-0002
     - M-20260227-0003
+  pre-commit:
+    - M-20260228-0001
+  process:
+    - M-20260228-0001
+  quality:
+    - M-20260228-0001
   readability:
     - M-20260227-0002
   requirements:

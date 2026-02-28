@@ -39,13 +39,29 @@ entries:
       - buffer-view
     title: Keep test_copy_tma_3d_with_view as separate special-case test
     updated: '2026-02-27'
+  - created: '2026-02-28'
+    id: ADR-20260228-0001
+    path: entries/ADR-20260228-0001.yaml
+    scope:
+      - repo
+    tags:
+      - pre-commit
+      - upstream-alignment
+      - tooling
+      - ci
+    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing checks
+    updated: '2026-02-28'
 tags:
   assert_structural_equal:
     - ADR-20260227-0001
   buffer-view:
     - ADR-20260227-0002
+  ci:
+    - ADR-20260228-0001
   golden:
     - ADR-20260227-0001
+  pre-commit:
+    - ADR-20260228-0001
   testing:
     - ADR-20260227-0001
     - ADR-20260227-0002
@@ -53,3 +69,7 @@ tags:
     - ADR-20260227-0001
   tma:
     - ADR-20260227-0002
+  tooling:
+    - ADR-20260228-0001
+  upstream-alignment:
+    - ADR-20260228-0001
