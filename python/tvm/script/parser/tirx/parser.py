@@ -207,7 +207,7 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         res = value.__enter__()
         IRBuilder.name(var_name, res)
         return res
-    elif isinstance(value, (Buffer, IterVar, TLayout)) or (
+    elif isinstance(value, Buffer | IterVar | TLayout) or (
         isinstance(value, Var) and not self.var_table.exist(value)
     ):
         IRBuilder.name(var_name, value)
@@ -409,11 +409,12 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
         # that genuine errors (e.g. wrong shape, bad store) are not swallowed.
         # Only TypeError from FFI type mismatch (e.g. rhs is a meta_var, not
         # a PrimExpr or auto-convertible scalar) triggers fallthrough.
-        if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
+        if isinstance(lhs_value, T.BufferLoad | tvm.tirx.Buffer):
             buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
             if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
                 # only 1-dim buffer with shape (1,) can be assigned directly
-                # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+                # Note that shape can be a PrimExpr, so we only judge by
+                # bool(shape[0] == 1) rather than int(shape[0]) == 1.
                 try:
                     T.buffer_store(buffer, rhs, [0])
                     return
@@ -485,7 +486,7 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
             lhs_value = self.eval_expr(lhs_copy)
         except Exception:  # pylint: disable=broad-except
             pass
-        if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
+        if isinstance(lhs_value, T.BufferLoad | tvm.tirx.Buffer):
             buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
             if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
                 try:
@@ -597,9 +598,13 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     tirx = find_decorator_annotation(node, "tirx", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
-
         # self.var_table.add("range", range_sugar)
-        with T.prim_func(is_private=privacy, is_tirx=tirx):
+        try:
+            prim_func_ctx = T.prim_func(is_private=privacy, is_tirx=tirx)
+        except TypeError:
+            # Backward compatibility for older IRBuilder signatures.
+            prim_func_ctx = T.prim_func(is_private=privacy, is_tirp=tirx)
+        with prim_func_ctx:
             T.func_name(node.name)
             if node.returns is not None:
                 ret_type = self.eval_expr(node.returns)

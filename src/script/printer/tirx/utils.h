@@ -19,6 +19,7 @@
 #ifndef TVM_SCRIPT_PRINTER_TIR_UTILS_H_
 #define TVM_SCRIPT_PRINTER_TIR_UTILS_H_
 
+#include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/script/printer/ir_docsifier.h>
 #include <tvm/tirx/analysis.h>
@@ -42,6 +43,8 @@
 namespace tvm {
 namespace script {
 namespace printer {
+
+using tvm::ffi::StructuralEqual;
 
 /*! \brief A printer frame for TIR fragment */
 class TIRFrameNode : public FrameNode {

@@ -63,9 +63,9 @@ std::vector<IRBuilder>* ThreadLocalBuilderStack() {
 
 void IRBuilder::EnterWithScope() {
   IRBuilderNode* n = this->get();
-  TVM_FFI_CHECK(n->frames.empty()) << "ValueError: There are frame(s) left in the builder: "
-                           << n->frames.size()
-                           << ". Please use a fresh new builder every time building IRs";
+  TVM_FFI_CHECK(n->frames.empty(), ValueError)
+      << "ValueError: There are frame(s) left in the builder: " << n->frames.size()
+      << ". Please use a fresh new builder every time building IRs";
   n->result = std::nullopt;
   std::vector<IRBuilder>* stack = ThreadLocalBuilderStack();
   stack->push_back(*this);
@@ -79,7 +79,7 @@ void IRBuilder::ExitWithScope() {
 
 IRBuilder IRBuilder::Current() {
   std::vector<IRBuilder>* stack = ThreadLocalBuilderStack();
-  TVM_FFI_CHECK(!stack->empty()) << "ValueError: No builder in current scope";
+  TVM_FFI_CHECK(!stack->empty(), ValueError) << "ValueError: No builder in current scope";
   return stack->back();
 }
 
@@ -97,9 +97,9 @@ Namer::FType& Namer::vtable() {
 
 void Namer::Name(ObjectRef node, ffi::String name) {
   static const FType& f = vtable();
-  TVM_FFI_CHECK(node.defined()) << "ValueError: Cannot name nullptr with: " << name;
-  TVM_FFI_CHECK(f.can_dispatch(node)) << "ValueError: Do not know how to name type \"" << node->GetTypeKey()
-                              << "\"";
+  TVM_FFI_CHECK(node.defined(), ValueError) << "ValueError: Cannot name nullptr with: " << name;
+  TVM_FFI_CHECK(f.can_dispatch(node), ValueError)
+      << "ValueError: Do not know how to name type \"" << node->GetTypeKey() << "\"";
   f(node, name);
 }
 

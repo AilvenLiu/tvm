@@ -18,20 +18,21 @@
  */
 
 #include "megakernel_utils.h"
-#include "attn_utils.h"
 
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/node/cast.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/nvtx.h>
 #include <tvm/runtime/tensor.h>
 #include <tvm/runtime/vm/vm.h>
-#include <tvm/node/cast.h>
 
 #include <utility>
+
+#include "attn_utils.h"
 
 namespace tvm {
 namespace runtime {
@@ -74,8 +75,8 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
   int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
   int split_qkv_project = config["SPLIT_QKV_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
   int split_o_project = config["SPLIT_O_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
-  TVM_FFI_ITVM_FFI_ICHECK_NE(split_qkv_project, -1);
-  TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
+  TVM_FFI_ICHECK_NE(split_qkv_project, -1);
+  TVM_FFI_ICHECK_NE(split_o_project, -1);
   bool is_moe = config.count("NUM_EXPERTS");
   bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
@@ -158,7 +159,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
         std::min(batch_size, kNumSM / (hidden_size / kSplitKReduceTileNUnit));
     int32_t n_tile_o_proj_reduce =
         (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_o_proj_reduce)) *
-        kSplitKReduceTileNUnit);
+         kSplitKReduceTileNUnit);
     int32_t m_tile_o_reduce = ceildiv(batch_size, m_split_o_proj_reduce);
     m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_reduce);
     for (int n_idx = 0; n_idx < ceildiv(hidden_size, n_tile_o_proj_reduce); ++n_idx) {
@@ -214,8 +215,8 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
         config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
     int down_proj_split_k_factor =
         config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
-    TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
-    TVM_FFI_ITVM_FFI_ICHECK_NE(gate_up_proj_split_k_factor, -1);
+    TVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
+    TVM_FFI_ICHECK_NE(gate_up_proj_split_k_factor, -1);
     if (gate_up_proj_split_k_factor == 1) {
       TVM_FFI_ICHECK_EQ(intermediate_size % kGemmTileBlkN, 0);
       for (int n_idx = 0; n_idx < 2 * intermediate_size / kGemmTileBlkN; ++n_idx) {
@@ -255,7 +256,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
           std::min(kNumSM / (hidden_size / kSplitKReduceTileNUnit), batch_size);
       int32_t n_tile_down_proj_reduce =
           (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_down_proj_reduce)) *
-          kSplitKReduceTileNUnit);
+           kSplitKReduceTileNUnit);
       int32_t m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce);
       m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce);
       for (int m_idx = 0; m_idx < m_split_down_proj_reduce; ++m_idx) {
@@ -365,12 +366,13 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   return queue_by_layer;
 }
 
-Tensor GetExecQueueStatic(tvm::ffi::AnyView vm_arg, ObjectRef gen_exec_func, ffi::Shape cache_args) {
+Tensor GetExecQueueStatic(tvm::ffi::AnyView vm_arg, ObjectRef gen_exec_func,
+                          ffi::Shape cache_args) {
   static std::unordered_map<size_t, Tensor> cache;
   // calculate hash key
   size_t hash = cache_args.size();
   for (int32_t i : cache_args) {
-      hash ^= std::hash<int32_t>()(i) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int32_t>()(i) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
   }
   if (cache.count(hash)) {
     // hit cache
@@ -383,7 +385,8 @@ Tensor GetExecQueueStatic(tvm::ffi::AnyView vm_arg, ObjectRef gen_exec_func, ffi
     std::vector<tvm::ffi::AnyView> packed_args(1);
     packed_args[0] = cache_args;
     tvm::ffi::Any rv;
-    vm->InvokeClosurePacked(func, tvm::ffi::PackedArgs(packed_args.data(), packed_args.size()), &rv);
+    vm->InvokeClosurePacked(func, tvm::ffi::PackedArgs(packed_args.data(), packed_args.size()),
+                            &rv);
     Tensor exec_queue = rv.cast<Tensor>();
     cache[hash] = exec_queue;
     return exec_queue;

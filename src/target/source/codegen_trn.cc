@@ -22,10 +22,11 @@
  */
 #include "codegen_trn.h"
 
-#include <tvm/tir/transform.h>
 #include <tvm/tir/expr.h>
+#include <tvm/tir/transform.h>
 
 #include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -630,7 +631,7 @@ void CodeGenTrainium::VisitExpr_(const OrNode* op, std::ostream& os) {
   os << PrintExpr(op->a) << " | " << PrintExpr(op->b);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK(){
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("target.build.trn", BuildTrainium);
 }

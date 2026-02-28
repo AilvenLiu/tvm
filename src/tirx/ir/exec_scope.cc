@@ -17,6 +17,7 @@
  * under the License.
  */
 #include <tvm/arith/analyzer.h>
+#include <tvm/runtime/logging.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/op.h>
@@ -109,7 +110,7 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
   if (!other_slice) {
     return false;
   }
-  return ExecScopeNode::Is(other) && StructuralEqual()(this->slices, other_slice->slices);
+  return ExecScopeNode::Is(other) && ffi::StructuralEqual()(this->slices, other_slice->slices);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -138,7 +139,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // ScopeIdDef
 ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope,
-                        ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
+                       ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
   auto n = ffi::make_object<ScopeIdDefNode>();
   CHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
                                        << ids.size() << " and " << extents.size();
@@ -160,12 +161,11 @@ PrimExpr ScopeIdDef::fused_extent() const {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tirx.ScopeIdDef",
-      [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope,
-         ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
-        return ScopeIdDef(vars, extents, scope, preferred_extents);
-      });
+  refl::GlobalDef().def("tirx.ScopeIdDef",
+                        [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope,
+                           ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
+                          return ScopeIdDef(vars, extents, scope, preferred_extents);
+                        });
 }
 
 bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
@@ -198,7 +198,6 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   while (!queue.empty()) {
     auto head = queue.front();
     queue.pop();
-
 
     // Snapshot to avoid iterator invalidation on insert
     std::vector<ScopeIdDef> snapshot;
@@ -278,7 +277,6 @@ std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchPara
   return {(*it).second->var, (*it).second->dom->extent};
 }
 
-
 // Helper function to handle common thread index calculations
 inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
   PrimExpr tx, ty, tz, ex, ey, ez;
@@ -303,7 +301,6 @@ PrimExpr ScopeIdResolveTable::ComputeWarpIdInCta(const LaunchParams& params) {
   TVM_STR_CONCAT(TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF, __COUNTER__) = \
       ::tvm::tirx::ScopeIdResolveTable::Global()->Register(parent, cur, target_kind)
 
-
 Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& prefix,
                                  int out_dim) {
   Array<PrimExpr> ret;
@@ -312,8 +309,6 @@ Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& 
   }
   return std::move(ret);
 }
-
-
 
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
     .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
@@ -358,13 +353,13 @@ auto mod32 = [](PrimExpr x) { return FloorMod(x, 32); };
 auto mod128 = [](PrimExpr x) { return FloorMod(x, 128); };
 
 // Warp-related scopes: resolve from warp_id_in_cta in launch params
-#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                                 \
-  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                   \
-      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                     \
-              const LaunchParams& params) -> Array<PrimExpr> {                                     \
-        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now";  \
-        arith::Analyzer ana;                                                                       \
-        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))};                \
+#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                                \
+  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                  \
+      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                    \
+              const LaunchParams& params) -> Array<PrimExpr> {                                    \
+        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now"; \
+        arith::Analyzer ana;                                                                      \
+        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))};               \
       })
 
 REGISTER_1D_WARP_SCOPE("cta", "warpgroup", div4);
@@ -379,5 +374,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxx
 }  // namespace tvm

@@ -284,7 +284,7 @@ class VarTable:
         """
         return {key: values[-1] for key, values in self.name2value.items() if values}
 
-    def get_at_depth(self, depth: int) -> Dict[str, Any]:
+    def get_at_depth(self, depth: int) -> dict[str, Any]:
         """Get variables visible at the given frame depth, using current values.
 
         For each variable name that appears in frames 0..depth-1, count how many
@@ -298,11 +298,11 @@ class VarTable:
 
         Returns
         -------
-        res : Dict[str, Any]
+        res : dict[str, Any]
             Variable dictionary of values visible at the given depth.
         """
-        result: Dict[str, Any] = {}
-        name_count: Dict[str, int] = defaultdict(int)
+        result: dict[str, Any] = {}
+        name_count: dict[str, int] = defaultdict(int)
         for frame_idx in range(min(depth, len(self.frames))):
             for name in self.frames[frame_idx].vars:
                 name_count[name] += 1

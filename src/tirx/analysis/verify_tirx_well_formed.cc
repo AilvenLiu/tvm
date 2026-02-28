@@ -24,17 +24,17 @@
 
 #include <tvm/arith/analyzer.h>
 #include <tvm/ir/op.h>
-<<<<<<<< HEAD:src/tirx/analysis/verify_tirp_well_formed.cc
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/stmt.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirp_op.h>
-========
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
->>>>>>>> bd927f10c7 (rename):src/tirx/analysis/verify_tirx_well_formed.cc
+=======
+#include <tvm/runtime/logging.h>
+#include <tvm/tirx/exec_scope.h>
+#include <tvm/tirx/stmt.h>
+#include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirx_op.h>
+>>>>>>> 6527ba630b (fix(rebase): restore tirx compatibility and tests after apache/main sync):src/tir/analysis/verify_tirx_well_formed.cc
 
 #include <exception>
 #include <optional>
@@ -56,15 +56,13 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path
-        << ". Use ExecScopeStmt with T.attr() instead.";
+    Verify(false) << "TIRxError: SBlock is not allowed in tirx=True mode at " << path
+                  << ". Use ExecScopeStmt with T.attr() instead.";
   }
 
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path
-        << ". Use ExecScopeStmt with T.attr() instead.";
+    Verify(false) << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path
+                  << ". Use ExecScopeStmt with T.attr() instead.";
   }
 
   void VisitStmt_(const tirx::OpCallNode* op, ffi::reflection::AccessPath path) override {
@@ -97,9 +95,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
           auto scope = exec_scope_stmt.value()->exec_scope;
           Verifier::VisitStmt_(exec_scope_stmt.value().get(), path);
           auto scope_slice = scope.as<ExecScopeSlice>();
-          Verify(scope_slice.has_value())
-              << "TIRxError: ExecScopeStmt with scope partition at " << path
-              << " has invalid exec_scope " << scope;
+          Verify(scope_slice.has_value()) << "TIRxError: ExecScopeStmt with scope partition at "
+                                          << path << " has invalid exec_scope " << scope;
           if (scope_slice_chk.has_value()) {
             Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
                    scope_slice_chk.value()->parent == scope_slice.value()->parent)
@@ -167,8 +164,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
               break;
             }
           }
-          Verify(consistent) << "TIRxError: ExecScopeSlice at " << path
-                             << " is inconsistent with " << it_slices->first;
+          Verify(consistent) << "TIRxError: ExecScopeSlice at " << path << " is inconsistent with "
+                             << it_slices->first;
           it_slices->second.push_back(slices);
           pop_scope = true;
         }
@@ -228,13 +225,11 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
@@ -251,13 +246,11 @@ class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
@@ -277,13 +270,11 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlock is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override {
-    Verify(false)
-        << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
+    Verify(false) << "TIRxError: SBlockRealize is not allowed in tirx=True mode at " << path;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
@@ -292,9 +283,8 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
       Verify(!root_.has_value()) << "TIRxError: Only one root scope is allowed in device function";
       root_ = op->exec_scope;
       auto kernel_scope = ExecScope::Create("kernel");
-      Verify(kernel_scope->Higher(root_.value()))
-          << "TIRxError: Root scope of device function at " << path
-          << " is higher than kernel scope";
+      Verify(kernel_scope->Higher(root_.value())) << "TIRxError: Root scope of device function at "
+                                                  << path << " is higher than kernel scope";
       inside_root_scope_ = true;
       Verifier::VisitStmt_(op, path);
       inside_root_scope_ = false;
@@ -343,11 +333,7 @@ bool VerifyTIRxWellFormed(const IRModule& mod, bool assert_mode, bool device_fun
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-<<<<<<<< HEAD:src/tirx/analysis/verify_tirp_well_formed.cc
-  refl::GlobalDef().def("tirx.analysis.VerifyTIRpWellFormed",
-========
   refl::GlobalDef().def("tirx.analysis.VerifyTIRxWellFormed",
->>>>>>>> bd927f10c7 (rename):src/tirx/analysis/verify_tirx_well_formed.cc
                         [](const ObjectRef& obj, bool assert_mode, bool device_func) {
                           if (auto n = obj.as<PrimFunc>()) {
                             return VerifyTIRxWellFormed(n.value(), assert_mode, device_func);
@@ -360,5 +346,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                           }
                         });
 }
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

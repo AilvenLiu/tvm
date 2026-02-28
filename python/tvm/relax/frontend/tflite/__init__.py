@@ -18,4 +18,5 @@
 Tools for converting TFLite graphs into Relax graphs.
 """
 
-from .tflite_frontend import from_tflite
+from .ir_builder.tir.ir import meta_class, meta_var  # noqa: F401
+from .parser.tir import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import

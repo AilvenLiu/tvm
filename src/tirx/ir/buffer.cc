@@ -347,19 +347,19 @@ static void ValidateAxisSeparators(const ffi::Array<IntImm>& axis_separators, si
   for (size_t i = 0; (i + 1) < axis_separators.size(); i++) {
     auto sep = axis_separators[i]->value;
     auto next_sep = axis_separators[i + 1]->value;
-    TVM_FFI_CHECK_LE(sep, next_sep) << "ValueError: "
-                            << "Axis separators must be in increasing order, "
-                            << "but axis_separators[" << i << "] = " << sep
-                            << " is greater than or equal to axis_separators[" << (i + 1)
-                            << "] = " << next_sep << ".";
+    TVM_FFI_CHECK_LE(sep, next_sep, ValueError)
+        << "ValueError: "
+        << "Axis separators must be in increasing order, "
+        << "but axis_separators[" << i << "] = " << sep
+        << " is greater than or equal to axis_separators[" << (i + 1) << "] = " << next_sep << ".";
   }
   if (axis_separators.size()) {
     auto first_sep = axis_separators[0]->value;
-    TVM_FFI_CHECK_GE(first_sep, 0) << "ValueError: "
-                           << "All axis separators must be non-negative.  "
-                           << "However, the axis_separators[0] = " << first_sep;
+    TVM_FFI_CHECK_GE(first_sep, 0, ValueError) << "ValueError: "
+                                               << "All axis separators must be non-negative.  "
+                                               << "However, the axis_separators[0] = " << first_sep;
     auto last_sep = axis_separators[axis_separators.size() - 1]->value;
-    TVM_FFI_CHECK_LE(last_sep, buffer_dim)
+    TVM_FFI_CHECK_LE(last_sep, buffer_dim, ValueError)
         << "ValueError: "
         << "All axis separators must be within the range "
         << "0 <= sep <= buffer_dim.  "
@@ -425,7 +425,7 @@ PrimExpr Buffer::vload(ffi::Array<PrimExpr> begin, DataType value_dtype,
   const BufferNode* n = operator->();
   TVM_FFI_ICHECK(n != nullptr);
   TVM_FFI_ICHECK(value_dtype.element_of() == n->dtype.element_of() &&
-         value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
+                 value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
       << "Cannot load " << value_dtype << " from buffer of " << n->dtype;
 
   ffi::Array<PrimExpr> indices = begin;
@@ -446,7 +446,7 @@ Stmt Buffer::vstore(ffi::Array<PrimExpr> begin, PrimExpr value,
   TVM_FFI_ICHECK(n != nullptr);
   DataType value_dtype = value.dtype();
   TVM_FFI_ICHECK(value_dtype.element_of() == n->dtype.element_of() &&
-         value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
+                 value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
       << "Cannot store " << value_dtype << " to buffer of " << n->dtype;
 
   ffi::Array<PrimExpr> indices = begin;
@@ -680,7 +680,7 @@ bool Buffer::IsScalar(bool alloc_or_decl) const {
          (!alloc_or_decl || tirx::is_zero((*this)->elem_offset)) && (*this)->data_alignment == 64 &&
          (*this)->offset_factor == 1 && (*this)->buffer_type == tirx::BufferType::kDefault &&
          (*this)->allocated_addr.size() == 0 && (*this)->layout.has_value() &&
-         StructuralEqual()((*this)->layout.value(), TileLayoutNode::DefaultLayout({1}));
+         ffi::StructuralEqual()((*this)->layout.value(), TileLayoutNode::DefaultLayout({1}));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

@@ -110,10 +110,10 @@ constexpr const int kMaxNIdx = 1 << 10;
 constexpr const int kMaxKIdx = 1 << 4;
 
 inline int32_t PackInto32bit(int32_t task_type, int32_t m_idx, int32_t n_idx, int32_t k_idx) {
-  CHECK_LT(task_type, kMaxTaskType);
-  CHECK_LT(m_idx, kMaxMIdx);
-  CHECK_LT(n_idx, kMaxNIdx);
-  CHECK_LT(k_idx, kMaxKIdx);
+  TVM_FFI_ICHECK_LT(task_type, kMaxTaskType);
+  TVM_FFI_ICHECK_LT(m_idx, kMaxMIdx);
+  TVM_FFI_ICHECK_LT(n_idx, kMaxNIdx);
+  TVM_FFI_ICHECK_LT(k_idx, kMaxKIdx);
   return (task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)) & 0xFFFFFFFF;
 }
 

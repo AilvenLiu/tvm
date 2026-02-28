@@ -19,7 +19,6 @@
 
 import inspect
 from collections.abc import Callable
-from typing import Dict, List, Optional, Tuple, Union
 
 import tvm
 import tvm.runtime
@@ -27,9 +26,10 @@ from tvm.runtime import ObjectConvertible
 from tvm.runtime.object import Object
 
 from ...ir import PrimExpr
+from ...tir import PrimFunc
 from ..expr import Call, Expr, ExternFunc, GlobalVar, ShapeExpr, StringImm, Var
 from ..struct_info import StructInfo, TensorStructInfo
-from ..utils import Dependency, args_converter, convert_to_expr, trans_callable_to_primfunc
+from ..utils import Dependency, convert_to_expr, trans_callable_to_primfunc
 from . import _ffi_api
 
 PrimExprLike = int | PrimExpr
@@ -278,9 +278,10 @@ def call_tir_device(
 ) -> Call:
     """Call a tile-level function and return the output."""
     args = _wrap_inline_arg_tuple(args)
-    assert (
-        tile_num is not None or inverse_in_deps is not None
-    ), "tile_num is required when using static scheduling and inverse_in_deps is required when using dynamic scheduling"
+    assert tile_num is not None or inverse_in_deps is not None, (
+        "tile_num is required when using static scheduling and "
+        "inverse_in_deps is required when using dynamic scheduling"
+    )
 
     if tile_num is None:
         tile_idx_dim = (
@@ -316,9 +317,9 @@ def call_tir_device(
     else:
         if not isinstance(inverse_in_deps, list):
             inverse_in_deps = [inverse_in_deps]
-        assert len(in_deps) == len(
-            inverse_in_deps
-        ), "Length of inverse_in_deps should match that of in_deps."
+        assert len(in_deps) == len(inverse_in_deps), (
+            "Length of inverse_in_deps should match that of in_deps."
+        )
         handle_dep = [
             dep.handle_dep(len(dep.event.struct_info.shape) + 2, tile_idx_dim + 1)
             for dep in inverse_in_deps
@@ -347,7 +348,8 @@ def call_tir_device(
         }
     ):
         raise ValueError(
-            "handle_config only supports keys: 'wait_scope', 'notify_scope', 'notify_scope_id', 'push_level', 'push_scope', 'push_scope_id'"
+            "handle_config only supports keys: 'wait_scope', 'notify_scope', "
+            "'notify_scope_id', 'push_level', 'push_scope', 'push_scope_id'"
         )
     in_dep_list = tvm.relax.Tuple(in_dep_list)
     out_dep_list = tvm.relax.Tuple(out_dep_list)
@@ -376,8 +378,8 @@ def call_tir_device(
 
 def alloc_event_tensor(
     workspace: Expr,
-    shape: Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]],
-    f_init: Union[Callable, PrimFunc, PrimExprLike],
+    shape: ShapeExpr | tuple[PrimExpr] | list[PrimExpr],
+    f_init: Callable | PrimFunc | PrimExprLike,
 ) -> Expr:
     """
     Allocate an event tensor and initialize it.
@@ -389,15 +391,15 @@ def alloc_event_tensor(
     shape : Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]]
         The shape of the event tensor.
     f_init : Union[Callable, PrimExprLike]
-        The function to initialize the event tensor. Takes indices as input and returns the initial count at corresponding index.
+        The function to initialize the event tensor. Takes indices as input and
+        returns the initial count at corresponding index.
     """
-    if isinstance(shape, (list, tuple)):
+    if isinstance(shape, list | tuple):
         shape = ShapeExpr(shape)
     f_init, extra_args = trans_callable_to_primfunc(f_init, len(shape), 1, "int32")
     return _ffi_api.alloc_event_tensor(workspace, shape, f_init, extra_args)
 
 
-@args_converter.auto
 def call_dps_packed(
     func: str | Expr,
     args: Expr,

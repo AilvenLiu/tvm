@@ -21,6 +21,7 @@
 
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/container/variant.h>
+#include <tvm/runtime/tensor.h>
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
 #include <tvm/tirx/exec_scope.h>
@@ -153,9 +154,10 @@ void OpCall(tvm::tirx::tirx::OpCall op_call);
  * \param scope_slice_parent The parent scope name for slicing.
  * \return The ExecScopeFrame.
  */
-ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name,
-                              ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
-                              ffi::String scope_slice_parent = "");
+ExecScopeFrame ExecScopeBlock(
+    ffi::String exec_scope_name,
+    ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
+    ffi::String scope_slice_parent = "");
 
 ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
                                    ffi::Variant<ffi::Array<Range>, PrimExpr> slice);

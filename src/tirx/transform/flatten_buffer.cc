@@ -248,7 +248,7 @@ class BufferFlattener : public arith::IRMutatorWithAnalyzer {
   ffi::Map<Var, Buffer> updated_extern_buffer_map_;
 };
 
-PrimFunc FlattenBuffer(PrimFunc f) { return Flattener::Flatten(f); }
+PrimFunc FlattenBuffer(PrimFunc f) { return BufferFlattener::Flatten(f); }
 
 namespace transform {
 

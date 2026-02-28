@@ -21,6 +21,9 @@
 #define TVM_TIR_IR_LAYOUT_UTILS_H_
 
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ffi/extra/structural_hash.h>
+#include <tvm/runtime/logging.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/layout.h>
 #include <tvm/tir/op.h>
@@ -28,10 +31,13 @@
 #include <numeric>
 #include <vector>
 
-#include "../../../node/attr_registry.h"
+#include "../../../ir/attr_registry.h"
 
 namespace tvm {
 namespace tir {
+
+using ffi::StructuralEqual;
+using ffi::StructuralHash;
 
 /*!
  * \brief Split the coordinate into multiple parts

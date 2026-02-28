@@ -125,7 +125,7 @@ class CuTensorMapDedupAnalyzer : public StmtExprVisitor {
         bool found = false;
         for (const auto& sub_canonical_list : canonical_list_) {
           for (const auto& kv : sub_canonical_list) {
-            if (StructuralEqual()(kv.first, key)) {
+            if (ffi::StructuralEqual()(kv.first, key)) {
               const Var& canonical = kv.second;
               if (!canonical.same_as(v)) {
                 var_remap_[v] = canonical;
@@ -260,7 +260,7 @@ class CuTensorMapDedupRewriter : public StmtExprMutator {
       // Keep only the first occurrence for this key in the frame
       for (const auto& sub_emitted_keys : emitted_keys_) {
         for (const auto& k : sub_emitted_keys) {
-          if (StructuralEqual()(k, key)) {
+          if (ffi::StructuralEqual()(k, key)) {
             return Evaluate(0);
           }
         }
