@@ -75,6 +75,19 @@ entries:
       - testing
     title: Use junitxml to enumerate exact skipped tests under xdist
     updated: '2026-02-28'
+  - created: '2026-02-28'
+    id: KB-20260228-0003
+    path: entries/KB-20260228-0003.yaml
+    scope:
+      - repo
+    tags:
+      - git
+      - pre-push
+      - pre-commit
+      - workflow
+      - recovery
+    title: Recover cleanly after pre-push hooks auto-rewrite the worktree
+    updated: '2026-02-28'
 tags:
   assert_structural_equal:
     - KB-20260227-0001
@@ -87,16 +100,22 @@ tags:
     - KB-20260227-0001
   git:
     - KB-20260228-0001
+    - KB-20260228-0003
   layout:
     - KB-20260227-0003
   lint:
     - KB-20260228-0001
   pre-commit:
     - KB-20260228-0001
+    - KB-20260228-0003
+  pre-push:
+    - KB-20260228-0003
   ptx:
     - KB-20260227-0002
   pytest:
     - KB-20260228-0002
+  recovery:
+    - KB-20260228-0003
   skip:
     - KB-20260228-0002
   testing:
@@ -109,5 +128,6 @@ tags:
     - KB-20260227-0003
   workflow:
     - KB-20260228-0001
+    - KB-20260228-0003
   xdist:
     - KB-20260228-0002
