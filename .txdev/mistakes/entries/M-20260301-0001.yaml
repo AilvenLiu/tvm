@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  summary: >-
+    File-level lint exemptions created risk and obscured real issues; targeted fixes were
+    required.
+  details: >-
+    During pre-commit remediation, applying broad file-level ignores looked faster but conflicted
+    with the requirement to preserve kernel correctness. The safer pattern is to fix each reported
+    violation individually, keeping exemptions narrowly scoped (for this feature, only line-level
+    E501 exceptions inside TVMScript when explicitly approved). This keeps behavior stable and
+    makes regressions traceable.
+created: '2026-03-01'
+id: M-20260301-0001
+scope:
+  - repo
+tags:
+  - pre-commit
+  - lint
+  - correctness
+  - workflow
+  - scope-control
+title: Using broad lint exemptions instead of per-error fixes
+updated: '2026-03-01'

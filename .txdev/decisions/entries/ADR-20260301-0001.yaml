@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  summary: >-
+    For conflicted kernel tests, take upstream implementations first, then apply minimal
+    non-semantic lint fixes.
+  details: >-
+    In this feature, kernel-heavy test conflicts were resolved by first accepting upstream
+    `origin/tirx` implementations wholesale, then making the smallest possible lint/style edits
+    needed for pre-commit. This decision minimized semantic divergence from upstream, reduced
+    debugging complexity, and improved confidence that test behavior remained correct while meeting
+    formatting policy.
+created: '2026-03-01'
+id: ADR-20260301-0001
+scope:
+  - repo
+tags:
+  - rebase
+  - kernel
+  - upstream-alignment
+  - pre-commit
+  - testing
+title: Prefer upstream-first conflict resolution for kernel test files
+updated: '2026-03-01'

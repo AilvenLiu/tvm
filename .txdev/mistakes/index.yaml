@@ -87,7 +87,22 @@ entries:
       - quoting
     title: Using inline PR body with backticks in shell command
     updated: '2026-02-28'
+  - created: '2026-03-01'
+    id: M-20260301-0001
+    path: entries/M-20260301-0001.yaml
+    scope:
+      - repo
+    tags:
+      - pre-commit
+      - lint
+      - correctness
+      - workflow
+      - scope-control
+    title: Using broad lint exemptions instead of per-error fixes
+    updated: '2026-03-01'
 tags:
+  correctness:
+    - M-20260301-0001
   debugging:
     - M-20260227-0003
   gh:
@@ -100,8 +115,10 @@ tags:
     - M-20260227-0003
   lint:
     - M-20260228-0002
+    - M-20260301-0001
   pre-commit:
     - M-20260228-0001
+    - M-20260301-0001
   process:
     - M-20260228-0001
     - M-20260228-0003
@@ -119,6 +136,7 @@ tags:
     - M-20260227-0001
   scope-control:
     - M-20260228-0002
+    - M-20260301-0001
   testing:
     - M-20260227-0001
     - M-20260227-0002
@@ -127,5 +145,6 @@ tags:
     - M-20260227-0001
   workflow:
     - M-20260228-0002
+    - M-20260301-0001
   shell:
     - M-20260228-0003

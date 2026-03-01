@@ -101,19 +101,40 @@ entries:
       - validation
     title: Zero-residual audit pattern for logging macro migration
     updated: '2026-02-28'
+  - created: '2026-03-01'
+    id: KB-20260301-0001
+    path: entries/KB-20260301-0001.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - kernel
+      - debugging
+      - ir
+      - codegen
+      - pre-commit
+    title: Fast semantic triage for TVMScript kernel regressions
+    updated: '2026-03-01'
 tags:
   assert_structural_equal:
     - KB-20260227-0001
   codegen:
     - KB-20260227-0002
+    - KB-20260301-0001
   copy_async:
     - KB-20260227-0002
     - KB-20260227-0003
   copy_tma_impl:
     - KB-20260227-0001
+  debugging:
+    - KB-20260301-0001
   git:
     - KB-20260228-0001
     - KB-20260228-0003
+  ir:
+    - KB-20260301-0001
+  kernel:
+    - KB-20260301-0001
   layout:
     - KB-20260227-0003
   lint:
@@ -123,6 +144,7 @@ tags:
   pre-commit:
     - KB-20260228-0001
     - KB-20260228-0003
+    - KB-20260301-0001
   pre-push:
     - KB-20260228-0003
   ptx:
@@ -147,6 +169,8 @@ tags:
     - KB-20260227-0003
   tvm-ffi:
     - KB-20260228-0004
+  tvmscript:
+    - KB-20260301-0001
   validation:
     - KB-20260228-0004
   workflow:
