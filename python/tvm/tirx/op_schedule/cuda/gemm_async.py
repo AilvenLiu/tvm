@@ -28,8 +28,13 @@ from tvm.tir.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
 from tvm.tirx.op_schedule import ScheduleContext, predicate, register_dispatch
 from tvm.tirx.operator.op import KernelReplacePoint
 
-from .common import get_st_extent, single_thread
-from .copy_async import SwizzleMode, tma_atom_layout, tma_atom_shape
+from .common import (
+    SwizzleMode,
+    get_st_extent,
+    single_thread,
+    tma_atom_layout,
+    tma_atom_shape,
+)
 
 
 def sf_tmem_layout(rows, sf_mma_k, K, dtype="float8_e8m0fnu"):

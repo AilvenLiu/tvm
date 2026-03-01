@@ -25,7 +25,7 @@ from tvm.tirx.bench.utils import CudaProfiler
 from tvm.tirx.megakernel.utils.base import Barriers, SmemManager, Tile
 from tvm.tirx.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig, ProfileEventType
 from tvm.tirx.megakernel.utils.utils import ceildiv, mbarrier_try_wait
-from tvm.tirx.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
+from tvm.tirx.op_schedule.cuda.common import SwizzleMode, tma_shared_layout
 
 
 class BarTMA2MMA(Barriers):

@@ -115,12 +115,69 @@ entries:
       - pre-commit
     title: Fast semantic triage for TVMScript kernel regressions
     updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: KB-20260301-0002
+    path: entries/KB-20260301-0002.yaml
+    scope:
+      - repo
+    tags:
+      - tirx
+      - op-schedule
+      - copy
+      - kwargs
+      - api
+    title: TIRX DSL kwargs pattern for copy op config parameters
+    updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: KB-20260301-0003
+    path: entries/KB-20260301-0003.yaml
+    scope:
+      - repo
+    tags:
+      - tirx
+      - lint
+      - ruff
+      - noqa
+      - testing
+    title: TIRX DSL scope declarations require noqa F841 for ruff
+    updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: KB-20260301-0004
+    path: entries/KB-20260301-0004.yaml
+    scope:
+      - repo
+    tags:
+      - tirx
+      - dsl
+      - scoping
+      - testing
+    title: TIRX DSL scoping — variables defined in if-blocks are not visible outside
+    updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: KB-20260301-0005
+    path: entries/KB-20260301-0005.yaml
+    scope:
+      - repo
+    tags:
+      - python
+      - ruff
+      - compatibility
+      - tirx
+      - testing
+    title: Python 3.10 star unpacking not allowed in index expressions
+    updated: '2026-03-01'
 tags:
+  api:
+    - KB-20260301-0002
   assert_structural_equal:
     - KB-20260227-0001
   codegen:
     - KB-20260227-0002
     - KB-20260301-0001
+  compatibility:
+    - KB-20260301-0005
+  copy:
+    - KB-20260301-0002
   copy_async:
     - KB-20260227-0002
     - KB-20260227-0003
@@ -128,6 +185,8 @@ tags:
     - KB-20260227-0001
   debugging:
     - KB-20260301-0001
+  dsl:
+    - KB-20260301-0004
   git:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -135,12 +194,19 @@ tags:
     - KB-20260301-0001
   kernel:
     - KB-20260301-0001
+  kwargs:
+    - KB-20260301-0002
   layout:
     - KB-20260227-0003
   lint:
     - KB-20260228-0001
+    - KB-20260301-0003
   logging:
     - KB-20260228-0004
+  noqa:
+    - KB-20260301-0003
+  op-schedule:
+    - KB-20260301-0002
   pre-commit:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -151,19 +217,34 @@ tags:
     - KB-20260227-0002
   pytest:
     - KB-20260228-0002
+  python:
+    - KB-20260301-0005
   recovery:
     - KB-20260228-0003
   refactor:
     - KB-20260228-0004
   rg:
     - KB-20260228-0004
+  ruff:
+    - KB-20260301-0003
+    - KB-20260301-0005
+  scoping:
+    - KB-20260301-0004
   skip:
     - KB-20260228-0002
   testing:
     - KB-20260227-0001
     - KB-20260228-0002
+    - KB-20260301-0003
+    - KB-20260301-0004
+    - KB-20260301-0005
   tir:
     - KB-20260227-0001
+  tirx:
+    - KB-20260301-0002
+    - KB-20260301-0003
+    - KB-20260301-0004
+    - KB-20260301-0005
   tma:
     - KB-20260227-0002
     - KB-20260227-0003

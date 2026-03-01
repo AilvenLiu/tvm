@@ -319,9 +319,6 @@ def copy(
 
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
-
-    config : Optional[Dict[str, Any]]
-        The config dict for the scheduler/variant.
     """
     if workspace is None:
         workspace = {}

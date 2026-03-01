@@ -24,7 +24,7 @@ from tvm.script import tirx as Tx
 from tvm.tir.layout import S, TCol, TileLayout, TLane
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
+from tvm.tirx.op_schedule.cuda.common import SwizzleMode, tma_shared_layout
 from tvm.tirx.pipeline import MBarrier, PipelineState, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 

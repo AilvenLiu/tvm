@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: >-
+    The original PR added smem->tmem copy schedule registration in copy.py (for both "copy" and
+    "copy_async" op names). But copy_async.py already had a registration for "copy_async" with
+    variant="smem->tmem", creating a duplicate. The code was reviewed multiple times during rebase
+    and test consolidation but the duplication was missed because the registrations were in different
+    files (copy.py vs copy_async.py) and used slightly different function names but called the same
+    underlying implementation. Lesson: when adding new dispatch registrations, grep for the op name
+    + variant combination across ALL files in the op_schedule directory, not just the file being
+    modified.
+  summary: >-
+    Did not notice that copy_async smem->tmem dispatch was registered in both copy.py and
+    copy_async.py until the user pointed it out.
+created: '2026-03-01'
+id: M-20260301-0003
+scope:
+  - repo
+tags:
+  - op-schedule
+  - registration
+  - code-review
+  - duplication
+title: Missing duplicate registration across files
+updated: '2026-03-01'

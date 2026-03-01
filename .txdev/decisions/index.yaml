@@ -90,6 +90,29 @@ entries:
       - testing
     title: Prefer upstream-first conflict resolution for kernel test files
     updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: ADR-20260301-0002
+    path: entries/ADR-20260301-0002.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - op-schedule
+      - test-organization
+    title: Op schedule tests should only contain tests that exercise the dispatch path
+    updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: ADR-20260301-0003
+    path: entries/ADR-20260301-0003.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - tirx
+      - cluster
+      - op-schedule
+    title: Dual-kernel pattern for cluster vs non-cluster test variants
+    updated: '2026-03-01'
 tags:
   api:
     - ADR-20260228-0003
@@ -101,31 +124,42 @@ tags:
     - ADR-20260227-0002
   ci:
     - ADR-20260228-0001
+  cluster:
+    - ADR-20260301-0003
   compatibility:
     - ADR-20260228-0002
     - ADR-20260228-0003
-  kernel:
-    - ADR-20260301-0001
   golden:
     - ADR-20260227-0001
+  kernel:
+    - ADR-20260301-0001
   logging:
     - ADR-20260228-0003
+  op-schedule:
+    - ADR-20260301-0002
+    - ADR-20260301-0003
   parser:
     - ADR-20260228-0002
   pre-commit:
     - ADR-20260228-0001
     - ADR-20260301-0001
-  refactor:
-    - ADR-20260228-0003
   rebase:
     - ADR-20260228-0002
     - ADR-20260301-0001
+  refactor:
+    - ADR-20260228-0003
+  test-organization:
+    - ADR-20260301-0002
   testing:
     - ADR-20260227-0001
     - ADR-20260227-0002
     - ADR-20260301-0001
+    - ADR-20260301-0002
+    - ADR-20260301-0003
   tir:
     - ADR-20260227-0001
+  tirx:
+    - ADR-20260301-0003
   tma:
     - ADR-20260227-0002
   tooling:

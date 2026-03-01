@@ -15,9 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import copy
 import functools
-from enum import Enum
 from typing import Optional
 
 import tvm
@@ -35,107 +33,13 @@ from tvm.tirx.op_schedule import (
 
 from .common import (
     CopyInstType,
+    SwizzleMode,
     copy_vec_load_impl,
+    get_swizzle_mode_from_layout,
     single_thread,
+    tma_atom_shape,
     validate_copy_op,
 )
-
-
-class SwizzleMode(Enum):
-    """The swizzle mode of the TMA"""
-
-    SWIZZLE_NONE = 0
-    SWIZZLE_32B_ATOM = 1
-    SWIZZLE_64B_ATOM = 2
-    SWIZZLE_128B_ATOM = 3
-
-
-def tma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayout:
-    """Generate the TMA atom layout given dtype and swizzle mode."""
-    bits = tvm.DataType(dtype).bits
-    if isinstance(swizzle_mode, int):
-        swizzle_mode = SwizzleMode(swizzle_mode)
-    return SwizzleLayout(
-        per_element=(128 // bits).bit_length() - 1,
-        swizzle_len=swizzle_mode.value,
-        atom_len=3,
-    )
-
-
-def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int] | None = None):
-    """Generate the TMA atom shape given dtype and swizzle mode."""
-    bits = tvm.DataType(dtype).bits
-    if isinstance(swizzle_mode, int):
-        swizzle_mode = SwizzleMode(swizzle_mode)
-    atom_shape = {
-        SwizzleMode.SWIZZLE_32B_ATOM: [8, 256],
-        SwizzleMode.SWIZZLE_64B_ATOM: [8, 512],
-        SwizzleMode.SWIZZLE_128B_ATOM: [8, 1024],
-    }[swizzle_mode]
-    atom_shape[-1] //= bits
-    if shape is None:
-        return atom_shape
-    atom_shape = [1] * (len(shape) - len(atom_shape)) + atom_shape
-    return atom_shape
-
-
-def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> TLayout:
-    """Generate the TMA layout for the shared memory given shape and dtype.
-    It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
-    """
-    if isinstance(swizzle_mode, int):
-        swizzle_mode = SwizzleMode(swizzle_mode)
-    if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-        return TileLayout(S[tuple(shape)]).canonicalize()
-    atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
-    layout = tma_atom_layout(dtype, swizzle_mode)
-    tile_to_shape = copy.copy(atom_shape)
-    tile_to_shape[-2] = shape[-2]
-    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).canonicalize()
-
-
-def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
-    """Check if the copy region in dst is compatible with the TMA atom shape."""
-    analyzer = Analyzer()
-    for i, _ in enumerate(dst_st):
-        if any(
-            not analyzer.can_prove_equal(x % atom_shape[i], 0)
-            for x in [dst_shape[i], dst_st[i], dst_extent[i]]
-        ):
-            return False
-    return True
-
-
-def get_swizzle_mode_from_layout(layout: TLayout) -> SwizzleMode | None:
-    """Extract swizzle mode from a shared memory layout.
-
-    Parameters
-    ----------
-    layout : TLayout
-        The shared memory layout (ComposeLayout, SwizzleLayout, or TileLayout)
-
-    Returns
-    -------
-    Optional[SwizzleMode]
-        The swizzle mode if recognized, None otherwise
-    """
-    if isinstance(layout, ComposeLayout):
-        swizzle = layout.swizzle  # SwizzleLayout is named 'swizzle' in ComposeLayout
-        swizzle_len = swizzle.swizzle_len
-    elif isinstance(layout, SwizzleLayout):
-        swizzle_len = layout.swizzle_len
-    elif isinstance(layout, TileLayout):
-        return SwizzleMode.SWIZZLE_NONE
-    else:
-        return None
-
-    # Map swizzle_len to SwizzleMode
-    return {
-        0: SwizzleMode.SWIZZLE_NONE,
-        1: SwizzleMode.SWIZZLE_32B_ATOM,
-        2: SwizzleMode.SWIZZLE_64B_ATOM,
-        3: SwizzleMode.SWIZZLE_128B_ATOM,
-    }.get(swizzle_len)
 
 
 def find_contiguous_region(layout: TileLayout) -> tuple:
@@ -245,7 +149,8 @@ def assert_compact_layout(shards: list, total_size, analyzer: Analyzer):
                     break
             if not found:
                 raise ValueError(
-                    f"Global layout is not compact: stride={stride} * extent={extent} = {expected_next} "  # noqa: E501
+                    f"Global layout is not compact: "
+                    f"stride={stride} * extent={extent} = {expected_next} "
                     f"does not match any other stride or total_size={total_size}"
                 )
 
@@ -433,7 +338,8 @@ def _decide_box_dim(
         atom_total = atom_shape[0] * atom_shape[-1]
         if contiguous_extent % atom_total != 0:
             raise ValueError(
-                f"Contiguous region {contiguous_extent} not divisible by TMA atom size {atom_total}. "  # noqa: E501
+                f"Contiguous region {contiguous_extent} not divisible by "
+                f"TMA atom size {atom_total}. "
                 f"box_dim={box_dim}, atom_shape={atom_shape}"
             )
 
@@ -898,7 +804,12 @@ def copy_tma_impl(
     def impl():
         for loop_vars in Tx.grid(*loop_extents):
             s_offset, tma_coords = Tx.meta_var(compute_offsets_and_tma_coords(loop_vars))
-            s_buf_w_offset = Tx.decl_buffer(s_buf.shape, s_buf.dtype, s_buf.data, elem_offset=s_buf.elem_offset + s_offset, scope=s_buf.scope(), layout=to_tile_layout(s_buf.layout, s_buf.shape))  # noqa: E501
+            s_buf_w_offset = Tx.decl_buffer(
+                s_buf.shape, s_buf.dtype, s_buf.data,
+                elem_offset=s_buf.elem_offset + s_offset,
+                scope=s_buf.scope(),
+                layout=to_tile_layout(s_buf.layout, s_buf.shape),
+            )
 
             # Emit TMA copy with computed offsets and coordinates
             if direction == "g2s":

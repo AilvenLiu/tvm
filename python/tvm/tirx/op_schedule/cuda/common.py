@@ -17,19 +17,137 @@
 
 """Common utilities for operator scheduling."""
 
+import copy
 import functools
 import operator
 from collections.abc import Callable
 from enum import Enum
 from functools import wraps
 
+import tvm
 from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, PrimExpr, PrimFunc
 from tvm.tir.exec_scope import ExecScopeSlice
+from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
+
+################################################################################
+# TMA utilities
+################################################################################
+
+
+class SwizzleMode(Enum):
+    """The swizzle mode of the TMA."""
+
+    SWIZZLE_NONE = 0
+    SWIZZLE_32B_ATOM = 1
+    SWIZZLE_64B_ATOM = 2
+    SWIZZLE_128B_ATOM = 3
+
+
+def tma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayout:
+    """Generate the TMA atom layout given dtype and swizzle mode."""
+    bits = tvm.DataType(dtype).bits
+    if isinstance(swizzle_mode, int):
+        swizzle_mode = SwizzleMode(swizzle_mode)
+    return SwizzleLayout(
+        per_element=(128 // bits).bit_length() - 1,
+        swizzle_len=swizzle_mode.value,
+        atom_len=3,
+    )
+
+
+def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int] | None = None):
+    """Generate the TMA atom shape given dtype and swizzle mode."""
+    bits = tvm.DataType(dtype).bits
+    if isinstance(swizzle_mode, int):
+        swizzle_mode = SwizzleMode(swizzle_mode)
+    atom_shape = {
+        SwizzleMode.SWIZZLE_32B_ATOM: [8, 256],
+        SwizzleMode.SWIZZLE_64B_ATOM: [8, 512],
+        SwizzleMode.SWIZZLE_128B_ATOM: [8, 1024],
+    }[swizzle_mode]
+    atom_shape[-1] //= bits
+    if shape is None:
+        return atom_shape
+    atom_shape = [1] * (len(shape) - len(atom_shape)) + atom_shape
+    return atom_shape
+
+
+def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> TLayout:
+    """Generate the TMA layout for the shared memory given shape and dtype.
+
+    It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
+    """
+    if isinstance(swizzle_mode, int):
+        swizzle_mode = SwizzleMode(swizzle_mode)
+    if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
+        return TileLayout(S[tuple(shape)]).canonicalize()
+    atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
+    layout = tma_atom_layout(dtype, swizzle_mode)
+    tile_to_shape = copy.copy(atom_shape)
+    tile_to_shape[-2] = shape[-2]
+    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).canonicalize()
+
+
+def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
+    """Check if the copy region in dst is compatible with the TMA atom shape."""
+    analyzer = Analyzer()
+    for i, _ in enumerate(dst_st):
+        if any(
+            not analyzer.can_prove_equal(x % atom_shape[i], 0)
+            for x in [dst_shape[i], dst_st[i], dst_extent[i]]
+        ):
+            return False
+    return True
+
+
+def get_swizzle_mode_from_layout(layout: TLayout) -> SwizzleMode | None:
+    """Extract swizzle mode from a shared memory layout.
+
+    Parameters
+    ----------
+    layout : TLayout
+        The shared memory layout (ComposeLayout, SwizzleLayout, or TileLayout)
+
+    Returns
+    -------
+    Optional[SwizzleMode]
+        The swizzle mode if recognized, None otherwise
+    """
+    if isinstance(layout, ComposeLayout):
+        swizzle = layout.swizzle  # SwizzleLayout is named 'swizzle' in ComposeLayout
+        swizzle_len = swizzle.swizzle_len
+    elif isinstance(layout, SwizzleLayout):
+        swizzle_len = layout.swizzle_len
+    elif isinstance(layout, TileLayout):
+        # TileLayout without SwizzleLayout means no swizzle (mode 0)
+        return SwizzleMode.SWIZZLE_NONE
+    else:
+        return None
+
+    # Map swizzle_len to SwizzleMode
+    return {
+        0: SwizzleMode.SWIZZLE_NONE,
+        1: SwizzleMode.SWIZZLE_32B_ATOM,
+        2: SwizzleMode.SWIZZLE_64B_ATOM,
+        3: SwizzleMode.SWIZZLE_128B_ATOM,
+    }.get(swizzle_len)
+
+
+################################################################################
+# Basic utilities
+################################################################################
+
+
+def next_power_of_2(x: int) -> int:
+    """Return the smallest power of 2 greater than or equal to x."""
+    if x <= 1:
+        return 1
+    return 1 << (x - 1).bit_length()
 
 
 def get_st_extent(buffer_region: BufferRegion):
@@ -233,6 +351,43 @@ def validate_gemm_op(op_call: OpCall, sctx: ScheduleContext) -> bool:
     ):
         return False
     return True
+
+
+@Tx.meta_class
+class SmemDescriptor:
+    """Helper class for SMEM matrix descriptor with 16B offset support.
+
+    Encodes the descriptor once at base address, then use add_16B_offset to
+    compute offsets for different column tiles without re-encoding.
+    """
+
+    def __init__(self, prefix: str):
+        self._buf = Tx.alloc_local([1], "uint64", name=prefix + "_desc")
+
+    @property
+    def desc(self):
+        """Return the scalar descriptor value (BufferLoad)."""
+        return self._buf[0]
+
+    def init(self, smem_ptr, ldo, sdo, swizzle):
+        Tx.ptx.tcgen05.encode_matrix_descriptor(
+            Tx.address_of(self._buf[0]), smem_ptr, ldo, sdo, swizzle
+        )
+
+    def add_16B_offset(self, offset):
+        """Add 16B-aligned offset to lower 32 bits of descriptor."""
+        func_name = "tvm_builtin_smem_desc_add_16B_offset"
+        source_code = f"""
+__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
+    union {{ uint64_t d; struct {{ uint32_t lo; uint32_t hi; }}; }} desc;
+    desc.d = desc_base;
+    desc.lo += static_cast<uint32_t>(offset);
+    return desc.d;
+}}
+"""
+        return Tx.cuda.func_call(
+            func_name, self._buf[0], offset, source_code=source_code, return_type="uint64"
+        )
 
 
 ################################################################################

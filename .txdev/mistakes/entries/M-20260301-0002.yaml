@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: >-
+    The tests were passing config={"mbar": mbar, "cta_group": 1} to Tx.copy(), which got
+    double-wrapped because **kwargs already captures everything. Instead of fixing the 6 call sites
+    in test files to use mbar=mbar, cta_group=1 (the correct usage), a config named parameter was
+    added to copy() and copy_async() in tirx.py to intercept and unwrap the dict. The DSL API was
+    already correct; the tests were using it wrong. The fix should have been at the call sites, not
+    in the framework. Lesson: when there is a mismatch between API usage and API behavior, first
+    check if the usage is wrong before modifying the API. Prefer fixing call sites over adding
+    compatibility shims to framework code.
+  summary: >-
+    Added a config parameter to the tirx.py copy() DSL function to work around a test bug, instead
+    of fixing the test call sites to use kwargs directly.
+created: '2026-03-01'
+id: M-20260301-0002
+scope:
+  - repo
+tags:
+  - api
+  - tirx
+  - scope-control
+  - over-engineering
+title: Modifying framework API instead of fixing call sites
+updated: '2026-03-01'

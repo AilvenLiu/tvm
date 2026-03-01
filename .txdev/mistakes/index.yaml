@@ -100,11 +100,41 @@ entries:
       - scope-control
     title: Using broad lint exemptions instead of per-error fixes
     updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: M-20260301-0002
+    path: entries/M-20260301-0002.yaml
+    scope:
+      - repo
+    tags:
+      - api
+      - tirx
+      - scope-control
+      - over-engineering
+    title: Modifying framework API instead of fixing call sites
+    updated: '2026-03-01'
+  - created: '2026-03-01'
+    id: M-20260301-0003
+    path: entries/M-20260301-0003.yaml
+    scope:
+      - repo
+    tags:
+      - op-schedule
+      - registration
+      - code-review
+      - duplication
+    title: Missing duplicate registration across files
+    updated: '2026-03-01'
 tags:
+  api:
+    - M-20260301-0002
+  code-review:
+    - M-20260301-0003
   correctness:
     - M-20260301-0001
   debugging:
     - M-20260227-0003
+  duplication:
+    - M-20260301-0003
   gh:
     - M-20260228-0003
   git:
@@ -116,6 +146,10 @@ tags:
   lint:
     - M-20260228-0002
     - M-20260301-0001
+  op-schedule:
+    - M-20260301-0003
+  over-engineering:
+    - M-20260301-0002
   pre-commit:
     - M-20260228-0001
     - M-20260301-0001
@@ -124,27 +158,32 @@ tags:
     - M-20260228-0003
   python:
     - M-20260228-0002
-  quoting:
-    - M-20260228-0003
   quality:
     - M-20260228-0001
+  quoting:
+    - M-20260228-0003
   rebase:
     - M-20260228-0002
   readability:
     - M-20260227-0002
+  registration:
+    - M-20260301-0003
   requirements:
     - M-20260227-0001
   scope-control:
     - M-20260228-0002
     - M-20260301-0001
+    - M-20260301-0002
+  shell:
+    - M-20260228-0003
   testing:
     - M-20260227-0001
     - M-20260227-0002
     - M-20260227-0003
+  tirx:
+    - M-20260301-0002
   user-intent:
     - M-20260227-0001
   workflow:
     - M-20260228-0002
     - M-20260301-0001
-  shell:
-    - M-20260228-0003
