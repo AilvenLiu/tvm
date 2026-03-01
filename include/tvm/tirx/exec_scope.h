@@ -98,10 +98,10 @@ class ScopeIdDefNode : public Object {
 
 class ScopeIdDef : public ObjectRef {
  public:
-  TVM_DLL explicit ScopeIdDef(
-      ffi::Array<Var> def_ids, ffi::Array<PrimExpr> extents, ScopePair scope,
-      ffi::Optional<ffi::Array<PrimExpr>> preferred_extents =
-          ffi::Optional<ffi::Array<PrimExpr>>(std::nullopt));
+  TVM_DLL explicit ScopeIdDef(ffi::Array<Var> def_ids, ffi::Array<PrimExpr> extents,
+                              ScopePair scope,
+                              ffi::Optional<ffi::Array<PrimExpr>> preferred_extents =
+                                  ffi::Optional<ffi::Array<PrimExpr>>(std::nullopt));
 
   PrimExpr fused_extent() const;
 

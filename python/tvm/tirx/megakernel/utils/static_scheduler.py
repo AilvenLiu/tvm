@@ -16,13 +16,15 @@
 # under the License.
 
 """Static tile scheduler for megakernel."""
+
 from typing import Literal
+
 import tvm
 from tvm.script import tirx as Tx
+from tvm.tirx.megakernel.utils.base import SemaphoreBase, TileSchedulerBase
+from tvm.tirx.megakernel.utils.config import JobType, KernelConfig
+from tvm.tirx.megakernel.utils.utils import any_sync, atomic_add_int32, gt, unpack_from_32bit
 
-from tvm.tirx.megakernel.utils.base import TileSchedulerBase, SemaphoreBase
-from tvm.tirx.megakernel.utils.utils import atomic_add_int32, unpack_from_32bit, any_sync, gt
-from tvm.tirx.megakernel.utils.config import KernelConfig, JobType
 
 class Semaphore(SemaphoreBase):
     def __init__(self, buffer):
@@ -30,7 +32,7 @@ class Semaphore(SemaphoreBase):
         self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
 
     @Tx.inline
-    def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
+    def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xFFFFFFFF):
         if level == "cta":
             with Tx.thread():
                 while 1:
@@ -43,16 +45,19 @@ class Semaphore(SemaphoreBase):
                     Tx.cuda.nano_sleep(40)
         elif level == "warp":
             with Tx.thread():
-                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+                warp_id = Tx.warp_id(
+                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
+                )
                 lane_id = Tx.thread_id([32], parent="warp")
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
                     while 1:
                         if lane_id == 0:
                             Tx.ptx.ld_global_acquire(
-                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                                self.state[0],
+                                self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
                             )
-                        if any_sync(0xffffffff, self.state[0] == 0):
+                        if any_sync(0xFFFFFFFF, self.state[0] == 0):
                             break
                         Tx.cuda.nano_sleep(40)
         else:
@@ -69,9 +74,7 @@ class Semaphore(SemaphoreBase):
         )
         if self.state[0] <= 0:
             while 1:
-                Tx.ptx.ld_global_acquire(
-                    self.state[0], self.sem.ptr_to(coord)
-                )
+                Tx.ptx.ld_global_acquire(self.state[0], self.sem.ptr_to(coord))
                 if gt(self.state[0], 0):
                     atomic_add_int32(
                         self.sem.ptr_to(coord),
@@ -95,7 +98,13 @@ class StaticTileScheduler(TileSchedulerBase):
 
     @Tx.inline
     def _update_current_m_n_idx(self):
-        unpack_from_32bit(self.queue_smem[self.tile_idx], Tx.address_of(self.task_type), Tx.address_of(self.m_idx), Tx.address_of(self.n_idx), Tx.address_of(self.k_idx))
+        unpack_from_32bit(
+            self.queue_smem[self.tile_idx],
+            Tx.address_of(self.task_type),
+            Tx.address_of(self.m_idx),
+            Tx.address_of(self.n_idx),
+            Tx.address_of(self.k_idx),
+        )
 
     def _alloc(self):
         self.m_idx = Tx.local_scalar("int32", name=self.prefix + "_m_idx")
@@ -103,7 +112,9 @@ class StaticTileScheduler(TileSchedulerBase):
         self.k_idx = Tx.local_scalar("int32", name=self.prefix + "_k_idx")
         self.task_type = Tx.local_scalar("int32", name=self.prefix + "_task_type")
         self.tile_idx = Tx.local_scalar("int32", name=self.prefix + "_tile_idx")
-        self.queue_smem = self.smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent")
+        self.queue_smem = self.smem_manager.alloc(
+            (self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent"
+        )
 
     @Tx.inline
     def init(self):
@@ -119,7 +130,6 @@ class StaticTileScheduler(TileSchedulerBase):
             Tx.tvm_storage_sync("shared")
             self._update_current_m_n_idx()
 
-
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
@@ -129,18 +139,41 @@ class StaticTileScheduler(TileSchedulerBase):
         self._update_current_m_n_idx()
 
     @Tx.inline
-    def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
+    def wait(
+        self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"] = "cta", mask=0xFFFFFFFF
+    ):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
     @Tx.inline
-    def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
-        # Notes: Here each thread will notify only at most one time，
-        #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
+    def notify(
+        self,
+        evt: Semaphore,
+        func_notify,
+        scope: Literal["thread", "warp", "warpgroup", "cta"] = "thread",
+        scope_id=0,
+        release=False,
+    ):
+        # Notes: Here each thread will notify only at most one time,
+        #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.  # noqa: E501
         # Notes: (num, rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
         # Notes: scope_id = -1 represents that each scope will separately notify
 
-        max_notify_num_map = Tx.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
-        max_scope_id_map = Tx.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
+        max_notify_num_map = Tx.meta_var(
+            {
+                "thread": 1,
+                "warp": 32,
+                "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER,
+                "cta": KernelConfig.NUM_THREADS,
+            }
+        )
+        max_scope_id_map = Tx.meta_var(
+            {
+                "thread": KernelConfig.NUM_THREADS,
+                "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER,
+                "warpgroup": KernelConfig.WG_NUMBER,
+                "cta": 1,
+            }
+        )
 
         @Tx.inline
         def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
@@ -157,12 +190,23 @@ class StaticTileScheduler(TileSchedulerBase):
             wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            tid_in_wg = Tx.thread_id(
+                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
+            )
             lane_id = Tx.thread_id([32], parent="warp")
-            idx_map = Tx.meta_var({"thread": (tid, 0), "warp": (warp_id, lane_id), "warpgroup": (wg_id, tid_in_wg), "cta": (0, tid)})
+            idx_map = Tx.meta_var(
+                {
+                    "thread": (tid, 0),
+                    "warp": (warp_id, lane_id),
+                    "warpgroup": (wg_id, tid_in_wg),
+                    "cta": (0, tid),
+                }
+            )
             idx = idx_map[scope]
             if self.debug:
-                Tx.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
+                Tx.cuda.trap_when_assert_failed(
+                    scope_id == -1 or scope_id < max_scope_id_map[scope]
+                )
             if scope_id == -1 or idx[0] == scope_id:
                 sync(scope, scope_id)
                 notify_num = Tx.meta_var(func_notify(idx[1])[0])
@@ -172,7 +216,6 @@ class StaticTileScheduler(TileSchedulerBase):
                     Tx.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
                 if idx[1] < notify_num:
                     evt.semaphore_notify(*coord, rank=rank, release=release)
-
 
     def valid(self):
         return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)

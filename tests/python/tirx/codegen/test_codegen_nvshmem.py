@@ -23,12 +23,12 @@ import numpy as np
 import pytest
 
 import tvm
-from tvm.script import tirx as Tx
 import tvm.testing
 from tvm.contrib.popen_pool import PopenWorker
-from tvm.exec import disco_worker as _  # pylint: disable=unused-import
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
+from tvm.script import tirx as Tx
+
 NUM_WORKERS = 4
 
 
@@ -76,8 +76,8 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(res: Tx.Buffer((2,), "int32")):
                 with Tx.kernel():
-                    bx = Tx.cta_id([1], parent="kernel")
-                    tx = Tx.thread_id([1], parent="cta")
+                    Tx.cta_id([1], parent="kernel")
+                    Tx.thread_id([1], parent="cta")
                     with Tx.thread():
                         res[0] = Tx.nvshmem.my_pe()
                         res[1] = Tx.nvshmem.n_pes()
@@ -97,22 +97,24 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(A: Tx.Buffer(shape, dtype), B: Tx.Buffer(shape, dtype)):
                 with Tx.kernel():
-                    bx = Tx.cta_id([1], parent="kernel")
+                    Tx.cta_id([1], parent="kernel")
                     warp_id = Tx.warp_id([nwarps], parent="cta")
-                    lane_id = Tx.thread_id([32], parent="warp")
+                    Tx.thread_id([32], parent="warp")
                     tid = Tx.thread_id([nwarps * 32], parent="cta")
 
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()
                         n_pes = Tx.nvshmem.n_pes()
                         offset = Tx.if_then_else(
-                            scope == "block", 0, Tx.if_then_else(scope == "thread", tid, warp_id * 32)
+                            scope == "block", 0, Tx.if_then_else(scope == "thread", tid, warp_id * 32)  # noqa: E501
                         )
-                        op_func(dst=B.ptr_to([offset]), src=A.ptr_to([offset]), nelems=nelems, pe=(my_pe + 1) % n_pes)
+                        op_func(dst=B.ptr_to([offset]), src=A.ptr_to([offset]), nelems=nelems, pe=(my_pe + 1) % n_pes)  # noqa: E501
                         Tx.nvshmem.quiet()
             # fmt: on
 
-            init_fn = lambda i, s, d: np.arange(s[0], dtype=d) + i * 100
+            def init_fn(i, s, d):
+                return np.arange(s[0], dtype=d) + i * 100
+
             A_array = create_nvshmem_array(sess, shape, dtype, init_fn)
             B_array = create_nvshmem_array(sess, shape, dtype)
             sess.sync_worker_0()
@@ -135,8 +137,8 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(res: Tx.Buffer((1,), "uint64")):
                 with Tx.kernel():
-                    bx = Tx.cta_id([1], parent="kernel")
-                    tid = Tx.thread_id([1], parent="cta")
+                    Tx.cta_id([1], parent="kernel")
+                    Tx.thread_id([1], parent="cta")
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()
                         n_pes = Tx.nvshmem.n_pes()
@@ -144,7 +146,7 @@ def test_codegen_nvshmem():
                         if sig_op == "add":
                             res[0] = 1
                         Tx.nvshmem.barrier_all()
-                        Tx.nvshmem.signal_op(sig_addr=res.ptr_to([0]), signal=1, sig_op=sig_op, pe=dst_pe)
+                        Tx.nvshmem.signal_op(sig_addr=res.ptr_to([0]), signal=1, sig_op=sig_op, pe=dst_pe)  # noqa: E501
                         Tx.nvshmem.wait_until(ivar=res.ptr_to([0]), cmp="eq", cmp_value=cmp_value)
             # fmt: on
 
@@ -173,9 +175,9 @@ def test_codegen_nvshmem():
                 signal_array: Tx.Buffer((1,), "uint64"),
             ):
                 with Tx.kernel():
-                    bx = Tx.cta_id([1], parent="kernel")
+                    Tx.cta_id([1], parent="kernel")
                     warp_id = Tx.warp_id([nwarps], parent="cta")
-                    lane_id = Tx.thread_id([32], parent="warp")
+                    Tx.thread_id([32], parent="warp")
                     tid = Tx.thread_id([nwarps * 32], parent="cta")
 
                     with Tx.thread():
@@ -202,7 +204,9 @@ def test_codegen_nvshmem():
                             cmp_value=cmp_value,
                         )
 
-            init_A = lambda i, s, d: np.arange(s[0], dtype=d) + i * 100
+            def init_A(i, s, d):
+                return np.arange(s[0], dtype=d) + i * 100
+
             A_array = create_nvshmem_array(sess, shape, dtype, init_A)
             B_array = create_nvshmem_array(sess, shape, dtype)
             signal_array = create_nvshmem_array(sess, (1,), "uint64")
@@ -223,11 +227,11 @@ def test_codegen_nvshmem():
 
             # fmt: off
             @Tx.prim_func(tirx=True)
-            def main(A: Tx.Buffer(shape, dtype), B: Tx.Buffer(shape, dtype), res: Tx.Buffer((1,), "uint64")):
+            def main(A: Tx.Buffer(shape, dtype), B: Tx.Buffer(shape, dtype), res: Tx.Buffer((1,), "uint64")):  # noqa: E501
                 with Tx.kernel():
-                    bx = Tx.cta_id([1], parent="kernel")
-                    warp_id = Tx.warp_id([2], parent="cta")
-                    lane_id = Tx.thread_id([32], parent="warp")
+                    Tx.cta_id([1], parent="kernel")
+                    Tx.warp_id([2], parent="cta")
+                    Tx.thread_id([32], parent="warp")
                     tid = Tx.thread_id([2 * 32], parent="cta")
 
                     with Tx.thread():
@@ -235,13 +239,15 @@ def test_codegen_nvshmem():
                         n_pes = Tx.nvshmem.n_pes()
                         dst_pe = (my_pe + 1) % n_pes
                         Tx.nvshmem.barrier_all()
-                        Tx.nvshmem.putmem_nbi.block(dst=B.ptr_to([0]), src=A.ptr_to([0]), nelems=4 * 64, pe=(my_pe + 1) % n_pes)
+                        Tx.nvshmem.putmem_nbi.block(dst=B.ptr_to([0]), src=A.ptr_to([0]), nelems=4 * 64, pe=(my_pe + 1) % n_pes)  # noqa: E501
                         Tx.nvshmem.fence()
                         if tid == 0:
-                            Tx.nvshmem.signal_op(sig_addr=res.ptr_to([0]), signal=1, sig_op="set", pe=dst_pe)
+                            Tx.nvshmem.signal_op(sig_addr=res.ptr_to([0]), signal=1, sig_op="set", pe=dst_pe)  # noqa: E501
                         Tx.nvshmem.wait_until(ivar=res.ptr_to([0]), cmp="eq", cmp_value=1)
             # fmt: on
-            init_fn = lambda i, s, d: np.arange(s[0], dtype=d) + i * 100
+            def init_fn(i, s, d):
+                return np.arange(s[0], dtype=d) + i * 100
+
             A_array = create_nvshmem_array(sess, shape, dtype, init_fn)
             B_array = create_nvshmem_array(sess, shape, dtype)
             res_array = create_nvshmem_array(sess, (1,), "uint64")
@@ -281,7 +287,7 @@ def test_codegen_nvshmem():
         ]:
             test_put_signal(sess, scope, shape, nwarps, nelems, cmp_value)
             print(
-                f"\n\ntest_put_signal done for {scope}, {shape}, {nwarps}, {nelems}, {cmp_value}\n\n"
+                f"\n\ntest_put_signal done for {scope}, {shape}, {nwarps}, {nelems}, {cmp_value}\n\n"  # noqa: E501
             )
 
         # test fence barrier

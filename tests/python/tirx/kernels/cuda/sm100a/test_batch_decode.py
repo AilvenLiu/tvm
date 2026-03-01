@@ -117,7 +117,6 @@ class PlanInfo:
             kv_indptr_h = kv_indptr_h.numpy().tolist()
 
         PAGE_SIZE = page_size
-        MAX_PAGE_NUM = max_page_num
 
         DEV = tvm.cuda(0)
         self.batch_size = batch_size
@@ -249,8 +248,8 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
         # fmt: off
         @Tx.prim_func(tirx=True)
-        def decode_kernel(q_ptr: Tx.handle, kv_ptr: Tx.handle, lse_ptr: Tx.handle, kv_indptr: Tx.handle, kv_last_page_len: Tx.handle,
-                          kv_indices: Tx.handle, request_indices: Tx.handle, kv_tile_indices: Tx.handle, max_chunk_size: Tx.handle, o_ptr: Tx.handle):
+        def decode_kernel(q_ptr: Tx.handle, kv_ptr: Tx.handle, lse_ptr: Tx.handle, kv_indptr: Tx.handle, kv_last_page_len: Tx.handle,  # noqa: E501
+                          kv_indices: Tx.handle, request_indices: Tx.handle, kv_tile_indices: Tx.handle, max_chunk_size: Tx.handle, o_ptr: Tx.handle):  # noqa: E501
 
             batch_size = Tx.int32()
             max_page_num = Tx.int32()
@@ -260,16 +259,16 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
             kv_tile_indices_global_elem_offset = Tx.int32()
             max_chunk_size_global_elem_offset = Tx.int32()
 
-            q_global = Tx.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global")
-            kv_global = Tx.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global")
-            kv_indptr_global = Tx.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
-            kv_last_page_len_global = Tx.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", offset_factor=1)
-            kv_indices_global = Tx.match_buffer(kv_indices, [total_page_num], "int32", scope="global", offset_factor=1)
-            request_indices_global = Tx.match_buffer(request_indices, [new_batch_size], "int32", scope="global", elem_offset=request_indices_global_elem_offset)
-            kv_tile_indices_global = Tx.match_buffer(kv_tile_indices, [new_batch_size], "int32", scope="global", elem_offset=kv_tile_indices_global_elem_offset)
-            max_chunk_size_global = Tx.match_buffer(max_chunk_size, [1], "int32", scope="global", elem_offset=max_chunk_size_global_elem_offset)
-            o_global = Tx.match_buffer(o_ptr, [new_batch_size, QO_HEADS, HEAD_DIM], O_TYPE, scope="global")
-            lse_global = Tx.match_buffer(lse_ptr, [new_batch_size, QO_HEADS], "float32", scope="global")
+            q_global = Tx.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global")  # noqa: E501
+            kv_global = Tx.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global")  # noqa: E501
+            kv_indptr_global = Tx.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", offset_factor=1)  # noqa: E501
+            kv_last_page_len_global = Tx.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", offset_factor=1)  # noqa: E501
+            kv_indices_global = Tx.match_buffer(kv_indices, [total_page_num], "int32", scope="global", offset_factor=1)  # noqa: E501
+            request_indices_global = Tx.match_buffer(request_indices, [new_batch_size], "int32", scope="global", elem_offset=request_indices_global_elem_offset)  # noqa: E501
+            kv_tile_indices_global = Tx.match_buffer(kv_tile_indices, [new_batch_size], "int32", scope="global", elem_offset=kv_tile_indices_global_elem_offset)  # noqa: E501
+            max_chunk_size_global = Tx.match_buffer(max_chunk_size, [1], "int32", scope="global", elem_offset=max_chunk_size_global_elem_offset)  # noqa: E501
+            o_global = Tx.match_buffer(o_ptr, [new_batch_size, QO_HEADS, HEAD_DIM], O_TYPE, scope="global")  # noqa: E501
+            lse_global = Tx.match_buffer(lse_ptr, [new_batch_size, QO_HEADS], "float32", scope="global")  # noqa: E501
 
             with Tx.kernel():
                 bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -279,8 +278,8 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                 with Tx.cta():
                     # allocate the memory
                     pool = Tx.PoolAllocator()
-                    k_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
-                    v_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")
+                    k_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")  # noqa: E501
+                    v_smem = pool.alloc([PIPE_DEPTH, HEAD_PER_CTA, BDZ, BDY, TILE_PER_BDX, HEAD_DIM], "float16")  # noqa: E501
                     kv_offset = pool.alloc([BDZ, BDX, BDY, TILE_PER_BDX], "int32")
                     epi_o = pool.alloc([BDZ, BDY, BDX, HEAD_PER_CTA, VEC_SIZE], "float32")
                     epi_md = pool.alloc([BDZ, BDY, HEAD_PER_CTA, 2], "float32")
@@ -317,8 +316,8 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 p = Tx.meta_var(token_id // PAGE_SIZE)
                                 r = Tx.meta_var(token_id % PAGE_SIZE)
                                 indices[0] = Tx.cuda.ldg(kv_indices_global.ptr_to([p]), "int32")
-                                kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM
-                                                                  + kv_head_id_beg * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM)
+                                kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM  # noqa: E501
+                                                                  + kv_head_id_beg * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM)  # noqa: E501
                         @Tx.inline
                         def sync_blk():
                             if BDZ <= 4:
@@ -334,24 +333,24 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             # fetch q
                             batch_idx[0] = request_indices_global[new_batch_id]
                             for kb in Tx.unroll(HEAD_PER_CTA):
-                                Tx.copy(tmp[kb, :], q_global[batch_idx[0], (kv_head_id_beg + kb) * BDY + ty, tx_start:tx_start + VEC_SIZE])
+                                Tx.copy(tmp[kb, :], q_global[batch_idx[0], (kv_head_id_beg + kb) * BDY + ty, tx_start:tx_start + VEC_SIZE])  # noqa: E501
                                 Tx.cast(q[kb, :], tmp[kb, :])
 
                             # get chunk size info
                             chunk_start_logical[0] = kv_indptr_global[batch_idx[0]] * PAGE_SIZE
                             chunk_end_logical[0] = chunk_start_logical[0]
                             if SPLIT_KV:
-                                chunk_start_logical[0] += max_chunk_size_global[0] * kv_tile_indices_global[new_batch_id]
-                                chunk_end_logical[0] = Tx.min(chunk_start_logical[0] + max_chunk_size_global[0],
-                                                            chunk_end_logical[0] + (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE
+                                chunk_start_logical[0] += max_chunk_size_global[0] * kv_tile_indices_global[new_batch_id]  # noqa: E501
+                                chunk_end_logical[0] = Tx.min(chunk_start_logical[0] + max_chunk_size_global[0],  # noqa: E501
+                                                            chunk_end_logical[0] + (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE  # noqa: E501
                                                             + kv_last_page_len_global[batch_idx[0]])
                             else:
-                                chunk_end_logical[0] += (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE + kv_last_page_len_global[batch_idx[0]]
+                                chunk_end_logical[0] += (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE + kv_last_page_len_global[batch_idx[0]]  # noqa: E501
                             chunk_size[0] = chunk_end_logical[0] - chunk_start_logical[0]
 
                             # fetch kv-offset
                             for kt in Tx.unroll(TILE_PER_BDX):
-                                fetch_kv_offset(kt, kv_head_id_beg, ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
+                                fetch_kv_offset(kt, kv_head_id_beg, ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)  # noqa: E501
                             Tx.ptx.fence.proxy_async("shared::cta")
                             sync_blk()
 
@@ -362,19 +361,19 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                                 # fetch K
                                 for kt in Tx.unroll(TILE_PER_BDX):
-                                    if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
+                                    if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:  # noqa: E501
                                         for kb in Tx.unroll(HEAD_PER_CTA):
-                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tx.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
+                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)  # noqa: E501
+                                            Tx.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",  # noqa: E501
                                                             vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
 
                                 # fetch V
                                 for kt in Tx.unroll(TILE_PER_BDX):
-                                    if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
+                                    if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:  # noqa: E501
                                         for kb in Tx.unroll(HEAD_PER_CTA):
-                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tx.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
+                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)  # noqa: E501
+                                            Tx.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",  # noqa: E501
                                                             vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
 
@@ -391,7 +390,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if ((ki + PIPE_DEPTH) % BDX == 0):
                                     for kt in Tx.unroll(TILE_PER_BDX):
                                         fetch_kv_offset(kt, kv_head_id_beg,
-                                                        (ki + PIPE_DEPTH) * TILE_PER_BDX * BDY * BDZ  + ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
+                                                        (ki + PIPE_DEPTH) * TILE_PER_BDX * BDY * BDZ  + ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)  # noqa: E501
                                     Tx.ptx.fence.proxy_async("shared::cta")
 
                                 # compute qk
@@ -402,16 +401,16 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 for kt in Tx.unroll(TILE_PER_BDX * BDY):
                                     for kb in Tx.unroll(HEAD_PER_CTA):
                                         # cast k to f32
-                                        Tx.cast(k[kb, :], k_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
+                                        Tx.cast(k[kb, :], k_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])  # noqa: E501
                                         s[kb, kt] = 0.0
                                         # local gemm
                                         for kv in Tx.unroll(VEC_SIZE):
                                             s[kb, kt] += q[kb, kv] * k[kb, kv]
                                         # reduce from other tx's sum
                                         for kr in Tx.unroll(find_power_of_two(BDX // 2) + 1):
-                                            s[kb, kt] = s[kb, kt] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, s[kb, kt], (BDX // 2) >> kr, 32, 32)
+                                            s[kb, kt] = s[kb, kt] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, s[kb, kt], (BDX // 2) >> kr, 32, 32)  # noqa: E501
                                         s[kb, kt] *= SM_SCALE
-                                        if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt >= chunk_size[0]:
+                                        if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt >= chunk_size[0]:  # noqa: E501
                                             s[kb, kt] = Tx.float32('-inf')
                                         # update max value
                                         m[kb, 0] = Tx.max(m[kb, 0], s[kb, kt])
@@ -430,14 +429,14 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                                 # get kv-offset used in cp
                                 for kt in Tx.unroll(TILE_PER_BDX):
-                                    kv_offset_cp[kt] = kv_offset[tz, (ki + PIPE_DEPTH) % BDX, ty, kt] + tx * VEC_SIZE
+                                    kv_offset_cp[kt] = kv_offset[tz, (ki + PIPE_DEPTH) % BDX, ty, kt] + tx * VEC_SIZE  # noqa: E501
 
                                 # fetch K
                                 for kt in Tx.unroll(TILE_PER_BDX):
-                                    if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
+                                    if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:  # noqa: E501
                                         for kb in Tx.unroll(HEAD_PER_CTA):
-                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tx.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
+                                            g_st = Tx.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)  # noqa: E501
+                                            Tx.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",  # noqa: E501
                                                             vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
 
@@ -446,18 +445,18 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 sync_blk()
                                 for kt in Tx.unroll(TILE_PER_BDX * BDY):
                                     for kb in Tx.unroll(HEAD_PER_CTA):
-                                        if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt < chunk_size[0]:
-                                            Tx.cast(v[kb, :], v_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
+                                        if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt < chunk_size[0]:  # noqa: E501
+                                            Tx.cast(v[kb, :], v_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])  # noqa: E501
                                             for kv in Tx.unroll(VEC_SIZE):
                                                 o[kb, kv] += s[kb, kt] * v[kb, kv]
                                 sync_blk()
 
                                 # fetch V
                                 for kt in Tx.unroll(TILE_PER_BDX):
-                                    if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
+                                    if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:  # noqa: E501
                                         for kb in Tx.unroll(HEAD_PER_CTA):
-                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tx.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
+                                            g_st = Tx.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)  # noqa: E501
+                                            Tx.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",  # noqa: E501
                                                             vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
                                 idx[0] = (idx[0] + 1) % PIPE_DEPTH
@@ -490,9 +489,9 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                             m[kb, 1] = m[kb, 0]
                                             d[kb, 1] = d[kb, 0]
                                             m[kb, 0] = Tx.max(m[kb, 1], m_tmp[kb, 0])
-                                            d[kb, 0] = d[kb, 1] * Tx.exp2(m[kb, 1] - m[kb, 0]) + d_tmp[kb, 0] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])
+                                            d[kb, 0] = d[kb, 1] * Tx.exp2(m[kb, 1] - m[kb, 0]) + d_tmp[kb, 0] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])  # noqa: E501
                                             for kv in Tx.unroll(VEC_SIZE):
-                                                o[kb, kv] = o[kb, kv] * Tx.exp2(m[kb, 1] - m[kb, 0]) + o_tmp[kb, kv] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])
+                                                o[kb, kv] = o[kb, kv] * Tx.exp2(m[kb, 1] - m[kb, 0]) + o_tmp[kb, kv] * Tx.exp2(m_tmp[kb, 0] - m[kb, 0])  # noqa: E501
                                     # normalize
                                     for kv in Tx.unroll(VEC_SIZE):
                                         o[kb, kv] = o[kb, kv] / d[kb, 0]
@@ -500,12 +499,12 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 for kb in Tx.unroll(HEAD_PER_CTA):
                                     qo_head_id = Tx.meta_var((kv_head_id_beg + kb) * BDY + ty)
                                     if SPLIT_KV:
-                                        Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], o[kb, :])
+                                        Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], o[kb, :])  # noqa: E501
                                     else:
                                         Tx.cast(tmp[kb, :], o[kb, :])
-                                        Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], tmp[kb, :])
+                                        Tx.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], tmp[kb, :])  # noqa: E501
                                     if tx == 0:
-                                        lse_global[new_batch_id, qo_head_id] = m[kb, 0] + Tx.log2(d[kb, 0])
+                                        lse_global[new_batch_id, qo_head_id] = m[kb, 0] + Tx.log2(d[kb, 0])  # noqa: E501
 
                             cur[0] += SM_COUNT
         # fmt: on
@@ -520,14 +519,14 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
         # fmt: off
         @Tx.prim_func(tirx=True)
-        def merge_kernel(o_tmp_ptr: Tx.handle, o_indptr: Tx.handle, o_ptr: Tx.handle, lse_tmp_ptr: Tx.handle, lse_ptr: Tx.handle):
+        def merge_kernel(o_tmp_ptr: Tx.handle, o_indptr: Tx.handle, o_ptr: Tx.handle, lse_tmp_ptr: Tx.handle, lse_ptr: Tx.handle):  # noqa: E501
             batch_size = Tx.int32()
             new_batch_size = Tx.int32()
-            o_tmp_global = Tx.match_buffer(o_tmp_ptr, [new_batch_size, NUM_HEADS, HEAD_DIM], "float32", scope="global")
+            o_tmp_global = Tx.match_buffer(o_tmp_ptr, [new_batch_size, NUM_HEADS, HEAD_DIM], "float32", scope="global")  # noqa: E501
             o_indptr_global = Tx.match_buffer(o_indptr, [batch_size + 1], "int32", scope="global")
-            o_global = Tx.match_buffer(o_ptr, [batch_size, NUM_HEADS, HEAD_DIM], "float16", scope="global")
-            lse_tmp_global = Tx.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_HEADS], "float32", scope="global")
-            lse_global = Tx.match_buffer(lse_ptr, [batch_size, NUM_HEADS], "float32", scope="global")
+            o_global = Tx.match_buffer(o_ptr, [batch_size, NUM_HEADS, HEAD_DIM], "float16", scope="global")  # noqa: E501
+            lse_tmp_global = Tx.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_HEADS], "float32", scope="global")  # noqa: E501
+            lse_global = Tx.match_buffer(lse_ptr, [batch_size, NUM_HEADS], "float32", scope="global")  # noqa: E501
 
             with Tx.kernel():
                 bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -568,17 +567,17 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
                             if num[0] == 1:
                                 if ty == 0:
-                                    Tx.copy(o[:], o_tmp_global[new_beg_batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE])
+                                    Tx.copy(o[:], o_tmp_global[new_beg_batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE])  # noqa: E501
                                     Tx.cast(tmp[:], o[:])
-                                    Tx.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])
-                                    lse_global[batch_idx[0], head_idx[0]] = lse_tmp_global[new_beg_batch_idx[0], head_idx[0]]
+                                    Tx.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])  # noqa: E501
+                                    lse_global[batch_idx[0], head_idx[0]] = lse_tmp_global[new_beg_batch_idx[0], head_idx[0]]  # noqa: E501
                                 continue
 
                             # pipeline
                             for kp in Tx.unroll(PIPE_DEPTH):
                                 if kp * BDY + ty < num[0]:
                                     Tx.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE],
-                                                  o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
+                                                  o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],  # noqa: E501
                                                   dispatch="non-bulk-copy", vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
 
@@ -592,7 +591,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if ki % BDX == 0:
                                     # load lse
                                     if ki * BDY + ty * BDX + tx < num[0]:
-                                        lse_tmp_smem_load[ty, tx] = lse_tmp_global[new_beg_batch_idx[0] + ki * BDY + ty * BDX + tx, head_idx[0]]
+                                        lse_tmp_smem_load[ty, tx] = lse_tmp_global[new_beg_batch_idx[0] + ki * BDY + ty * BDX + tx, head_idx[0]]  # noqa: E501
                                     else:
                                         lse_tmp_smem_load[ty, tx] = 0.0
                                     Tx.ptx.fence.proxy_async("shared::cta")
@@ -611,11 +610,11 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     m[0] = Tx.max(m[1], m_tmp[0])
                                     d[0] = d[1] * Tx.exp2(m[1] - m[0]) + Tx.exp2(m_tmp[0] - m[0])
                                     for kv in Tx.unroll(VEC_SIZE):
-                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])
+                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])  # noqa: E501
                                 Tx.ptx.bar.sync(2, BDX * BDY)
                                 if (PIPE_DEPTH + ki) * BDY + ty < num[0]:
-                                    Tx.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE],
-                                                  o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
+                                    Tx.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE],  # noqa: E501
+                                                  o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],  # noqa: E501
                                                   dispatch="non-bulk-copy", vec_len=VEC_SIZE)
                                 Tx.ptx.cp_async.commit_group()
                             Tx.ptx.cp_async.wait_group(0)
@@ -644,14 +643,14 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     m[0] = Tx.max(m[1], m_tmp[0])
                                     d[0] = d[1] * Tx.exp2(m[1] - m[0]) + Tx.exp2(m_tmp[0] - m[0])
                                     for kv in Tx.unroll(VEC_SIZE):
-                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])
+                                        o[kv] = o[kv] * Tx.exp2(m[1] - m[0]) + o_tmp[kv] * Tx.exp2(m_tmp[0] - m[0])  # noqa: E501
 
                                 for kv in Tx.unroll(VEC_SIZE):
                                     o[kv] = o[kv] / d[0]
 
                                 # store to global mem
                                 Tx.cast(tmp[:], o[:])
-                                Tx.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])
+                                Tx.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])  # noqa: E501
                                 if tx == 0:
                                     lse_global[batch_idx[0], head_idx[0]] = m[0] + Tx.log2(d[0])
                             idx[0] += SM_COUNT
@@ -760,7 +759,9 @@ def test(num_heads, seq_len, head_dim, batch_size):
             )
             o, lse = wrapper.run_return_lse(q_f, kv_data_f)
 
-            func = lambda: wrapper.run(q_f, kv_data_f)
+            def func():
+                return wrapper.run(q_f, kv_data_f)
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_decode")
             func()
             print(f"FlashInfer BatchDecodeWithPagedKVCacheWrapper time: {ms:.3f} ms")
@@ -796,13 +797,15 @@ def test(num_heads, seq_len, head_dim, batch_size):
             )
             o, lse = wrapper.run_return_lse(q_f, kv_data_f)
 
-            func = lambda: wrapper.run(q_f, kv_data_f)
+            def func():
+                return wrapper.run(q_f, kv_data_f)
+
             ms = bench(
                 func, warmup=10, repeat=30, proton_name="flashinfer_batch_decode_tensor_cores"
             )
             func()
             print(
-                f"FlashInfer BatchDecodeWithPagedKVCacheWrapper(use_tensor_cores=True) time: {ms:.3f} ms"
+                f"FlashInfer BatchDecodeWithPagedKVCacheWrapper(use_tensor_cores=True) time: {ms:.3f} ms"  # noqa: E501
             )
 
             return (
@@ -838,7 +841,9 @@ def test(num_heads, seq_len, head_dim, batch_size):
             )
             o, lse = wrapper.run_return_lse(q_f, kv_data_f)
 
-            func = lambda: wrapper.run(q_f, kv_data_f)
+            def func():
+                return wrapper.run(q_f, kv_data_f)
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_prefill")
             func()
             print(f"FlashInfer BatchPrefillWithPagedKVCacheWrapper time: {ms:.3f} ms")
@@ -855,7 +860,7 @@ def test(num_heads, seq_len, head_dim, batch_size):
             q_f = Q.to(0).reshape(batch_size, qo_heads, head_dim)
             kv_data_f = KV_data.to(0)
             kv_indptr_f = KV_indptr.to(0)
-            kv_last_page_len_f = KV_last_page_len.to(0)
+            KV_last_page_len.to(0)
             kv_indices_f = KV_indices.to(0)
 
             qo_indptr_f = torch.arange(0, batch_size + 1, dtype=torch.int32).to(0)
@@ -875,7 +880,9 @@ def test(num_heads, seq_len, head_dim, batch_size):
             )
             o, lse = wrapper.run(q_f, kv_data_f)
 
-            func = lambda: wrapper.run(q_f, kv_data_f)
+            def func():
+                return wrapper.run(q_f, kv_data_f)
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_attention")
             func()
             print(f"FlashInfer BatchAttention time: {ms:.3f} ms")
@@ -887,7 +894,7 @@ def test(num_heads, seq_len, head_dim, batch_size):
 
         with ProtonContext("batch_decode"):
             print(
-                f">>>>>>>>>>>>>>>>>>>>>>>>> Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"
+                f">>>>>>>>>>>>>>>>>>>>>>>>> Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"  # noqa: E501
             )
             O_flashinfer_batch_decode, lse_flashinfer_batch_decode = flashinfer_batch_decode()
             O_flashinfer_batch_decode_tensor_cores, lse_flashinfer_batch_decode_tensor_cores = (

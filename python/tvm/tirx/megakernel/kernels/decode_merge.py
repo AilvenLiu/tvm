@@ -15,18 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict
+from typing import Any
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F32_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, exp2
-from tvm.tirx.megakernel.utils.config import KernelConfig, F32_BYTES
 
 
 class DecodeMergeTile(Tile):
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call=False):
+    def class_config_init(cls, problem_config: dict[str, Any], use_device_call=False):
         cls.use_device_call = use_device_call
         cls.qo_heads = problem_config["num_attention_heads"]
         cls.kv_heads = problem_config["num_key_value_heads"]

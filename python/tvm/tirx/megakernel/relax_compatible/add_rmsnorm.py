@@ -16,11 +16,9 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.base import SmemManager
-
 from tvm.tirx.megakernel.kernels import AddRMSNormTile, RMSNormTile
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
 class FuseAddRMSNormTile(AddRMSNormTile):

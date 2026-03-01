@@ -50,13 +50,13 @@ def get_rmsnorm_kernel(hidden_size):
     block_size = min(256, hidden_size // vec_size)
     bdx = 32
     bdy = ceildiv(block_size, 32)
-    smem_size = (bdy + hidden_size) * F32_BYTES
+    (bdy + hidden_size) * F32_BYTES
 
     # fmt: off
     @Tx.prim_func(tirx=True)
     def rmsnorm(input_ptr: Tx.handle, weight_ptr: Tx.handle, out_ptr: Tx.handle):
         batch_size = Tx.int32()
-        input_global = Tx.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")
+        input_global = Tx.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")  # noqa: E501
         weight_global = Tx.match_buffer(weight_ptr, [hidden_size], "float16", scope="global")
         out_global = Tx.match_buffer(out_ptr, [batch_size, hidden_size], "float16", scope="global")
 
@@ -102,7 +102,7 @@ def get_rmsnorm_kernel(hidden_size):
 
                         # warp reduce sum
                         for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
-                            sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                            sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)  # noqa: E501
                         sum_sq_smem[ty] = sum_sq[0]
                         Tx.ptx.bar.sync(1, bdx * bdy)
                         Tx.ptx.fence.proxy_async("shared::cta")
@@ -113,7 +113,7 @@ def get_rmsnorm_kernel(hidden_size):
                             else:
                                 sum_sq[0] = 0.0
                             for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
-                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)  # noqa: E501
                             sum_sq_smem[0] = sum_sq[0]
                         Tx.ptx.bar.sync(1, bdx * bdy)
                         Tx.ptx.fence.proxy_async("shared::cta")
@@ -160,9 +160,10 @@ def test_rmsnorm(hidden_size, batch_size):
             import flashinfer
 
             out = torch.empty_like(x)
-            func = lambda: flashinfer.norm.rmsnorm(
-                x.clone(), weight, EPS, enable_pdl=False, out=out
-            )
+
+            def func():
+                return flashinfer.norm.rmsnorm(x.clone(), weight, EPS, enable_pdl=False, out=out)
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
             print(f"flashinfer time: {ms:.3f} ms")
             return out.cpu().numpy()
@@ -172,11 +173,14 @@ def test_rmsnorm(hidden_size, batch_size):
             x_tvm = tvm.runtime.tensor(x.cpu().numpy(), DEV)
             weight_tvm = tvm.runtime.tensor(weight.cpu().numpy(), DEV)
             out_tvm = tvm.runtime.empty((batch_size, hidden_size), dtype="float16", device=DEV)
-            func = lambda: mod(
-                x_tvm,
-                weight_tvm,
-                out_tvm,
-            )
+
+            def func():
+                return mod(
+                    x_tvm,
+                    weight_tvm,
+                    out_tvm,
+                )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             print(f"tir time: {ms:.3f} ms")
             mod(x_tvm, weight_tvm, out_tvm)

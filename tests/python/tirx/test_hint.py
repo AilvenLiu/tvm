@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """Tests for T.hint() — universal directive primitive for TIRx sketch language."""
+
 import tvm
 import tvm.script
 import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import tir as T
-from tvm.tir import AttrStmt, StringImm
+from tvm.tir import AttrStmt
 
 
 def from_source(code):
@@ -32,11 +33,11 @@ def test_hint_statement():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -62,11 +63,11 @@ def test_hint_context_manager():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -90,11 +91,11 @@ def test_hint_with_attrs():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -120,11 +121,11 @@ def test_hint_printer_roundtrip_statement():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -142,11 +143,11 @@ def test_hint_printer_roundtrip_context_manager():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -164,11 +165,11 @@ def test_hint_printer_roundtrip_with_attrs():
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -221,15 +222,14 @@ def test_hint_keyword_arg_on_tx_op_roundtrip():
 
 def test_hint_no_message():
     """T.hint(access=...) with no message string."""
-    from tvm.script import tirx as Tx
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (128,), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -245,6 +245,7 @@ def test_hint_no_message():
             assert "access" in stmt.node
             assert "message" not in stmt.node
             from tvm.tir import BufferRegion
+
             assert isinstance(stmt.node["access"], BufferRegion)
             found[0] = True
 
@@ -254,15 +255,14 @@ def test_hint_no_message():
 
 def test_hint_access_buffer_region():
     """T.hint(access=A[region]) stores the BufferRegion structurally in the IR."""
-    from tvm.script import tirx as Tx
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (128, 64), "float32", scope="global")
         with T.kernel():
             bx, by, bz = T.cta_id([2, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
+            T.warp_id([1], parent="cta")
+            T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -277,6 +277,7 @@ def test_hint_access_buffer_region():
             assert str(stmt.node["message"]) == "partition"
             assert "access" in stmt.node
             from tvm.tir import BufferRegion
+
             assert isinstance(stmt.node["access"], BufferRegion)
             br = stmt.node["access"]
             assert br.buffer.name == "A"

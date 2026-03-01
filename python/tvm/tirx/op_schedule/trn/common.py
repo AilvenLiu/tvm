@@ -17,24 +17,23 @@
 
 """Common utilities for operator scheduling."""
 
-from collections import namedtuple
-from typing import Tuple, Optional, Dict, Callable, List
-from functools import wraps, reduce
 import itertools
+from collections import namedtuple
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import reduce, wraps
+from math import gcd
+from operator import mul
 
 import tvm
-from dataclasses import dataclass
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tirx as Tx
 from tvm.ir import Range
-from tvm.tir import BufferRegion, Buffer, PrimFunc, Var, PrimExpr
-from tvm.tir.stmt import OpCall
+from tvm.script import tirx as Tx
+from tvm.tir import Buffer, BufferRegion, PrimExpr, PrimFunc, Var
 from tvm.tir.expr_functor import ExprMutator
-from tvm.tirx.op_schedule import ScheduleContext, fail
 from tvm.tir.layout import Iter
-from math import gcd
-from functools import reduce
-from operator import mul
+from tvm.tir.stmt import OpCall
+from tvm.tirx.op_schedule import ScheduleContext, fail
 
 # Used to generate the correct [:, None] for mask/predicate
 nki_dim = "nki_dim"
@@ -129,7 +128,7 @@ def get_ewise_dim_map(
 def get_reduction_dim_map(
     src_buffer_region: BufferRegion,
     dst_buffer_region: BufferRegion,
-    axes: Tuple[int],
+    axes: tuple[int],
     analyzer: Analyzer,
 ):
     """Get the dimension map between source and destination buffer regions for reduction.
@@ -162,13 +161,15 @@ def get_reduction_dim_map(
     src_extent = [r.extent for r in src_region]
     src_non_unit_extent_ = [(i, e) for i, e in enumerate(src_extent) if e != 1]
     src_non_reduction_extents = [(i, e) for i, e in src_non_unit_extent_ if i not in axes]
-    assert len(src_non_reduction_extents) == len(
-        dst_non_unit_extent_
-    ), f"Source and destination must have the same number of non-reduction extents: {len(src_non_reduction_extents)} != {len(dst_non_unit_extent_)}"
+    assert len(src_non_reduction_extents) == len(dst_non_unit_extent_), (
+        f"Source and destination must have the same number of non-reduction extents: {len(src_non_reduction_extents)} != {len(dst_non_unit_extent_)}"  # noqa: E501
+    )
     for i in range(len(src_non_reduction_extents)):
         assert analyzer.can_prove_equal(
             src_non_reduction_extents[i][1], dst_non_unit_extent_[i][1]
-        ), f"Source and destination must have the same extent for non-reduction axes: {src_non_reduction_extents[i][1]} != {dst_non_unit_extent_[i][1]}"
+        ), (
+            f"Source and destination must have the same extent for non-reduction axes: {src_non_reduction_extents[i][1]} != {dst_non_unit_extent_[i][1]}"  # noqa: E501
+        )
     dim_map = {s[0]: d[0] for s, d in zip(src_non_reduction_extents, dst_non_unit_extent_)}
     return dim_map
 
@@ -177,7 +178,7 @@ largest_psum_per_bank = 512
 max_psum_banks = 8
 
 
-def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
+def check_workspace_buffer(buffer: Buffer, shape: tuple[int], scope: str):
     """Check if a workspace buffer is valid.
 
     Parameters
@@ -199,13 +200,13 @@ def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
     if scope == "trn.psum":
         # the number of psum banks used is inferred from the shape
         # only check p and f dims
-        assert all(
-            x >= y for x, y in zip(buffer.shape[1:], shape)
-        ), f"workspace buffer must have enough size, {buffer.shape[1:]} cannot cover {shape}"
+        assert all(x >= y for x, y in zip(buffer.shape[1:], shape)), (
+            f"workspace buffer must have enough size, {buffer.shape[1:]} cannot cover {shape}"
+        )
     else:
-        assert all(
-            x >= y for x, y in zip(buffer.shape, shape)
-        ), f"workspace buffer must have enough size, {buffer.shape} cannot cover {shape}"
+        assert all(x >= y for x, y in zip(buffer.shape, shape)), (
+            f"workspace buffer must have enough size, {buffer.shape} cannot cover {shape}"
+        )
 
 
 def init_analyzer(sctx: ScheduleContext):
@@ -227,7 +228,7 @@ def init_analyzer(sctx: ScheduleContext):
     return analyzer
 
 
-def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
+def target_trn(fn: Callable[[OpCall, ScheduleContext], PrimFunc | None]):
     """Decorator that ensures a function is only executed for TRN targets.
 
     Parameters
@@ -245,9 +246,9 @@ def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
     def wrapper(*args, **kwargs):
         sctx = kwargs.get("sctx", None)
         if sctx is None:
-            assert len(args) == 2 and isinstance(
-                args[1], ScheduleContext
-            ), "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            assert len(args) == 2 and isinstance(args[1], ScheduleContext), (
+                "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            )
             sctx = args[1]
         if not sctx.is_trn():
             fail("target is not Trainium")
@@ -373,15 +374,15 @@ class LogicalIterDim:
         return LogicalIterDim(1, 1, Tx.int32(0))
 
 
-LogicalIterList = Tuple[Tuple[Tuple[LogicalIterDim]]]
+LogicalIterList = tuple[tuple[tuple[LogicalIterDim]]]
 
 
-def to_int_list(intimm_list: List[Tx.IntImm]):
+def to_int_list(intimm_list: list[Tx.IntImm]):
     return [int(i) for i in intimm_list]
 
 
 class VarReplacer(ExprMutator):
-    def __init__(self, var_map: Dict[Var, PrimExpr]):
+    def __init__(self, var_map: dict[Var, PrimExpr]):
         super().__init__()
         self.var_map = var_map
 
@@ -391,7 +392,7 @@ class VarReplacer(ExprMutator):
         return op
 
     @staticmethod
-    def replace_vars(expr: PrimExpr, var_map: Dict[Var, PrimExpr]) -> PrimExpr:
+    def replace_vars(expr: PrimExpr, var_map: dict[Var, PrimExpr]) -> PrimExpr:
         return VarReplacer(var_map).visit_expr(expr)
 
 
@@ -400,42 +401,42 @@ class InstructionRepr:
     buffer_region: BufferRegion
     size: int
     stride: int
-    selected_data_iter_ids: List[int]
+    selected_data_iter_ids: list[int]
 
     def __init__(
         self,
         buffer_region: BufferRegion,
         inst_size: int,
         inst_stride: int,
-        selected_data_iter_ids: List[int],
+        selected_data_iter_ids: list[int],
     ):
         self.buffer_region = buffer_region
         self.size = inst_size if inst_size is not None else 1
         self.stride = inst_stride if inst_stride is not None else 1
         self.selected_data_iter_ids = selected_data_iter_ids
 
-    def bound_inst_size(self, max_inst_size: Optional[int], analyzer: Analyzer):
+    def bound_inst_size(self, max_inst_size: int | None, analyzer: Analyzer):
         if max_inst_size is None:
             return
         if analyzer.can_prove(self.size <= max_inst_size):
             return
-        assert analyzer.can_prove(
-            self.size % max_inst_size == 0
-        ), f"The instruction size {self.size} is not a multiple of the max instruction size {max_inst_size}"
+        assert analyzer.can_prove(self.size % max_inst_size == 0), (
+            f"The instruction size {self.size} is not a multiple of the max instruction size {max_inst_size}"  # noqa: E501
+        )
         self.size = max_inst_size
         self.selected_data_iter_ids = None
 
 
 class InstructionGenerator:
-    def __init__(self, buffer_regions: Tuple[BufferRegion], analyzer: Analyzer):
+    def __init__(self, buffer_regions: tuple[BufferRegion], analyzer: Analyzer):
         self.buffer_regions = []
         self.analyzer = analyzer
         self.split_shape_views = {}
         self.split_layout_views = {}
         self.seps = {}
         self.bound_regions = {}
-        self.bind_iters: Dict[BufferRegion, LogicalIterList] = None
-        self.bind_maps: Dict[BufferRegion, Dict[Var, PrimExpr]] = {}
+        self.bind_iters: dict[BufferRegion, LogicalIterList] = None
+        self.bind_maps: dict[BufferRegion, dict[Var, PrimExpr]] = {}
         for buffer_region in buffer_regions:
             if not isinstance(buffer_region, BufferRegion):
                 continue
@@ -595,7 +596,7 @@ class InstructionGenerator:
         return tuple(out)
 
     def _link_buffer_regions(
-        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: Dict[int, int]
+        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: dict[int, int]
     ):
         split_shape_view_1 = self.split_shape_views[buffer_region]
         split_layout_view_1 = self.split_layout_views[buffer_region]
@@ -623,11 +624,11 @@ class InstructionGenerator:
         self.split_layout_views[buffer_region] = layout
         self.seps[buffer_region] = actual_seps
 
-    def _get_reverse_dim_map(self, dim_map: Dict[int, int]) -> Dict[int, int]:
+    def _get_reverse_dim_map(self, dim_map: dict[int, int]) -> dict[int, int]:
         return {dim_map[i]: i for i in dim_map}
 
     def link_buffer_regions(
-        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: Dict[int, int]
+        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: dict[int, int]
     ):
         self.dim_mapper.register_dim_map(buffer_region, to_link, dim_map)
         for r in self.buffer_regions:
@@ -640,9 +641,9 @@ class InstructionGenerator:
             seps_1 = self.seps[r]
             seps_2 = self.seps[to_link]
             for i, j in dim_map.items():
-                assert (
-                    seps_1[i + 1] - seps_1[i] == seps_2[j + 1] - seps_2[j]
-                ), f"The number of data iters at dim {i} of {buffer_region.buffer.name} is not equal to the number of data iters at dim {j} of {to_link.buffer.name}"
+                assert seps_1[i + 1] - seps_1[i] == seps_2[j + 1] - seps_2[j], (
+                    f"The number of data iters at dim {i} of {buffer_region.buffer.name} is not equal to the number of data iters at dim {j} of {to_link.buffer.name}"  # noqa: E501
+                )
 
     def bind_inst_iter(
         self,
@@ -689,7 +690,7 @@ class InstructionGenerator:
                 )
 
     def fill_in_block_dim(
-        self, buffer_region: BufferRegion, bind: Var, dims: Optional[List[int]] = None
+        self, buffer_region: BufferRegion, bind: Var, dims: list[int] | None = None
     ):
         # fixme: be cautious of the min of buffer region. This implementation is not correct.
         #        we need to first take a view of sub-layout (keep strides, but reduce the extent
@@ -720,14 +721,14 @@ class InstructionGenerator:
                         if d >= 0
                         else 1
                     )
-                    assert (
-                        next_logical_stride % cur == 0
-                    ), f"Fail to infer block dim for {buffer_region.buffer.name} at dim {i}"
+                    assert next_logical_stride % cur == 0, (
+                        f"Fail to infer block dim for {buffer_region.buffer.name} at dim {i}"
+                    )
                     gap = next_logical_stride // cur
                     if is_partition:
-                        assert (
-                            gap == 1
-                        ), f"Fail to propagate partition dim. The propagated dim does not cover the whole partition on {buffer_region.buffer.name} at dim {i}"
+                        assert gap == 1, (
+                            f"Fail to propagate partition dim. The propagated dim does not cover the whole partition on {buffer_region.buffer.name} at dim {i}"  # noqa: E501
+                        )
                     elif gap > 1:
                         new_acc_block_ext = acc_block_ext * gap
                         logical_iter_list_block[i][j - seps[i]].append(
@@ -761,16 +762,16 @@ class InstructionGenerator:
                     gap = next_logical_stride // (
                         logical_iter_dims[d].logical_stride * logical_iter_dims[d].extent
                     )
-                    assert gap == 1, f"Call fill_in_block_dim() before calling generate_indices()"
+                    assert gap == 1, "Call fill_in_block_dim() before calling generate_indices()"
 
-    def set_bind_map(self, buffer_region: BufferRegion, bind_map: Dict[Var, PrimExpr]):
+    def set_bind_map(self, buffer_region: BufferRegion, bind_map: dict[Var, PrimExpr]):
         self.bind_maps[buffer_region] = bind_map
 
-    def set_bind_map_all(self, bind_map: Dict[Var, PrimExpr]):
+    def set_bind_map_all(self, bind_map: dict[Var, PrimExpr]):
         for buffer_region in self.buffer_regions:
             self.set_bind_map(buffer_region, bind_map)
 
-    def generate_axes(self, buffer_region: BufferRegion) -> List[PrimExpr]:
+    def generate_axes(self, buffer_region: BufferRegion) -> list[PrimExpr]:
         self._check_bind_iter_coverage(buffer_region)
         layout = self.split_layout_views[buffer_region]
         iters = layout.shard
@@ -794,7 +795,7 @@ class InstructionGenerator:
             axes.append(index)
         return axes
 
-    def generate_indices(self, buffer_region: BufferRegion) -> List[PrimExpr]:
+    def generate_indices(self, buffer_region: BufferRegion) -> list[PrimExpr]:
         axes = self.generate_axes(buffer_region)
         return [axes[i] + r.min for i, r in enumerate(buffer_region.region)]
 
@@ -870,7 +871,7 @@ class InstructionGenerator:
         )
         return guard
 
-    def _find_max_linear_inst(self, indexed_data_iters, min_stride: Optional[int] = None):
+    def _find_max_linear_inst(self, indexed_data_iters, min_stride: int | None = None):
         min_stride = min_stride or 1
         indexed_data_iters = sorted(indexed_data_iters, key=lambda x: x[1].stride)
         inst_size = 1
@@ -879,9 +880,9 @@ class InstructionGenerator:
         for idx, data_iter in indexed_data_iters:
             if data_iter.extent == 1 or data_iter.stride * data_iter.extent < min_stride:
                 continue
-            assert (
-                data_iter.stride % min_stride == 0 or min_stride % data_iter.stride == 0
-            ), f"Invalid instruction stride {min_stride}"
+            assert data_iter.stride % min_stride == 0 or min_stride % data_iter.stride == 0, (
+                f"Invalid instruction stride {min_stride}"
+            )
             if inst_stride is not None and inst_stride * inst_size != data_iter.stride:
                 # the stride of the found data iter is not compatible with previous data iters
                 break
@@ -897,8 +898,8 @@ class InstructionGenerator:
     def find_max_inst_size_from_one_region(
         self,
         buffer_region: BufferRegion,
-        allowed_f_dim: Optional[Tuple[int]] = None,
-        min_stride: Optional[int] = None,
+        allowed_f_dim: tuple[int] | None = None,
+        min_stride: int | None = None,
     ):
         allowed_f_dim = allowed_f_dim or tuple(range(len(buffer_region.region)))
         layout = self.split_layout_views[buffer_region]
@@ -920,7 +921,7 @@ class InstructionGenerator:
         self,
         inst_repr: InstructionRepr,
         to_region: BufferRegion,
-        allowed_to_f_dim: Optional[Tuple[int]] = None,
+        allowed_to_f_dim: tuple[int] | None = None,
         broadcast: bool = False,
     ):
         allowed_to_f_dim = allowed_to_f_dim or tuple(range(len(to_region.region)))
@@ -1020,19 +1021,19 @@ class InstructionGenerator:
                 if iters_1[seps_1[i] + k].axis.name == iters_2[seps_2[j] + k].axis.name:
                     if iters_1[seps_1[i] + k].axis.name in ["F", "Bank"]:
                         continue
-                    raise ValueError(f"Transpose only part of P dimension is not supported")
+                    raise ValueError("Transpose only part of P dimension is not supported")
                 if iters_1[seps_1[i] + k].axis.name == "P":
                     indexed_iters_2.append((seps_2[j] + k, iters_2[seps_2[j] + k]))
                 else:
                     indexed_iters_1.append((seps_1[i] + k, iters_1[seps_1[i] + k]))
         inst_repr_1 = InstructionRepr(buffer_region_1, *self._find_max_linear_inst(indexed_iters_1))
         inst_repr_2 = InstructionRepr(buffer_region_2, *self._find_max_linear_inst(indexed_iters_2))
-        assert inst_repr_1.size == layout_2.size(
-            "P"
-        ), f"The instruction size of {buffer_region_1.buffer.name} does not match the partition size of {buffer_region_2.buffer.name}"
-        assert inst_repr_2.size == layout_1.size(
-            "P"
-        ), f"The instruction size of {buffer_region_2.buffer.name} does not match the partition size of {buffer_region_1.buffer.name}"
+        assert inst_repr_1.size == layout_2.size("P"), (
+            f"The instruction size of {buffer_region_1.buffer.name} does not match the partition size of {buffer_region_2.buffer.name}"  # noqa: E501
+        )
+        assert inst_repr_2.size == layout_1.size("P"), (
+            f"The instruction size of {buffer_region_2.buffer.name} does not match the partition size of {buffer_region_1.buffer.name}"  # noqa: E501
+        )
         return inst_repr_1, inst_repr_2
 
     def restrict_inst_to_one_dim(self, inst_repr: InstructionRepr):

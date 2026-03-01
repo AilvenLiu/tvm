@@ -130,7 +130,6 @@ def test_dispatch_raises_with_aggregated_reasons():
 def test_dispatch_prints_real_opcall_ir():
     """Create a real OpCall via BufferRegions and ensure its IR is in the table."""
     _import_and_register()
-    import tvm
     from tvm.ir import Op
     from tvm.tir.buffer import decl_buffer
     from tvm.tir.stmt import OpCall

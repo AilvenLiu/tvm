@@ -15,20 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 import enum
-from functools import partial
-from typing import Tuple
 
 import numpy as np
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.script.ir_builder import IRBuilder
 
 
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
-
     M = 1024
     N = 1024
 
@@ -50,7 +46,7 @@ def test_partial_reduction():
 
     @Tx.meta_class
     class MPMCQueue:
-        def __init__(self, capacity: int, task_types: Tx.Buffer, task_idxs: Tx.Buffer, head: Tx.Buffer, tail: Tx.Buffer, num_tot_tasks: int):
+        def __init__(self, capacity: int, task_types: Tx.Buffer, task_idxs: Tx.Buffer, head: Tx.Buffer, tail: Tx.Buffer, num_tot_tasks: int):  # noqa: E501
             if capacity & (capacity - 1):
                 raise ValueError("capacity must be a power-of-two")
             self.capacity = capacity
@@ -66,7 +62,7 @@ def test_partial_reduction():
             self.num_tot_tasks = num_tot_tasks
         @Tx.inline
         def enqueue(self, task_type: int, *task_idx: int):
-            self.tail_r[0] = Tx.cuda.atomic_add(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([Tx.int32(0)])), 1)
+            self.tail_r[0] = Tx.cuda.atomic_add(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([Tx.int32(0)])), 1)  # noqa: E501
             # TODO: wait if tail - head > capacity
             self.masked_pos[0] = self.tail_r[0] & self.mask
             self.task_types[self.masked_pos[0]] = task_type
@@ -76,13 +72,13 @@ def test_partial_reduction():
 
         @Tx.inline
         def dequeue(self, fetched_task_type: Tx.Buffer, fetched_task_idx: Tx.Buffer):
-            self.head_r[0] = Tx.cuda.atomic_add(self.head.access_ptr("rw", offset=self.head.elem_offset_of([Tx.int32(0)])), 1)
+            self.head_r[0] = Tx.cuda.atomic_add(self.head.access_ptr("rw", offset=self.head.elem_offset_of([Tx.int32(0)])), 1)  # noqa: E501
             if self.head_r[0] < self.num_tot_tasks:
               self.masked_pos[0] = self.head_r[0] & self.mask
-              Tx.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))
+              Tx.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))  # noqa: E501
               while fetched_task_type[0] < 0:
                   Tx.cuda.nano_sleep(40)
-                  Tx.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))
+                  Tx.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))  # noqa: E501
               self.task_types[self.masked_pos[0]] = -1
               Tx.cuda.thread_fence()
               for i in Tx.vectorized(2):
@@ -95,7 +91,7 @@ def test_partial_reduction():
         def __init__(self, queue: MPMCQueue):
             self.queue = queue
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
-            self.fetched_task_idx = Tx.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")
+            self.fetched_task_idx = Tx.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")  # noqa: E501
 
         @Tx.inline
         def _fetch_from_queue(self):
@@ -127,7 +123,7 @@ def test_partial_reduction():
                 Tx.cuda.cta_sync()
                 with Tx.thread()[0:1]:
                     # add 1 because atomic_add returns the old value
-                    self.state[0] = Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1
+                    self.state[0] = Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1  # noqa: E501
                     if self.state[0] == self.cnt:
                         self.queue.enqueue(TaskType.REDUCE.value, coord[0], 0)
                 Tx.cuda.thread_fence()
@@ -141,12 +137,12 @@ def test_partial_reduction():
 
         with Tx.kernel():
             bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
+            Tx.thread_id([1024], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])
+                Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])  # noqa: E501
                 Tx.sum(B_smem, A_smem)
                 Tx.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
 
@@ -158,7 +154,7 @@ def test_partial_reduction():
 
         with Tx.kernel():
             bx = Tx.cta_id([NUM_BLOCK_M], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
+            Tx.thread_id([1024], parent="cta")
             with Tx.cta():
                 B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
@@ -171,7 +167,7 @@ def test_partial_reduction():
     TASK_IDX_LEN = 2
 
     @Tx.prim_func(tirx=True)
-    def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore: Tx.handle, task_types: Tx.handle, task_idxs: Tx.handle, head: Tx.handle, tail: Tx.handle):
+    def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore: Tx.handle, task_types: Tx.handle, task_idxs: Tx.handle, head: Tx.handle, tail: Tx.handle):  # noqa: E501
         A_ptr = Tx.match_buffer(A, (M, N), "float32")
         B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
         C_ptr = Tx.match_buffer(C, (M, 1), "float32")
@@ -182,8 +178,8 @@ def test_partial_reduction():
         tail_ptr = Tx.match_buffer(tail, (1, ), "int32")
         with Tx.kernel():
             bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
-            queue = MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M)
+            Tx.thread_id([1024], parent="cta")
+            queue = MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M)  # noqa: E501
             sem = Semaphore(NUM_BLOCK_N, sem_ptr, queue)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
@@ -196,7 +192,7 @@ def test_partial_reduction():
                     if tile_scheduler.fetched_task_type[0] == TaskType.PARTIAL.value:
                         m_idx = Tx.meta_var(tile_scheduler.fetched_task_idx[0])
                         n_idx = Tx.meta_var(tile_scheduler.fetched_task_idx[1])
-                        Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
+                        Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])  # noqa: E501
                         Tx.sum(B_smem_1, A_smem)
                         Tx.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem_1)
                         sem.semaphore_notify(m_idx)
@@ -249,7 +245,6 @@ def test_partial_reduction():
     head_tvm = tvm.runtime.tensor(mpmc_queue.head, device=DEV)
     tail_tvm = tvm.runtime.tensor(mpmc_queue.tail, device=DEV)
     with target:
-
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
         ref_mod_stage_1 = tvm.compile(ref_mod_stage_1, target=target, tir_pipeline="tirx")
         ref_mod_stage_1(A_tvm, B_tvm)

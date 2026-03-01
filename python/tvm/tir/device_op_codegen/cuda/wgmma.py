@@ -16,8 +16,8 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments, too-many-locals
 """PTX WGMMA operations (Hopper warpgroup MMA)."""
-import tvm
 
+import tvm
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
@@ -55,7 +55,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
   _desc.bitfield.leading_byte_offset_ = static_cast<uint32_t>(ldo);
 
   *desc = (uint64_t)_desc;
-}}"""
+}}"""  # noqa: E501
     return cuda_func_call(func_name, desc, addr, ldo, sdo, swizzle, source_code=source_code), [
         "gmma_descriptor"
     ]
@@ -170,7 +170,7 @@ def codegen_ptx_wgmma_mma_async_ss(
     accum_r_list = ", ".join([f"%{i}" for i in range(num_accums)])
     accum_constraints = ", ".join([f'"+f"(p_acc{i})' for i in range(num_accums)])
 
-    func_name = f"ptx_wgmma_mma_async_ss_{M}x{N}x{K}_{in_dtype.replace('.', '')}_{out_dtype.replace('.', '')}_{int(scaleA)}_{int(scaleB)}_{int(transA)}_{int(transB)}"
+    func_name = f"ptx_wgmma_mma_async_ss_{M}x{N}x{K}_{in_dtype.replace('.', '')}_{out_dtype.replace('.', '')}_{int(scaleA)}_{int(scaleB)}_{int(transA)}_{int(transB)}"  # noqa: E501
     source_code = f"""
 __forceinline__ __device__ void {func_name}({accum_params}, uint64_t p_descA, uint64_t p_descB, int p_scaleD) {{
     /* T.ptx_wgmma_mma_async_ss() */
@@ -186,7 +186,7 @@ __forceinline__ __device__ void {func_name}({accum_params}, uint64_t p_descA, ui
       : {accum_constraints}
       : "l"(p_descA), "l"(p_descB), "r"(p_scaleD), "n"({int(scaleA)}), "n"({int(scaleB)}){transpose_constraints}
     );
-}}"""
+}}"""  # noqa: E501
     return cuda_func_call(func_name, *accums, descA, descB, scaleD, source_code=source_code)
 
 
@@ -247,7 +247,7 @@ def codegen_ptx_wgmma_mma_async_rs(
     else:
         transpose_r_code, transpose_constraints = "", ""
 
-    func_name = f"ptx_wgmma_mma_async_rs_{M}x{N}x{K}_{in_dtype.replace('.', '')}_{out_dtype.replace('.', '')}_{int(scaleA)}_{int(scaleB)}_{int(transA)}_{int(transB)}"
+    func_name = f"ptx_wgmma_mma_async_rs_{M}x{N}x{K}_{in_dtype.replace('.', '')}_{out_dtype.replace('.', '')}_{int(scaleA)}_{int(scaleB)}_{int(transA)}_{int(transB)}"  # noqa: E501
     source_code = f"""
 __forceinline__ __device__ void {func_name}({accum_params}, {A_reg_params}, uint64_t p_descB, int p_scaleD) {{
     /* T.ptx_wgmma_mma_async_rs() */
@@ -263,5 +263,5 @@ __forceinline__ __device__ void {func_name}({accum_params}, {A_reg_params}, uint
       : {accum_constraints}
       : {A_reg_constraints}, "l"(p_descB), "r"(p_scaleD), "n"({int(scaleA)}), "n"({int(scaleB)}){transpose_constraints}
     );
-}}"""
+}}"""  # noqa: E501
     return cuda_func_call(func_name, *accums, *A_regs, descB, scaleD, source_code=source_code)

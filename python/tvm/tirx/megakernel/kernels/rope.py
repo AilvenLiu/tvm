@@ -16,14 +16,12 @@
 # under the License.
 
 import tvm.script.tirx as Tx
-
 from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class RopeTile(Tile):
-
     # qk_tvm: [batch_size, qo_heads + 2 * kv_heads, head_dim]
     # cos_sin_cache_tvm: [1, head_dim]
 

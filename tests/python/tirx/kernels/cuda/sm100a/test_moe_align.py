@@ -15,20 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import numpy as np
 import pytest
 import torch
+from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.kernels.moe_align import MOEAlignTile, CountAndSortExpertTokens
+from tvm.tirx.megakernel.kernels.moe_align import CountAndSortExpertTokens, MOEAlignTile
 from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.utils.config import KernelConfig
-
-from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
-
 
 NUM_EXPERTS = 128
 TOPK = 8
@@ -62,20 +59,20 @@ def get_moe_align_kernel(pad_sorted_token_ids):
         num_tokens = Tx.int32()
         topk_ids = Tx.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
         max_num_tokens_padded = Tx.int32()
-        sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
-        expert_ids = Tx.match_buffer(expert_ids_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
-        num_valid_tokens = Tx.match_buffer(num_valid_tokens_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")
-        moe_align_tile = MOEAlignTile(NUM_EXPERTS, num_tokens * TOPK, BLOCK_SIZE, pad_sorted_token_ids=pad_sorted_token_ids)
+        sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")  # noqa: E501
+        expert_ids = Tx.match_buffer(expert_ids_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")  # noqa: E501
+        num_valid_tokens = Tx.match_buffer(num_valid_tokens_ptr, (max_num_tokens_padded // BLOCK_SIZE,), dtype="int32")  # noqa: E501
+        moe_align_tile = MOEAlignTile(NUM_EXPERTS, num_tokens * TOPK, BLOCK_SIZE, pad_sorted_token_ids=pad_sorted_token_ids)  # noqa: E501
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
             smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
             smem_manager.set_tile(moe_align_tile)
             moe_align_tile.init(smem_manager)
             smem_manager.init()
             topk_ids_flattened = topk_ids.view(-1)
-            moe_align_tile.run(0, 0, 0, topk_ids_flattened, sorted_token_ids, expert_ids, num_tokens_post_pad, cumsum_buffer, num_valid_tokens)
+            moe_align_tile.run(0, 0, 0, topk_ids_flattened, sorted_token_ids, expert_ids, num_tokens_post_pad, cumsum_buffer, num_valid_tokens)  # noqa: E501
     return moe_align_kernel
     # fmt: on
 
@@ -101,7 +98,7 @@ def count_and_sort_expert_tokens_kernel(
     count_and_sort_tile = CountAndSortExpertTokens(num_tokens * TOPK, HIDDEN_SIZE, TOPK)
     with Tx.kernel():
         bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-        tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+        Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
         topk_ids_flattened = topk_ids.view(-1)
         buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
         smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
@@ -167,7 +164,7 @@ def test_moe_align(task):
                     topk_ids_tvm, sorted_ids_tvm, cumsum_buffer_tvm, data_tvm, reordered_data_tvm
                 )
 
-            ms = bench(func, warmup=10, repeat=30, proton_name="tir")
+            bench(func, warmup=10, repeat=30, proton_name="tir")
         return sorted_ids_tvm, expert_ids_tvm, num_tokens_post_pad_tvm, num_valid_tokens_tvm
 
     def std():
@@ -187,7 +184,7 @@ def test_moe_align(task):
                 )
             return sorted_ids_std, expert_ids_std, num_tokens_post_pad_std, valid_num_tokens
 
-        ms = bench(func, warmup=10, repeat=30, proton_name="std")
+        bench(func, warmup=10, repeat=30, proton_name="std")
         return func()
 
     with ProtonContext("moe_align"):

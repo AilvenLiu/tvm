@@ -45,7 +45,7 @@ def get_cos_sin_cache_kernel(rotary_dim, base):
     @Tx.prim_func(tirx=True)
     def cos_sin_cache(cos_sin_cache: Tx.handle):
         max_seq_len = Tx.int32()
-        cos_sin_cache_global = Tx.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
+        cos_sin_cache_global = Tx.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -60,9 +60,9 @@ def get_cos_sin_cache_kernel(rotary_dim, base):
                     col = Tx.meta_var(idx[0] % rotary_dim)
 
                     if col < rotary_dim // 2:
-                        cos_sin_cache_global[row, col] = Tx.cos(Tx.float64(row) / Tx.pow(base, Tx.float64(col * 2) / Tx.float64(rotary_dim)))
+                        cos_sin_cache_global[row, col] = Tx.cos(Tx.float64(row) / Tx.pow(base, Tx.float64(col * 2) / Tx.float64(rotary_dim)))  # noqa: E501
                     else:
-                        cos_sin_cache_global[row, col] = Tx.sin(Tx.float64(row) / Tx.pow(base, Tx.float64(col * 2 - rotary_dim) / Tx.float64(rotary_dim)))
+                        cos_sin_cache_global[row, col] = Tx.sin(Tx.float64(row) / Tx.pow(base, Tx.float64(col * 2 - rotary_dim) / Tx.float64(rotary_dim)))  # noqa: E501
 
                     idx[0] += SM_COUNT * 1024
     # fmt: on
@@ -79,13 +79,13 @@ def get_rope_kernel(head_dim):
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def rope_with_cos_sin_cache(q: Tx.handle, cos_sin_cache: Tx.handle, pos_ids: Tx.handle, q_rope: Tx.handle):
+    def rope_with_cos_sin_cache(q: Tx.handle, cos_sin_cache: Tx.handle, pos_ids: Tx.handle, q_rope: Tx.handle):  # noqa: E501
         nnz = Tx.int32()
         num_heads = Tx.int32()
         max_seq_len = Tx.int32()
         q_global = Tx.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global")
-        q_rope_global = Tx.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global")
-        cos_sin_cache_global = Tx.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
+        q_rope_global = Tx.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global")  # noqa: E501
+        cos_sin_cache_global = Tx.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")  # noqa: E501
         pos_ids_global = Tx.match_buffer(pos_ids, [nnz], "int32", scope="global")
         half_rotary_dim: Tx.let = rotary_dim // 2
 
@@ -110,9 +110,9 @@ def get_rope_kernel(head_dim):
                     Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx:stx + vec_size])
                     Tx.cast(qk_vec32[:], qk_vec[:])
                     if stx < half_rotary_dim:
-                        Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx + half_rotary_dim:stx + half_rotary_dim + vec_size])
+                        Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx + half_rotary_dim:stx + half_rotary_dim + vec_size])  # noqa: E501
                     else:
-                        Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx - half_rotary_dim:stx - half_rotary_dim + vec_size])
+                        Tx.copy(qk_vec[:], global_in[pos[0], head[0], stx - half_rotary_dim:stx - half_rotary_dim + vec_size])  # noqa: E501
                     Tx.cast(qk_vec32_other[:], qk_vec[:])
                     if stx < half_rotary_dim:
                         for kv in Tx.unroll(vec_size):
@@ -128,8 +128,8 @@ def get_rope_kernel(head_dim):
                     pos[0] = idx[0] % nnz
                     head[0] = idx[0] // nnz
                     cache_stx = Tx.meta_var(stx % half_rotary_dim)
-                    Tx.copy(cos[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx:cache_stx + vec_size])
-                    Tx.copy(sin[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx + half_rotary_dim:cache_stx + half_rotary_dim + vec_size])
+                    Tx.copy(cos[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx:cache_stx + vec_size])  # noqa: E501
+                    Tx.copy(sin[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx + half_rotary_dim:cache_stx + half_rotary_dim + vec_size])  # noqa: E501
                     compute_rope(q_global, q_rope_global)
                     idx[0] += SM_COUNT * bdy
     return rope_with_cos_sin_cache
@@ -238,14 +238,17 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
                 query.clone(),
                 key.clone(),
             )
-            func = lambda: flashinfer.rope.apply_rope_with_cos_sin_cache(
-                positions=pos_ids_flashinfer,
-                query=query_flashinfer,
-                key=key_flashinfer,
-                head_size=head_dim,
-                cos_sin_cache=cos_sin_cache,
-                is_neox=True,
-            )
+
+            def func():
+                return flashinfer.rope.apply_rope_with_cos_sin_cache(
+                    positions=pos_ids_flashinfer,
+                    query=query_flashinfer,
+                    key=key_flashinfer,
+                    head_size=head_dim,
+                    cos_sin_cache=cos_sin_cache,
+                    is_neox=True,
+                )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
             print(f"flashinfer time: {ms:.3f} ms")
             q_out, k_out = func()

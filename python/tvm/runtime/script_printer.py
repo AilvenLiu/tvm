@@ -205,12 +205,13 @@ class Scriptable:
             The TVM Script of the given TVM IR
 
         """
-        # Default to all-Tx output for TIRX PrimFunc (or IRModule with TIRX entry) when user did not override
+        # Default to all-Tx output for TIRX PrimFunc (or IRModule with TIRX entry) when user did not override  # noqa: E501
         tir_prefix_val = tir_prefix
         tir_import_module_val = tir_import_module
         if tir_prefix == "T" and tir_import_module == "tir":
             from tvm.ir import IRModule  # pylint: disable=import-outside-toplevel
             from tvm.tir import PrimFunc  # pylint: disable=import-outside-toplevel
+
             is_tirx = False
             if isinstance(self, PrimFunc) and getattr(self, "attrs", None):
                 is_tirx = self.attrs.get("is_tirx", False)

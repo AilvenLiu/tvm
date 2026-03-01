@@ -15,11 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import functools
+
 import numpy as np
 import pytest
 import torch
+from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
+from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
+    try_get_optimal_moe_config,
+)
+from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from torch.nn import functional as F
-import functools
+from triton import language as tl
 
 import tvm
 import tvm.testing
@@ -30,14 +37,6 @@ from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.utils.config import KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
-
-from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
-from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
-from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
-    try_get_optimal_moe_config,
-)
-from triton import language as tl
-
 
 test_configs = [
     {
@@ -110,7 +109,6 @@ def gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size):
 
 
 def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
-
     # fmt: off
     @Tx.prim_func(tirx=True)
     def group_gemm(
@@ -140,7 +138,7 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
         with Tx.kernel():
             cta_cnt = Tx.meta_var(KernelConfig.SM_NUMBER)  # persistent kernel
             bx = Tx.cta_id([cta_cnt], parent="kernel")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
             buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
             smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
@@ -150,12 +148,12 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             GroupGEMMTile.class_init(smem_manager)
             M_TILE_CNT = Tx.meta_var(ceildiv(num_tokens_post_padded[0], MAX_BLK_M))
             N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
-            tile_scheduler = ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1)
+            tile_scheduler = ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1)  # noqa: E501
             tile_scheduler.init(bx)
             smem_manager.init()
             while tile_scheduler.valid():
                 smem_manager.enter_tile_runtime(group_gemm_tile)
-                group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, A, B, C, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, None)
+                group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, A, B, C, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, None)  # noqa: E501
                 tile_scheduler.next_tile()
             GroupGEMMTile.class_finalize()
     return group_gemm
@@ -266,8 +264,8 @@ def test_group_gemm(task):
                     num_tokens_post_padded_tvm,
                 )
 
-            ms = bench(func1, warmup=0, repeat=30, proton_name="tir1")
-            ms = bench(func2, warmup=0, repeat=30, proton_name="tir2")
+            bench(func1, warmup=0, repeat=30, proton_name="tir1")
+            bench(func2, warmup=0, repeat=30, proton_name="tir2")
             # reset out2 to get the correct result
             out2_tvm = tvm.runtime.empty(
                 (num_tokens_post_padded.item(), hidden_size), dtype="float16", device=dev
@@ -321,57 +319,60 @@ def test_group_gemm(task):
         )
         out2 = torch.empty((batch_size, top_k, hidden_size), dtype=torch.float16, device="cuda")
 
-        func1 = lambda: invoke_fused_moe_kernel(
-            x1,
-            w13,
-            None,  # bias
-            out1,
-            None,  # A_scale
-            None,  # B_scale
-            None,  # B_zp
-            topk_weights=routing_weights,
-            topk_ids=selected_experts,
-            sorted_token_ids=sorted_token_ids,
-            expert_ids=expert_ids,
-            num_tokens_post_padded=num_tokens_post_padded,
-            mul_routed_weight=False,
-            top_k=top_k,
-            config=sgL_config,
-            compute_type=tl.float16,
-            use_fp8_w8a8=False,
-            use_int8_w8a8=False,
-            use_int8_w8a16=False,
-            use_int4_w4a16=False,
-            per_channel_quant=False,
-            block_shape=None,
-        )
+        def func1():
+            return invoke_fused_moe_kernel(
+                x1,
+                w13,
+                None,  # bias
+                out1,
+                None,  # A_scale
+                None,  # B_scale
+                None,  # B_zp
+                topk_weights=routing_weights,
+                topk_ids=selected_experts,
+                sorted_token_ids=sorted_token_ids,
+                expert_ids=expert_ids,
+                num_tokens_post_padded=num_tokens_post_padded,
+                mul_routed_weight=False,
+                top_k=top_k,
+                config=sgL_config,
+                compute_type=tl.float16,
+                use_fp8_w8a8=False,
+                use_int8_w8a8=False,
+                use_int8_w8a16=False,
+                use_int4_w4a16=False,
+                per_channel_quant=False,
+                block_shape=None,
+            )
+
         ms1 = bench(func1, warmup=3, repeat=30, proton_name="sglang gemm1", debug=DEBUG)
         print("sglang gemm1", ms1)
 
-        func2 = lambda: invoke_fused_moe_kernel(
-            x2,
-            w2,
-            None,  # bias
-            out2,
-            None,  # A_scale
-            None,  # B_scale
-            None,  # B_zp
-            topk_weights=routing_weights,
-            topk_ids=selected_experts,
-            sorted_token_ids=sorted_token_ids,
-            expert_ids=expert_ids,
-            num_tokens_post_padded=num_tokens_post_padded,
-            mul_routed_weight=True,
-            top_k=1,
-            config=sgL_config,
-            compute_type=tl.float16,
-            use_fp8_w8a8=False,
-            use_int8_w8a8=False,
-            use_int8_w8a16=False,
-            use_int4_w4a16=False,
-            per_channel_quant=False,
-            block_shape=None,
-        )
+        def func2():
+            return invoke_fused_moe_kernel(
+                x2,
+                w2,
+                None,  # bias
+                out2,
+                None,  # A_scale
+                None,  # B_scale
+                None,  # B_zp
+                topk_weights=routing_weights,
+                topk_ids=selected_experts,
+                sorted_token_ids=sorted_token_ids,
+                expert_ids=expert_ids,
+                num_tokens_post_padded=num_tokens_post_padded,
+                mul_routed_weight=True,
+                top_k=1,
+                config=sgL_config,
+                compute_type=tl.float16,
+                use_fp8_w8a8=False,
+                use_int8_w8a8=False,
+                use_int8_w8a16=False,
+                use_int4_w4a16=False,
+                per_channel_quant=False,
+                block_shape=None,
+            )
 
         ms2 = bench(func2, warmup=3, repeat=30, proton_name="sglang gemm2", debug=DEBUG)
         print("sglang gemm2", ms2)

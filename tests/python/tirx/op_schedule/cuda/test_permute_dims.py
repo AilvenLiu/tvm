@@ -15,14 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
-import pytest
 import ml_dtypes
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, S
+from tvm.tir.layout import S, TileLayout
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
@@ -60,7 +60,7 @@ ml_dtypes_dict = {
 @pytest.mark.parametrize("dtype", ["uint8", "float16", "int32"])
 def test_vectorized_permute_dims_2d(task, dtype):
     a_shape, layoutA, dev = task
-    region = list(slice(None) for _ in range(len(a_shape)))
+    list(slice(None) for _ in range(len(a_shape)))
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -68,8 +68,8 @@ def test_vectorized_permute_dims_2d(task, dtype):
         A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([32], parent="cta")
             with Tx.cta():
                 with Tx.warp():
                     Tx.permute_dims(A, [1, 0])
@@ -122,7 +122,7 @@ def test_vectorized_permute_dims_nd(task, dtype):
     a_shape, layoutA, st, extent, dev = task
     ndim = len(a_shape)
     region = list(slice(st[i], st[i] + extent[i]) for i in range(ndim))
-    order = list(range(ndim - 2)) + [ndim - 1, ndim - 2]
+    order = [*list(range(ndim - 2)), ndim - 1, ndim - 2]
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -130,11 +130,11 @@ def test_vectorized_permute_dims_nd(task, dtype):
         A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([32], parent="cta")
             with Tx.cta():
                 with Tx.warp():
-                    Tx.permute_dims(A[*region], order)
+                    Tx.permute_dims(A[tuple(region)], order)
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -150,7 +150,7 @@ def test_vectorized_permute_dims_nd(task, dtype):
         A = tvm.runtime.tensor(A_np, dev)
         mod(A)
         A_ref = A_np.copy()
-        A_ref[*region] = np.transpose(A_np[*region], order).reshape(extent)
+        A_ref[tuple(region)] = np.transpose(A_np[tuple(region)], order).reshape(extent)
         np.testing.assert_allclose(A_ref.flatten(), A.numpy().flatten())
 
 

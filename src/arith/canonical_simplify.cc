@@ -1058,8 +1058,7 @@ PrimExpr CanonicalSimplifier::Impl::VisitExpr_(const FloorDivNode* op) {
     // so that SeparateDivisibleParts can simplify what SplitDivConst cannot.
     if (const auto* split_a = a.as<SplitExprNode>()) {
       if (split_a->lower_factor == 1 && split_a->scale == 1 &&
-          split_a->upper_factor != SplitExprNode::kPosInf &&
-          split_a->upper_factor % cval == 0 &&
+          split_a->upper_factor != SplitExprNode::kPosInf && split_a->upper_factor % cval == 0 &&
           split_a->DivModeCompatibleTo(kFloorDiv)) {
         PrimExpr raw_index = this->CanonicalMutate(split_a->index);
         if (const auto* psum = raw_index.as<SumExprNode>()) {
@@ -1076,14 +1075,12 @@ PrimExpr CanonicalSimplifier::Impl::VisitExpr_(const FloorDivNode* op) {
             } else {
               if (!(TryCompare(temp, cval) == CompareResult::kLT &&
                     analyzer_->CanProveGreaterEqual(temp, 0))) {
-                lhs.CopyOnWrite()->AddToSelf(
-                    SplitDivConst(ToSplitExpr(temp), cval, kFloorDiv), 1);
+                lhs.CopyOnWrite()->AddToSelf(SplitDivConst(ToSplitExpr(temp), cval, kFloorDiv), 1);
               }
             }
             // Apply floormod(floordiv_result, m) to complete the identity
             PrimExpr div_result = Normalize(lhs);
-            return this->VisitExpr(
-                floormod(div_result, make_const(a.dtype(), new_mod)));
+            return this->VisitExpr(floormod(div_result, make_const(a.dtype(), new_mod)));
           }
         }
       }

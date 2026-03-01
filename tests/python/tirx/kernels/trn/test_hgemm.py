@@ -14,15 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.transform import LowerTIRx
 
-from .utils import run_on_remote_and_check_correct, ssh_client
+from .utils import run_on_remote_and_check_correct
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -56,7 +54,7 @@ def test_gemm2(ssh_client):
             TILE_M_START = Tx.meta_var(mi * TILE_M)
             # FIXME: currently nki has a bug for psum initialization
             # fix this when NKI exposes psum initialization API
-            Tx.gemm(c_psum[psum_bank], a_sbuf[iter_id%3, :, TILE_M_START:TILE_M_START+TILE_M], b_sbuf[iter_id%3, :, TILE_N_START:TILE_N_START+TILE_N], c_psum[psum_bank], transpose_A=True)
+            Tx.gemm(c_psum[psum_bank], a_sbuf[iter_id%3, :, TILE_M_START:TILE_M_START+TILE_M], b_sbuf[iter_id%3, :, TILE_N_START:TILE_N_START+TILE_N], c_psum[psum_bank], transpose_A=True)  # noqa: E501
             if k == 0:
                 Tx.copy(result_tiles[(n*NUM_BLOCK_K+m)%2,
                     TILE_M_START : TILE_M_START+TILE_M,
@@ -80,7 +78,7 @@ def test_gemm2(ssh_client):
         m = Tx.meta_var(iter_id // NUM_BLOCK_K % NUM_BLOCK_M)
         k = Tx.meta_var(iter_id % NUM_BLOCK_K)
         Tx.copy(
-            a_sbuf[iter_id % 3], A[ k * BLOCK_K : (k + 1) * BLOCK_K, (m) * BLOCK_M : (m + 1) * BLOCK_M]
+            a_sbuf[iter_id % 3], A[ k * BLOCK_K : (k + 1) * BLOCK_K, (m) * BLOCK_M : (m + 1) * BLOCK_M]  # noqa: E501
         )
 
     @Tx.inline
@@ -99,10 +97,10 @@ def test_gemm2(ssh_client):
         B = Tx.match_buffer(B_ptr, (K, N), dtype)
         C = Tx.match_buffer(C_ptr, (M, N), dtype)
         with Tx.kernel():
-            result_tiles = Tx.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")
+            result_tiles = Tx.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")  # noqa: E501
             b_sbuf = Tx.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF")
             a_sbuf = Tx.alloc_buffer((3, BLOCK_K, BLOCK_M), dtype, scope="trn.sbuf", layout="FPF")
-            c_psum = Tx.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout="FPF", allocated_addr=(0, 0))
+            c_psum = Tx.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout="FPF", allocated_addr=(0, 0))  # noqa: E501
             load_A(0, a_sbuf, A)
             load_B(0, b_sbuf, B)
             for iter_id in Tx.serial(NUM_BLOCK_M * NUM_BLOCK_K * NUM_BLOCK_N-1):
@@ -113,9 +111,9 @@ def test_gemm2(ssh_client):
                 load_B(iter_id+1, b_sbuf, B)
                 mm(iter_id, a_sbuf, b_sbuf, c_psum, result_tiles)
                 if k == NUM_BLOCK_K-1:
-                    Tx.copy(C[m*BLOCK_M:(m+1)*BLOCK_M, n*BLOCK_N:(n+1)*BLOCK_N], result_tiles[(n*NUM_BLOCK_K+m)%2])
+                    Tx.copy(C[m*BLOCK_M:(m+1)*BLOCK_M, n*BLOCK_N:(n+1)*BLOCK_N], result_tiles[(n*NUM_BLOCK_K+m)%2])  # noqa: E501
             mm(NUM_BLOCK_M * NUM_BLOCK_K * NUM_BLOCK_N-1, a_sbuf, b_sbuf, c_psum, result_tiles)
-            Tx.copy(C[(NUM_BLOCK_M-1)*BLOCK_M:(NUM_BLOCK_M-1)*BLOCK_M+BLOCK_M, (NUM_BLOCK_N-1)*BLOCK_N:(NUM_BLOCK_N-1)*BLOCK_N+BLOCK_N], result_tiles[(NUM_BLOCK_M * NUM_BLOCK_N-1)%2])
+            Tx.copy(C[(NUM_BLOCK_M-1)*BLOCK_M:(NUM_BLOCK_M-1)*BLOCK_M+BLOCK_M, (NUM_BLOCK_N-1)*BLOCK_N:(NUM_BLOCK_N-1)*BLOCK_N+BLOCK_N], result_tiles[(NUM_BLOCK_M * NUM_BLOCK_N-1)%2])  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": matmul2})

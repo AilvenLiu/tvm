@@ -16,9 +16,25 @@
 # under the License.
 
 """Utility modules for megakernel."""
-from . import base
-from . import config
-from . import utils
-from . import support
-from . import static_scheduler
-from . import dynamic_scheduler
+
+from importlib import import_module
+from typing import Any
+
+_SUBMODULES = (
+    "base",
+    "config",
+    "utils",
+    "support",
+    "static_scheduler",
+    "dynamic_scheduler",
+)
+
+__all__ = list(_SUBMODULES)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _SUBMODULES:
+        module = import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -17,11 +17,11 @@
 # pylint: disable=no-member, super-init-not-called
 
 """Definition of execution scope."""
-from typing import List, Union
 
-from tvm_ffi import register_object, get_global_func
-from tvm.runtime import Object
+from tvm_ffi import get_global_func, register_object
+
 from tvm.ir import Range
+from tvm.runtime import Object
 
 from . import _ffi_api
 from .expr import PrimExpr, Var
@@ -31,12 +31,12 @@ from .expr import PrimExpr, Var
 class ScopeIdDef(Object):
     """Definition of scope identifiers with their extents and parent-child relationships."""
 
-    def_ids: List[Var]
-    extents: List[PrimExpr]
+    def_ids: list[Var]
+    extents: list[PrimExpr]
     parent: str
     cur: str
 
-    def __init__(self, def_ids: List[Var], extents: List[PrimExpr], parent: str, cur: str):
+    def __init__(self, def_ids: list[Var], extents: list[PrimExpr], parent: str, cur: str):
         self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent, cur)
 
 
@@ -45,7 +45,7 @@ class ExecScope(Object):
     """Base class for execution scopes."""
 
     name: str
-    scope_id_def: List[ScopeIdDef]
+    scope_id_def: list[ScopeIdDef]
 
     def __init__(self, name: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScope, name)
@@ -71,9 +71,9 @@ class ExecScope(Object):
 class ExecScopeSlice(ExecScope):
     """A slice of an execution scope with their slices and parent scope name."""
 
-    slices: Union[List[Range], PrimExpr]
+    slices: list[Range] | PrimExpr
     parent: str
     cur: str
 
-    def __init__(self, slices: Union[List[Range], PrimExpr], parent: str, cur: str):
+    def __init__(self, slices: list[Range] | PrimExpr, parent: str, cur: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, slices, parent, cur)

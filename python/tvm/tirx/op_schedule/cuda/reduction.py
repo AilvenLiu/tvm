@@ -20,15 +20,14 @@
 import functools
 import operator
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.stmt import OpCall
-from tvm.tirx.op_schedule import ScheduleContext, fail, register_dispatch, predicate
-from tvm.tirx.operator.op import ReduceOp
+from tvm.tirx.op_schedule import ScheduleContext, fail, predicate, register_dispatch
 
 from ..common import ReduceOpType
 
@@ -38,11 +37,13 @@ reduce_op_table = {
     ReduceOpType.MIN: Tx.min,
 }
 
-reduce_default_value_table = lambda dtype: {
-    ReduceOpType.SUM: 0.0,
-    ReduceOpType.MAX: Tx.min_value(dtype),
-    ReduceOpType.MIN: Tx.max_value(dtype),
-}
+
+def reduce_default_value_table(dtype):
+    return {
+        ReduceOpType.SUM: 0.0,
+        ReduceOpType.MAX: Tx.min_value(dtype),
+        ReduceOpType.MIN: Tx.max_value(dtype),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -127,14 +128,14 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     accum: bool,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule warp-level tree-reduction operation in shared memory on CUDA.
 
     Support reduction along the last D dimensions.
     Warp partition follows the rule below:
         For src tensor [s1, s2, ..., r1, r2, ...], where si are spatial axes and ri are reduction axes.
         Use one warp (32 threads) for each si for reduction.
-    """
+    """  # noqa: E501
 
     # Basic validation checks
     if sctx.exec_scope.name != "cta":
@@ -220,26 +221,26 @@ def reduction_cuda_shared_nd_sync_cta_impl(
                 # reduction on dst_indices
                 spa_fused = Tx.meta_var(step * warp_cnt + Tx.floordiv(tid_x, threads_per_warp))
                 if spa_fused < spatial_len:
-                    src_indices_1 = Tx.meta_var(get_indices(spa_fused, src_st[:spatial_dims], src_extent[:spatial_dims]))
+                    src_indices_1 = Tx.meta_var(get_indices(spa_fused, src_st[:spatial_dims], src_extent[:spatial_dims]))  # noqa: E501
                     thread_data[0] = init_value
                     # load from src
                     for t in Tx.serial(Tx.ceildiv(reduction_len, threads_per_warp)):
                         red_fused = Tx.meta_var(t * threads_per_warp + tid_x % threads_per_warp)
                         if red_fused < reduction_len:
-                            src_indices_2 = Tx.meta_var(get_indices(red_fused, src_st[spatial_dims:], src_extent[spatial_dims:]))
-                            thread_data[0] = op_func(thread_data[0], src[*(src_indices_1 + src_indices_2)])
+                            src_indices_2 = Tx.meta_var(get_indices(red_fused, src_st[spatial_dims:], src_extent[spatial_dims:]))  # noqa: E501
+                            thread_data[0] = op_func(thread_data[0], src[tuple(src_indices_1 + src_indices_2)])  # noqa: E501
                     # warp reduce
                     mask = Tx.tvm_warp_activemask()
-                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 1, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 2, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 4, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 8, 32, 32))
-                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 16, 32, 32))
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 1, 32, 32))  # noqa: E501
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 2, 32, 32))  # noqa: E501
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 4, 32, 32))  # noqa: E501
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 8, 32, 32))  # noqa: E501
+                    thread_data[0] = op_func(thread_data[0], Tx.tvm_warp_shuffle_xor(mask, thread_data[0], 16, 32, 32))  # noqa: E501
 
                     # write result to dst_indices
                     if tid_x % threads_per_warp == 0:
                         dst_indices = Tx.meta_var(get_indices(spa_fused, dst_st, dst_extent))
-                        dst[*dst_indices] = Tx.if_then_else(Tx.bool(accum), op_func(dst[*dst_indices], thread_data[0]), thread_data[0])
+                        dst[tuple(dst_indices)] = Tx.if_then_else(Tx.bool(accum), op_func(dst[tuple(dst_indices)], thread_data[0]), thread_data[0])  # noqa: E501
 
         Tx.tvm_storage_sync("shared")
     # fmt: on
@@ -253,7 +254,7 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
     accum: bool,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule thread-level sum reduction using packed add sum with add.f32x2 PTX instruction.
 
     This implementation uses packed add sum leveraging the PTX `add.rz.ftz.f32x2`
@@ -275,7 +276,7 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
     dtype = src.dtype
 
     src_extent = [r.extent for r in src_region]
-    dst_extent = [r.extent for r in dst_region]
+    [r.extent for r in dst_region]
     src_st = [r.min for r in src_region]
     dst_st = [r.min for r in dst_region]
 
@@ -295,7 +296,7 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
             for i in Tx.unroll(8):
                 if accum and i == 0:
                     # Include accumulator in first element
-                    local_sum[i] = src[src_base + i] + dst[*dst_st]
+                    local_sum[i] = src[src_base + i] + dst[tuple(dst_st)]
                 else:
                     local_sum[i] = src[src_base + i]
 
@@ -330,7 +331,7 @@ def reduction_cuda_local_thread_packed_add_sum_impl(
                 local_sum[4], local_sum[5],
                 Tx.address_of(local_sum[0]),
             )
-            dst[*dst_st] = local_sum[0] + local_sum[1]
+            dst[tuple(dst_st)] = local_sum[0] + local_sum[1]
     # fmt: on
 
     return impl
@@ -342,7 +343,7 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
     accum: bool,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule thread-level max/min reduction using 3-input PTX intrinsics.
 
     This implementation uses the PTX `max.f32`/`min.f32` instruction which can
@@ -388,7 +389,7 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
             for i in Tx.unroll(4):
                 if accum and i == 0:
                     # Include accumulator in first temp
-                    temp[i] = reduce3_func(src[src_base + 2 * i], src[src_base + 2 * i + 1], dst[*dst_st])
+                    temp[i] = reduce3_func(src[src_base + 2 * i], src[src_base + 2 * i + 1], dst[tuple(dst_st)])  # noqa: E501
                 else:
                     temp[i] = op_func(src[src_base + 2 * i], src[src_base + 2 * i + 1])
 
@@ -406,8 +407,8 @@ def reduction_cuda_local_thread_3input_maxmin_impl(
                 temp[0] = op_func(temp[0], src[src_base + remainder_base + i])
 
             # Final merge: combine 4 temps into result
-            dst[*dst_st] = op_func(temp[0], temp[1])
-            dst[*dst_st] = reduce3_func(dst[*dst_st], temp[2], temp[3])
+            dst[tuple(dst_st)] = op_func(temp[0], temp[1])
+            dst[tuple(dst_st)] = reduce3_func(dst[tuple(dst_st)], temp[2], temp[3])
     # fmt: on
 
     return impl
@@ -419,7 +420,7 @@ def reduction_cuda_local_thread_impl(
     accum: bool,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule thread-level reduction operation on local memory on CUDA.
 
     This is the fallback implementation using simple sequential reduction.
@@ -482,10 +483,10 @@ def reduction_cuda_local_thread_impl(
     def impl_simple():
         with Tx.thread():
             if not accum:
-                dst[*dst_st] = init_value
+                dst[tuple(dst_st)] = init_value
             for i in Tx.serial(reduction_len):
                 src_indices = Tx.meta_var(get_src_indices(i, src_st, src_extent))
-                dst[*dst_st] = op_func(dst[*dst_st], src[*src_indices])
+                dst[tuple(dst_st)] = op_func(dst[tuple(dst_st)], src[tuple(src_indices)])
     # fmt: on
 
     return impl_simple
@@ -496,9 +497,9 @@ def reduction_cuda_warp_logical_view_impl(
     src_buffer_region: BufferRegion,
     accum: bool,
     reduce_op: ReduceOpType,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule reduction operation on logical tensor of local memory on CUDA.
 
     If 'thread_reduce' is set to True in config, perform a reduction
@@ -558,10 +559,10 @@ def reduction_cuda_warp_logical_view_impl(
     if src.layout.is_swizzle() or dst.layout.is_swizzle():
         fail("swizzle layout unsupported for local reduction")
 
-    atom = Tx.TileLayout(Tx.S[(1, 2):(2, 1)])
+    atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
     warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-    red_atom = Tx.TileLayout(Tx.S[(1, 1):(1, 1)])
+    red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     shuffle = Tx.bool(config.get("thread_reduce", False))
@@ -598,8 +599,8 @@ def reduction_cuda_warp_logical_view_impl(
                     if not is_same_buffer:
                         dst_local[i] = src_local[i]
                     row_var = Tx.meta_var(dst_local[i])
-                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
-                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))  # noqa: E501
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))  # noqa: E501
         # fmt: on
 
         return impl_shuffle_only
@@ -631,8 +632,8 @@ def reduction_cuda_warp_logical_view_impl(
                     dst_local[i] = op_func(row_var, src_local[i, j])
                 # if shuffle is True, perform shuffling among threads of 4
                 if shuffle:
-                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))
-                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 2, 32, 32))  # noqa: E501
+                    dst_local[i] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, 1, 32, 32))  # noqa: E501
     # fmt: on
 
     return impl
@@ -642,7 +643,7 @@ def reduction_cuda_impl(
     op: OpCall,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Dispatch to shared memory scheduler or logical tensor of local memory scheduler
     based on the storage scope of buffers.
     """

@@ -114,7 +114,7 @@ def set_global_func(dtype):
     fis_empty = tvm.get_global_func("vm.builtin.attention_kv_cache_empty")
     fdebug_get_kv = tvm.get_global_func("vm.builtin.attention_kv_cache_debug_get_kv_mla")
 
-    def load_module(name: str, static_modules: List[tvm.runtime.Module]):
+    def load_module(name: str, static_modules: list[tvm.runtime.Module]):
         assert len(static_modules) > 0
         if len(static_modules) == 1:
             return static_modules[0]

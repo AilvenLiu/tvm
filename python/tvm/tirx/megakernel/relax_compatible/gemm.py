@@ -16,12 +16,11 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, S, TLane, TCol
-
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.kernels.gemm import GemmTile, BarTMA2MMA, BarMMA2TMA, BarMMA2LD, BarLD2MMA
+from tvm.tir.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.megakernel.kernels import GateUpSiluTile
+from tvm.tirx.megakernel.kernels.gemm import BarLD2MMA, BarMMA2LD, BarMMA2TMA, BarTMA2MMA, GemmTile
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
 class FuseGemmTile(GemmTile):

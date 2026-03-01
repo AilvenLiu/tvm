@@ -25,7 +25,7 @@ from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir import SBlock, PrimFunc, ExecScopeStmt
+from tvm.tir import ExecScopeStmt, PrimFunc
 from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
@@ -95,7 +95,6 @@ class DeviceFuncToKernel(StmtExprVisitor):
 
 @mutator
 class _Rewriter(PyExprMutator):
-
     def __init__(self, mod: IRModule) -> None:
         super().__init__(mod)
         self.mod = mod

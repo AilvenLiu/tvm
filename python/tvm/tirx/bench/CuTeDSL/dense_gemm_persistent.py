@@ -43,21 +43,18 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
-from typing import Optional, Type, Tuple, Union
 
 import cuda.bindings.driver as cuda
-import torch
-
 import cutlass
 import cutlass.cute as cute
-from cutlass.cute.nvgpu import cpasync, tcgen05
+import cutlass.cute.testing as testing
+import cutlass.pipeline as pipeline
 import cutlass.torch as cutlass_torch
 import cutlass.utils as utils
-import cutlass.pipeline as pipeline
-import cutlass.cute.testing as testing
 import cutlass.utils.blackwell_helpers as sm100_utils
+import torch
+from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.cute.runtime import from_dlpack
-
 
 """
 A high-performance persistent batched dense GEMM example for the NVIDIA Blackwell SM100 architecture
@@ -124,7 +121,7 @@ Constraints are same as dense_gemm.py:
   i.e, number of elements is a multiple of 4, 8, and 16 for TFloat32,
   Float16/BFloat16, and Int8/Uint8/Float8, respectively.
 * OOB tiles are not allowed when TMA store is disabled
-"""
+"""  # noqa: E501
 
 
 class PersistentDenseGemmKernel:
@@ -177,14 +174,14 @@ class PersistentDenseGemmKernel:
         ...     cluster_shape_mn=(2, 2)
         ... )
         >>> gemm(a_tensor, b_tensor, c_tensor, max_active_clusters, stream)
-    """
+    """  # noqa: E501
 
     def __init__(
         self,
-        acc_dtype: Type[cutlass.Numeric],
+        acc_dtype: type[cutlass.Numeric],
         use_2cta_instrs: bool,
-        mma_tiler_mn: Tuple[int, int],
-        cluster_shape_mn: Tuple[int, int],
+        mma_tiler_mn: tuple[int, int],
+        cluster_shape_mn: tuple[int, int],
         use_tma_store: bool,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
@@ -213,9 +210,9 @@ class PersistentDenseGemmKernel:
         :type cluster_shape_mn: Tuple[int, int]
         :param use_tma_store: Use Tensor Memory Access (TMA) or normal store for output C tensor.
         :type use_tma_store: bool
-        """
+        """  # noqa: E501
 
-        self.acc_dtype: Type[cutlass.Numeric] = acc_dtype
+        self.acc_dtype: type[cutlass.Numeric] = acc_dtype
         self.use_2cta_instrs = use_2cta_instrs
         self.cluster_shape_mn = cluster_shape_mn
         # K dimension is deferred in _setup_attributes
@@ -378,9 +375,9 @@ class PersistentDenseGemmKernel:
         :raises AssertionError: If OOB (Out-Of-Bounds) tiles are present when TMA store is disabled.
         """
         # Setup static attributes before smem/grid/tma computation
-        self.a_dtype: Type[cutlass.Numeric] = a.element_type
-        self.b_dtype: Type[cutlass.Numeric] = b.element_type
-        self.c_dtype: Type[cutlass.Numeric] = c.element_type
+        self.a_dtype: type[cutlass.Numeric] = a.element_type
+        self.b_dtype: type[cutlass.Numeric] = b.element_type
+        self.c_dtype: type[cutlass.Numeric] = c.element_type
         self.a_major_mode = utils.LayoutEnum.from_tensor(a).mma_major_mode()
         self.b_major_mode = utils.LayoutEnum.from_tensor(b).mma_major_mode()
         self.c_layout = utils.LayoutEnum.from_tensor(c)
@@ -521,12 +518,12 @@ class PersistentDenseGemmKernel:
         mA_mkl: cute.Tensor,
         tma_atom_b: cute.CopyAtom,
         mB_nkl: cute.Tensor,
-        tma_atom_c: Optional[cute.CopyAtom],
+        tma_atom_c: cute.CopyAtom | None,
         mC_mnl: cute.Tensor,
         cluster_layout_vmnk: cute.Layout,
         a_smem_layout_staged: cute.ComposedLayout,
         b_smem_layout_staged: cute.ComposedLayout,
-        c_smem_layout_staged: Union[cute.Layout, cute.ComposedLayout, None],
+        c_smem_layout_staged: cute.Layout | cute.ComposedLayout | None,
         epi_tile: cute.Tile,
         tile_sched_params: utils.PersistentTileSchedulerParams,
         epilogue_op: cutlass.Constexpr,
@@ -954,7 +951,11 @@ class PersistentDenseGemmKernel:
             # Partition for epilogue
             #
             epi_tidx = tidx
-            (tiled_copy_t2r, tTR_tAcc_base, tTR_rAcc,) = self.epilog_tmem_copy_and_partition(
+            (
+                tiled_copy_t2r,
+                tTR_tAcc_base,
+                tTR_rAcc,
+            ) = self.epilog_tmem_copy_and_partition(
                 epi_tidx, tCtAcc_base, tCgC, epi_tile, use_2cta_instrs
             )
 
@@ -977,7 +978,11 @@ class PersistentDenseGemmKernel:
                     bSG_gC_partitioned,
                 ) = self.epilog_gmem_copy_and_partition(epi_tidx, tma_atom_c, tCgC, epi_tile, sC)
             else:
-                (simt_atom, tTR_rC, tTR_gC_partitioned,) = self.epilog_gmem_copy_and_partition(
+                (
+                    simt_atom,
+                    tTR_rC,
+                    tTR_gC_partitioned,
+                ) = self.epilog_gmem_copy_and_partition(
                     epi_tidx, tiled_copy_t2r, tCgC, epi_tile, sC
                 )
 
@@ -1107,7 +1112,7 @@ class PersistentDenseGemmKernel:
                                 bSG_sC[(None, c_buffer)],
                                 bSG_gC[(None, subtile_idx)],
                             )
-                            # Fence and barrier to make sure shared memory store is visible to TMA store
+                            # Fence and barrier to make sure shared memory store is visible to TMA store  # noqa: E501
                             c_pipeline.producer_commit()
                             c_pipeline.producer_acquire()
                         cute.arch.barrier(
@@ -1166,8 +1171,8 @@ class PersistentDenseGemmKernel:
         tAcc: cute.Tensor,
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
-        use_2cta_instrs: Union[cutlass.Boolean, bool],
-    ) -> Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
+        use_2cta_instrs: cutlass.Boolean | bool,
+    ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
         """
         Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination).
 
@@ -1187,7 +1192,7 @@ class PersistentDenseGemmKernel:
             - tTR_tAcc: The partitioned accumulator tensor
             - tTR_rAcc: The accumulated tensor in register used to hold t2r results
         :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
-        """
+        """  # noqa: E501
         # Make tiledCopy for tensor memory load
         copy_atom_t2r = sm100_utils.get_tmem_load_op(
             self.cta_tile_shape_mnk,
@@ -1225,7 +1230,7 @@ class PersistentDenseGemmKernel:
         tTR_rC: cute.Tensor,
         tidx: cutlass.Int32,
         sC: cute.Tensor,
-    ) -> Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
+    ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
         """
         Make tiledCopy for shared memory store, then use it to partition register array (source) and shared memory (destination).
 
@@ -1244,7 +1249,7 @@ class PersistentDenseGemmKernel:
             - tRS_rC: The partitioned tensor C (register source)
             - tRS_sC: The partitioned tensor C (smem destination)
         :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
-        """
+        """  # noqa: E501
         copy_atom_r2s = sm100_utils.get_smem_store_op(
             self.c_layout, self.c_dtype, self.acc_dtype, tiled_copy_t2r
         )
@@ -1259,11 +1264,11 @@ class PersistentDenseGemmKernel:
     def epilog_gmem_copy_and_partition(
         self,
         tidx: cutlass.Int32,
-        atom: Union[cute.CopyAtom, cute.TiledCopy],
+        atom: cute.CopyAtom | cute.TiledCopy,
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
         sC: cute.Tensor,
-    ) -> Tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
+    ) -> tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
         """Make tiledCopy for global memory store, then use it to:
         - partition register array (source) and global memory (destination) for none TMA store version;
         - partition shared memory (source) and global memory (destination) for TMA store version.
@@ -1289,7 +1294,7 @@ class PersistentDenseGemmKernel:
                 - tTR_rC: The register tensor C
                 - tTR_gC: The partitioned global tensor C
         :rtype: Tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]
-        """
+        """  # noqa: E501
         # (EPI_TILE_M, EPI_TILE_N, EPI_M, EPI_N, RestM, RestN, RestL)
         gC_epi = cute.flat_divide(gC_mnl[((None, None), 0, 0, None, None, None)], epi_tile)
         if cutlass.const_expr(self.use_tma_store):
@@ -1321,16 +1326,16 @@ class PersistentDenseGemmKernel:
     @staticmethod
     def _compute_stages(
         tiled_mma: cute.TiledMma,
-        mma_tiler_mnk: Tuple[int, int, int],
-        a_dtype: Type[cutlass.Numeric],
-        b_dtype: Type[cutlass.Numeric],
+        mma_tiler_mnk: tuple[int, int, int],
+        a_dtype: type[cutlass.Numeric],
+        b_dtype: type[cutlass.Numeric],
         epi_tile: cute.Tile,
-        c_dtype: Type[cutlass.Numeric],
+        c_dtype: type[cutlass.Numeric],
         c_layout: utils.LayoutEnum,
         smem_capacity: int,
         occupancy: int,
         use_tma_store: bool,
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         """Computes the number of stages for A/B/C operands based on heuristics.
 
         :param tiled_mma: The tiled MMA object defining the core computation.
@@ -1418,10 +1423,10 @@ class PersistentDenseGemmKernel:
     @staticmethod
     def _compute_grid(
         c: cute.Tensor,
-        cta_tile_shape_mnk: Tuple[int, int, int],
-        cluster_shape_mn: Tuple[int, int],
+        cta_tile_shape_mnk: tuple[int, int, int],
+        cluster_shape_mn: tuple[int, int],
         max_active_clusters: cutlass.Constexpr,
-    ) -> Tuple[utils.PersistentTileSchedulerParams, Tuple[int, int, int]]:
+    ) -> tuple[utils.PersistentTileSchedulerParams, tuple[int, int, int]]:
         """Use persistent tile scheduler to compute the grid size for the output tensor C.
 
         :param c: The output tensor C
@@ -1453,7 +1458,7 @@ class PersistentDenseGemmKernel:
     @staticmethod
     def _compute_num_tmem_alloc_cols(
         tiled_mma: cute.TiledMma,
-        mma_tiler: Tuple[int, int, int],
+        mma_tiler: tuple[int, int, int],
         num_acc_stage: int,
     ) -> int:
         """
@@ -1477,9 +1482,9 @@ class PersistentDenseGemmKernel:
 
     @staticmethod
     def is_valid_dtypes(
-        ab_dtype: Type[cutlass.Numeric],
-        acc_dtype: Type[cutlass.Numeric],
-        c_dtype: Type[cutlass.Numeric],
+        ab_dtype: type[cutlass.Numeric],
+        acc_dtype: type[cutlass.Numeric],
+        c_dtype: type[cutlass.Numeric],
     ) -> bool:
         """
         Check if the dtypes are valid
@@ -1507,41 +1512,48 @@ class PersistentDenseGemmKernel:
             is_valid = False
         if (
             acc_dtype not in {cutlass.Float32, cutlass.Float16, cutlass.Int32}
-            or acc_dtype == cutlass.Float16
-            and ab_dtype not in {cutlass.Float16, cutlass.Float8E4M3FN, cutlass.Float8E5M2}
-            or acc_dtype == cutlass.Int32
-            and ab_dtype not in {cutlass.Uint8, cutlass.Int8}
+            or (
+                acc_dtype == cutlass.Float16
+                and ab_dtype not in {cutlass.Float16, cutlass.Float8E4M3FN, cutlass.Float8E5M2}
+            )
+            or (acc_dtype == cutlass.Int32 and ab_dtype not in {cutlass.Uint8, cutlass.Int8})
         ):
             is_valid = False
         if (
-            acc_dtype == cutlass.Float32
-            and c_dtype
-            not in {
-                cutlass.Float32,
-                cutlass.Float16,
-                cutlass.BFloat16,
-                cutlass.Float8E4M3FN,
-                cutlass.Float8E5M2,
-                cutlass.Int32,
-                cutlass.Int8,
-                cutlass.Uint8,
-            }
-            or acc_dtype == cutlass.Float16
-            and c_dtype
-            not in {
-                cutlass.BFloat16,
-                cutlass.Float16,
-            }
-            or acc_dtype == cutlass.Int32
-            and c_dtype
-            not in {
-                cutlass.BFloat16,
-                cutlass.Float16,
-                cutlass.Float32,
-                cutlass.Int32,
-                cutlass.Int8,
-                cutlass.Uint8,
-            }
+            (
+                acc_dtype == cutlass.Float32
+                and c_dtype
+                not in {
+                    cutlass.Float32,
+                    cutlass.Float16,
+                    cutlass.BFloat16,
+                    cutlass.Float8E4M3FN,
+                    cutlass.Float8E5M2,
+                    cutlass.Int32,
+                    cutlass.Int8,
+                    cutlass.Uint8,
+                }
+            )
+            or (
+                acc_dtype == cutlass.Float16
+                and c_dtype
+                not in {
+                    cutlass.BFloat16,
+                    cutlass.Float16,
+                }
+            )
+            or (
+                acc_dtype == cutlass.Int32
+                and c_dtype
+                not in {
+                    cutlass.BFloat16,
+                    cutlass.Float16,
+                    cutlass.Float32,
+                    cutlass.Int32,
+                    cutlass.Int8,
+                    cutlass.Uint8,
+                }
+            )
         ):
             is_valid = False
         return is_valid
@@ -1549,8 +1561,8 @@ class PersistentDenseGemmKernel:
     @staticmethod
     def is_valid_mma_tiler_and_cluster_shape(
         use_2cta_instrs: bool,
-        mma_tiler_mn: Tuple[int, int],
-        cluster_shape_mn: Tuple[int, int],
+        mma_tiler_mn: tuple[int, int],
+        cluster_shape_mn: tuple[int, int],
     ) -> bool:
         """
         Check if the mma tiler and cluster shape are valid
@@ -1577,8 +1589,11 @@ class PersistentDenseGemmKernel:
         # Skip illegal cluster shape
         if cluster_shape_mn[0] % (2 if use_2cta_instrs else 1) != 0:
             is_valid = False
+
         # Skip invalid cluster shape
-        is_power_of_2 = lambda x: x > 0 and (x & (x - 1)) == 0
+        def is_power_of_2(x):
+            return x > 0 and (x & (x - 1)) == 0
+
         if (
             cluster_shape_mn[0] * cluster_shape_mn[1] > 16
             or cluster_shape_mn[0] <= 0
@@ -1594,9 +1609,9 @@ class PersistentDenseGemmKernel:
         m: int,
         n: int,
         k: int,
-        l: int,
-        ab_dtype: Type[cutlass.Numeric],
-        c_dtype: Type[cutlass.Numeric],
+        l: int,  # noqa: E741
+        ab_dtype: type[cutlass.Numeric],
+        c_dtype: type[cutlass.Numeric],
         a_major: str,
         b_major: str,
         c_major: str,
@@ -1648,7 +1663,7 @@ class PersistentDenseGemmKernel:
         use_tma_store: bool,
         m: int,
         n: int,
-        mma_tiler_mn: Tuple[int, int],
+        mma_tiler_mn: tuple[int, int],
     ) -> bool:
         """
         Check if the epilogue store option is valid
@@ -1681,17 +1696,17 @@ class PersistentDenseGemmKernel:
 
     @staticmethod
     def can_implement(
-        ab_dtype: Type[cutlass.Numeric],
-        acc_dtype: Type[cutlass.Numeric],
-        c_dtype: Type[cutlass.Numeric],
+        ab_dtype: type[cutlass.Numeric],
+        acc_dtype: type[cutlass.Numeric],
+        c_dtype: type[cutlass.Numeric],
         use_2cta_instrs: bool,
-        mma_tiler_mn: Tuple[int, int],
-        cluster_shape_mn: Tuple[int, int],
+        mma_tiler_mn: tuple[int, int],
+        cluster_shape_mn: tuple[int, int],
         use_tma_store: bool,
         m: int,
         n: int,
         k: int,
-        l: int,
+        l: int,  # noqa: E741
         a_major: str,
         b_major: str,
         c_major: str,
@@ -1754,15 +1769,15 @@ class PersistentDenseGemmKernel:
 
 
 def run(
-    mnkl: Tuple[int, int, int, int],
-    ab_dtype: Type[cutlass.Numeric],
-    c_dtype: Type[cutlass.Numeric],
-    acc_dtype: Type[cutlass.Numeric],
+    mnkl: tuple[int, int, int, int],
+    ab_dtype: type[cutlass.Numeric],
+    c_dtype: type[cutlass.Numeric],
+    acc_dtype: type[cutlass.Numeric],
     a_major: str,
     b_major: str,
     c_major: str,
-    mma_tiler_mn: Tuple[int, int] = (256, 256),
-    cluster_shape_mn: Tuple[int, int] = (2, 1),
+    mma_tiler_mn: tuple[int, int] = (256, 256),
+    cluster_shape_mn: tuple[int, int] = (2, 1),
     use_2cta_instrs: bool = True,
     use_tma_store: bool = True,
     tolerance: float = 1e-01,
@@ -1822,8 +1837,8 @@ def run(
     :raises ValueError: If the configuration is invalid or unsupported by the kernel
     :return: Execution time of the GEMM kernel
     :rtype: float
-    """
-    print(f"Running Blackwell Persistent Dense GEMM test with:")
+    """  # noqa: E501
+    print("Running Blackwell Persistent Dense GEMM test with:")
     print(f"mnkl: {mnkl}")
     print(f"AB dtype: {ab_dtype}, C dtype: {c_dtype}, Acc dtype: {acc_dtype}")
     print(f"Matrix majors - A: {a_major}, B: {b_major}, C: {c_major}")
@@ -1837,7 +1852,7 @@ def run(
     print(f"Use cold L2: {'True' if use_cold_l2 else 'False'}")
 
     # Unpack parameters
-    m, n, k, l = mnkl
+    m, n, k, l = mnkl  # noqa: E741
 
     # Skip unsupported testcase
     if not PersistentDenseGemmKernel.can_implement(
@@ -1857,7 +1872,7 @@ def run(
         c_major,
     ):
         raise TypeError(
-            f"Unsupported testcase {ab_dtype}, {acc_dtype}, {c_dtype}, {use_2cta_instrs}, {mma_tiler_mn}, {cluster_shape_mn}, {use_tma_store}, {m}, {n}, {k}, {l}, {a_major}, {b_major}, {c_major}"
+            f"Unsupported testcase {ab_dtype}, {acc_dtype}, {c_dtype}, {use_2cta_instrs}, {mma_tiler_mn}, {cluster_shape_mn}, {use_tma_store}, {m}, {n}, {k}, {l}, {a_major}, {b_major}, {c_major}"  # noqa: E501
         )
 
     if not torch.cuda.is_available():
@@ -1867,7 +1882,13 @@ def run(
 
     # Create and permute tensor A/B/C
     def create_and_permute_tensor(
-        l, mode0, mode1, is_mode0_major, dtype, is_dynamic_layout=True, torch_tensor=None
+        l,  # noqa: E741
+        mode0,
+        mode1,
+        is_mode0_major,
+        dtype,
+        is_dynamic_layout=True,
+        torch_tensor=None,
     ):
         if torch_tensor is None:
             # is_mode0_major: (l, mode1, mode0) -> (mode0, mode1, l)
@@ -2015,23 +2036,19 @@ def run(
         )
         return testing.JitArguments(a_tensor, b_tensor, c_tensor, current_stream)
 
-    workspace_count = 1
     if use_cold_l2:
         one_workspace_bytes = (
             a_torch_cpu.numel() * a_torch_cpu.element_size()
             + b_torch_cpu.numel() * b_torch_cpu.element_size()
             + c_torch_cpu.numel() * c_torch_cpu.element_size()
         )
-        workspace_count = testing.get_workspace_count(
-            one_workspace_bytes, warmup_iterations, iterations
-        )
+        testing.get_workspace_count(one_workspace_bytes, warmup_iterations, iterations)
 
     if A_torch is None and B_torch is None and C_torch is None:
-        from tvm.tirx.bench.utils import bench
-        from tvm.tirx.bench.utils import ProtonContext
+        from tvm.tirx.bench.utils import ProtonContext, bench
 
         with ProtonContext("blackwcuteell_gemm"):
-            exec_time = bench(
+            bench(
                 lambda: compiled_gemm(a_tensor, b_tensor, c_tensor, current_stream),
                 warmup_iterations,
                 iterations,
@@ -2042,7 +2059,7 @@ def run(
 
 if __name__ == "__main__":
 
-    def parse_comma_separated_ints(s: str) -> Tuple[int, ...]:
+    def parse_comma_separated_ints(s: str) -> tuple[int, ...]:
         try:
             return tuple(int(x.strip()) for x in s.split(","))
         except ValueError:

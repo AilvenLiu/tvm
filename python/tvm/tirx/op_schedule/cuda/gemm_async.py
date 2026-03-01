@@ -17,18 +17,18 @@
 
 import functools
 import operator
-from typing import List, Optional, Tuple
 
 import tvm
+from tvm.arith.analyzer import Analyzer
+from tvm.runtime import DataType
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc
-from tvm.runtime import DataType
-from tvm.arith.analyzer import Analyzer
-from tvm.tir.stmt import OpCall, AllocBuffer, SeqStmt, Evaluate
-from tvm.tir.layout import S, R, TileLayout, ComposeLayout, TLane, TCol
-from tvm.tirx.op_schedule import ScheduleContext, register_dispatch, predicate
-from tvm.tirx.operator.op import GemmAsync, KernelReplacePoint
-from .common import single_thread, validate_gemm_op, get_st_extent
+from tvm.tir.layout import ComposeLayout, R, S, TCol, TileLayout, TLane
+from tvm.tir.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
+from tvm.tirx.op_schedule import ScheduleContext, predicate, register_dispatch
+from tvm.tirx.operator.op import KernelReplacePoint
+
+from .common import get_st_extent, single_thread
 from .copy_async import SwizzleMode, tma_atom_layout, tma_atom_shape
 
 
@@ -98,14 +98,14 @@ def _validate_sf_tmem_layout(slice_layout, rows, sf_K_total, sf_mma_k, name):
       shard = ([32, sf_mma_k], [1@TLane, 1@TCol])
       replica = ([4], [32@TLane])
     """
-    assert isinstance(
-        slice_layout, TileLayout
-    ), f"{name}: sliced layout must be TileLayout, got {type(slice_layout)}"
+    assert isinstance(slice_layout, TileLayout), (
+        f"{name}: sliced layout must be TileLayout, got {type(slice_layout)}"
+    )
     M = rows // 32
 
-    assert (
-        sf_K_total % sf_mma_k == 0
-    ), f"{name}: sf_K_total={sf_K_total} must be divisible by sf_mma_k={sf_mma_k}"
+    assert sf_K_total % sf_mma_k == 0, (
+        f"{name}: sf_K_total={sf_K_total} must be divisible by sf_mma_k={sf_mma_k}"
+    )
     K = sf_K_total // sf_mma_k
 
     atom = TileLayout(S[(32, sf_mma_k) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
@@ -156,7 +156,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     C_scope, A_scope, B_scope = C_buffer.scope(), A_buffer.scope(), B_buffer.scope()
     if not (C_scope == "tmem" and A_scope.startswith("shared") and B_scope.startswith("shared")):
         raise ValueError(
-            f"tcgen05 schedule expected C_scope=tmem, A_scope=shared, B_scope=shared, got C_scope={C_scope}, A_scope={A_scope}, B_scope={B_scope}"
+            f"tcgen05 schedule expected C_scope=tmem, A_scope=shared, B_scope=shared, got C_scope={C_scope}, A_scope={A_scope}, B_scope={B_scope}"  # noqa: E501
         )
 
     analyzer = Analyzer()
@@ -176,12 +176,12 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     ]
 
     if is_block_scaled:
-        assert (
-            A_type in _BLOCK_SCALED_DTYPES
-        ), f"tcgen05 block-scaled schedule expected A_type in {_BLOCK_SCALED_DTYPES}, got {A_type}"
-        assert (
-            B_type in _BLOCK_SCALED_DTYPES
-        ), f"tcgen05 block-scaled schedule expected B_type in {_BLOCK_SCALED_DTYPES}, got {B_type}"
+        assert A_type in _BLOCK_SCALED_DTYPES, (
+            f"tcgen05 block-scaled schedule expected A_type in {_BLOCK_SCALED_DTYPES}, got {A_type}"
+        )
+        assert B_type in _BLOCK_SCALED_DTYPES, (
+            f"tcgen05 block-scaled schedule expected B_type in {_BLOCK_SCALED_DTYPES}, got {B_type}"
+        )
     else:
         assert A_type in [
             "float16",
@@ -191,9 +191,9 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
             "float16",
             "bfloat16",
         ], f"tcgen05 schedule expected B_type=float16 or bfloat16, got {B_type}"
-    assert (
-        A_type == B_type
-    ), f"tcgen05 schedule expect A_type and B_type to be the same, got A_type={A_type}, B_type={B_type}"
+    assert A_type == B_type, (
+        f"tcgen05 schedule expect A_type and B_type to be the same, got A_type={A_type}, B_type={B_type}"  # noqa: E501
+    )
 
     # Parse SFA/SFB and transA/transB/accum based on arg layout
     if is_block_scaled:
@@ -212,18 +212,18 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         SFB_slice_layout = SFB_buffer.layout.slice(SFB_buffer.shape, SFB_buffer_region.region)
         SFA_elem_per_col = 32 // DataType(SFA_type).bits
         SFB_elem_per_col = 32 // DataType(SFB_type).bits
-        assert (
-            SFA_type in _SCALE_FACTOR_DTYPES
-        ), f"tcgen05 block-scaled schedule expected SFA_type in {_SCALE_FACTOR_DTYPES}, got {SFA_type}"
-        assert (
-            SFB_type in _SCALE_FACTOR_DTYPES
-        ), f"tcgen05 block-scaled schedule expected SFB_type in {_SCALE_FACTOR_DTYPES}, got {SFB_type}"
+        assert SFA_type in _SCALE_FACTOR_DTYPES, (
+            f"tcgen05 block-scaled schedule expected SFA_type in {_SCALE_FACTOR_DTYPES}, got {SFA_type}"  # noqa: E501
+        )
+        assert SFB_type in _SCALE_FACTOR_DTYPES, (
+            f"tcgen05 block-scaled schedule expected SFB_type in {_SCALE_FACTOR_DTYPES}, got {SFB_type}"  # noqa: E501
+        )
         # Compute sf_mma_k from data/SF dtypes and validate layouts
         sfa_sf_mma_k = _compute_sf_mma_k(A_type, SFA_type)
         sfb_sf_mma_k = _compute_sf_mma_k(B_type, SFB_type)
-        assert (
-            sfa_sf_mma_k == sfb_sf_mma_k
-        ), f"SFA and SFB must have same sf_mma_k, got sfa={sfa_sf_mma_k}, sfb={sfb_sf_mma_k}"
+        assert sfa_sf_mma_k == sfb_sf_mma_k, (
+            f"SFA and SFB must have same sf_mma_k, got sfa={sfa_sf_mma_k}, sfb={sfb_sf_mma_k}"
+        )
         SFA_rows = int(SFA_buffer_region.region[-2].extent)
         SFA_K_total = int(SFA_buffer_region.region[-1].extent)
         SFB_rows = int(SFB_buffer_region.region[-2].extent)
@@ -239,7 +239,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     descI = op_call.config.get("descI", None)
 
     C_elem_size = DataType(C_type).bits
-    C_elem_per_32b = 32 // C_elem_size
+    32 // C_elem_size
     C_st, C_extent = get_st_extent(C_buffer_region)
     _, A_extent = get_st_extent(A_buffer_region)
     _, B_extent = get_st_extent(B_buffer_region)
@@ -254,13 +254,13 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         B_slice_layout.tile_layout if isinstance(B_slice_layout, ComposeLayout) else B_slice_layout
     )
 
-    assert (
-        len(C_extent) == 2 and len(A_extent) >= 2 and len(B_extent) >= 2
-    ), "Only 2D C, A, B are supported for gemm"
+    assert len(C_extent) == 2 and len(A_extent) >= 2 and len(B_extent) >= 2, (
+        "Only 2D C, A, B are supported for gemm"
+    )
     for buf_name, extent in [("C", C_extent), ("A", A_extent), ("B", B_extent)]:
-        assert all(
-            analyzer.can_prove_equal(ext, 1) for ext in extent[:-2]
-        ), f"tcgen05 schedule expected {buf_name}_extent to be 1 before the last two dimensions"
+        assert all(analyzer.can_prove_equal(ext, 1) for ext in extent[:-2]), (
+            f"tcgen05 schedule expected {buf_name}_extent to be 1 before the last two dimensions"
+        )
 
     M = int(C_extent[-2])
     N = int(C_extent[-1])
@@ -296,9 +296,9 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     # Cross-validate B's N with C's N and cta_group
     B_N = int(B_extent[-2] if not transB else B_extent[-1])
-    assert (
-        B_N * cta_group == N
-    ), f"tcgen05: B_N={B_N} * cta_group={cta_group}={B_N * cta_group} doesn't match N={N}"
+    assert B_N * cta_group == N, (
+        f"tcgen05: B_N={B_N} * cta_group={cta_group}={B_N * cta_group} doesn't match N={N}"
+    )
 
     # Validate SFA/SFB region shapes
     if is_block_scaled:
@@ -308,12 +308,12 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         assert SFB_rows >= N, f"tcgen05: SFB rows={SFB_rows} must be >= N={N}"
         valid_sfa_K = {sfa_sf_mma_k, sfa_sf_mma_k * num_ki}
         valid_sfb_K = {sfb_sf_mma_k, sfb_sf_mma_k * num_ki}
-        assert (
-            SFA_K_total in valid_sfa_K
-        ), f"tcgen05: SFA K extent={SFA_K_total} must be in {valid_sfa_K}"
-        assert (
-            SFB_K_total in valid_sfb_K
-        ), f"tcgen05: SFB K extent={SFB_K_total} must be in {valid_sfb_K}"
+        assert SFA_K_total in valid_sfa_K, (
+            f"tcgen05: SFA K extent={SFA_K_total} must be in {valid_sfa_K}"
+        )
+        assert SFB_K_total in valid_sfb_K, (
+            f"tcgen05: SFB K extent={SFB_K_total} must be in {valid_sfb_K}"
+        )
 
     # Check C's sliced layout: (M, N):(1@TLane, 1@TCol), allow offset
     base = TileLayout(S[(M, N) : (1 @ TLane, 1 @ TCol)])
@@ -326,7 +326,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     tmem_offset_32b = C_slice_layout.offset.get(TCol, 0)
 
     # Check A and B's subregion layout and compute descriptor offsets
-    def swizzle_check(slice_layout, dtype) -> Tuple[SwizzleMode, int, int]:
+    def swizzle_check(slice_layout, dtype) -> tuple[SwizzleMode, int, int]:
         """Check subregion layout compatibility and compute descriptor offsets.
 
         Uses the sliced (subregion) layout to find a compatible swizzle mode.
@@ -366,8 +366,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
                 sdo = (tiler_grouped.shard[-2].stride * atom_size) // elem_per_128b
                 return mode, ldo, sdo
         raise ValueError(
-            f"No compatible swizzle mode found for dtype {dtype} "
-            f"with subregion shape {sub_shape}"
+            f"No compatible swizzle mode found for dtype {dtype} with subregion shape {sub_shape}"
         )
 
     A_swizzle_mode, A_ldo, A_sdo = swizzle_check(A_slice_layout, A_type)
@@ -455,8 +454,8 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
             for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
                 A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
                 B_ki_linear = Tx.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
-                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
-                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
+                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))  # noqa: E501
+                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))  # noqa: E501
                 descA_val = Tx.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
                 descB_val = Tx.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
                 should_accum = Tx.meta_var(tvm.tir.any(ki != 0, accum_expr))
@@ -468,7 +467,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                 sfa_addr = Tx.meta_var(sfa_base + tvm.tir.floordiv(sfa_tcol, SFA_elem_per_col))
                 sfb_addr = Tx.meta_var(sfb_base + tvm.tir.floordiv(sfb_tcol, SFB_elem_per_col))
                 if needs_sf_id:
-                    sf_id = Tx.meta_var(analyzer.simplify(tvm.tir.floormod(sfa_tcol, SFA_elem_per_col)))
+                    sf_id = Tx.meta_var(analyzer.simplify(tvm.tir.floormod(sfa_tcol, SFA_elem_per_col)))  # noqa: E501
                     Tx.cuda.runtime_instr_desc(Tx.address_of(descI_in), sf_id)
                 Tx.ptx.tcgen05.mma.block_scale(C_type, A_type, B_type, SFA_type, SFB_type,
                                               Tx.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
@@ -483,12 +482,12 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
             for ki in Tx.serial(tvm.tir.floordiv(K, MMA_K)):
                 A_ki_linear = Tx.meta_var(ki * MMA_K * A_extent[-1] if transA else ki * MMA_K)
                 B_ki_linear = Tx.meta_var(ki * MMA_K * B_extent[-1] if transB else ki * MMA_K)
-                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))
-                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))
+                A_offset = Tx.meta_var(tvm.tir.floordiv(A_slice_tile.apply(A_ki_linear)["m"], A_elem_per_16B))  # noqa: E501
+                B_offset = Tx.meta_var(tvm.tir.floordiv(B_slice_tile.apply(B_ki_linear)["m"], B_elem_per_16B))  # noqa: E501
                 descA_val = Tx.meta_var(smem_desc_add_16B_offset(descA_in, A_offset))
                 descB_val = Tx.meta_var(smem_desc_add_16B_offset(descB_in, B_offset))
                 should_accum = Tx.meta_var(tvm.tir.any(ki != 0, accum_expr))
-                Tx.ptx.tcgen05.mma("float32", A_type, B_type, Tx.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),
+                Tx.ptx.tcgen05.mma("float32", A_type, B_type, Tx.cuda.get_tmem_addr(tmem_addr, 0, tmem_offset_32b),  # noqa: E501
                                   descA_val, descB_val, descI_in, False, cta_group, should_accum)
         # fmt: on
 
@@ -503,19 +502,19 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
-            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,
+            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,  # noqa: E501, F821
                                                                SFA_init_addr, SFB_init_addr,
-                                                               M * cta_group, N, MMA_K, transA, transB, cta_group)
-            main_impl(descA_buf[0], descB_buf[0], descI_local)
+                                                               M * cta_group, N, MMA_K, transA, transB, cta_group)  # noqa: E501
+            main_impl(descA_buf[0], descB_buf[0], descI_local)  # noqa: F821
         # fmt: on
     else:
         # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
-            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,
-                                                  M * cta_group, N, MMA_K, transA, transB, cta_group)
-            main_impl(descA_buf[0], descB_buf[0], descI_local)
+            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,  # noqa: E501, F821
+                                                  M * cta_group, N, MMA_K, transA, transB, cta_group)  # noqa: E501
+            main_impl(descA_buf[0], descB_buf[0], descI_local)  # noqa: F821
         # fmt: on
 
     return impl

@@ -21,6 +21,7 @@ The header generator is used to generate the header for the CUDA code.
 It's controlled by the predefined tags.
 The tags are used to identify the utility functions/classes necessary for the codegen.
 """
+
 import tvm_ffi
 
 TAGS = {
@@ -399,7 +400,7 @@ __host__ __device__ nv_bfloat164 make_nv_bfloat164(nv_bfloat16 x, nv_bfloat16 y,
 __host__ __device__ nv_bfloat162 make_nv_bfloat162(nv_bfloat16 x, nv_bfloat16 y) {
     return nv_bfloat162(x, y);
 }
-"""
+"""  # noqa: E501
         if "fp8" in tags:
             header += R"""
 __host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp8x2_e4m3& fp8x2) {
@@ -459,7 +460,7 @@ __device__ __nv_fp8x4_e8m0 make___nv_fp8x4_e8m0(__nv_fp8_e8m0 a, __nv_fp8_e8m0 b
     result.__x = (a.__x) | (b.__x << 8) | (c.__x << 16) | (d.__x << 24);
     return result;
 }
-"""
+"""  # noqa: E501
     if "fp4" in tags:
         header += R"""
 __host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp4x2_e2m1& fp4x2) {
@@ -648,7 +649,7 @@ union GmmaDescriptor
   HOST_DEVICE constexpr
   operator uint64_t() const noexcept { return desc_; }
 };
-"""
+"""  # noqa: E501
 
     if "smem_descriptor" in tags:
         header += R"""
@@ -681,7 +682,7 @@ union SmemDescriptor
   HOST_DEVICE constexpr
   operator uint64_t() const noexcept { return desc_; }
 };
-"""
+"""  # noqa: E501
 
     if "instr_descriptor" in tags:
         header += R"""
@@ -716,7 +717,7 @@ union InstrDescriptor
   HOST_DEVICE constexpr explicit
   operator uint32_t() const noexcept { return desc_; }
 };
-"""
+"""  # noqa: E501
 
     if "instr_descriptor_block_scaled" in tags:
         header += R"""
@@ -751,7 +752,7 @@ union InstrDescriptorBlockScaled
   HOST_DEVICE constexpr
   operator uint32_t() const noexcept { return desc_; }
 };
-"""
+"""  # noqa: E501
 
     if "elect_one_sync" in tags:
         header += R"""

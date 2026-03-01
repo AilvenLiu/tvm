@@ -20,8 +20,8 @@ from typing import Literal
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as Tx
-from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
 
 
 def get_llama3_megakernel_relax_mod(
@@ -30,7 +30,7 @@ def get_llama3_megakernel_relax_mod(
     TP_SIZE: int,
     PROFILER_ON: bool,
 ):
-    assert mk.TIE_WORD_EMBEDDINGS == True, "Llama3-1B must support tie word embeddings"
+    assert mk.TIE_WORD_EMBEDDINGS, "Llama3-1B must support tie word embeddings"
 
     def static_mod():
         # fmt: off
@@ -38,59 +38,59 @@ def get_llama3_megakernel_relax_mod(
         def call_llama3_layer(input0, input1, layer_id):
             with R.dataflow():
                 # 6i+1, 6i+2, 6i+3, 6i+4, 6i+6, 6i+13 if i<num_hidden_layers-1 else 6i+7
-                model_layers_0_self_attn_c_attn_weight1: R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+1]
-                model_layers_0_self_attn_o_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16") = packed_params[6*layer_id+2]
-                model_layers_0_self_attn_q_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)
-                model_layers_0_self_attn_k_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)
-                model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+3]
-                model_layers_0_mlp_down_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16") = packed_params[6*layer_id+4]
-                model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]
-                model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]
+                model_layers_0_self_attn_c_attn_weight1: R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+1]  # noqa: E501, F821
+                model_layers_0_self_attn_o_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16") = packed_params[6*layer_id+2]  # noqa: E501, F821
+                model_layers_0_self_attn_q_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)  # noqa: E501
+                model_layers_0_self_attn_k_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)  # noqa: E501
+                model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+3]  # noqa: E501, F821
+                model_layers_0_mlp_down_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16") = packed_params[6*layer_id+4]  # noqa: E501, F821
+                model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]  # noqa: E501, F821
+                model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]  # noqa: E501, F821
 
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
-                partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
-                qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
-                o = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
-                o_partial_attn = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
-                lse_partial = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)
-                partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
-                before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                partial_out_gate_up_proj = R.builtin.alloc_tensor(R.shape([mk.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, mk.INTERMEDIATE_SIZE * 2]), dtype="float32", runtime_device_index=0)
-                out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 2 * mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([mk.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
-                before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
+                partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                o = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                o_partial_attn = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)  # noqa: E501
+                lse_partial = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501
+                partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                partial_out_gate_up_proj = R.builtin.alloc_tensor(R.shape([mk.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, mk.INTERMEDIATE_SIZE * 2]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 2 * mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([mk.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)  # noqa: E501
 
                 layer_res = R.call_tir_inplace(
-                    cls.layer_kernel,
+                    cls.layer_kernel,  # noqa: F821
                     (
                         # input and output
                         input0, input1, output_tensor,
                         # weights
-                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,
-                        model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
-                        model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
+                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,  # noqa: E501
+                        model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,  # noqa: E501
+                        model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,  # noqa: E501
                         model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
                         # page cache, cos_sin cache and plan info
-                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,
-                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
-                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,
+                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,  # noqa: F821
+                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,  # noqa: E501, F821
+                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,  # noqa: E501, F821
                         # intermediate buffer
-                        partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,
-                        hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
+                        partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,  # noqa: E501
+                        hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,  # noqa: E501
                         partial_sum_down_proj, before_down_proj_allreduce,
                         # event tensor
-                        etensor_workspace,
+                        etensor_workspace,  # noqa: F821
                         # execution queue
-                        exec_queue, profiler_buffer
+                        exec_queue, profiler_buffer  # noqa: F821
                     ),
                     [2, 1, 47],
                     out_sinfo=[
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output  # noqa: E501, F821
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual  # noqa: E501, F821
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -107,8 +107,8 @@ def get_llama3_megakernel_relax_mod(
             def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
                 Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
                 batch_size = Tx.int64()
-                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")
-                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))
+                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")  # noqa: E501
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))  # noqa: E501
                 # with Tx.sblock("root"):
                 for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)):
                     with Tx.sblock("compute"):
@@ -144,7 +144,7 @@ def get_llama3_megakernel_relax_mod(
                 max_seq_len = Tx.int64()
                 cls = Module
                 with R.dataflow():
-                    cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )
+                    cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )  # noqa: E501
                     R.output(cache)
                 return cache
 
@@ -222,8 +222,8 @@ def get_llama3_megakernel_relax_mod(
                 packed_params: R.Tuple(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     #
-                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),
-                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),
+                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),  # noqa: E501
+                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),  # noqa: E501
                     R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE,), dtype="float16"),
@@ -248,7 +248,7 @@ def get_llama3_megakernel_relax_mod(
                             R.Tensor((batch_size,), dtype="int32"),
                             R.Tensor((batch_size,), dtype="int32"),
                             R.Tensor((batch_size,), dtype="int32"),
-                            R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
+                            R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),  # noqa: E501
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor(None, dtype="int32"),
@@ -257,15 +257,15 @@ def get_llama3_megakernel_relax_mod(
                     )
                     (
                         kv_data_,
-                        page_kv_indptr,
+                        _page_kv_indptr,
                         page_kv_indices_,
-                        page_kv_last_page_len,
-                        append_pos,
-                        rope_pos,
+                        _page_kv_last_page_len,
+                        _append_pos,
+                        _rope_pos,
                         attn_plan_results,
-                        inverse_indptr,
-                        inverse_indices,
-                        etensor_workspace,
+                        _inverse_indptr,
+                        _inverse_indices,
+                        _etensor_workspace,
                         attn_task_num,
                     ) = (
                         res0[0],
@@ -280,25 +280,25 @@ def get_llama3_megakernel_relax_mod(
                         res0[9],
                         res0[10],
                     )
-                    kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, mk.HEAD_DIM), dtype="float16")] * mk.NUM_HIDDEN_LAYERS))
-                    page_kv_indices = R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                    task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
-                    q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
-                    len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
-                    merge_indptr = R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
-                    q_indptr = R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_indptr = R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    partial_indptr = R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_len = R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_len = R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_start = R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_start = R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_end = R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    work_indptr = R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    exec_queue = R.call_pure_packed(
+                    R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, mk.HEAD_DIM), dtype="float16")] * mk.NUM_HIDDEN_LAYERS))  # noqa: E501
+                    R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
+                    task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]  # noqa: E501
+                    q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]  # noqa: E501
+                    R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
+                    R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
+                    R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))  # noqa: E501
+                    R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.call_pure_packed(
                         "vm.builtin.paged_attention_kv_cache_get_exec_queue",
                         paged_kv_cache,
                         R.prim_value(batch_size),
@@ -309,12 +309,12 @@ def get_llama3_megakernel_relax_mod(
                         ]
                     )
 
-                    model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[5]
-                    lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[0 if mk.TIE_WORD_EMBEDDINGS else mk.NUM_HIDDEN_LAYERS*6+2]
+                    model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[5]  # noqa: E501
+                    lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[0 if mk.TIE_WORD_EMBEDDINGS else mk.NUM_HIDDEN_LAYERS*6+2]  # noqa: E501
 
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
-                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))  # noqa: E501
+                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_  # noqa: E501
 
                     o_layer0 = call_llama3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_llama3_layer(o_layer0[0], o_layer0[1], 1)
@@ -334,15 +334,15 @@ def get_llama3_megakernel_relax_mod(
                     o_layer15 = call_llama3_layer(o_layer14[0], o_layer14[1], 15)
 
                     # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
-                    # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                    lv4 = R.call_tir(cls.hgemm, (o_layer15[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
+                    # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")  # noqa: E501
+                    lv4 = R.call_tir(cls.hgemm, (o_layer15[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))  # noqa: E501
 
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
-                    astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
+                    astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))  # noqa: E501
 
                     profiler = (
-                        o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],
-                        o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],
+                        o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],  # noqa: E501
+                        o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],  # noqa: E501
                         o_layer12[2], o_layer13[2], o_layer14[2], o_layer15[2]
                     )
 
@@ -360,8 +360,8 @@ def get_llama3_megakernel_relax_mod(
                 packed_params: R.Tuple(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     #
-                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),
-                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),
+                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),  # noqa: E501
+                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),  # noqa: E501
                     R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE,), dtype="float16"),
@@ -377,7 +377,7 @@ def get_llama3_megakernel_relax_mod(
                     packed_params,
                 )
                 if PROFILER_ON:
-                    rank = R.call_packed("runtime.disco.worker_id", sinfo_args=[R.Shape()]) if TP_SIZE > 1 else R.prim_value(-1)
+                    rank = R.call_packed("runtime.disco.worker_id", sinfo_args=[R.Shape()]) if TP_SIZE > 1 else R.prim_value(-1)  # noqa: E501
                     _ = R.call_packed(
                         "megakernel.export_trace",
                         model_output[2],
@@ -400,36 +400,36 @@ def get_llama3_megakernel_relax_mod(
         def call_llama3_layer(input0, input1, layer_id):
             with R.dataflow():
                 # 6i+1, 6i+2, 6i+3, 6i+4, 6i+6, 6i+13 if i<num_hidden_layers-1 else 6i+7
-                model_layers_0_self_attn_c_attn_weight1: R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+1]
-                model_layers_0_self_attn_o_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16") = packed_params[6*layer_id+2]
-                model_layers_0_self_attn_q_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)
-                model_layers_0_self_attn_k_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)
-                model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+3]
-                model_layers_0_mlp_down_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16") = packed_params[6*layer_id+4]
-                model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]
-                model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]
+                model_layers_0_self_attn_c_attn_weight1: R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+1]  # noqa: E501, F821
+                model_layers_0_self_attn_o_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16") = packed_params[6*layer_id+2]  # noqa: E501, F821
+                model_layers_0_self_attn_q_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)  # noqa: E501
+                model_layers_0_self_attn_k_norm_weight1: R.Tensor((mk.HEAD_DIM,), dtype="float16") = R.builtin.alloc_tensor(R.shape([mk.HEAD_DIM]), "float16", runtime_device_index=0)  # noqa: E501
+                model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[6*layer_id+3]  # noqa: E501, F821
+                model_layers_0_mlp_down_proj_weight1: R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16") = packed_params[6*layer_id+4]  # noqa: E501, F821
+                model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]  # noqa: E501, F821
+                model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]  # noqa: E501, F821
 
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
-                partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
-                qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
-                o = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
-                o_partial_attn = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
-                lse_partial = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)
-                partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
-                before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                partial_out_gate_up_proj = R.builtin.alloc_tensor(R.shape([mk.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, mk.INTERMEDIATE_SIZE * 2]), dtype="float32", runtime_device_index=0)
-                out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 2 * mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)
-                partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([mk.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)
-                before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)
-                profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
+                partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                o = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                o_partial_attn = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)  # noqa: E501
+                lse_partial = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501
+                partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJECT, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                partial_out_gate_up_proj = R.builtin.alloc_tensor(R.shape([mk.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, mk.INTERMEDIATE_SIZE * 2]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 2 * mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, mk.INTERMEDIATE_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([mk.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, mk.HIDDEN_SIZE]), dtype="float32", runtime_device_index=0)  # noqa: E501, F821
+                before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, mk.HIDDEN_SIZE]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, mk.HIDDEN_SIZE), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, mk.HIDDEN_SIZE]), dtype="float16", runtime_device_index=0)  # noqa: E501, F821
+                profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)  # noqa: E501
                 exec_queue = R.call_pure_packed(
                     "vm.builtin.paged_attention_kv_cache_get_exec_queue",
-                    paged_kv_cache,
-                    R.prim_value(batch_size),
-                    attn_task_num,
+                    paged_kv_cache,  # noqa: F821
+                    R.prim_value(batch_size),  # noqa: F821
+                    attn_task_num,  # noqa: F821
                     R.prim_value(layer_id),
                     sinfo_args=[
                         R.Tensor((DynamicTileScheduler.MAX_TASKS,), dtype="int32"),
@@ -441,32 +441,32 @@ def get_llama3_megakernel_relax_mod(
 
 
                 layer_res = R.call_tir_inplace(
-                    cls.layer_kernel,
+                    cls.layer_kernel,  # noqa: F821
                     (
                         # input and output
                         input0, input1, output_tensor,
                         # weights
-                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,
-                        model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
-                        model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
+                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,  # noqa: E501
+                        model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,  # noqa: E501
+                        model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,  # noqa: E501
                         model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
                         # page cache, cos_sin cache and plan info
-                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,
-                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
-                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,
+                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,  # noqa: F821
+                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,  # noqa: E501, F821
+                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,  # noqa: E501, F821
                         # intermediate buffer
-                        partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,
-                        hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
+                        partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,  # noqa: E501
+                        hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,  # noqa: E501
                         partial_sum_down_proj, before_down_proj_allreduce,
                         # event tensor
-                        etensor_workspace,
+                        etensor_workspace,  # noqa: F821
                         # execution queue
                         queue_tasks, queue_head, queue_tail, profiler_buffer
                     ),
                     [2, 1, 49],
                     out_sinfo=[
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output  # noqa: E501, F821
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual  # noqa: E501, F821
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -483,8 +483,8 @@ def get_llama3_megakernel_relax_mod(
             def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
                 Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
                 batch_size = Tx.int64()
-                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")
-                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))
+                lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")  # noqa: E501
+                compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))  # noqa: E501
                 # with Tx.sblock("root"):
                 for i0, i1, i2 in Tx.grid(batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)):
                     with Tx.sblock("compute"):
@@ -521,7 +521,7 @@ def get_llama3_megakernel_relax_mod(
                 max_seq_len = Tx.int64()
                 cls = Module
                 with R.dataflow():
-                    cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )
+                    cache: R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, mk.HEAD_DIM), dtype="float32") )  # noqa: E501
                     R.output(cache)
                 return cache
 
@@ -601,8 +601,8 @@ def get_llama3_megakernel_relax_mod(
                 packed_params: R.Tuple(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     #
-                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),
-                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),
+                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),  # noqa: E501
+                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),  # noqa: E501
                     R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE,), dtype="float16"),
@@ -627,7 +627,7 @@ def get_llama3_megakernel_relax_mod(
                             R.Tensor((batch_size,), dtype="int32"),
                             R.Tensor((batch_size,), dtype="int32"),
                             R.Tensor((batch_size,), dtype="int32"),
-                            R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
+                            R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),  # noqa: E501
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor(None, dtype="int32"),
@@ -636,16 +636,16 @@ def get_llama3_megakernel_relax_mod(
                     )
                     (
                         kv_data_,
-                        page_kv_indptr,
+                        _page_kv_indptr,
                         page_kv_indices_,
-                        page_kv_last_page_len,
-                        append_pos,
-                        rope_pos,
+                        _page_kv_last_page_len,
+                        _append_pos,
+                        _rope_pos,
                         attn_plan_results,
-                        inverse_indptr,
-                        inverse_indices,
-                        etensor_workspace,
-                        attn_task_num,
+                        _inverse_indptr,
+                        _inverse_indices,
+                        _etensor_workspace,
+                        _attn_task_num,
                     ) = (
                         res0[0],
                         res0[1],
@@ -659,30 +659,30 @@ def get_llama3_megakernel_relax_mod(
                         res0[9],
                         res0[10],
                     )
-                    kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, mk.HEAD_DIM), dtype="float16")] * mk.NUM_HIDDEN_LAYERS))
-                    page_kv_indices = R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                    task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
-                    q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
-                    len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
-                    merge_indptr = R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
-                    q_indptr = R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_indptr = R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    partial_indptr = R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_len = R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_len = R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_start = R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_start = R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_end = R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    work_indptr = R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[5]
-                    lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[0 if mk.TIE_WORD_EMBEDDINGS else mk.NUM_HIDDEN_LAYERS*6+2]
+                    R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, mk.HEAD_DIM), dtype="float16")] * mk.NUM_HIDDEN_LAYERS))  # noqa: E501
+                    R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
+                    task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]  # noqa: E501
+                    q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]  # noqa: E501
+                    R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
+                    R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
+                    R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))  # noqa: E501
+                    R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[5]  # noqa: E501
+                    lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[0 if mk.TIE_WORD_EMBEDDINGS else mk.NUM_HIDDEN_LAYERS*6+2]  # noqa: E501
 
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
-                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))  # noqa: E501
+                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_  # noqa: E501
 
                     o_layer0 = call_llama3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_llama3_layer(o_layer0[0], o_layer0[1], 1)
@@ -702,15 +702,15 @@ def get_llama3_megakernel_relax_mod(
                     o_layer15 = call_llama3_layer(o_layer14[0], o_layer14[1], 15)
 
                     # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
-                    # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                    lv4 = R.call_tir(cls.hgemm, (o_layer15[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
+                    # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")  # noqa: E501
+                    lv4 = R.call_tir(cls.hgemm, (o_layer15[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))  # noqa: E501
 
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
-                    astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
+                    astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))  # noqa: E501
 
                     profiler = (
-                        o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],
-                        o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],
+                        o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],  # noqa: E501
+                        o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],  # noqa: E501
                         o_layer12[2], o_layer13[2], o_layer14[2], o_layer15[2]
                     )
 
@@ -728,8 +728,8 @@ def get_llama3_megakernel_relax_mod(
                 packed_params: R.Tuple(
                     R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     #
-                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),
-                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),
+                    *([R.Tensor(((mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM, mk.HIDDEN_SIZE), dtype="float16"),  # noqa: E501
+                    R.Tensor((mk.HIDDEN_SIZE, mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM), dtype="float16"),  # noqa: E501
                     R.Tensor((2 * mk.INTERMEDIATE_SIZE, mk.HIDDEN_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16"),
                     R.Tensor((mk.HIDDEN_SIZE,), dtype="float16"),
@@ -745,7 +745,7 @@ def get_llama3_megakernel_relax_mod(
                     packed_params,
                 )
                 if PROFILER_ON:
-                    rank = R.call_packed("runtime.disco.worker_id", sinfo_args=[R.Shape()]) if TP_SIZE > 1 else R.prim_value(-1)
+                    rank = R.call_packed("runtime.disco.worker_id", sinfo_args=[R.Shape()]) if TP_SIZE > 1 else R.prim_value(-1)  # noqa: E501
                     _ = R.call_packed(
                         "megakernel.export_trace",
                         model_output[2],

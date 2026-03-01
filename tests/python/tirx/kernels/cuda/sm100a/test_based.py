@@ -29,16 +29,17 @@ Architecture:
 """
 
 import math
-import pytest
+
 import numpy as np
+import pytest
 import torch
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # Constants
 CHUNK = 64
@@ -47,8 +48,8 @@ D_VO = 64
 SM_COUNT = 148
 
 # Warp-specialized layout
-WG_NUMBER = 2        # WG0=consumer, WG1=producer+MMA
-WARP_NUMBER = 4      # per warpgroup
+WG_NUMBER = 2  # WG0=consumer, WG1=producer+MMA
+WARP_NUMBER = 4  # per warpgroup
 NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # 256
 
 # MMA dimensions
@@ -59,8 +60,8 @@ MMA_K = 16
 CTA_GROUP = 1
 
 # Swizzle modes
-SWIZZLE_QK = 1   # 32B swizzle for Q/K (D_QK=16 * 2B = 32B rows)
-SWIZZLE_V = 3    # 128B swizzle for V/work/D_out (D_VO=64 * 2B = 128B rows)
+SWIZZLE_QK = 1  # 32B swizzle for Q/K (D_QK=16 * 2B = 32B rows)
+SWIZZLE_V = 3  # 128B swizzle for V/work/D_out (D_VO=64 * 2B = 128B rows)
 
 # Pipeline
 PIPE_DEPTH = 2
@@ -73,11 +74,11 @@ N_COLS = 64
 TMEM_LD_SIZE = 64
 
 # Dimensions for a2 MMA phases
-QQT_ROWS = CHUNK       # 64
-QQT_COLS = D_QK * D_QK # 256
-A2S_ROWS = D_QK * D_QK # 256
-A2S_COLS = D_VO        # 64
-N_KK_CHUNKS = 4        # KK[64,256] split into 4 chunks of [64,64] for state update
+QQT_ROWS = CHUNK  # 64
+QQT_COLS = D_QK * D_QK  # 256
+A2S_ROWS = D_QK * D_QK  # 256
+A2S_COLS = D_VO  # 64
+N_KK_CHUNKS = 4  # KK[64,256] split into 4 chunks of [64,64] for state update
 
 # SMEM budget (bytes):
 #   barriers=1024 + Q[2,64,16]*f16=4K + K[2,64,16]*f16=4K + V[2,64,64]*f16=16K
@@ -86,29 +87,29 @@ N_KK_CHUNKS = 4        # KK[64,256] split into 4 chunks of [64,64] for state upd
 #   + qqt_kk[64,256]*f16=32K + a2s_f16[256,64]*f16=32K
 #   + a1s_f16[16,64]*f16=2K (1024B-aligned, for a1 contribution MMA)
 #   Total ~178K
-A1S_F16_ROWS = D_QK   # 16
-A1S_F16_COLS = D_VO   # 64
+A1S_F16_ROWS = D_QK  # 16
+A1S_F16_COLS = D_VO  # 64
 SMEM_SIZE = (
     1024  # barriers + alignment
-    + PIPE_DEPTH * CHUNK * D_QK * F16_BYTES   # Q (swizzled 32B)
-    + PIPE_DEPTH * CHUNK * D_QK * F16_BYTES   # K (swizzled 32B)
-    + PIPE_DEPTH * CHUNK * D_VO * F16_BYTES   # V (swizzled 128B)
-    + CHUNK * D_VO * F16_BYTES                # work_smem (swizzled 128B)
-    + CHUNK * D_VO * F16_BYTES                # D_out (swizzled 128B)
-    + D_VO * F32_BYTES                        # a0s
-    + D_QK * D_VO * F32_BYTES                 # a1s
-    + D_QK * D_QK * D_VO * F32_BYTES          # a2s
-    + QQT_ROWS * QQT_COLS * F16_BYTES         # qqt_kk_smem (swizzled 128B)
-    + A2S_ROWS * A2S_COLS * F16_BYTES          # a2s_f16_smem (swizzled 128B)
-    + 1024                                    # alignment padding for a1s_f16
-    + A1S_F16_ROWS * A1S_F16_COLS * F16_BYTES # a1s_f16_smem (swizzled 128B)
+    + PIPE_DEPTH * CHUNK * D_QK * F16_BYTES  # Q (swizzled 32B)
+    + PIPE_DEPTH * CHUNK * D_QK * F16_BYTES  # K (swizzled 32B)
+    + PIPE_DEPTH * CHUNK * D_VO * F16_BYTES  # V (swizzled 128B)
+    + CHUNK * D_VO * F16_BYTES  # work_smem (swizzled 128B)
+    + CHUNK * D_VO * F16_BYTES  # D_out (swizzled 128B)
+    + D_VO * F32_BYTES  # a0s
+    + D_QK * D_VO * F32_BYTES  # a1s
+    + D_QK * D_QK * D_VO * F32_BYTES  # a2s
+    + QQT_ROWS * QQT_COLS * F16_BYTES  # qqt_kk_smem (swizzled 128B)
+    + A2S_ROWS * A2S_COLS * F16_BYTES  # a2s_f16_smem (swizzled 128B)
+    + 1024  # alignment padding for a1s_f16
+    + A1S_F16_ROWS * A1S_F16_COLS * F16_BYTES  # a1s_f16_smem (swizzled 128B)
 )
 assert SMEM_SIZE <= 232448
 
 
 def prepare_data(batch, heads, seq_len):
-    q = torch.randn(batch * heads, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK ** 0.5)
-    k = torch.randn(batch * heads, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK ** 0.5)
+    q = torch.randn(batch * heads, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK**0.5)
+    k = torch.randn(batch * heads, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK**0.5)
     v = torch.randn(batch * heads, seq_len, D_VO, dtype=torch.float16, device="cuda") / D_VO
     return q, k, v
 
@@ -132,7 +133,7 @@ def naive_based(q, k, v):
         return X
 
     qk = torch.matmul(qf, kf.transpose(-2, -1))  # (BH, L, L)
-    T2 = torch.matmul(make_causal(qk ** 2), vf)
+    T2 = torch.matmul(make_causal(qk**2), vf)
     T1 = torch.matmul(make_causal(qk), vf)
     T0 = vf.cumsum(dim=1)
 
@@ -194,8 +195,6 @@ a1s_f16_layout = Tx.ComposeLayout(
 
 
 def get_based_kernel():
-    a_type = tvm.DataType("float16")
-
     # fmt: off
     @Tx.prim_func(tirx=True)
     def based(q_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, o_ptr: Tx.handle,
@@ -208,11 +207,11 @@ def get_based_kernel():
         o_g = Tx.match_buffer(o_ptr, [total_bh, seq_len, D_VO], "float16", scope="global")
         kv_a0_g = Tx.match_buffer(kv_a0_ptr, [total_bh, D_VO], "float16", scope="global")
         kv_a1_g = Tx.match_buffer(kv_a1_ptr, [total_bh, D_QK, D_VO], "float16", scope="global")
-        kv_a2_g = Tx.match_buffer(kv_a2_ptr, [total_bh, D_QK * D_QK, D_VO], "float16", scope="global")
+        kv_a2_g = Tx.match_buffer(kv_a2_ptr, [total_bh, D_QK * D_QK, D_VO], "float16", scope="global")  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
             warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
 
@@ -260,7 +259,7 @@ def get_based_kernel():
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
                     Tx.cuda.warp_sync()
 
                 Tx.ptx.fence.proxy_async("shared::cta")
@@ -302,16 +301,16 @@ def get_based_kernel():
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
                                         tic = Tx.meta_var(cid_tma % PIPE_DEPTH)
                                         q_row = Tx.meta_var(cid_tma * CHUNK)
-                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.ptr_to([tic]), "cta_group": CTA_GROUP})  # noqa: E501
                                         # Wait for MMA to release this SMEM slot
                                         if cid_tma >= PIPE_DEPTH:
                                             mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V for this chunk
-                                        Tx.copy_async(Q_smem[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : D_QK], **tma_copy)
-                                        Tx.copy_async(K_smem[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : D_QK], **tma_copy)
-                                        Tx.copy_async(V_smem[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : D_VO], **tma_copy)
+                                        Tx.copy_async(Q_smem[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : D_QK], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_smem[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : D_QK], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_smem[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : D_VO], **tma_copy)  # noqa: E501
                                         # Signal that load is done
-                                        tma2mma_bar.arrive(tic, (2 * CHUNK * D_QK * F16_BYTES + CHUNK * D_VO * F16_BYTES))
+                                        tma2mma_bar.arrive(tic, (2 * CHUNK * D_QK * F16_BYTES + CHUNK * D_VO * F16_BYTES))  # noqa: E501
                                     if cid_tma % PIPE_DEPTH == PIPE_DEPTH - 1:
                                         phase[0] = phase[0] ^ 1
                                     cid_tma = cid_tma + 1
@@ -322,27 +321,27 @@ def get_based_kernel():
                             # Phase 1: Q@K^T — transB=False, K is [N,K] format
                             # Q[64,16], K[64,16] with SWIZZLE_QK (32B)
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI), "float32", "float16", "float16",
+                                Tx.address_of(descI), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, False, CTA_GROUP)
 
                             # Phase 2: att@V — transB=True, V is [K,N] format
                             descI_tb: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_tb), "float32", "float16", "float16",
+                                Tx.address_of(descI_tb), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
 
                             # Phase 3: QQT[64,256]@a2s_f16[256,64] — transA=False, transB=True
-                            # A=QQT[M=64,K=256] stored as [M,K], B=a2s_f16[K=256,N=64] stored as [K,N]
+                            # A=QQT[M=64,K=256] stored as [M,K], B=a2s_f16[K=256,N=64] stored as [K,N]  # noqa: E501
                             descI_a2_contrib: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_a2_contrib), "float32", "float16", "float16",
+                                Tx.address_of(descI_a2_contrib), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
 
                             # Phases 4-7: KK_chunk^T[64,64]@V[64,64] — transA=True, transB=True
                             # A stored as [K=64, M=64] in SMEM, transA transposes to [M, K]
                             descI_a2_state: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_a2_state), "float32", "float16", "float16",
+                                Tx.address_of(descI_a2_state), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, True, True, CTA_GROUP)
 
                             # Descriptor params for Q/K (SWIZZLE_QK=1, 32B rows)
@@ -377,14 +376,14 @@ def get_based_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
                                         for ki in Tx.unroll(D_QK // MMA_K):  # 1 iteration
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO_QK, MMA_SDO_QK, SWIZZLE_QK)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_smem.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_smem.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO_QK, MMA_SDO_QK, SWIZZLE_QK)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
@@ -395,70 +394,70 @@ def get_based_kernel():
                                         # work[M=64,K=64], V[K=64,N=64] -> o[64,64]
                                         for ki in Tx.unroll(CHUNK // MMA_K):  # 4 iterations
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO_V, MMA_SDO_V, SWIZZLE_V)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO_V, MMA_SDO_V, SWIZZLE_V)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 2.5 (NEW): Q[64,16] @ a1s_f16[16,64] -> a1 contrib (in TMEM) ==
+                                        # == Phase 2.5 (NEW): Q[64,16] @ a1s_f16[16,64] -> a1 contrib (in TMEM) ==  # noqa: E501
                                         # A=Q[M=64,K=16], B=a1s_f16[K=16,N=64] -> [64,64], 1 K-iter
                                         for ki in Tx.unroll(D_QK // MMA_K):  # 1 iteration
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO_QK, MMA_SDO_QK, SWIZZLE_QK)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), a1s_f16_smem.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), a1s_f16_smem.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO_V, MMA_SDO_V, SWIZZLE_V)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2.5
                                         consumer2mma_bar.wait(0, phase_c2m)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 3: QQT[64,256] @ a2s_f16[256,64] -> a2_contrib (in TMEM) ==
+                                        # == Phase 3: QQT[64,256] @ a2s_f16[256,64] -> a2_contrib (in TMEM) ==  # noqa: E501
                                         # A=QQT[M=64,K=256], B=a2s_f16[N=64,K=256] -> [64,64]
                                         for ki in Tx.unroll(QQT_COLS // MMA_K):  # 16 iterations
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), qqt_kk_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), qqt_kk_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO_QQT, MMA_SDO_QQT, SWIZZLE_V)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), a2s_f16_smem.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), a2s_f16_smem.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO_V, MMA_SDO_V, SWIZZLE_V)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_a2_contrib, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_a2_contrib, False, CTA_GROUP, ki > 0)  # noqa: E501, F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 3
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phases 4-7: KK_chunk_i^T[64,64] @ V[64,64] -> kv_update (in TMEM) ==
-                                        # qqt_kk_smem now holds KK[64,256], split into 4 chunks of [64,64]
-                                        # For each chunk i: A=KK[:,i*64:(i+1)*64] with transA → A^T[64,64] @ V[64,64]
+                                        # == Phases 4-7: KK_chunk_i^T[64,64] @ V[64,64] -> kv_update (in TMEM) ==  # noqa: E501
+                                        # qqt_kk_smem now holds KK[64,256], split into 4 chunks of [64,64]  # noqa: E501
+                                        # For each chunk i: A=KK[:,i*64:(i+1)*64] with transA → A^T[64,64] @ V[64,64]  # noqa: E501
                                         for chunk_i in Tx.unroll(N_KK_CHUNKS):
                                             for ki in Tx.unroll(CHUNK // MMA_K):  # 4 iterations
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descA), qqt_kk_smem.ptr_to([ki * MMA_K, chunk_i * CHUNK]),
+                                                    Tx.address_of(descA), qqt_kk_smem.ptr_to([ki * MMA_K, chunk_i * CHUNK]),  # noqa: E501, F821
                                                     MMA_LDO_QQT, MMA_SDO_QQT, SWIZZLE_V)
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                                    Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                     MMA_LDO_V, MMA_SDO_V, SWIZZLE_V)
                                                 Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                     Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                    descA, descB, descI_a2_state, False, CTA_GROUP, ki > 0)
+                                                    descA, descB, descI_a2_state, False, CTA_GROUP, ki > 0)  # noqa: E501, F821
                                             mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                             # Wait consumer done with this state update phase
@@ -519,7 +518,6 @@ def get_based_kernel():
                             cid_con = 0
                             while cid_con < nc_con:
                                 tic_c = Tx.meta_var(cid_con % PIPE_DEPTH)
-                                tid_in_wg_val = Tx.meta_var(warp_id * 32 + lane_id)
 
                                 # ======== Phase 1: Read qk from TMEM ========
                                 mma2consumer_bar.wait(0, phase_m2c)
@@ -567,13 +565,13 @@ def get_based_kernel():
 
                                         # Load Q values for this row (16 values)
                                         for d in Tx.serial(D_QK):
-                                            q_vals[d] = Tx.cast(Q_smem[tic_c, out_row, d], "float32")
+                                            q_vals[d] = Tx.cast(Q_smem[tic_c, out_row, d], "float32")  # noqa: E501
 
                                         # ---- Add a0 contribution: o[f] += a0s[f] ----
                                         for f in Tx.serial(D_VO):
                                             o_reg[f] = o_reg[f] + a0s[f]
 
-                                # ---- Prepare QQT[64,256], a2s_f16[256,64], a1s_f16[16,64] in SMEM ----
+                                # ---- Prepare QQT[64,256], a2s_f16[256,64], a1s_f16[16,64] in SMEM ----  # noqa: E501
                                 # All 128 consumer threads cooperate
                                 with Tx.thread():
                                     tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
@@ -585,24 +583,24 @@ def get_based_kernel():
                                         qcol = Tx.meta_var(flat % QQT_COLS)
                                         e_idx = Tx.meta_var(qcol // D_QK)
                                         d_idx = Tx.meta_var(qcol % D_QK)
-                                        qd_f32 = Tx.meta_var(Tx.cast(Q_smem[tic_c, qrow, d_idx], "float32"))
-                                        qe_f32 = Tx.meta_var(Tx.cast(Q_smem[tic_c, qrow, e_idx], "float32"))
-                                        qqt_kk_smem[qrow, qcol] = Tx.cast(qd_f32 * qe_f32 * 0.03125, "float16")
+                                        qd_f32 = Tx.meta_var(Tx.cast(Q_smem[tic_c, qrow, d_idx], "float32"))  # noqa: E501
+                                        qe_f32 = Tx.meta_var(Tx.cast(Q_smem[tic_c, qrow, e_idx], "float32"))  # noqa: E501
+                                        qqt_kk_smem[qrow, qcol] = Tx.cast(qd_f32 * qe_f32 * 0.03125, "float16")  # noqa: E501
 
                                     # a2s_f16: 256*64=16384 values / 128 threads = 128 per thread
                                     for i in Tx.serial(128):
                                         flat = Tx.meta_var(tid_flat * 128 + i)
                                         a2row = Tx.meta_var(flat // A2S_COLS)
                                         a2col = Tx.meta_var(flat % A2S_COLS)
-                                        a2s_f16_smem[a2row, a2col] = Tx.cast(a2s[a2row, a2col], "float16")
+                                        a2s_f16_smem[a2row, a2col] = Tx.cast(a2s[a2row, a2col], "float16")  # noqa: E501
 
                                     # a1s_f16: 16*64=1024 values / 128 threads = 8 per thread
-                                    # a1s_f16[d, f] = f16(a1s[d, f] * 0.25) — pre-scale by 0.25 for Q
+                                    # a1s_f16[d, f] = f16(a1s[d, f] * 0.25) — pre-scale by 0.25 for Q  # noqa: E501
                                     for i in Tx.serial(8):
                                         flat = Tx.meta_var(tid_flat * 8 + i)
                                         a1row = Tx.meta_var(flat // A1S_F16_COLS)
                                         a1col = Tx.meta_var(flat % A1S_F16_COLS)
-                                        a1s_f16_smem[a1row, a1col] = Tx.cast(a1s[a1row, a1col] * 0.25, "float16")
+                                        a1s_f16_smem[a1row, a1col] = Tx.cast(a1s[a1row, a1col] * 0.25, "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
@@ -646,20 +644,20 @@ def get_based_kernel():
 
                                         # ---- Update a0/a1 states (moved from Phase 2) ----
                                         for pos in Tx.serial(CHUNK):
-                                            v_val = Tx.meta_var(Tx.cast(V_smem[tic_c, pos, out_row], "float32"))
+                                            v_val = Tx.meta_var(Tx.cast(V_smem[tic_c, pos, out_row], "float32"))  # noqa: E501
                                             a0s[out_row] = a0s[out_row] + v_val
                                             for d in Tx.serial(D_QK):
-                                                k_vals[d] = Tx.cast(K_smem[tic_c, pos, d], "float32")
+                                                k_vals[d] = Tx.cast(K_smem[tic_c, pos, d], "float32")  # noqa: E501
                                             for d in Tx.serial(D_QK):
-                                                a1s[d, out_row] = a1s[d, out_row] + k_vals[d] * v_val
+                                                a1s[d, out_row] = a1s[d, out_row] + k_vals[d] * v_val  # noqa: E501
 
                                 # TMA store output
                                 Tx.ptx.fence.proxy_async("shared::cta")
                                 Tx.cuda.warpgroup_sync(10)
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     q_row_out = Tx.meta_var(cid_con * CHUNK)
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : D_VO],
-                                                  D_out_smem[:, :], dispatch="tma", cache_hint="evict_last")
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : D_VO],  # noqa: E501
+                                                  D_out_smem[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
                                     Tx.ptx.cp_async.bulk.wait_group(0)
                                 Tx.cuda.warpgroup_sync(10)
@@ -675,9 +673,9 @@ def get_based_kernel():
                                         kcol = Tx.meta_var(flat % QQT_COLS)
                                         e_idx = Tx.meta_var(kcol // D_QK)
                                         d_idx = Tx.meta_var(kcol % D_QK)
-                                        kd_f32 = Tx.meta_var(Tx.cast(K_smem[tic_c, krow, d_idx], "float32"))
-                                        ke_f32 = Tx.meta_var(Tx.cast(K_smem[tic_c, krow, e_idx], "float32"))
-                                        qqt_kk_smem[krow, kcol] = Tx.cast(kd_f32 * ke_f32, "float16")
+                                        kd_f32 = Tx.meta_var(Tx.cast(K_smem[tic_c, krow, d_idx], "float32"))  # noqa: E501
+                                        ke_f32 = Tx.meta_var(Tx.cast(K_smem[tic_c, krow, e_idx], "float32"))  # noqa: E501
+                                        qqt_kk_smem[krow, kcol] = Tx.cast(kd_f32 * ke_f32, "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
@@ -718,14 +716,14 @@ def get_based_kernel():
                                     # a1: (D_QK, D_VO), each thread writes one row, scaled by 0.5
                                     if out_row < D_QK:
                                         for f in Tx.serial(D_VO):
-                                            kv_a1_g[wid_con, out_row, f] = Tx.cast(a1s[out_row, f] * 0.5, "float16")
+                                            kv_a1_g[wid_con, out_row, f] = Tx.cast(a1s[out_row, f] * 0.5, "float16")  # noqa: E501
 
                                     # a2: (D_QK*D_QK, D_VO), scaled by 0.1767766953
                                     # 256 rows / 64 threads = 4 rows per thread
                                     for ri in Tx.serial(4):
                                         a2_row = Tx.meta_var(out_row * 4 + ri)
                                         for f in Tx.serial(D_VO):
-                                            kv_a2_g[wid_con, a2_row, f] = Tx.cast(a2s[a2_row, f] * 0.1767766953, "float16")
+                                            kv_a2_g[wid_con, a2_row, f] = Tx.cast(a2s[a2_row, f] * 0.1767766953, "float16")  # noqa: E501
                             Tx.cuda.warpgroup_sync(10)
 
                             wid_con = wid_con + SM_COUNT
@@ -740,7 +738,9 @@ def get_based_kernel():
     return based
 
 
-@pytest.mark.parametrize("batch,heads,seq_len", [(1, 1, 64), (1, 1, 256), (1, 8, 1024), (10, 16, 128)])
+@pytest.mark.parametrize(
+    "batch,heads,seq_len", [(1, 1, 64), (1, 1, 256), (1, 8, 1024), (10, 16, 128)]
+)
 def test_based(batch, heads, seq_len):
     q, k, v = prepare_data(batch, heads, seq_len)
     o_ref, a0_ref, a1_ref, a2_ref = naive_based(q, k, v)
@@ -774,7 +774,12 @@ def test_based(batch, heads, seq_len):
     o_ref_np = o_ref.cpu().numpy()
     abs_diff = np.abs(o_tir.astype(np.float32) - o_ref_np.astype(np.float32))
     abs_ref = np.abs(o_ref_np.astype(np.float32))
-    print(f"O:  avg_ref={abs_ref.mean():.6f}, avg_diff={abs_diff.mean():.6f}, max_diff={abs_diff.max():.6f}")
+    print(
+        "O:  "
+        f"avg_ref={abs_ref.mean():.6f}, "
+        f"avg_diff={abs_diff.mean():.6f}, "
+        f"max_diff={abs_diff.max():.6f}"
+    )
     # f16 accumulation error grows with nc (chunks); scale O tolerance accordingly
     nc = seq_len // 64
     o_atol = max(0.3, 0.01 * nc)
@@ -783,13 +788,19 @@ def test_based(batch, heads, seq_len):
     # Check a0
     a0_tir = a0_tvm.numpy()
     a0_ref_np = a0_ref.cpu().numpy()
-    print(f"a0: avg_ref={np.abs(a0_ref_np).mean():.6f}, max_diff={np.abs(a0_tir.astype(np.float32) - a0_ref_np.astype(np.float32)).max():.6f}")
+    print(
+        f"a0: avg_ref={np.abs(a0_ref_np).mean():.6f}, "
+        f"max_diff={np.abs(a0_tir.astype(np.float32) - a0_ref_np.astype(np.float32)).max():.6f}"
+    )
     np.testing.assert_allclose(a0_tir, a0_ref_np, rtol=1e-1, atol=1e-1)
 
     # Check a1
     a1_tir = a1_tvm.numpy()
     a1_ref_np = a1_ref.cpu().numpy()
-    print(f"a1: avg_ref={np.abs(a1_ref_np).mean():.6f}, max_diff={np.abs(a1_tir.astype(np.float32) - a1_ref_np.astype(np.float32)).max():.6f}")
+    print(
+        f"a1: avg_ref={np.abs(a1_ref_np).mean():.6f}, "
+        f"max_diff={np.abs(a1_tir.astype(np.float32) - a1_ref_np.astype(np.float32)).max():.6f}"
+    )
     # Scale tolerance with sequence length — f16 accumulation error grows with chunks.
     # Large BH also increases statistical chance of outlier diffs, so add a small margin.
     nc = seq_len // 64
@@ -799,7 +810,10 @@ def test_based(batch, heads, seq_len):
     # Check a2
     a2_tir = a2_tvm.numpy()
     a2_ref_np = a2_ref.cpu().numpy()
-    print(f"a2: avg_ref={np.abs(a2_ref_np).mean():.6f}, max_diff={np.abs(a2_tir.astype(np.float32) - a2_ref_np.astype(np.float32)).max():.6f}")
+    print(
+        f"a2: avg_ref={np.abs(a2_ref_np).mean():.6f}, "
+        f"max_diff={np.abs(a2_tir.astype(np.float32) - a2_ref_np.astype(np.float32)).max():.6f}"
+    )
     np.testing.assert_allclose(a2_tir, a2_ref_np, rtol=state_atol, atol=state_atol)
 
     print(f"PASSED (O + states): batch={batch}, heads={heads}, seq_len={seq_len}")
@@ -820,20 +834,21 @@ def bench_based():
     # f = 2*B*N*H*expanded_dim (feature map Q & K)
     #   + 4 * B*N*H*D_VO*expanded_dim (kv, cumsum, q*kv, sum)
     EXPANDED_DIM = D_QK * D_QK + D_QK + 1  # 273
+
     def flops(ms, seq_len):
         f = 2 * batch * seq_len * heads * EXPANDED_DIM
         f += 4 * batch * seq_len * heads * D_VO * EXPANDED_DIM
         return f / (ms * 1e-3)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"BASED Benchmark (B={batch}, H={heads})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     with ProtonContext("based"):
         for seq_len in [1024, 2048, 4096, 8192]:
             q, k, v = (
-                torch.randn(BH, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK ** 0.5),
-                torch.randn(BH, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK ** 0.5),
+                torch.randn(BH, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK**0.5),
+                torch.randn(BH, seq_len, D_QK, dtype=torch.float16, device="cuda") / (D_QK**0.5),
                 torch.randn(BH, seq_len, D_VO, dtype=torch.float16, device="cuda"),
             )
             o_np = np.zeros((BH, seq_len, D_VO), dtype=np.float16)
@@ -849,7 +864,9 @@ def bench_based():
             a1_tvm = tvm.runtime.tensor(a1_np, DEV)
             a2_tvm = tvm.runtime.tensor(a2_np, DEV)
 
-            func = lambda: mod(q_tvm, k_tvm, v_tvm, o_tvm, a0_tvm, a1_tvm, a2_tvm)
+            def func():
+                mod(q_tvm, k_tvm, v_tvm, o_tvm, a0_tvm, a1_tvm, a2_tvm)
+
             ms = bench(func, warmup=100, repeat=300, proton_name=f"based_N{seq_len}")
             tflops = flops(ms, seq_len) / 1e12
             print(f"  N={seq_len:>5d}: {tflops:.2f} TFLOPS, {ms:.3f} ms")

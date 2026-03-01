@@ -14,13 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E402
 
 import functools
 import json
 import random
 from argparse import ArgumentParser
 from pathlib import Path
-from typing import List
+
 import pytest
 
 pytest.skip(
@@ -29,7 +30,6 @@ pytest.skip(
 )
 
 import numpy as np
-import torch
 from mlc_llm.compiler_pass.attach_support_info import (
     AttachMemoryPlanAttr,
     AttachVariableBounds,
@@ -45,14 +45,11 @@ from mlc_llm.nn.kv_cache import PagedKVCache
 from tqdm import tqdm
 
 import tvm
-from tvm import dlight, relax, target
+from tvm import dlight, relax
 from tvm.relax import register_pipeline
 from tvm.relax.frontend import nn
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
-from tvm.script import relax as R
 from tvm.tirx.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
 from tvm.tirx.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
@@ -65,14 +62,13 @@ from tvm.tirx.megakernel.utils.config import (
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
 from .test_layer import MegaKernelDenseLayer
-from .test_moe_full_layer import MegaKernelMOEFullLayer
 from .test_lm_head import LMHeadLayer
+from .test_moe_full_layer import MegaKernelMOEFullLayer
 
 # pyright: reportInvalidTypeForm=false
 
 
 def test(args):
-
     dev = tvm.cuda()
     target = tvm.target.Target("cuda")
 
@@ -171,8 +167,8 @@ def test(args):
     TP_SIZE = args.tp_size
     if args.model == "Qwen3-30B-A3B":
         assert TP_SIZE == 1
-    # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface
-    #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
+    # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface  # noqa: E501
+    #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight  # noqa: E501
     use_mega_weights = (
         mk_config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][args.tp_size] == 1
         if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config
@@ -184,7 +180,7 @@ def test(args):
         else f"/raid/catalyst/models/{args.model}-q0f16-MLC"
     )
     MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/{args.model}-q0f16-tp{TP_SIZE}.so"
-    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/{args.model}-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
+    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/{args.model}-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path  # noqa: E501
     DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser()  # NOTE: update this path
 
     # LOAD_WEIGHTS = None  # generate weights
@@ -242,7 +238,7 @@ def test(args):
         }
         return nn.spec.ModuleSpec.from_raw(mod_spec, model)
 
-    def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
+    def _craft_pipeline(ext_mods: list[nn.ExternModule], dump_file_prefix: Path):
         ext_mods = ext_mods or []
         debug_dir = Path(DEBUG_PATH)
 
@@ -304,7 +300,7 @@ def test(args):
 
     @register_pipeline("opt_llm_mg")
     def _pipeline(  # pylint: disable=too-many-arguments
-        ext_mods: List[nn.ExternModule] = None,
+        ext_mods: list[nn.ExternModule] | None = None,
     ):
         return _craft_pipeline(ext_mods, "opt_llm_mg")
 
@@ -359,11 +355,16 @@ def test(args):
             batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
             kv_cache_create_func_ = mod_get_func(vm, "create_flashinfer_paged_kv_cache", True)
             embed_func_ = mod_get_func(vm, "embed", True)
-            batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
-            kv_cache_create_func = lambda *args: disco_sess.call_packed(
-                kv_cache_create_func_, *args
-            )
-            embed_func = lambda *args: disco_sess.call_packed(embed_func_, *args)
+
+            def batch_decode_func(*args):
+                return disco_sess.call_packed(batch_decode_func_, *args)
+
+            def kv_cache_create_func(*args):
+                return disco_sess.call_packed(kv_cache_create_func_, *args)
+
+            def embed_func(*args):
+                return disco_sess.call_packed(embed_func_, *args)
+
         return vm, batch_decode_func, kv_cache_create_func, embed_func
 
     model = mlc_model_func(mlc_config_tp1)
@@ -392,13 +393,13 @@ def test(args):
     ):
         nonlocal nvshmem_initialized
         if not nvshmem_initialized and TP_SIZE > 1:
-            print(f"start to initialize nvshmem")
+            print("start to initialize nvshmem")
             f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
             uid = f_init_nvshmem_uid()
             f_init_nvshmem = get_global_func("runtime.disco.nvshmem.init_nvshmem")
             f_init_nvshmem(uid, TP_SIZE, 0)
             nvshmem_initialized = True
-            print(f"nvshmem initialized")
+            print("nvshmem initialized")
 
         kv_cache = kv_cache_create_func(
             ShapeTuple([MAX_BATCH_SIZE]),  # max_batch_size
@@ -519,8 +520,12 @@ def test(args):
             mod_get_func = get_global_func("ffi.ModuleGetFunction")
             batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
             cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
-            batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
-            cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
+
+            def batch_decode_func(*args):
+                return disco_sess.call_packed(batch_decode_func_, *args)
+
+            def cos_sin_cache_func(*args):
+                return disco_sess.call_packed(cos_sin_cache_func_, *args)
 
         return batch_decode_func, cos_sin_cache_func
 

@@ -266,12 +266,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                 scope_id_def->scope->parent, scope_p->Attr("scope_id_def")->Attr("parent"))};
             if (scope_id_def->preferred_extents.defined()) {
               kwarg_keys.push_back("preferred");
-              kwarg_vals.push_back(d->AsDoc<ExprDoc>(
-                  scope_id_def->preferred_extents.value(),
-                  scope_p->Attr("scope_id_def")->Attr("preferred_extents")));
+              kwarg_vals.push_back(
+                  d->AsDoc<ExprDoc>(scope_id_def->preferred_extents.value(),
+                                    scope_p->Attr("scope_id_def")->Attr("preferred_extents")));
             }
-            ExprDoc rhs = TIR(d, scope_id_def->scope->cur + "_id")
-                              ->Call(call_args, kwarg_keys, kwarg_vals);
+            ExprDoc rhs =
+                TIR(d, scope_id_def->scope->cur + "_id")->Call(call_args, kwarg_keys, kwarg_vals);
             (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
           }
 
@@ -281,10 +281,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           // Generate the with statement
           if (auto scope_slice_opt = exec_scope.as<tvm::tir::ExecScopeSlice>()) {
             auto scope_slice = scope_slice_opt.value();
-            ExprDoc extents_doc =
-                d->AsDoc<ExprDoc>(scope_slice->extents, scope_p->Attr("extents"));
-            ExprDoc parent_doc =
-                LiteralDoc::Str(scope_slice->parent, scope_p->Attr("parent"));
+            ExprDoc extents_doc = d->AsDoc<ExprDoc>(scope_slice->extents, scope_p->Attr("extents"));
+            ExprDoc parent_doc = LiteralDoc::Str(scope_slice->parent, scope_p->Attr("parent"));
             ExprDoc call = TIR(d, exec_scope->name)->Call({extents_doc, parent_doc});
             if (auto slices_opt = scope_slice->slices.as<ffi::Array<Range>>()) {
               auto slices = slices_opt.value();
@@ -299,8 +297,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
               return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
             } else {
               auto cond = scope_slice->slices.as<PrimExpr>().value();
-              auto cond_doc =
-                  d->AsDoc<ExprDoc>(cond, scope_p->Attr("select_cond"));
+              auto cond_doc = d->AsDoc<ExprDoc>(cond, scope_p->Attr("select_cond"));
               return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
             }
           } else {

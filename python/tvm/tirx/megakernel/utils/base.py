@@ -16,14 +16,15 @@
 # under the License.
 
 """Base abstract classes for megakernel."""
+
 import functools
-from typing import Dict, List, Literal, Optional, Tuple, Type
+from typing import Literal
 
 import tvm
-from tvm.script import tirx as Tx
 from tvm.script import ir as I
-from tvm.tir.expr import Var
+from tvm.script import tirx as Tx
 from tvm.tir import PrimExpr
+from tvm.tir.expr import Var
 from tvm.tirx.bench.utils import CudaProfiler
 
 from .config import KernelConfig, ProfileEventType
@@ -43,10 +44,6 @@ class Tile:
     @classmethod
     def class_finalize(cls):
         pass
-
-    @classmethod
-    def __str__(cls):
-        return cls.__name__
 
     def __init__(self):
         self._instance_id = id(self)
@@ -114,9 +111,7 @@ class SmemManager:
         self.ptr = ptr
         self.reguler_pool_allocator = Tx.PoolAllocator(ptr)
         self.persistent_pool_allocator = Tx.PoolAllocator(None if fusion_mode else ptr)
-        self.tiles = (
-            {}
-        )  # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]
+        self.tiles = {}  # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]  # noqa: E501
         self.runtime_tile_chunk_count = {}
         self.bufs = {}  # buf -> (split, beg, size, method)
         self.persistent_bufs = {}  # persistent buf -> (beg, end)
@@ -160,8 +155,8 @@ class SmemManager:
 
     # wrapper for pool allocator
     # method: "shared" -> wait_all / arrive_all
-    #         "exclusive" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will be exclusive on corresponding pages
-    #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages
+    #         "exclusive" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will be exclusive on corresponding pages  # noqa: E501
+    #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages  # noqa: E501
     #         "persistent" -> persistent smem, cannot be wait / arrive
     def alloc(
         self,
@@ -202,13 +197,13 @@ class SmemManager:
         else:
             # check the validity of the method
             if method == "shared":
-                assert (
-                    len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0
-                ), "Cannot use both shared and shared/exclusive methods at the same time"
+                assert len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0, (
+                    "Cannot use both shared and shared/exclusive methods at the same time"
+                )
             elif method == "exclusive":
-                assert (
-                    len(self.tiles[self.cur_tile_name][1]["shared"]) == 0
-                ), "Cannot use both shared and shared/exclusive methods at the same time"
+                assert len(self.tiles[self.cur_tile_name][1]["shared"]) == 0, (
+                    "Cannot use both shared and shared/exclusive methods at the same time"
+                )
             # allocation info
             buf_info = (split, beg, size, method)
             self.tiles[self.cur_tile_name][0] = max(
@@ -231,15 +226,15 @@ class SmemManager:
             checked_exclusive = []
             check_overlap = []
             for method in ["shared", "exclusive"]:
-                for (split, beg, size, _) in buf_info_dict[method]:
+                for split, beg, size, _ in buf_info_dict[method]:
                     end = beg + size
                     # check the max smem size
                     assert end <= self.chunk_num * self.chunk_size
                     # confirm no overlap in each tile
                     for beg_other, end_other in check_overlap:
-                        assert (
-                            beg >= end_other or beg_other >= end
-                        ), "Overlap detected in smem allocation"
+                        assert beg >= end_other or beg_other >= end, (
+                            "Overlap detected in smem allocation"
+                        )
                     check_overlap.append((beg, end))
                     # check the exclusive smem
                     if method == "exclusive":
@@ -248,10 +243,10 @@ class SmemManager:
                             end_chunk_id = (
                                 beg + size // split * (split_idx + 1) - 1
                             ) // self.chunk_size
-                            for (beg_id, end_id) in checked_exclusive:
-                                assert (
-                                    beg_id > end_chunk_id or end_id < beg_chunk_id
-                                ), "Exclusive chunk overlap detected"
+                            for beg_id, end_id in checked_exclusive:
+                                assert beg_id > end_chunk_id or end_id < beg_chunk_id, (
+                                    "Exclusive chunk overlap detected"
+                                )
                             checked_exclusive.append((beg_chunk_id, end_chunk_id))
                     else:
                         beg_chunk_id = beg // self.chunk_size
@@ -259,12 +254,12 @@ class SmemManager:
                         checked_exclusive.append((beg_chunk_id, end_chunk_id))
 
         # confirm that no overlap between persistent smem and other smem
-        for (beg_persistent, end_persistent) in self.persistent_bufs.values():
+        for beg_persistent, end_persistent in self.persistent_bufs.values():
             assert (
                 beg_persistent >= self.chunk_size * self.chunk_num
                 and end_persistent <= self.smem_max_bytes
             )
-            for (_, beg, size, _) in self.bufs.values():
+            for _, beg, size, _ in self.bufs.values():
                 assert beg >= end_persistent or beg_persistent >= beg + size
         persistent_buf_list = list(self.persistent_bufs.values())
         for i in range(len(persistent_buf_list)):
@@ -284,7 +279,7 @@ class SmemManager:
             print(k, v)
 
     # call before each op-kernel compilation
-    def set_tile(self, cur_tile: Optional[Tile]):
+    def set_tile(self, cur_tile: Tile | None):
         if cur_tile is None:
             self.cur_tile_name = "default"
         else:
@@ -475,7 +470,7 @@ class TileSchedulerBase:
     def __init__(self):
         pass
 
-    def get_idx_and_task_type(self) -> Tuple[List[PrimExpr], PrimExpr]:
+    def get_idx_and_task_type(self) -> tuple[list[PrimExpr], PrimExpr]:
         raise NotImplementedError
 
     @Tx.inline
@@ -504,7 +499,6 @@ class TileSchedulerBase:
 
 
 class InitETensorTile(Tile):
-
     VEC_SIZE = 1
 
     def __init__(self, etensor_and_f_init_pairs):
@@ -566,7 +560,7 @@ class MegaKernelWrapper:
 
     def __init__(
         self,
-        config: Dict = {},
+        config: dict = {},
         tp_size: int = 1,
         profiler_on: bool = False,
     ):
@@ -587,7 +581,7 @@ class MegaKernelWrapper:
         else:
             self.profiler = None
 
-    def _init_tile_scheduler(self, scheduler_class: Type[TileSchedulerBase], *args):
+    def _init_tile_scheduler(self, scheduler_class: type[TileSchedulerBase], *args):
         self.tile_scheduler: TileSchedulerBase = scheduler_class(*args)
 
     def _add_tile(self, tile, profiler_event_type, predicate=True):
@@ -652,15 +646,15 @@ class MegaKernelWrapper:
         return etensor
 
     def set_events_complete(
-        self, is_dynamic_sch, Semaphore: Type[SemaphoreBase], etensor_workspace_global
+        self, is_dynamic_sch, Semaphore: type[SemaphoreBase], etensor_workspace_global
     ):
         if not is_dynamic_sch:
-            l = len(self.etensor_and_f_init_pairs)
+            num_evtensors = len(self.etensor_and_f_init_pairs)
             self.evt_etensor_init_complete = self.add_etensor(
                 Semaphore,
                 etensor_workspace_global,
                 shape=[1],
-                f_init=f_init_const(l + 1 + KernelConfig.SM_NUMBER),
+                f_init=f_init_const(num_evtensors + 1 + KernelConfig.SM_NUMBER),
             )
         else:
             self.evt_etensor_init_complete = None

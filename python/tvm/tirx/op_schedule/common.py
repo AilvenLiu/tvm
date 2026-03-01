@@ -16,13 +16,14 @@
 # under the License.
 """TIRx operator schedule common utilities."""
 
+from collections.abc import Callable
 from enum import Enum
-from typing import Optional, List, Callable, Union
 
-from tvm.tirx.op_schedule import ScheduleContext, register_dispatch
-from .dispatcher import predicate
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
+from tvm.tirx.op_schedule import ScheduleContext, register_dispatch
+
+from .dispatcher import predicate
 
 
 class MapOpType(Enum):
@@ -53,10 +54,10 @@ class ReduceOpType(Enum):
 
 def register_unary_binary_schedule(
     op_name: str,
-    op_type: Union[MapOpType, ReduceOpType],
+    op_type: MapOpType | ReduceOpType,
     target_kind: str,
     target_check: Callable[[ScheduleContext], bool],
-    schedule_candidates: List[Callable[[OpCall, Enum, ScheduleContext], Optional[PrimFunc]]],
+    schedule_candidates: list[Callable[[OpCall, Enum, ScheduleContext], PrimFunc | None]],
 ) -> None:
     """Register a schedule function for a given operation type."""
 

@@ -16,8 +16,9 @@
 # under the License.
 
 """Configuration for megakernel."""
+
 from enum import Enum
-from typing import Dict, Any
+from typing import Any
 
 import tvm
 
@@ -280,7 +281,7 @@ llama3_1b_config = {
 
 
 @tvm.register_global_func("tirx.megakernel.get_model_config")
-def get_model_config(model_name: str) -> Dict[str, Any]:
+def get_model_config(model_name: str) -> dict[str, Any]:
     """Get model config by model name.
 
     Parameters

@@ -125,7 +125,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.ScheduleContextAddAllocBuffer", &ScheduleContextNode::AddAllocBuffer)
       .def_method("tirx.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt)
       .def_method("tirx.ScheduleContextAddPostBufferDefStmt",
-                   &ScheduleContextNode::AddPostBufferDefStmt);
+                  &ScheduleContextNode::AddPostBufferDefStmt);
 }
 
 /********************* Schedule Ops **********************/

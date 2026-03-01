@@ -16,13 +16,13 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments, too-many-locals, line-too-long
 """PTX tcgen05 operations (Blackwell tensor memory, MMA)."""
-import tvm
 
+import tvm
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
 from .types import PTXDataType
-from .utils import parse_str, is_power_of_two, validate_cta_group, validate_power_of_two_range
+from .utils import is_power_of_two, parse_str, validate_cta_group, validate_power_of_two_range
 
 
 @register_codegen("ptx_tcgen05_alloc")
@@ -170,7 +170,7 @@ __forceinline__ __device__ void {func_name}(uint32_t src_addr, uint32_t row_offs
         :
     );
 }}
-"""
+"""  # noqa: E501
     regs = [tvm.tir.address_of(reg) for reg in regs]
 
     return cuda_func_call(
@@ -242,7 +242,7 @@ __forceinline__ __device__ void {func_name}(uint32_t dst_addr, uint32_t row_offs
         :  "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), {reg_operands}
     );
 }}
-"""
+"""  # noqa: E501
     regs = [tvm.tir.address_of(reg) for reg in regs]
     return cuda_func_call(
         func_name,
@@ -312,7 +312,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
 
   *desc = (uint64_t)_desc;
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, desc, addr, ldo, sdo, swizzle, source_code=source_code), [
         "smem_descriptor"
     ]
@@ -431,19 +431,19 @@ def _check_tcgen05_mma_matrix_shape(
             else:
                 raise ValueError(err)
         elif cta_group == 2:
-            if not (m in [128, 256]):
+            if m not in [128, 256]:
                 raise ValueError(err)
             if not (32 <= n <= 256 and n % 32 == 0):
                 raise ValueError(err)
     elif kind == "i8":
         if cta_group == 1:
-            if not (m in [64, 128]):
+            if m not in [64, 128]:
                 raise ValueError(err)
             is_n_valid = (n == 8) or (n == 24) or (16 <= n <= 256 and n % 16 == 0)
             if not is_n_valid:
                 raise ValueError(err)
         elif cta_group == 2:
-            if not (m in [128, 256]):
+            if m not in [128, 256]:
                 raise ValueError(err)
             if not (32 <= n <= 256 and n % 32 == 0):
                 raise ValueError(err)
@@ -458,7 +458,7 @@ def _check_tcgen05_mma_matrix_shape(
                 if not (m == 256):
                     raise ValueError(err)
             else:  # dense
-                if not (m in [128, 256]):
+                if m not in [128, 256]:
                     raise ValueError(err)
             if not (16 <= n <= 256 and n % 16 == 0):
                 raise ValueError(err)
@@ -517,7 +517,7 @@ def codegen_ptx_tcgen05_encode_instr_descriptor(
     kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype)
     if kind not in ["f16", "tf32", "f8f6f4", "i8"]:
         raise ValueError(
-            f"Check failed for Data Type Kind. d_dtype: {d_dtype}, a_dtype: {a_dtype}, b_dtype: {b_dtype}"
+            f"Check failed for Data Type Kind. d_dtype: {d_dtype}, a_dtype: {a_dtype}, b_dtype: {b_dtype}"  # noqa: E501
         )
 
     if not _check_tcgen05_mma_matrix_shape(kind, n_cta_group, M, N, K, is_sparse):
@@ -853,7 +853,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
         :  {input_operands_list}
     );
 }}
-"""
+"""  # noqa: E501
 
     args = [func_name, d_tmem_addr, a_operand, b_desc]
     if sparse:
@@ -1018,7 +1018,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
         : "r"(d_tmem_addr), {a_constraint}(a_operand), "l"(b_desc), "r"(i_desc), "r"(accum), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
     );
 }}
-"""
+"""  # noqa: E501
     args = [func_name, d_tmem_addr, a_operand, b_desc]
     if sparse:
         args.append(sp_tmem_addr)
@@ -1135,7 +1135,7 @@ __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
         :"r"(bar_addr){cta_mask_arg_str}
     );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, bar, cta_mask, source_code=source_code)
 
 
@@ -1161,7 +1161,7 @@ def codegen_ptx_tcgen05_cp(
     if shape not in valid_shapes:
         raise ValueError(f"Invalid shape for tcgen05 copy, check failed for shape: {shape}")
 
-    err_msg = f"Invalid multicast for tcgen05 copy, check failed for shape: {shape}, multicast: {multicast}"
+    err_msg = f"Invalid multicast for tcgen05 copy, check failed for shape: {shape}, multicast: {multicast}"  # noqa: E501
     if shape == "64x128b":
         if multicast not in {"warpx2::02_13", "warpx2::01_23"}:
             raise ValueError(err_msg)
@@ -1204,7 +1204,7 @@ __forceinline__ __device__ void {func_name}(uint32_t dst_addr, int row_offset, i
         : "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), "l"(src_desc)
     );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(
         func_name,
         dst_addr,

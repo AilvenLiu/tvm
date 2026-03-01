@@ -28,8 +28,8 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.bench.utils import CudaProfiler, export_to_perfetto_trace
 
 
 class TaskType(Enum):
@@ -143,7 +143,7 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
             "l"(u8[2 * u + 1]));
     }
 }
-"""
+"""  # noqa: E501
 
 pack_values = """
 __forceinline__ __device__ void pack_values(int32_t rem, int32_t task_type, int32_t task_idx0, int32_t task_idx1, uint64_t* dst_addr) {
@@ -152,7 +152,7 @@ __forceinline__ __device__ void pack_values(int32_t rem, int32_t task_type, int3
                  : "l"(dst_addr), "r"(rem), "r"(task_type), "r"(task_idx0), "r"(task_idx1)
                  : "memory");
 }
-"""
+"""  # noqa: E501
 
 unpack_values = """
 __forceinline__ __device__ void unpack_values(uint64_t* src_addr, int32_t* rem, int32_t* task_type, int32_t* task_idx0, int32_t* task_idx1) {
@@ -162,14 +162,14 @@ __forceinline__ __device__ void unpack_values(uint64_t* src_addr, int32_t* rem, 
                  : "memory");
 
 }
-"""
+"""  # noqa: E501
 
 semaphore_notify_remote = """
 __forceinline__ __device__ uint64_t semaphore_notify_remote(int32_t signal_rank, uint64_t* addr, uint64_t signal_value) {
     auto dst_addr = reinterpret_cast<unsigned long long*>(nvshmem_ptr(addr, signal_rank));
     return atomicAdd_system(dst_addr, signal_value);
 }
-"""
+"""  # noqa: E501
 
 enqueue_remote = """
 __forceinline__ __device__ void enqueue_remote(int32_t* task_types, int32_t* task_idxs, int32_t* tail, int32_t mask,
@@ -184,26 +184,26 @@ __forceinline__ __device__ void enqueue_remote(int32_t* task_types, int32_t* tas
     remote_task_idxs[masked_pos * 2 + 1] = task_idx1;
     __threadfence();
 }
-"""
+"""  # noqa: E501
 
-ld_global_acquire = f"""
-__forceinline__ __device__ int32_t ld_global_acquire(int32_t* addr) {{
+ld_global_acquire = """
+__forceinline__ __device__ int32_t ld_global_acquire(int32_t* addr) {
   int32_t res;
   asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(res) : "l"(addr));
   return res;
-}}
+}
 """
 
-while_ld_global_acquire = f"""
-__forceinline__ __device__ int32_t while_ld_global_acquire(int32_t* addr) {{
+while_ld_global_acquire = """
+__forceinline__ __device__ int32_t while_ld_global_acquire(int32_t* addr) {
   int32_t res;
   asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(res) : "l"(addr));
-  while (res < 0) {{
+  while (res < 0) {
     __nanosleep(40);
     asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(res) : "l"(addr));
-  }}
+  }
   return res;
-}}
+}
 """
 
 warp_broadcast = """
@@ -213,7 +213,7 @@ __forceinline__ __device__ void warp_broadcast(int32_t* rem, int32_t* task_type,
     *task_idx0 = __shfl_sync(0xFFFFFFFF, *task_idx0, 0);
     *task_idx1 = __shfl_sync(0xFFFFFFFF, *task_idx1, 0);
 }}
-"""
+"""  # noqa: E501
 
 trap_when_assert_fail = """
 __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
@@ -227,7 +227,6 @@ __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
 
 @Tx.meta_class
 class Barriers:
-
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, pipe_width, is_p2c):
         self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
             (pipe_depth, pipe_width), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
@@ -249,7 +248,6 @@ class Barriers:
 
 
 class BarTMA2MMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx, expected_bytes):
         Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx, 0]), expected_bytes)
@@ -260,21 +258,18 @@ class BarTMA2MMA(Barriers):
 
 
 class BarMMA2LD(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([0, idx]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarMMA2TMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx, 0]), cta_group=CTA_GROUP, cta_mask=3)
 
 
 class BarLD2MMA(Barriers):
-
     @Tx.inline
     def arrive(self, idx):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([0, idx]), cta_id=0, pred=True)
@@ -393,7 +388,6 @@ class MPMCQueue:
 
 
 class GEMMMPMCQueue(MPMCQueue):
-
     @Tx.inline
     def dequeue(
         self,
@@ -426,7 +420,6 @@ class GEMMMPMCQueue(MPMCQueue):
 
 
 class RSMPMCQueue(MPMCQueue):
-
     @Tx.inline
     def dequeue(
         self,
@@ -628,7 +621,16 @@ class Semaphore:
 def test_hgemm_rs():
     A_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        Tx.TileLayout(Tx.S[(PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K) : (NUM_CONSUMER * BLK_M * BLK_K, BLK_M * BLK_K, BLK_K, 1)]),
+        Tx.TileLayout(
+            Tx.S[
+                (PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K) : (
+                    NUM_CONSUMER * BLK_M * BLK_K,
+                    BLK_M * BLK_K,
+                    BLK_K,
+                    1,
+                )
+            ]
+        ),
     )
     B_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -641,16 +643,16 @@ def test_hgemm_rs():
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M, N), d_type),
-                                       semaphore: Tx.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64"), out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
-                                       gemm_task_types: Tx.Buffer((CAPACITY,), "int32"), gemm_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), gemm_head: Tx.Buffer((1,), "int32"), gemm_tail: Tx.Buffer((1,), "int32"),
-                                       rs_task_types: Tx.Buffer((CAPACITY,), "int32"), rs_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), rs_head: Tx.Buffer((1,), "int32"), rs_tail: Tx.Buffer((1,), "int32")):
+    def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M, N), d_type),  # noqa: E501
+                                       semaphore: Tx.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64"), out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),  # noqa: E501
+                                       gemm_task_types: Tx.Buffer((CAPACITY,), "int32"), gemm_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), gemm_head: Tx.Buffer((1,), "int32"), gemm_tail: Tx.Buffer((1,), "int32"),  # noqa: E501
+                                       rs_task_types: Tx.Buffer((CAPACITY,), "int32"), rs_task_idxs: Tx.Buffer((CAPACITY, 2), "int32"), rs_head: Tx.Buffer((1,), "int32"), rs_tail: Tx.Buffer((1,), "int32")):  # noqa: E501
         A_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         D_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data, K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, gemm_out.data, N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data, K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, gemm_out.data, N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)  # noqa: E501
         with Tx.kernel():
             cbx, cby = Tx.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = Tx.cta_id([SM_NUMBER], parent="kernel")
@@ -664,16 +666,16 @@ def test_hgemm_rs():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
-                A_smem = Tx.decl_buffer((PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
+                A_smem = Tx.decl_buffer((PIPELINE_DEPTH, NUM_CONSUMER, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,  # noqa: E501
                                         elem_offset=1024 // F16_BYTES)
-                B_smem = Tx.decl_buffer((PIPELINE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
-                                        elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * NUM_CONSUMER * BLK_M * BLK_K)
-                D_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, layout=D_layout,
-                                        elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
+                B_smem = Tx.decl_buffer((PIPELINE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,  # noqa: E501
+                                        elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * NUM_CONSUMER * BLK_M * BLK_K)  # noqa: E501
+                D_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, layout=D_layout,  # noqa: E501
+                                        elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)  # noqa: E501
 
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))  # noqa: E501
                 reg_fp16 = Tx.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 descA: Tx.uint64
                 descB: Tx.uint64
@@ -685,13 +687,13 @@ def test_hgemm_rs():
                 # gemm + rs
                 sem = Tx.meta_var(Semaphore(cnt=2 * WORLD_SIZE, buffer=semaphore))
                 offset: Tx.int32
-                gemm_queue = Tx.meta_var(GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS))
-                rs_queue = Tx.meta_var(RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS))
+                gemm_queue = Tx.meta_var(GEMMMPMCQueue(CAPACITY, gemm_task_types, gemm_task_idxs, gemm_head, gemm_tail, GEMM_M_CLUSTERS * GEMM_N_CLUSTERS))  # noqa: E501
+                rs_queue = Tx.meta_var(RSMPMCQueue(CAPACITY, rs_task_types, rs_task_idxs, rs_head, rs_tail, RS_M_CLUSTERS * RS_N_CLUSTERS))  # noqa: E501
                 packed_buf = Tx.decl_buffer((1,), "uint64", buf.data, elem_offset=64)
-                packed_ptr: Tx.let[Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0
+                packed_ptr: Tx.let[Tx.Var(name="packed_ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(packed_buf.ptr_to([0]), 0)) # rank: 0  # noqa: E501
                 packed_value = Tx.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
-                sch_pipe = Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False)
-                tile_scheduler = MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe)
+                sch_pipe = Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False)  # noqa: E501
+                tile_scheduler = MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe)  # noqa: E501
                 profiler = CudaProfiler(
                     profiler_buffer,
                     write_stride=PROFILER_WRITE_STRIDE,
@@ -704,21 +706,21 @@ def test_hgemm_rs():
                 tma2mma = BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True)
                 mma2tma = BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False)
                 mma2ld = BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True)
-                ld2mma = BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False)
+                ld2mma = BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False)  # noqa: E501
                 tma2mma.init(1)
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)
                 ld2mma.init(128 * NUM_CONSUMER)
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))  # noqa: E501
                 tma_finished = Tx.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
                 phase[0] = 0
                 phase_tmem[0] = 0
                 sch_pipe.init(c2p_thread_count=C2P_THREAD_COUNT, p2c_thread_count=1)
-                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
+                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)  # noqa: E501, F821
 
                 # alloc TMEM
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
 
                 Tx.ptx.barrier.cluster.arrive()
                 Tx.ptx.barrier.cluster.wait()
@@ -743,8 +745,8 @@ def test_hgemm_rs():
                                     n_start = Tx.meta_var(offset % (TILE_N // 8) * 8)
                                     Tx.cuda.func_call(
                                         "ld_reduce_8_fp16",
-                                        gemm_out.ptr_to([rank * LOCAL_M + TILE_M * m_idx + (TILE_M // 2) * cbx + m_start, TILE_N * n_idx + n_start]),
-                                        out.ptr_to([TILE_M * m_idx + (TILE_M // 2) * cbx + m_start, TILE_N * n_idx + n_start]),
+                                        gemm_out.ptr_to([rank * LOCAL_M + TILE_M * m_idx + (TILE_M // 2) * cbx + m_start, TILE_N * n_idx + n_start]),  # noqa: E501
+                                        out.ptr_to([TILE_M * m_idx + (TILE_M // 2) * cbx + m_start, TILE_N * n_idx + n_start]),  # noqa: E501
                                         source_code=ld_reduce_8xfp16,
                                     )
                                     offset += NUM_THREADS
@@ -768,32 +770,32 @@ def test_hgemm_rs():
                                                 for ks in Tx.unroll(PIPELINE_DEPTH):
                                                     stage = ko * PIPELINE_DEPTH + ks
                                                     mma2tma.wait(ks, 0, phase[0])
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)  # noqa: E501
 
                                                     if cbx == 0:
-                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
+                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)  # noqa: E501
                                                 phase[0] = phase[0] ^ 1
                                             if PIPE_REMAIN_NUM > 0:
                                                 # last remained loop
                                                 for ks in Tx.unroll(PIPE_REMAIN_NUM):
                                                     stage = PIPE_CYCLE * PIPELINE_DEPTH + ks
                                                     mma2tma.wait(ks, 0, phase[0])
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),  # noqa: E501
+                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)  # noqa: E501
 
                                                     if cbx == 0:
-                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
+                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)  # noqa: E501
                                                 # for unaligned cases
-                                                for ks in Tx.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):
+                                                for ks in Tx.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):  # noqa: E501
                                                     mma2tma.wait(ks, 0, phase[0])
                                                     if cbx == 0:
                                                         tma2mma.arrive_only(ks)
@@ -812,17 +814,17 @@ def test_hgemm_rs():
                                                         # wait tma
                                                         tma2mma.wait(ks, 0, phase[0])
                                                         for ki in Tx.unroll(BLK_K // MMA_K):
-                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
+                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
 
                                                             if stage == 0 and ki == 0:
-                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                                    descI, False, CTA_GROUP, False)
+                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,  # noqa: E501, F821
+                                                                                    descI, False, CTA_GROUP, False)  # noqa: E501, F821
                                                             else:
-                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                                    descI, False, CTA_GROUP, True)
+                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,  # noqa: E501, F821
+                                                                                    descI, False, CTA_GROUP, True)  # noqa: E501, F821
 
                                                         mma2tma.arrive(ks)
                                                     phase[0] = phase[0] ^ 1
@@ -832,22 +834,22 @@ def test_hgemm_rs():
                                                         # wait tma
                                                         tma2mma.wait(ks, 0, phase[0])
                                                         for ki in Tx.unroll(BLK_K // MMA_K):
-                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
+                                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
 
-                                                            if PIPE_CYCLE == 0 and ks == 0 and ki == 0:
-                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                                    descI, False, CTA_GROUP, False)
+                                                            if PIPE_CYCLE == 0 and ks == 0 and ki == 0:  # noqa: E501
+                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,  # noqa: E501, F821
+                                                                                    descI, False, CTA_GROUP, False)  # noqa: E501, F821
                                                             else:
-                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                                    descI, False, CTA_GROUP, True)
+                                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,  # noqa: E501, F821
+                                                                                    descI, False, CTA_GROUP, True)  # noqa: E501, F821
 
                                                         mma2tma.arrive(ks)
                                                     mma2ld.arrive(warp_id)
                                                     # for unaligned cases
-                                                    for ks in Tx.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):
+                                                    for ks in Tx.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):  # noqa: E501
                                                         tma2mma.wait(ks, 0, phase[0])
                                                         mma2tma.arrive(ks)
                                                     phase[0] = phase[0] ^ 1
@@ -862,11 +864,11 @@ def test_hgemm_rs():
                                     phase_tmem[0] = phase_tmem[0] ^ 1
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
                                     # TMEM -> RF (ld)
-                                    for i in Tx.unroll(MMA_N // TMEM_LD_SIZE): # load (MMA_M // 2, MMA_N)
+                                    for i in Tx.unroll(MMA_N // TMEM_LD_SIZE): # load (MMA_M // 2, MMA_N)  # noqa: E501
                                         col_st = Tx.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
-                                        Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                        Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])  # noqa: E501
                                         with Tx.thread():
-                                            Tx.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
+                                            Tx.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])  # noqa: E501
 
                                     # the tmem can be overwritten by the next tile
                                     ld2mma.arrive(wg_id)
@@ -874,14 +876,14 @@ def test_hgemm_rs():
                                     for i in Tx.unroll(NUM_CONSUMER * BLK_N // EPI_TILE):
                                         for it in Tx.unroll(EPI_TILE // 8):
                                             for vec in Tx.vectorized(8):
-                                                D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
+                                                D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]  # noqa: E501
                                         Tx.cuda.warpgroup_sync(wg_id)
                                         Tx.ptx.fence.proxy_async("shared::cta")
                                         # st to gmem
                                         if lane_id == 0 and warp_id == 0:
-                                            Tx.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([wg_id, 0, 0]),
-                                                                        D_tensor_map, n_idx * BLK_N * CTA_GROUP + i * EPI_TILE,
-                                                                        (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
+                                            Tx.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([wg_id, 0, 0]),  # noqa: E501
+                                                                        D_tensor_map, n_idx * BLK_N * CTA_GROUP + i * EPI_TILE,  # noqa: E501
+                                                                        (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)  # noqa: E501
                                             Tx.ptx.cp_async.bulk.commit_group()
                                             Tx.ptx.cp_async.bulk.wait_group(0)
                                         Tx.cuda.warpgroup_sync(wg_id)
@@ -889,7 +891,7 @@ def test_hgemm_rs():
                                     comm_m_idx = Tx.meta_var(m_idx * 2 + wg_id)
                                     comm_m_idx_local = Tx.meta_var(comm_m_idx % (LOCAL_M // TILE_M))
                                     signal_rank = Tx.meta_var(comm_m_idx // (LOCAL_M // TILE_M))
-                                    sem.semaphore_notify(signal_rank, tid, comm_m_idx_local, n_idx, rs_queue)
+                                    sem.semaphore_notify(signal_rank, tid, comm_m_idx_local, n_idx, rs_queue)  # noqa: E501
 
                             profiler.end(ProfileEventType.GEMM, tid == 0)
 
@@ -915,7 +917,7 @@ def test_hgemm_rs():
     sess.sync_worker_0()
 
     # prepare test data
-    print(f"begin preparing test data ...")
+    print("begin preparing test data ...")
     np.random.seed(42)
     DEV = tvm.cuda(0)
     A_np = np.random.uniform(-1, 1, (WORLD_SIZE, M, K)).astype(a_type)
@@ -1008,7 +1010,7 @@ def test_hgemm_rs():
     sess.scatter_from_worker0(A_array_all, args_dict["A_array"])
     sess.scatter_from_worker0(B_array_all, args_dict["B_array"])
     sess.sync_worker_0()
-    print(f"Data prepared successfully")
+    print("Data prepared successfully")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         target = tvm.target.Target("cuda")
@@ -1070,7 +1072,7 @@ def test_hgemm_rs():
         sess.gather_to_worker0(args_dict["out_array"], res_dict["out_res"])
         sess.copy_from_worker_0(res_dict["out_host"], res_dict["out_res"])
         sess.gather_to_worker0(
-            args_dict[f"profiler_buffer_array_{TOTAL_ITERS-1}"], res_dict["profiler_buffer_res"]
+            args_dict[f"profiler_buffer_array_{TOTAL_ITERS - 1}"], res_dict["profiler_buffer_res"]
         )
         sess.copy_from_worker_0(res_dict["profiler_buffer_host"], res_dict["profiler_buffer_res"])
 

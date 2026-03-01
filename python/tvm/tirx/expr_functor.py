@@ -19,19 +19,18 @@ TIR expression functors in Python.
 
 This module implements the visitor and mutator patterns for TIR expressions.
 """
-from typing import Callable, List, TypeVar, Union, Dict, Optional
+
+from collections.abc import Callable
+from typing import TypeVar
 
 import tvm
-from tvm import ir
-from tvm.ir import PrimExpr
-from tvm.tirx import Var, SizeVar, IterVar, Buffer, DataProducer
-from tvm.runtime import Object
+from tvm.ir import PrimExpr, Range
+from tvm.tirx import IterVar
+
+T = TypeVar("T")
 
 
-T = TypeVar('T')
-
-
-def _visit_array(arr: List[T], callback: Callable[[T], None]) -> None:
+def _visit_array(arr: list[T], callback: Callable[[T], None]) -> None:
     """Visit elements in an array using a callback function.
 
     Parameters
@@ -269,6 +268,7 @@ class ExprVisitor(ExprFunctor):
     This is a visitor that recursively traverses an expression. Subclasses can
     override the visit methods to customize the behavior.
     """
+
     def visit_var_(self, op):
         """Visitor implementation for Var."""
         pass
@@ -277,9 +277,9 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for SizeVar."""
         self.visit_var_(op)
 
-
     def visit_buffer_load_(self, op):
         """Visitor implementation for BufferLoad."""
+
         def _visit_indices(index):
             self.visit_expr(index)
 
@@ -287,6 +287,7 @@ class ExprVisitor(ExprFunctor):
 
     def visit_producer_load_(self, op):
         """Visitor implementation for ProducerLoad."""
+
         def _visit_indices(index):
             self.visit_expr(index)
 
@@ -299,6 +300,7 @@ class ExprVisitor(ExprFunctor):
 
     def visit_call_(self, op):
         """Visitor implementation for Call."""
+
         def _visit_arg(arg):
             self.visit_expr(arg)
 
@@ -391,6 +393,7 @@ class ExprVisitor(ExprFunctor):
 
     def visit_reduce_(self, op):
         """Visitor implementation for Reduce."""
+
         def _visit_iter_var(iv):
             self.visit_expr(iv.dom.min)
             self.visit_expr(iv.dom.extent)
@@ -400,7 +403,6 @@ class ExprVisitor(ExprFunctor):
 
         _visit_array(op.axis, _visit_iter_var)
         _visit_array(op.source, _visit_source)
-
 
         if op.init:
             _visit_array(op.init, _visit_source)
@@ -426,8 +428,10 @@ class ExprVisitor(ExprFunctor):
         self.visit_expr(op.base)
         self.visit_expr(op.stride)
         self.visit_expr(op.lanes)
+
     def visit_shuffle_(self, op):
         """Visitor implementation for Shuffle."""
+
         def _visit_expr(expr):
             self.visit_expr(expr)
 
@@ -438,6 +442,7 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for Broadcast."""
         self.visit_expr(op.value)
         self.visit_expr(op.lanes)
+
 
 class ExprMutator(ExprFunctor):
     """A mutator over Expr.
@@ -584,6 +589,7 @@ class ExprMutator(ExprFunctor):
 
     def visit_reduce_(self, op):
         """Mutator implementation for Reduce."""
+
         def _mutate_iter_var(iv):
             old_dom = iv.dom
             new_min = self.visit_expr(old_dom.min)
@@ -602,7 +608,9 @@ class ExprMutator(ExprFunctor):
 
         axis_unchanged = all(old_iv is new_iv for old_iv, new_iv in zip(op.axis, axis))
         source_unchanged = all(old_e is new_e for old_e, new_e in zip(op.source, source))
-        init_unchanged = True if not op.init else all(old_e is new_e for old_e, new_e in zip(op.init, init))
+        init_unchanged = (
+            True if not op.init else all(old_e is new_e for old_e, new_e in zip(op.init, init))
+        )
         condition_unchanged = condition is op.condition
 
         if axis_unchanged and source_unchanged and init_unchanged and condition_unchanged:
@@ -634,7 +642,11 @@ class ExprMutator(ExprFunctor):
         true_value = self.visit_expr(op.true_value)
         false_value = self.visit_expr(op.false_value)
 
-        if condition is op.condition and true_value is op.true_value and false_value is op.false_value:
+        if (
+            condition is op.condition
+            and true_value is op.true_value
+            and false_value is op.false_value
+        ):
             return op
         else:
             return tvm.tirx.Select(condition, true_value, false_value)

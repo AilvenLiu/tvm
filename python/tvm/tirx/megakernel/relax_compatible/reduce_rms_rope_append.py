@@ -16,11 +16,10 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
 from tvm.tirx.megakernel.kernels import (
-    SplitKReduceRMSnormRopeQTile,
-    SplitKReduceRMSnormRopeAppendKTile,
     SplitKReduceAppendVTile,
+    SplitKReduceRMSnormRopeAppendKTile,
+    SplitKReduceRMSnormRopeQTile,
 )
 
 

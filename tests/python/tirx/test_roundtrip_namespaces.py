@@ -16,8 +16,10 @@
 # under the License.
 
 import tvm
-from tvm.script import tirx as Tx
 from tvm.ir import assert_structural_equal
+from tvm.script import tirx as Tx
+
+
 def from_source(code):
     return tvm.script.from_source(code)
 

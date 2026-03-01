@@ -35,7 +35,9 @@ The ops are split into logical groups:
 """
 
 # Import header generator and tags (registers tir.device_op_codegen.cuda.header_generator)
-from .header import header_generator, TAGS
+# Import op modules to register their codegen functions
+from . import barrier, cp_async, cuda_sync, math, misc_ptx, mma, nvshmem, tcgen05, timer, wgmma
+from .header import TAGS, header_generator
 
 # Import registry (registers tir.device_op_codegen.cuda.get_codegen)
 from .registry import CODEGEN_REGISTRY, get_codegen, register_codegen
@@ -43,24 +45,12 @@ from .registry import CODEGEN_REGISTRY, get_codegen, register_codegen
 # Import types
 from .types import PTXDataType
 
-# Import op modules to register their codegen functions
-from . import mma
-from . import wgmma
-from . import tcgen05
-from . import barrier
-from . import cp_async
-from . import misc_ptx
-from . import timer
-from . import cuda_sync
-from . import nvshmem
-from . import math
-
 # Re-export commonly used items
 __all__ = [
     "CODEGEN_REGISTRY",
-    "get_codegen",
-    "register_codegen",
-    "header_generator",
     "TAGS",
     "PTXDataType",
+    "get_codegen",
+    "header_generator",
+    "register_codegen",
 ]

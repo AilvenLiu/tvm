@@ -14,14 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import numpy as np
 import math
 from enum import Enum
+
+import numpy as np
+
 import tvm
-from tvm.script import tirx as Tx
 import tvm.testing
+from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirx.bench.utils import bench, ProtonContext, export_to_perfetto_trace, CudaProfiler
+from tvm.tirx.bench.utils import CudaProfiler, ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirx.tile_scheduler import IndexedTripleTileScheduler
 
 
@@ -175,12 +177,12 @@ def test_fp16_fused_attn():
 
         @Tx.inline
         def copy(self, state, smem, tmap, *coord):
-            # copy [HEAD_DIM, BLK_KV/BLK_Q] from global [HAED_DIM, hidx, BLK_KV/BLK_Q * idx, bidx] to smem
-            # copy at most [TMA_TILE, BLK_KV/BLK_Q] elements per iteration due to the restriction of swizzle
+            # copy [HEAD_DIM, BLK_KV/BLK_Q] from global [HAED_DIM, hidx, BLK_KV/BLK_Q * idx, bidx] to smem  # noqa: E501
+            # copy at most [TMA_TILE, BLK_KV/BLK_Q] elements per iteration due to the restriction of swizzle  # noqa: E501
             stage = Tx.meta_var(state.index)
             cur_full = Tx.meta_var(self.full.ptr_to([stage]))
             for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
-                Tx.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])
+                Tx.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])  # noqa: E501
 
     @Tx.meta_class
     class PipelineState:
@@ -249,7 +251,7 @@ def test_fp16_fused_attn():
             self.row_max = Tx.alloc_buffer((self.row), "float32", scope="local") # m
             self.row_max_old = Tx.alloc_buffer((self.row), "float32", scope="local") # m_old
             self.row_sum = Tx.alloc_buffer((self.row), "float32", scope="local") # l
-            self.scores_scale = Tx.alloc_buffer((self.row), "float32", scope="local") # e^*(m_old - m_new)
+            self.scores_scale = Tx.alloc_buffer((self.row), "float32", scope="local") # e^*(m_old - m_new)  # noqa: E501
             IRBuilder.current().name(prefix + "_row_max", self.row_max)
             IRBuilder.current().name(prefix + "_row_max_old", self.row_max_old)
             IRBuilder.current().name(prefix + "_row_sum", self.row_sum)
@@ -279,16 +281,16 @@ def test_fp16_fused_attn():
                     self.row_max[i] = Tx.max(row_max, S_regs[i * 2 + j * 4])
                     self.row_max[i] = Tx.max(row_max, S_regs[i * 2 + j * 4 + 1])
                 # quad reduce, (T0, T1, T2, T3), (T4, T5, T6, T7) ...
-                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 2, 32, 32))
-                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 1, 32, 32))
+                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 2, 32, 32))  # noqa: E501
+                self.row_max[i] = Tx.max(row_max, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_max, 1, 32, 32))  # noqa: E501
 
         @Tx.inline
         def scale_apply_exp2(self, S_regs):
             for i in Tx.serial(self.row):
                 row_max = Tx.meta_var(self.row_max[i])
                 for j in Tx.serial(BLK_KV // 8):
-                    S_regs[i * 2 + j * 4] = Tx.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
-                    S_regs[i * 2 + j * 4 + 1] = Tx.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
+                    S_regs[i * 2 + j * 4] = Tx.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)  # noqa: E501
+                    S_regs[i * 2 + j * 4 + 1] = Tx.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)  # noqa: E501
 
         @Tx.inline
         def reduce_l(self, S_regs):
@@ -312,7 +314,7 @@ def test_fp16_fused_attn():
                 self.row_max_old[i] = self.row_max[i]
             self.reduce_m(S_regs)
             for i in Tx.serial(self.row):
-                self.scores_scale[i] = Tx.exp2((self.row_max_old[i] - self.row_max[i]) * self.sm_scale_log2)
+                self.scores_scale[i] = Tx.exp2((self.row_max_old[i] - self.row_max[i]) * self.sm_scale_log2)  # noqa: E501
             self.scale_apply_exp2(S_regs)
             self.reduce_l(S_regs)
 
@@ -333,8 +335,8 @@ def test_fp16_fused_attn():
         with Tx.thread():
             scaleD: Tx.int32
             scaleD = 0
-            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)
-            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)  # noqa: E501
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)  # noqa: E501
             for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in Tx.serial(TMA_TILE // WGMMA_QK_K):
                     Tx.ptx.wgmma.mma_async.ss(
@@ -357,12 +359,12 @@ def test_fp16_fused_attn():
         Tx.ptx.wgmma.fence()
 
         v_stage = Tx.meta_var(consumer_v.index)
-        Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_V), smem_v.ptr_to([v_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
+        Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_V), smem_v.ptr_to([v_stage, 0]), BLK_KV * 8, 64, SWIZZLE)  # noqa: E501
         for wgmma_tile in Tx.serial(BLK_KV // WGMMA_PV_K):
             P_offset = Tx.meta_var(wgmma_tile * WGMMA_PV_K // 4)
             Tx.ptx.wgmma.mma_async.rs(
                 WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
-                1.0, 1.0, True, desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)])
+                1.0, 1.0, True, desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)])  # noqa: E501
             )
             desc_V = desc_V + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 
@@ -381,14 +383,14 @@ def test_fp16_fused_attn():
                 col_noswizzle = Tx.meta_var(st_tile * 2 + lane_id // 16)
                 col = Tx.meta_var((lane_id % 8) ^ col_noswizzle)
                 row = Tx.meta_var(warp_id * 16 + lane_id % 16)
-                Tx.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))
+                Tx.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))  # noqa: E501
 
     @Tx.inline
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
-            Tx.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
+            Tx.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)  # noqa: E501
             Tx.ptx.cp_async.bulk.commit_group()
             Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
@@ -404,8 +406,8 @@ def test_fp16_fused_attn():
         s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, HEAD_DIM // TMA_TILE - 1)
 
     @Tx.prim_func(tirx=True)
-    def manual(Q_ptr: Tx.handle, K_ptr: Tx.handle, V_ptr: Tx.handle, b_indices_ptr: Tx.handle, h_indices_ptr: Tx.handle,
-               q_indices_ptr: Tx.handle, tiles_indptr_ptr: Tx.handle, O_ptr: Tx.handle, profiler_buffer_ptr: Tx.handle) -> None:
+    def manual(Q_ptr: Tx.handle, K_ptr: Tx.handle, V_ptr: Tx.handle, b_indices_ptr: Tx.handle, h_indices_ptr: Tx.handle,  # noqa: E501
+               q_indices_ptr: Tx.handle, tiles_indptr_ptr: Tx.handle, O_ptr: Tx.handle, profiler_buffer_ptr: Tx.handle) -> None:  # noqa: E501
         qo_layout = Tx.meta_var(Tx.TileLayout(Tx.S[QO_SHAPE]))
         kv_layout = Tx.meta_var(Tx.TileLayout(Tx.S[KV_SHAPE]))
         Q = Tx.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
@@ -415,8 +417,8 @@ def test_fp16_fused_attn():
         h_indices = Tx.match_buffer(h_indices_ptr, (total_qtiles,), "int32", scope="global")
         q_indices = Tx.match_buffer(q_indices_ptr, (total_qtiles,), "int32", scope="global")
         tiles_indptr = Tx.match_buffer(tiles_indptr_ptr, (SM_COUNT + 1,), "int32", scope="global")
-        O = Tx.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
-        profiler_buffer = Tx.match_buffer(profiler_buffer_ptr, (PROFILER_BUFFER_SIZE,), "uint64", scope="global")
+        O = Tx.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)  # noqa: E741
+        profiler_buffer = Tx.match_buffer(profiler_buffer_ptr, (PROFILER_BUFFER_SIZE,), "uint64", scope="global")  # noqa: E501
 
         Q_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         K_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
@@ -424,19 +426,19 @@ def test_fp16_fused_attn():
         O_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
         GSHAPE_QO = Tx.meta_var((HEAD_DIM, NHEADS, QO_LEN, BATCH_SIZE))
-        GSTRIDES_QO = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * QO_LEN))
+        GSTRIDES_QO = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * QO_LEN))  # noqa: E501
         SSHAPE_QO = Tx.meta_var((TMA_TILE, 1, BLK_Q, 1))
 
         GSHAPE_KV = Tx.meta_var((HEAD_DIM, NHEADS, KV_LEN, BATCH_SIZE))
-        GSTRIDES_KV = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * KV_LEN))
+        GSTRIDES_KV = Tx.meta_var((F16_BYTES * HEAD_DIM, F16_BYTES * HEAD_DIM * NHEADS, F16_BYTES * HEAD_DIM * NHEADS * KV_LEN))  # noqa: E501
         SSHAPE_KV = Tx.meta_var((TMA_TILE, 1, BLK_KV, 1))
 
         COMMMON = Tx.meta_var((1, 1, 1, 1, 0, SWIZZLE, 0, 0))
 
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -454,17 +456,17 @@ def test_fp16_fused_attn():
                 bar_O = Tx.decl_buffer([1], "uint64", buf.data, elem_offset=1)
                 full_k = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2)
                 empty_k = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + KV_STAGES)
-                full_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 2 * KV_STAGES)
-                empty_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 3 * KV_STAGES)
-                smem_q = Tx.decl_buffer([BLK_Q * HEAD_DIM], "float16", buf.data, elem_offset=512) # 1024B
-                smem_k = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + BLK_Q * HEAD_DIM)
+                full_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 2 * KV_STAGES)  # noqa: E501
+                empty_v = Tx.decl_buffer([KV_STAGES], "uint64", buf.data, elem_offset=2 + 3 * KV_STAGES)  # noqa: E501
+                smem_q = Tx.decl_buffer([BLK_Q * HEAD_DIM], "float16", buf.data, elem_offset=512) # 1024B  # noqa: E501
+                smem_k = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + BLK_Q * HEAD_DIM)  # noqa: E501
                 # v and o share the same smem region for reuse
-                smem_v = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
-                smem_o = Tx.decl_buffer([STAGES_EPI, BLK_Q, TMA_TILE], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
+                smem_v = Tx.decl_buffer([KV_STAGES, BLK_KV * HEAD_DIM], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)  # noqa: E501
+                smem_o = Tx.decl_buffer([STAGES_EPI, BLK_Q, TMA_TILE], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)  # noqa: E501
 
                 with Tx.thread():
                     # tile scheduler
-                    tile_scheduler = IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr)
+                    tile_scheduler = IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr)  # noqa: E501
                     # pipeline
                     pipeline_k = Pipeline(full_k, empty_k, TMA_BYTES_K)
                     pipeline_v = Pipeline(full_v, empty_v, TMA_BYTES_V)
@@ -496,7 +498,7 @@ def test_fp16_fused_attn():
 
                     # softmax
                     softmax = Softmax("softmax")
-                    ############################################################################## INITIALIZATION
+                    ############################################################################## INITIALIZATION  # noqa: E501
                     # tile scheduler
                     tile_scheduler.init(bx)
                     # barriers
@@ -520,15 +522,15 @@ def test_fp16_fused_attn():
                     q_idx = Tx.meta_var(tile_scheduler.q_idx)
                     h_idx = Tx.meta_var(tile_scheduler.h_idx)
                     b_idx = Tx.meta_var(tile_scheduler.b_idx)
-                    attend_kv_len = Tx.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile
-                    num_kv_tiles = Tx.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
+                    attend_kv_len = Tx.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile  # noqa: E501
+                    num_kv_tiles = Tx.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend  # noqa: E501
                     is_leader = Tx.meta_var(Tx.ptx.elect_sync())
 
-                    P_reg_fp16 = Tx.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
+                    P_reg_fp16 = Tx.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)  # noqa: E501
                     with Tx.cta():
                         Tx.attr({"tirx.scope_partition": True})
                         with Tx.warpgroup()[0:1]:
-                            ############################################################################## PRODUCER
+                            ############################################################################## PRODUCER  # noqa: E501
                             # deallocate registers
                             Tx.ptx.setmaxnreg(False, 24)
                             # only 1 warp is responsible for the producer
@@ -539,50 +541,50 @@ def test_fp16_fused_attn():
                                     kv_tile_idx_load = num_kv_tiles - 1
                                     # copy a tile of K first
                                     with Tx.thread()[is_leader]:
-                                        pipeline_k.producer_acquire(producer_k, profiler, leader_cond)
-                                        pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, kv_tile_idx_load * BLK_KV, b_idx)
+                                        pipeline_k.producer_acquire(producer_k, profiler, leader_cond)  # noqa: E501
+                                        pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, kv_tile_idx_load * BLK_KV, b_idx)  # noqa: E501
                                         profiler.end(ProfileEventType.IssueLoadKV, leader_cond)
                                         producer_k.advance()
-                                    # wait for consumers to finish the previous Q tile, then load the current Q tile
-                                    Tx.ptx.bar.sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
+                                    # wait for consumers to finish the previous Q tile, then load the current Q tile  # noqa: E501
+                                    Tx.ptx.bar.sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer  # noqa: E501
                                     profiler.start(ProfileEventType.IssueLoadQ, leader_cond)
                                     with Tx.thread()[is_leader]:
                                         Tx.ptx.mbarrier.arrive.expect_tx(bar_Q_ptr, TMA_BYTES_Q)
                                         for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
                                             Tx.ptx.cp_async.bulk.tensor.g2c(
-                                                4, smem_q.ptr_to([tma_tile * TMA_TILE * BLK_Q]), bar_Q_ptr, Q_map,
+                                                4, smem_q.ptr_to([tma_tile * TMA_TILE * BLK_Q]), bar_Q_ptr, Q_map,  # noqa: E501
                                                 tma_tile * TMA_TILE, h_idx, q_idx * BLK_Q, b_idx
                                             )
                                     profiler.end(ProfileEventType.IssueLoadQ, leader_cond)
-                                    # wait for the consumers to finish writing last O_tile to gmem to reuse for Vsmem
+                                    # wait for the consumers to finish writing last O_tile to gmem to reuse for Vsmem  # noqa: E501
                                     Tx.ptx.bar.sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
                                     with Tx.thread()[is_leader]:
                                         while kv_tile_idx_load > 0:
                                             # load k tiles
-                                            pipeline_k.producer_acquire(producer_k, profiler, leader_cond)
-                                            pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, (kv_tile_idx_load - 1) * BLK_KV, b_idx)
+                                            pipeline_k.producer_acquire(producer_k, profiler, leader_cond)  # noqa: E501
+                                            pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, (kv_tile_idx_load - 1) * BLK_KV, b_idx)  # noqa: E501
                                             profiler.end(ProfileEventType.IssueLoadKV, leader_cond)
                                             producer_k.advance()
                                             # load v tiles
-                                            pipeline_v.producer_acquire(producer_v, profiler, leader_cond)
-                                            pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, kv_tile_idx_load * BLK_KV, b_idx)
+                                            pipeline_v.producer_acquire(producer_v, profiler, leader_cond)  # noqa: E501
+                                            pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, kv_tile_idx_load * BLK_KV, b_idx)  # noqa: E501
                                             profiler.end(ProfileEventType.IssueLoadKV, leader_cond)
                                             producer_v.advance()
                                             kv_tile_idx_load = kv_tile_idx_load - 1
                                         # load the last v tile
-                                        pipeline_v.producer_acquire(producer_v, profiler, leader_cond)
-                                        pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, 0, b_idx)
+                                        pipeline_v.producer_acquire(producer_v, profiler, leader_cond)  # noqa: E501
+                                        pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, 0, b_idx)  # noqa: E501
                                         profiler.end(ProfileEventType.IssueLoadKV, leader_cond)
                                         producer_v.advance()
                                 # move to the next tile
                                     tile_scheduler.next_tile()
                                 # wait until all the consumers finish
-                                # in our case, I think it's fine to let producers exit early since there's no cluster coordination
+                                # in our case, I think it's fine to let producers exit early since there's no cluster coordination  # noqa: E501
                                 with Tx.thread()[is_leader]:
                                     pipeline_k.producer_tail(producer_k)
                                     pipeline_v.producer_tail(producer_v)
                         with Tx.warpgroup()[1:3]:
-                            ############################################################################## CONSUMER
+                            ############################################################################## CONSUMER  # noqa: E501
                             # allocate registers
                             Tx.ptx.setmaxnreg(True, 240)
                             # inform the producer to Q is ready to be loaded
@@ -605,8 +607,8 @@ def test_fp16_fused_attn():
                                 softmax.init()
                                 profiler.start(ProfileEventType.GemmQK, leader_cond)
                                 # calculate S_0 = Q^TK_0
-                                gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
-                                # wait for O of last tile to be written back to gmem, notifify the producer to load V
+                                gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)  # noqa: E501, F821
+                                # wait for O of last tile to be written back to gmem, notifify the producer to load V  # noqa: E501
                                 Tx.ptx.cp_async.bulk.wait_group(0)
                                 Tx.ptx.bar.arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
                                 # wait for the gemm result of S_0 = Q^TK_0
@@ -617,7 +619,7 @@ def test_fp16_fused_attn():
                                 consumer_k.advance()
                                 profiler.start(ProfileEventType.SoftmaxUpdate, leader_cond)
                                 # mask S_0
-                                mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)
+                                mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)  # noqa: E501
                                 # softmax, initialize m, P, l for the first tile
                                 softmax.init_m_P_l(S_reg)
                                 profiler.end(ProfileEventType.SoftmaxUpdate, leader_cond)
@@ -639,7 +641,7 @@ def test_fp16_fused_attn():
                                         pipeline_k.consumer_wait(consumer_k)
                                         profiler.start(ProfileEventType.GemmQK, leader_cond)
                                         # commit S_i = Q^TK_i but do not wait
-                                        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
+                                        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)  # noqa: E501, F821
                                         profiler.start(ProfileEventType.ScaleO, leader_cond)
                                         # scale O_{i-1} with scale_{i-1}
                                         softmax.scale_o(O_reg)
@@ -648,7 +650,7 @@ def test_fp16_fused_attn():
                                         pipeline_v.consumer_wait(consumer_v)
                                         profiler.start(ProfileEventType.GemmPV, leader_cond)
                                         # commit O_{i-1} += P_{i-1}V_{i-1} but do not wait
-                                        gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
+                                        gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)  # noqa: F821
                                         # wait for the gemm result of S_i = Q^TK_i
                                         Tx.ptx.wgmma.wait_group(1)
                                         profiler.end(ProfileEventType.GemmQK, leader_cond)
@@ -657,7 +659,7 @@ def test_fp16_fused_attn():
                                         profiler.start(ProfileEventType.SoftmaxUpdate, leader_cond)
                                         # mask S_i
                                         if do_masking:
-                                            mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)
+                                            mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)  # noqa: E501
                                         # update m, P, l for the current tile
                                         softmax.update_m_P_l(S_reg)
                                         profiler.end(ProfileEventType.SoftmaxUpdate, leader_cond)
@@ -674,7 +676,7 @@ def test_fp16_fused_attn():
                                             P_reg_fp16[i] = Tx.Cast("float16", S_reg[i])
                                         profiler.end(ProfileEventType.WritePReg, leader_cond)
 
-                                    while (masking_step < n_masking_steps and kv_tile_idx_read >= 0):
+                                    while (masking_step < n_masking_steps and kv_tile_idx_read >= 0):  # noqa: E501
                                         consumer_body(True)
                                         masking_step = masking_step + 1
                                         kv_tile_idx_read =kv_tile_idx_read - 1
@@ -693,7 +695,7 @@ def test_fp16_fused_attn():
                                 pipeline_v.consumer_wait(consumer_v)
                                 profiler.start(ProfileEventType.GemmPV, leader_cond)
                                 # commit the last O += PV
-                                gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
+                                gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)  # noqa: F821
                                 profiler.start(ProfileEventType.SoftmaxUpdate, leader_cond)
                                 # get final l, do quad reduce and l^(-1)
                                 softmax.finalize()
@@ -709,11 +711,11 @@ def test_fp16_fused_attn():
                                 softmax.scale_o(O_reg)
                                 profiler.end(ProfileEventType.ScaleO, leader_cond)
                                 ####### Epilogue, write O back to gmem
-                                # make sure all consumer threads finish V consumption, so Vsmem can be reused for Osmem
+                                # make sure all consumer threads finish V consumption, so Vsmem can be reused for Osmem  # noqa: E501
                                 Tx.ptx.bar.sync(NameBarrier.O_LOAD_READY, MMA_THREADS)
                                 profiler.start(ProfileEventType.WriteO, leader_cond)
                                 # write O back to gmem
-                                write_epilogue(warp_id - 4, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg)
+                                write_epilogue(warp_id - 4, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg)  # noqa: E501
                                 profiler.end(ProfileEventType.WriteO, leader_cond)
 
                                 # move to the next tile
@@ -752,7 +754,7 @@ def test_fp16_fused_attn():
         profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
         profiler_buffer_tvm = tvm.runtime.tensor(profiler_buffer, DEV)
 
-        from heapq import heappush, heappop
+        from heapq import heappop, heappush
 
         def cost(qo_len, kv_len):
             return 2 * qo_len + kv_len
@@ -805,17 +807,20 @@ def test_fp16_fused_attn():
             ):
                 mod = tvm.IRModule({"main": manual})
                 mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-                func = lambda: mod(
-                    q_tvm,
-                    k_tvm,
-                    v_tvm,
-                    b_indices_tvm,
-                    h_indices_tvm,
-                    q_indices_tvm,
-                    tiles_indptr_tvm,
-                    o_tvm,
-                    profiler_buffer_tvm,
-                )
+
+                def func():
+                    return mod(
+                        q_tvm,
+                        k_tvm,
+                        v_tvm,
+                        b_indices_tvm,
+                        h_indices_tvm,
+                        q_indices_tvm,
+                        tiles_indptr_tvm,
+                        o_tvm,
+                        profiler_buffer_tvm,
+                    )
+
                 ms = bench(func, warmup=0, repeat=10, proton_name="tir")
                 print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
@@ -857,7 +862,9 @@ def test_fp16_fused_attn():
             causal=CAUSAL,
         )
 
-        func = lambda: sm90_wrapper.run(q_torch, k_torch, v_torch)
+        def func():
+            return sm90_wrapper.run(q_torch, k_torch, v_torch)
+
         ms = bench(func, warmup=0, repeat=10, proton_name="flashinfer")
         print(f"FlashInfer flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
         o_torch = func()

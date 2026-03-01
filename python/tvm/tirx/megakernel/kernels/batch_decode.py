@@ -15,18 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict
+from typing import Any
 
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, exp2, find_power_of_two
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class DecodeTile(Tile):
-
     # qkv_tvm: [batch_size, qo_heads + 2 * kv_heads, head_dim]
     # kv_cache_tvm: [max_page_num, 2, kv_heads, page_size, head_dim]
     # o_tvm: [new_batch_size, qo_heads, head_dim]
@@ -39,7 +37,7 @@ class DecodeTile(Tile):
     # max_chunk_size_tvm: [1]
 
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call=False):
+    def class_config_init(cls, problem_config: dict[str, Any], use_device_call=False):
         cls.use_device_call = use_device_call
         cls.loop_inner = 1
         cls.pipe_depth = 1
@@ -193,8 +191,8 @@ class DecodeTile(Tile):
     def run(self, m_idx, n_idx, k_idx, split_kv):
         with Tx.cta():
             tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            Tx.thread_id([32], parent="warp")
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var((tid // self.bdx) % self.bdy)
             tz = Tx.meta_var(tid // (self.bdx * self.bdy))

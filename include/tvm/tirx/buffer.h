@@ -255,8 +255,8 @@ class Buffer : public ObjectRef {
 
   /*!
    * \brief Return true if the buffer is a scalar.
-   * \param alloc_or_decl Whether to consider alloc_scalar and decl_scalar as scalar. True for alloc_scalar,
-   * False for decl_scalar.
+   * \param alloc_or_decl Whether to consider alloc_scalar and decl_scalar as scalar. True for
+   * alloc_scalar, False for decl_scalar.
    */
   TVM_DLL bool IsScalar(bool alloc_or_decl = true) const;
 

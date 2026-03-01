@@ -17,29 +17,14 @@
 """
 Tests for StmtVisitor and StmtMutator functionality in TVM TIR.
 """
+
 import tvm
-from tvm import tir
-from tvm.ir import PrimExpr, Range
-from tvm.tir.expr import Var, IntImm, Add, Sub, Mul, EQ, LT, GT
-from tvm.tir.stmt import (
-    LetStmt,
-    AttrStmt,
-    AssertStmt,
-    For,
-    While,
-    BufferStore,
-    SeqStmt,
-    Evaluate,
-    SBlock,
-    SBlockRealize,
-    IfThenElse,
-    DeclBuffer,
-)
-from tvm.script import tirx as Tx
-from tvm.tir.stmt_functor import StmtVisitor, StmtMutator, StmtExprVisitor, StmtExprMutator
-import tvm.tirx.operator as tirx_op
-import pytest
 import tvm.testing
+from tvm import tir
+from tvm.ir import Range
+from tvm.script import tirx as Tx
+from tvm.tir.expr import EQ, GT, LT, Add, IntImm, Mul, Sub, Var
+from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor, StmtMutator, StmtVisitor
 
 
 class ASTLog:
@@ -636,7 +621,7 @@ def basic_check(stmt, visitor_str, mutator_str):
 def create_test_statements():
     """Create test statements for various TIR constructs."""
     x = tir.Var("x", "int32")
-    y = tir.Var("y", "int32")
+    tir.Var("y", "int32")
 
     # IntImm
     int_imm = tir.IntImm("int32", 10)

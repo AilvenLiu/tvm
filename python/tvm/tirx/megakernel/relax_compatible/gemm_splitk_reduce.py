@@ -16,9 +16,8 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.megakernel.kernels import SplitKReduceTile
+from tvm.tirx.megakernel.utils.utils import ceildiv
 
 
 class FuseSplitKReduceTile(SplitKReduceTile):

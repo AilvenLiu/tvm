@@ -25,9 +25,9 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.bench.utils import CudaProfiler, ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirx.tile_scheduler import GroupMajor3D
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:
@@ -82,7 +82,6 @@ def skip():
 
 def get_hgemm_kernel(dim_n, dim_k):
     M_CLUSTER = 1
-    N_CLUSTER = 1
     WG_NUMBER = 2
     WARP_NUMBER = 4
     NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
@@ -123,11 +122,11 @@ def get_hgemm_kernel(dim_n, dim_k):
     assert N % (BLK_N * CTA_GROUP) == 0
     TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
 
-    atomic_add_system_uint64 = f"""
-    __forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
+    atomic_add_system_uint64 = """
+    __forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {
         asm volatile("red.async.release.global.gpu.add.u64 [%0], %1;" ::"l"(addr), "l"(value)
                     : "memory");
-    }}
+    }
     """
 
     @Tx.meta_class
@@ -231,24 +230,24 @@ def get_hgemm_kernel(dim_n, dim_k):
         with Tx.kernel():
             # cbx, cby = Tx.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = Tx.cta_id([SM_NUMBER], parent="kernel")
-            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
             warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([NUM_THREADS], parent="cta")  # noqa: F841
             with Tx.cta():
                 # alloc shared memory
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
-                A_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
+                A_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,  # noqa: E501
                                         elem_offset=1024 // F16_BYTES)
-                B_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
-                                        elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * BLK_M * BLK_K)
-                D_smem = Tx.decl_buffer((TMEM_PIPE_DEPTH, EPI_TILE, MMA_N), "float32", buf.data, layout=D_layout,
-                                        elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K // 2)
+                B_smem = Tx.decl_buffer((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,  # noqa: E501
+                                        elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * BLK_M * BLK_K)  # noqa: E501
+                D_smem = Tx.decl_buffer((TMEM_PIPE_DEPTH, EPI_TILE, MMA_N), "float32", buf.data, layout=D_layout,  # noqa: E501
+                                        elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K // 2)  # noqa: E501
 
                 # alloc local memory
                 reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))  # noqa: E501
                 stage: Tx.int32
                 phase = Tx.alloc_buffer((1, ), "int32", scope="local")
                 descA: Tx.uint64
@@ -266,7 +265,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 tma2mma_bar = BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True)
                 mma2tma_bar = BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
                 mma2ld_bar = BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
-                ld2mma_bar = BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
+                ld2mma_bar = BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)  # noqa: E501
                 m_tiles_expr: Tx.let = Tx.truncdiv(M + BLK_M * CTA_GROUP - 1, BLK_M * CTA_GROUP)
                 tile_scheduler = GroupMajor3D(
                     "tile_scheduler",
@@ -291,7 +290,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.cta_sync()
                 Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
+                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))  # noqa: E501
 
                 @Tx.inline
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -303,7 +302,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                     if PIPE_REMAIN_NUM > 0:
                         # last remained loop
                         for ks in Tx.unroll(PIPE_REMAIN_NUM):
-                            stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
+                            stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks  # noqa: F841
                             main_loop(True, ks)
                         epilogue1()
                         # for unaligned cases
@@ -328,7 +327,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                     k_offset = Tx.meta_var(k_idx * TILE_K)
                                     m_st = Tx.meta_var(m_idx * BLK_M)
                                     n_st = Tx.meta_var(n_idx * BLK_N)
-                                    k_start = Tx.meta_var(stage * BLK_K + k_offset)
+                                    k_start = Tx.meta_var(stage * BLK_K + k_offset)  # noqa: F821
 
                                     @Tx.inline
                                     def tma_load(is_remain, ks):
@@ -336,10 +335,10 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         mma2tma_bar.wait(ks, phase[0])
                                         profiler.end(ProfileEventType.WAIT, lane_id == 0)
                                         profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
-                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
-                                        Tx.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], **tma_copy)
-                                        Tx.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, k_start : k_start + BLK_K], **tma_copy)
-                                        tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
+                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})  # noqa: E501
+                                        Tx.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, k_start : k_start + BLK_K], **tma_copy)  # noqa: E501
+                                        tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)  # noqa: E501
                                         profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
 
                                     @Tx.inline
@@ -356,7 +355,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                             profiler.init(1)
                             tmem_idx = Tx.local_scalar("int32", "tmem_idx")
                             tmem_phase = Tx.local_scalar("int32", "tmem_phase")
-                            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_N, MMA_M, MMA_K, False, False, CTA_GROUP)
+                            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_N, MMA_M, MMA_K, False, False, CTA_GROUP)  # noqa: E501, F821
                             phase[0] = 0
                             while tile_scheduler.valid():
                                 m_idx = Tx.meta_var(tile_scheduler.m_idx)
@@ -378,14 +377,14 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
                                         # issue mma
                                         for ki in Tx.unroll(BLK_K // MMA_K):
-                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                            if (stage == 0 and ks == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CIRCLE_NUM == 0)):
-                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, False)
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
+                                            if (stage == 0 and ks == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CIRCLE_NUM == 0)):  # noqa: E501
+                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, False)  # noqa: E501, F821
                                             else:
-                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, True)
+                                                Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, True)  # noqa: E501, F821
                                         mma2tma_bar.arrive(ks)
                                         profiler.end(ProfileEventType.IssueMMA, lane_id == 0)
 
@@ -422,20 +421,20 @@ def get_hgemm_kernel(dim_n, dim_k):
                             Tx.ptx.tcgen05.fence.after_thread_sync()
 
                             for ko in Tx.unroll(MMA_M // EPI_TILE):
-                                stage = (tile_scheduler.tile_idx * MMA_M // EPI_TILE + ko) % TMEM_PIPE_DEPTH
+                                stage = (tile_scheduler.tile_idx * MMA_M // EPI_TILE + ko) % TMEM_PIPE_DEPTH  # noqa: E501
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
                                     if lane_id == 0 and warp_id == 0:
                                         Tx.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
                                     Tx.cuda.warpgroup_sync(10)
-                                profiler.start(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
+                                profiler.start(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)  # noqa: E501
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in Tx.unroll(EPI_TILE // TMEM_LD_SIZE):
-                                    col_st = Tx.meta_var(tmem_idx * MMA_M + ko * EPI_TILE + ki * TMEM_LD_SIZE)
+                                    col_st = Tx.meta_var(tmem_idx * MMA_M + ko * EPI_TILE + ki * TMEM_LD_SIZE)  # noqa: E501
                                     Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     with Tx.thread():
-                                        Tx.copy(D_smem[stage, ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE, warp_id * 32 + lane_id], reg[:])
+                                        Tx.copy(D_smem[stage, ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE, warp_id * 32 + lane_id], reg[:])  # noqa: E501
                                 profiler.end(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
                                 # the tmem can be overwritten
                                 if ko == MMA_M // EPI_TILE - 1:
@@ -444,14 +443,14 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                                 Tx.ptx.fence.proxy_async("shared::cta")
                                 Tx.cuda.warpgroup_sync(10)
-                                profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
+                                profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)  # noqa: E501
                                 # smem -> gmem
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = Tx.meta_var(m_idx * BLK_M + ko * EPI_TILE)
                                     n_start = Tx.meta_var(n_idx * BLK_N)
-                                    Tx.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], dispatch="tma", cache_hint="evict_last")
+                                    Tx.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
-                                profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
+                                profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)  # noqa: E501
                             with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                 Tx.ptx.cp_async.bulk.wait_group(0)
                             Tx.cuda.warpgroup_sync(10)
@@ -499,7 +498,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                         for kv in Tx.unroll(VEC_SIZE):
                             vec_32[kv] += tmp[kv]
                     for kv in Tx.unroll(VEC_SIZE // 2):
-                        Tx.cuda.float22half2(Tx.address_of(vec_16[kv * 2]), Tx.address_of(vec_32[kv * 2]))
+                        Tx.cuda.float22half2(Tx.address_of(vec_16[kv * 2]), Tx.address_of(vec_32[kv * 2]))  # noqa: E501
                         # vec_16[kv] = Tx.cast(vec_32[kv], "float16")
                     for kv in Tx.vectorized(VEC_SIZE):
                         D[m_idx, n_idx + kv] = vec_16[kv]
@@ -554,7 +553,10 @@ def test_hgemm_1consumer_1cta_swap_splitk(batch_size):
         torch_dev = torch.device("cuda")
         A_torch = A_bf16.to(torch_dev)
         B_torch = B_bf16.to(torch_dev)
-        func = lambda: torch.matmul(A_torch, B_torch.T)
+
+        def func():
+            return torch.matmul(A_torch, B_torch.T)
+
         C_torch = func()
         ms = bench(func, warmup=10, repeat=30, proton_name="cublas")
         print(f"CUBLAS flops: {flops(batch_size, N, K, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")

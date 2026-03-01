@@ -193,7 +193,7 @@ def _compile_cuda_nvcc(
         "--expt-extended-lambda",
         "--use_fast_math",
         "--ptxas-options=-v",  # printing out number of registers
-        "--ptxas-options=--verbose,--register-usage-level=10,--warn-on-local-memory-usage",  # printing out number of registers
+        "--ptxas-options=--verbose,--register-usage-level=10,--warn-on-local-memory-usage",  # printing out number of registers  # noqa: E501
     ]
 
     major, _ = parse_compute_version(get_target_compute_version(Target.current(allow_none=True)))

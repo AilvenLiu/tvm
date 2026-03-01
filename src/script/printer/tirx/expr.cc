@@ -77,7 +77,8 @@ Doc PrintVar(const tirx::Var& var, const AccessPath& var_p, const IRDocsifier& d
   if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(var)) {
     return doc.value();
   }
-  TVM_FFI_THROW(InternalError) << "IndexError: Variable is not defined in the environment: " << var->name_hint;
+  TVM_FFI_THROW(InternalError) << "IndexError: Variable is not defined in the environment: "
+                               << var->name_hint;
   TVM_FFI_UNREACHABLE();
 }
 
@@ -230,8 +231,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
         });
 
-LambdaDoc PrintPredicate(const ObjectRef& pred, const ffi::Array<tirx::Var>& vs, const AccessPath& vs_p,
-                         const PrimExpr& p, const AccessPath& p_p, const IRDocsifier& d) {
+LambdaDoc PrintPredicate(const ObjectRef& pred, const ffi::Array<tirx::Var>& vs,
+                         const AccessPath& vs_p, const PrimExpr& p, const AccessPath& p_p,
+                         const IRDocsifier& d) {
   With<TIRFrame> f(d, pred);
   ffi::Array<IdDoc> vars;
   for (int i = 0, l = vs.size(); i < l; ++i) {

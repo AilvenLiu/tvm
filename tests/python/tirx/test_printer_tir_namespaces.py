@@ -15,10 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import tvm
 import pytest
+
 from tvm import tir
-from tvm.script import tirx as Tx
 
 
 def _assert_print(obj, expected):
@@ -57,13 +56,11 @@ def test_printer_ptx_more():
     s = tir.Var("s", "handle")
     _assert_print(
         tir.op.ptx_ldmatrix(True, 1, ".b16", r, s),
-        "r = Tx.handle()\n"
-        "s = Tx.handle()\n"
-        'Tx.ptx.ldmatrix("void", Tx.bool(True), 1, ".b16", r, s)',
+        'r = Tx.handle()\ns = Tx.handle()\nTx.ptx.ldmatrix("void", Tx.bool(True), 1, ".b16", r, s)',
     )
     _assert_print(
         tir.op.ptx_stmatrix(1, False, s, r),
-        "s = Tx.handle()\n" "r = Tx.handle()\n" "Tx.ptx.stmatrix(1, Tx.bool(False), s, r)",
+        "s = Tx.handle()\nr = Tx.handle()\nTx.ptx.stmatrix(1, Tx.bool(False), s, r)",
     )
     _assert_print(tir.op.ptx_setmaxnreg(True, 64), "Tx.ptx.setmaxnreg(Tx.bool(True), 64)")
     _assert_print(tir.op.ptx_fetch_register(32, "laneid"), 'Tx.ptx.fetch_register(32, "laneid")')
@@ -86,7 +83,7 @@ def test_printer_ptx_more():
     _assert_print(tir.op.ptx_elect_sync(), "Tx.ptx.elect_sync()")
     _assert_print(
         tir.op.ptx_ld_global_acquire(r, s),
-        "r = Tx.handle()\n" "s = Tx.handle()\n" "Tx.ptx.ld_global_acquire(r, s)",
+        "r = Tx.handle()\ns = Tx.handle()\nTx.ptx.ld_global_acquire(r, s)",
     )
     _assert_print(tir.op.ptx_map_shared_rank(r, 2), "r = Tx.handle()\nTx.ptx.map_shared_rank(r, 2)")
     _assert_print(tir.op.ptx_bar_arrive(0, 128), "Tx.ptx.bar.arrive(0, 128)")
@@ -102,15 +99,13 @@ def test_printer_ptx_more():
     b = tir.Var("b", "handle")
     _assert_print(
         tir.op.ptx_tcgen05_encode_matrix_descriptor(d, a, 1, 2, 0),
-        "d = Tx.handle()\n"
-        "a = Tx.handle()\n"
-        "Tx.ptx.tcgen05.encode_matrix_descriptor(d, a, 1, 2, 0)",
+        "d = Tx.handle()\na = Tx.handle()\nTx.ptx.tcgen05.encode_matrix_descriptor(d, a, 1, 2, 0)",
     )
     _assert_print(
         tir.op.ptx_tcgen05_encode_instr_descriptor(
             d, "f16", "f16", "f16", 16, 16, 16, True, False, 1, False, False, False, False
         ),
-        'd = Tx.handle()\nTx.ptx.tcgen05.encode_instr_descriptor(d, "f16", "f16", "f16", 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',
+        'd = Tx.handle()\nTx.ptx.tcgen05.encode_instr_descriptor(d, "f16", "f16", "f16", 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_tcgen05_encode_instr_descriptor_block_scaled(
@@ -119,7 +114,7 @@ def test_printer_ptx_more():
         "d = Tx.handle()\n"
         "a = Tx.handle()\n"
         "b = Tx.handle()\n"
-        'Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(d, "f16", "f16", "f16", "f16", a, b, 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',
+        'Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(d, "f16", "f16", "f16", "f16", a, b, 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_tcgen05_cp(a, 0, 0, d, "64x128b", "f16", "f16", 1, ""),
@@ -173,7 +168,8 @@ def test_printer_cuda_more():
     _assert_print(tir.op.cuda_syncthreads_or(1), "Tx.cuda.syncthreads_or(1)")
     _assert_print(tir.op.cuda_nano_sleep(100), "Tx.cuda.nano_sleep(100)")
     _assert_print(
-        tir.op.cuda_atomic_add(p, tir.IntImm("int32", 1)), "p = Tx.handle()\nTx.cuda.atomic_add(p, 1)"
+        tir.op.cuda_atomic_add(p, tir.IntImm("int32", 1)),
+        "p = Tx.handle()\nTx.cuda.atomic_add(p, 1)",
     )
     _assert_print(tir.op.cuda_atomic_cas(p, 1, 2), "p = Tx.handle()\nTx.cuda.atomic_cas(p, 1, 2)")
     _assert_print(tir.op.cuda_ldg(p, "float32"), 'p = Tx.handle()\nTx.cuda.ldg(p, "float32")')
@@ -195,7 +191,8 @@ def test_printer_nvshmem_more():
     _assert_print(tir.op.nvshmem_quiet(), "Tx.nvshmem.quiet()")
     _assert_print(tir.op.nvshmem_barrier_all(), "Tx.nvshmem.barrier_all()")
     _assert_print(
-        tir.op.nvshmem_getmem_nbi(p, p, 16, 0), "p = Tx.handle()\nTx.nvshmem.getmem_nbi(p, p, 16, 0)"
+        tir.op.nvshmem_getmem_nbi(p, p, 16, 0),
+        "p = Tx.handle()\nTx.nvshmem.getmem_nbi(p, p, 16, 0)",
     )
     _assert_print(
         tir.op.nvshmem_getmem_nbi_warp(p, p, 16, 0),
@@ -206,7 +203,8 @@ def test_printer_nvshmem_more():
         "p = Tx.handle()\nTx.nvshmem.putmem_nbi.block(p, p, 16, 0)",
     )
     _assert_print(
-        tir.op.nvshmem_putmem_nbi(p, p, 16, 0), "p = Tx.handle()\nTx.nvshmem.putmem_nbi(p, p, 16, 0)"
+        tir.op.nvshmem_putmem_nbi(p, p, 16, 0),
+        "p = Tx.handle()\nTx.nvshmem.putmem_nbi(p, p, 16, 0)",
     )
     _assert_print(
         tir.op.nvshmem_putmem_nbi_warp(p, p, 16, 0),
@@ -264,11 +262,11 @@ def test_printer_nki_namespace():
     )
     _assert_print(
         tir.op.nki_memset(a0, 0),
-        'A = Tx.Buffer((1,), "float16", layout=None)\n' "Tx.nki.memset(A[0], 0)",
+        'A = Tx.Buffer((1,), "float16", layout=None)\nTx.nki.memset(A[0], 0)',
     )
     _assert_print(
         tir.op.nki_identity(a0, 1),
-        'A = Tx.Buffer((1,), "float16", layout=None)\n' "Tx.nki.identity(A[0], 1)",
+        'A = Tx.Buffer((1,), "float16", layout=None)\nTx.nki.identity(A[0], 1)',
     )
     _assert_print(
         tir.op.nki_reciprocal(a0, b0),
@@ -296,23 +294,23 @@ def test_printer_nki_namespace():
     _assert_print(
         tir.op.nki_tensorscalar_reduce(a0, a0, 1.0, "mul", "sum", False),
         'A = Tx.Buffer((1,), "float16", layout=None)\n'
-        'Tx.nki.tensorscalar_reduce(A[0], A[0], Tx.float32(1.0), "mul", "sum", Tx.bool(False), Tx.bool(False))',
+        'Tx.nki.tensorscalar_reduce(A[0], A[0], Tx.float32(1.0), "mul", "sum", Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.nki_scalar_tensor_tensor(a0, a0, 1.0, a0, "add", "add"),
         'A = Tx.Buffer((1,), "float16", layout=None)\n'
-        'Tx.nki.scalar_tensor_tensor(A[0], A[0], Tx.float32(1.0), A[0], "add", "add", Tx.bool(False), Tx.bool(False))',
+        'Tx.nki.scalar_tensor_tensor(A[0], A[0], Tx.float32(1.0), A[0], "add", "add", Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.nki_scalar_tensor_scalar(a0, a0, 1.0, 1.0, "add", "add"),
         'A = Tx.Buffer((1,), "float16", layout=None)\n'
-        'Tx.nki.scalar_tensor_scalar(A[0], A[0], Tx.float32(1.0), Tx.float32(1.0), "add", "add", Tx.bool(False), Tx.bool(False))',
+        'Tx.nki.scalar_tensor_scalar(A[0], A[0], Tx.float32(1.0), Tx.float32(1.0), "add", "add", Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.nki_activation_reduce(a0, a0, b0, "relu", "sum", 0.0, 1.0),
         'A = Tx.Buffer((1,), "float16", layout=None)\n'
         'B = Tx.Buffer((1,), "float16", layout=None)\n'
-        'Tx.nki.activation_reduce(A[0], A[0], B[0], "relu", "sum", Tx.float32(0.0), Tx.float32(1.0))',
+        'Tx.nki.activation_reduce(A[0], A[0], B[0], "relu", "sum", Tx.float32(0.0), Tx.float32(1.0))',  # noqa: E501
     )
     _assert_print(
         tir.op.nki_affine_select(a0, a0, a0, 1.0),
@@ -325,27 +323,27 @@ def test_printer_ptx_mma_and_wgmma():
     r = tir.Var("r", "handle")
     d = tir.Var("d", "handle")
     a = tir.Var("a", "handle")
-    b = tir.Var("b", "handle")
+    tir.Var("b", "handle")
     _assert_print(
         tir.op.ptx_mma("m8n8k4", "row", "row", "fp16", "fp16", "fp16", "fp16", r, r, r, 0, False),
-        'r = Tx.handle()\nTx.ptx.mma("void", "m8n8k4", "row", "row", "fp16", "fp16", "fp16", "fp16", r, r, r, 0, Tx.bool(False))',
+        'r = Tx.handle()\nTx.ptx.mma("void", "m8n8k4", "row", "row", "fp16", "fp16", "fp16", "fp16", r, r, r, 0, Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_wgmma_encode_matrix_descriptor(d, a, 1, 1, 0),
-        "d = Tx.handle()\n" "a = Tx.handle()\n" "Tx.ptx.wgmma.encode_matrix_descriptor(d, a, 1, 1, 0)",
+        "d = Tx.handle()\na = Tx.handle()\nTx.ptx.wgmma.encode_matrix_descriptor(d, a, 1, 1, 0)",
     )
     _assert_print(tir.op.ptx_wgmma_noop_barrier(0), "Tx.ptx.wgmma.noop_barrier(0)")
     _assert_print(
         tir.op.ptx_wgmma_mma_async_ss(
             16, 16, 16, "f16", "f16", True, False, 1.0, 1.0, True, d, d, 0, 0
         ),
-        'd = Tx.handle()\nTx.ptx.wgmma.mma_async.ss(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, d, 0, 0)',
+        'd = Tx.handle()\nTx.ptx.wgmma.mma_async.ss(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, d, 0, 0)',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_wgmma_mma_async_rs(
             16, 16, 16, "f16", "f16", True, False, 1.0, 1.0, True, d, 0, 0
         ),
-        'd = Tx.handle()\nTx.ptx.wgmma.mma_async.rs(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, 0, 0)',
+        'd = Tx.handle()\nTx.ptx.wgmma.mma_async.rs(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, 0, 0)',  # noqa: E501
     )
 
 
@@ -353,7 +351,7 @@ def test_printer_ptx_cp_async_tensor():
     tmap = tir.Var("tm", "handle")
     _assert_print(
         tir.op.ptx_cp_async_bulk_tensor_global_to_cluster(2, tmap, 0, tmap, 0, 0, 0, 0, 1, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 0, 0, 0, 1, "", 0, 1, "")',
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 0, 0, 0, 1, "", 0, 1, "")',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, 0, 0, 0, ""),
@@ -365,7 +363,7 @@ def test_printer_ptx_cp_async_tensor():
     )
     _assert_print(
         tir.op.ptx_cp_async_bulk_tensor_shared_to_global_reduce(2, 0, tmap, 0, 0, 0, "", "add"),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, 0, 0, 0, "", "add", "", "add")',
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, 0, 0, 0, "", "add", "", "add")',  # noqa: E501
     )
 
 
@@ -374,7 +372,5 @@ def test_printer_ptx_cp_async_call():
     gl = tir.Var("gl", "handle")
     _assert_print(
         tir.op.ptx_cp_async(sh, gl, 16, "", -1, -1, ""),
-        "sh = Tx.handle()\n"
-        "gl = Tx.handle()\n"
-        'Tx.ptx.cp_async("void", sh, gl, 16, "", -1, -1, "")',
+        'sh = Tx.handle()\ngl = Tx.handle()\nTx.ptx.cp_async("void", sh, gl, 16, "", -1, -1, "")',
     )

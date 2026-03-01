@@ -16,9 +16,7 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, KernelConfig
-
+from tvm.tirx.megakernel.utils.base import KernelConfig, Tile
 
 ld_reduce_8xfp16 = """
 __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr) {
@@ -40,7 +38,7 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
         asm("multimem.st.release.sys.global.v4.f32 [%0], {%1, %2, %3, %4};" ::"l"(dest), "r"(u4[4 * u]), "r"(u4[4 * u + 1]), "r"(u4[4 * u + 2]), "r"(u4[4 * u + 3]): "memory");
     }
 }
-"""
+"""  # noqa: E501
 
 
 class AllreduceTile(Tile):

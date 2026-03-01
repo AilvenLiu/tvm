@@ -16,15 +16,17 @@
 # under the License.
 
 import argparse
+
 import numpy as np
 import torch
+
 import tvm
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.megakernel.kernels import GemmTile
+from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.utils.config import KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, get_source_func
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.kernels import GemmTile
 
 
 def prepare_data(batch_size, N, K):
@@ -159,4 +161,4 @@ if __name__ == "__main__":
     for bs in args.batch_size:
         print(f"batch={bs}, N={args.N}, K={args.K}")
         test(bs, args.N, args.K, mod)
-        print(f"Pass!")
+        print("Pass!")

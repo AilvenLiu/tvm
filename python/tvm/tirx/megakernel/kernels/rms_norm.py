@@ -16,14 +16,12 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
 from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class RMSnormTile(Tile):
-
     # weight_tvm: [num_heads]
     # qk_tvm: [batch_size, num_heads, head_dim]
 
@@ -65,7 +63,6 @@ class RMSnormTile(Tile):
             self._alloc_local()
 
             with Tx.thread():
-
                 self.idx[0] = ty
                 while (
                     self.idx[0] < self.m_tile * self.h_tile

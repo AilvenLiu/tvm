@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """PTX Math operations using inline assembly."""
+
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
@@ -90,7 +91,7 @@ __forceinline__ __device__ void {func_name}(float a1, float a2, float b1, float 
     float2 b = make_float2(b1, b2);
     asm volatile("add.{rounding_mode}.ftz.f32x2 %0, %1, %2;" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, a1, a2, b1, b2, d_addr, source_code=source_code)
 
 
@@ -106,7 +107,7 @@ __forceinline__ __device__ void {func_name}(float a1, float a2, float b1, float 
     float2 b = make_float2(b1, b2);
     asm volatile("sub.{rounding_mode}.ftz.f32x2 %0, %1, %2;" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, a1, a2, b1, b2, d_addr, source_code=source_code)
 
 
@@ -122,7 +123,7 @@ __forceinline__ __device__ void {func_name}(float a1, float a2, float b1, float 
     float2 b = make_float2(b1, b2);
     asm volatile("mul.{rounding_mode}.ftz.f32x2 %0, %1, %2;" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, a1, a2, b1, b2, d_addr, source_code=source_code)
 
 
@@ -139,5 +140,5 @@ __forceinline__ __device__ void {func_name}(float a1, float a2, float b1, float 
     float2 c = make_float2(c1, c2);
     asm volatile("fma.{rounding_mode}.ftz.f32x2 %0, %1, %2, %3;" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)), "l"(reinterpret_cast<uint64_t&>(c)));
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, a1, a2, b1, b2, c1, c2, d_addr, source_code=source_code)

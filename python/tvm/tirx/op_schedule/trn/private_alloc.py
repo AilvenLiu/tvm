@@ -15,32 +15,32 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Tuple, Dict, Any, Optional
+from typing import Any
 
-from tvm.tir.stmt import OpCall
-from tvm.tir import FloatImm, Buffer, Stmt
 from tvm.script import tirx as Tx
+from tvm.tir import Buffer, FloatImm, Stmt
+from tvm.tir.stmt import OpCall
+from tvm.tirx.op_schedule.registry import f_op_scheduler
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
 from tvm.tirx.op_schedule.trn.common import (
-    nki_dim,
-    get_ewise_dim_map,
     InstructionGenerator,
+    get_ewise_dim_map,
     init_analyzer,
+    nki_dim,
 )
-from tvm.tirx.op_schedule.registry import f_op_scheduler
 from tvm.tirx.operator.op import (
-    UnaryOpWithBiasScale,
-    ReduceOp,
+    BinaryReduce,
     Copy,
     Gemm,
-    BinaryReduce,
+    ReduceOp,
+    UnaryOpWithBiasScale,
     UnaryReduce,
 )
 
 
 def alloc_const_bias_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Any]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Any]:
     bias = op.bias if op.bias is not None else FloatImm(op.dsts[0].buffer.dtype, 0.0)
     if "const_bias" in op.workspace:
         return {}
@@ -71,8 +71,8 @@ def alloc_const_bias_trn(
 
 
 def alloc_partial_reduce_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Any]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Any]:
     if "partial_reduce" in op.workspace:
         return {}
     f_op_scheduler(op, sctx)
@@ -91,8 +91,8 @@ def alloc_partial_reduce_trn(
 
 
 def alloc_identity_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Any]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Any]:
     if "identity" in op.workspace:
         return {}
     par_size = op.srcs[0].buffer.layout.size("P")
@@ -121,8 +121,8 @@ def alloc_identity_trn(
 
 
 def alloc_acc_psum_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Any]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Any]:
     if "acc_psum" in op.workspace or op.dsts[0].buffer.scope() == "trn.psum":
         return {}
     par_size = op.dsts[0].buffer.layout.size("P")
@@ -139,8 +139,8 @@ def alloc_acc_psum_trn(
 
 
 def alloc_copy_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Buffer]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Buffer]:
     src_region = op.srcs[0]
     dst_region = op.dsts[0]
     analyzer = init_analyzer(sctx)
@@ -156,8 +156,8 @@ def alloc_copy_trn(
 
 
 def alloc_unary_reduce_trn(
-    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
-) -> Dict[str, Buffer]:
+    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+) -> dict[str, Buffer]:
     if "max_inst_size" in op.config:
         partial_reduce_dict = alloc_partial_reduce_trn(op, buffer_dict, sctx)
         const_bias_dict = alloc_const_bias_trn(op, buffer_dict, sctx)
@@ -181,9 +181,9 @@ def alloc_unary_reduce_trn(
             buffer_dict[partial_reduce_buffer] = (partial_reduce_buffer, None)
             workspace_dict["partial_reduce"] = partial_reduce_buffer
         if const_bias_buffer is not None and "const_bias" not in op.workspace:
-            assert (
-                len(sctx.callbacks[ScheduleContext.kDeviceInitStmt]) == 1
-            ), "const_bias should have init"
+            assert len(sctx.callbacks[ScheduleContext.kDeviceInitStmt]) == 1, (
+                "const_bias should have init"
+            )
             init_stmt = sctx.callbacks[ScheduleContext.kDeviceInitStmt][0]
             buffer_dict[const_bias_buffer] = (const_bias_buffer, init_stmt)
             workspace_dict["const_bias"] = const_bias_buffer

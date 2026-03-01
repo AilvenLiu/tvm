@@ -16,41 +16,35 @@
 # under the License.
 
 import argparse
-import math
-import ml_dtypes
-import numpy as np
-from enum import Enum
-import pytest
-
-import tvm
-from tvm.script import tirx as Tx, ir as I, relax as R
-import tvm.testing
-from tvm import relax as rx
 
 import flashinfer
+import numpy as np
+import pytest
 import torch
 
+import tvm
+import tvm.testing
+from tvm import relax as rx
+from tvm.script import relax as R
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-
-from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, event_type_names
-from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.megakernel.utils.support import get_inverse_plan_info
-from tvm.tirx.megakernel.utils import static_scheduler
-from tvm.tirx.megakernel.utils import dynamic_scheduler
 from tvm.tirx.megakernel.relax_compatible import (
-    FuseRMSNormTile,
-    FuseGemmTile,
-    FuseGateUpSiluTile,
-    FuseSplitKReduceRMSnormRopeQTile,
-    FuseSplitKReduceRMSnormRopeAppendKTile,
-    FuseSplitKReduceAppendVTile,
     FuseBatchAttnTile,
     FuseBatchMergeTile,
+    FuseGateUpSiluTile,
+    FuseGemmTile,
+    FuseRMSNormTile,
+    FuseSplitKReduceAppendVTile,
+    FuseSplitKReduceRMSnormRopeAppendKTile,
+    FuseSplitKReduceRMSnormRopeQTile,
 )
+from tvm.tirx.megakernel.utils import dynamic_scheduler, static_scheduler
+from tvm.tirx.megakernel.utils.config import JobType, KernelConfig, event_type_names
+from tvm.tirx.megakernel.utils.support import get_inverse_plan_info
+from tvm.tirx.megakernel.utils.utils import ceildiv
 
 
 class MegaKernel:
-
     # model configs
     VOCAB_SIZE = 151936
     MAX_POSITION_EMBEDDINGS = 40960
@@ -135,9 +129,9 @@ class MegaKernel:
             # with bb.dataflow():
             # unpack info
             kv_data_ = bb.emit(R.TupleGetItem(packed_info, 0))
-            page_kv_indptr = bb.emit(R.TupleGetItem(packed_info, 1))
+            bb.emit(R.TupleGetItem(packed_info, 1))
             page_kv_indices_ = bb.emit(R.TupleGetItem(packed_info, 2))
-            page_kv_last_page_len = bb.emit(R.TupleGetItem(packed_info, 3))
+            bb.emit(R.TupleGetItem(packed_info, 3))
             append_pos = bb.emit(R.TupleGetItem(packed_info, 4))
             rope_pos = bb.emit(R.TupleGetItem(packed_info, 5))
             len_kv_chunk_ = bb.emit(R.TupleGetItem(packed_info, 6))
@@ -1271,14 +1265,14 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
         res = bench(func, warmup=3, repeat=10, proton_name="tir")
         res = func()
         if profile_on:
-            export_to_perfetto_trace(res[2].numpy(), f"layer.perfetto-trace", event_type_names)
+            export_to_perfetto_trace(res[2].numpy(), "layer.perfetto-trace", event_type_names)
         return res[0].numpy(), res[1].numpy().astype(np.float16)
 
     def std(arg_dict, batch_size, use_prefill, mk: MegaKernel):
         import flashinfer
         import torch
 
-        FULL_INTERMEDIATE_SIZE = mk.INTERMEDIATE_SIZE * mk.world_size
+        mk.INTERMEDIATE_SIZE * mk.world_size
         FULL_NUM_ATTENTION_HEADS = mk.NUM_ATTENTION_HEADS * mk.world_size
         FULL_NUM_KEY_VALUE_HEADS = mk.NUM_KEY_VALUE_HEADS * mk.world_size
 
@@ -1440,7 +1434,6 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument(
         "--scheduler",

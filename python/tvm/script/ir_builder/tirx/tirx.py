@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIRX"""
+
 import functools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
 
 import tvm.tirx.operator as tirx_op
 from tvm import DataType
 from tvm.ir import Op
-from tvm.tirx import Buffer, BufferRegion, PrimExpr, Var
+from tvm.tirx import Buffer, BufferRegion, PrimExpr
 from tvm.tirx.expr import FloatImm
 from tvm.tirx.predicate import Predicate
 
@@ -29,7 +30,7 @@ from . import _ffi_api, frame
 from .ir import alloc_buffer, attr, decl_buffer, meta_class
 
 
-def _to_region(buffer: Union[BufferRegion, Buffer]):
+def _to_region(buffer: BufferRegion | Buffer):
     if isinstance(buffer, Buffer):
         # If this buffer was created from a BufferRegion assignment (e.g. via
         # partition(select=...)), use the original region so that the OpCall
@@ -43,7 +44,7 @@ def _to_region(buffer: Union[BufferRegion, Buffer]):
 
 
 def _wrap_elem_in_tuple(e):
-    if isinstance(e, (tuple, list)):
+    if isinstance(e, (tuple, list)):  # noqa: UP038
         return e
     return (e,)
 
@@ -52,10 +53,10 @@ f_insert = _ffi_api.OpCall  # pylint: disable=no-member
 
 
 def zero(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Zero out all elements in src and store to dst.
@@ -80,12 +81,12 @@ def zero(
 
 
 def sqrt(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
-    scale: Optional[FloatImm] = None,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    bias: BufferRegion | Buffer | FloatImm | None = None,
+    scale: FloatImm | None = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Sqrt all elements in src and store to dst.
@@ -122,11 +123,11 @@ def sqrt(
 
 
 def add(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer, FloatImm],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer | FloatImm,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Add data from src1 and src2, store to dst.
@@ -159,11 +160,11 @@ def add(
 
 
 def sub(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Sub data from src2 to src1, store to dst.
@@ -196,11 +197,11 @@ def sub(
 
 
 def mul(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer, FloatImm],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer | FloatImm,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Multiply data from src1 and src2, store to dst.
@@ -233,11 +234,11 @@ def mul(
 
 
 def fdiv(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """(Float) Div data from src2 to src1, store to dst.
@@ -269,10 +270,10 @@ def fdiv(
 
 
 def cast(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Cast src to dst.
@@ -300,10 +301,10 @@ def cast(
 
 
 def copy(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Copy data from src to dst.
@@ -331,10 +332,10 @@ def copy(
 
 
 def copy_async(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     if workspace is None:
@@ -348,16 +349,16 @@ def copy_async(
 
 
 def gemm_async(
-    C: Union[BufferRegion, Buffer],
-    A: Union[BufferRegion, Buffer],
-    B: Union[BufferRegion, Buffer],
-    SFA: Optional[Union[BufferRegion, Buffer]] = None,
-    SFB: Optional[Union[BufferRegion, Buffer]] = None,
+    C: BufferRegion | Buffer,
+    A: BufferRegion | Buffer,
+    B: BufferRegion | Buffer,
+    SFA: BufferRegion | Buffer | None = None,
+    SFB: BufferRegion | Buffer | None = None,
     transA: bool = False,
     transB: bool = False,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """General matrix multiplication asynchronously.
@@ -426,10 +427,10 @@ def gemm_async(
 
 
 def fill(
-    dst: Union[BufferRegion, Buffer],
+    dst: BufferRegion | Buffer,
     value: PrimExpr,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Fill the buffer region with the value.
@@ -453,16 +454,16 @@ def fill(
 
 
 def gemm(
-    D: Union[BufferRegion, Buffer],
-    A: Union[BufferRegion, Buffer],
-    B: Union[BufferRegion, Buffer],
-    C: Union[BufferRegion, Buffer],
+    D: BufferRegion | Buffer,
+    A: BufferRegion | Buffer,
+    B: BufferRegion | Buffer,
+    C: BufferRegion | Buffer,
     transpose_A: bool = False,
     transpose_B: bool = False,
     alpha: PrimExpr = 1.0,
     beta: PrimExpr = 0.0,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """General matrix multiplication.
@@ -523,12 +524,12 @@ def gemm(
 
 
 def sum(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    axes: Union[int, Tuple[int]] = -1,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    axes: int | tuple[int] = -1,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """
@@ -563,12 +564,12 @@ def sum(
 
 
 def max(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    axes: Union[int, Tuple[int]] = -1,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    axes: int | tuple[int] = -1,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """
@@ -603,12 +604,12 @@ def max(
 
 
 def min(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    axes: Union[int, Tuple[int]] = -1,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    axes: int | tuple[int] = -1,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """
@@ -643,10 +644,10 @@ def min(
 
 
 def reciprocal(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Reciprocal all elements in src and store to dst.
@@ -673,10 +674,10 @@ def reciprocal(
 
 
 def memset(
-    dst: Union[BufferRegion, Buffer],
+    dst: BufferRegion | Buffer,
     value: PrimExpr,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Set all elements in dst to value.
@@ -702,11 +703,11 @@ def memset(
 
 
 def maximum(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer, FloatImm],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer | FloatImm,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Maximum all elements in src1 and src2 and store to dst.
@@ -739,11 +740,11 @@ def maximum(
 
 
 def minimum(
-    dst: Union[BufferRegion, Buffer],
-    src1: Union[BufferRegion, Buffer, FloatImm],
-    src2: Union[BufferRegion, Buffer, FloatImm],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src1: BufferRegion | Buffer | FloatImm,
+    src2: BufferRegion | Buffer | FloatImm,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Minimum all elements in src1 and src2 and store to dst.
@@ -776,12 +777,12 @@ def minimum(
 
 
 def exp(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
-    scale: Optional[FloatImm] = None,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    bias: BufferRegion | Buffer | FloatImm | None = None,
+    scale: FloatImm | None = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Exponentiate all elements in src and store to dst.
@@ -816,12 +817,12 @@ def exp(
 
 
 def exp2(
-    dst: Union[BufferRegion, Buffer],
-    src: Union[BufferRegion, Buffer],
-    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
-    scale: Optional[FloatImm] = None,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    bias: BufferRegion | Buffer | FloatImm | None = None,
+    scale: FloatImm | None = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Compute base-2 exponential (2^x) of all elements in src and store to dst.
@@ -856,7 +857,7 @@ def exp2(
 
 
 def compose_op(
-    workspace: Dict[str, Buffer] = None, dispatch: Optional[str] = None, **kwargs
+    workspace: dict[str, Buffer] | None = None, dispatch: str | None = None, **kwargs
 ) -> frame.ComposeOpFrame:
     """Compose a TIRx op.
 
@@ -882,15 +883,15 @@ def tvm_kernel_replace_point():
 
 
 def binary_reduce(
-    binary_output: Union[BufferRegion, Buffer],
-    reduce_output: Union[BufferRegion, Buffer],
-    binary_input1: Union[BufferRegion, Buffer, FloatImm],
-    binary_input2: Union[BufferRegion, Buffer, FloatImm],
-    binary_op: Union[str, Op],
-    reduce_op: Union[str, Op],
-    reduce_axes: Union[int, Tuple[int]] = -1,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    binary_output: BufferRegion | Buffer,
+    reduce_output: BufferRegion | Buffer,
+    binary_input1: BufferRegion | Buffer | FloatImm,
+    binary_input2: BufferRegion | Buffer | FloatImm,
+    binary_op: str | Op,
+    reduce_op: str | Op,
+    reduce_axes: int | tuple[int] = -1,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Combine a binary operation with a reduction operation.
@@ -957,16 +958,16 @@ def binary_reduce(
 
 
 def unary_reduce(
-    unary_output: Union[BufferRegion, Buffer],
-    reduce_output: Union[BufferRegion, Buffer],
-    unary_input: Union[BufferRegion, Buffer],
-    unary_op: Union[str, Op],
-    reduce_op: Union[str, Op],
-    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
-    scale: Optional[FloatImm] = None,
-    reduce_axes: Union[int, Tuple[int]] = -1,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    unary_output: BufferRegion | Buffer,
+    reduce_output: BufferRegion | Buffer,
+    unary_input: BufferRegion | Buffer,
+    unary_op: str | Op,
+    reduce_op: str | Op,
+    bias: BufferRegion | Buffer | FloatImm | None = None,
+    scale: FloatImm | None = None,
+    reduce_axes: int | tuple[int] = -1,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Combine a unary operation with a reduction operation.
@@ -1038,15 +1039,15 @@ def unary_reduce(
 
 
 def binary_chain(
-    output: Union[BufferRegion, Buffer],
-    data: Union[BufferRegion, Buffer],
-    operand0: Union[BufferRegion, Buffer, FloatImm],
-    operand1: Union[BufferRegion, Buffer, FloatImm],
-    op0: Union[str, Op],
-    op1: Union[str, Op],
+    output: BufferRegion | Buffer,
+    data: BufferRegion | Buffer,
+    operand0: BufferRegion | Buffer | FloatImm,
+    operand1: BufferRegion | Buffer | FloatImm,
+    op0: str | Op,
+    op1: str | Op,
     reverse1: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Chain multiple binary operations together.
@@ -1118,13 +1119,13 @@ def binary_chain(
 
 
 def reduce_negate(
-    output: Union[BufferRegion, Buffer],
-    input: Union[BufferRegion, Buffer],
-    reduce_op: Union[str, Op],
-    reduce_axes: Union[int, Tuple[int]] = -1,
+    output: BufferRegion | Buffer,
+    input: BufferRegion | Buffer,
+    reduce_op: str | Op,
+    reduce_axes: int | tuple[int] = -1,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Negate the result of a reduction operation.
@@ -1177,10 +1178,10 @@ def reduce_negate(
 
 
 def select(
-    dst: Union[BufferRegion, Buffer],
-    true_value: Union[BufferRegion, Buffer, FloatImm],
-    false_value: Union[BufferRegion, Buffer, FloatImm],
-    pred: Union[Predicate, Callable[..., PrimExpr]],
+    dst: BufferRegion | Buffer,
+    true_value: BufferRegion | Buffer | FloatImm,
+    false_value: BufferRegion | Buffer | FloatImm,
+    pred: Predicate | Callable[..., PrimExpr],
 ):
     """Select between two values based on a predicate.
 
@@ -1197,7 +1198,7 @@ def select(
 
     pred : Union[Predicate, Callable[..., PrimExpr]]
         The predicate to evaluate. The callable should take the same number of arguments as the dimensions of the destination buffer.
-    """
+    """  # noqa: E501
     dst = _to_region(dst)
     if isinstance(true_value, Buffer):
         true_value = _to_region(true_value)
@@ -1301,9 +1302,9 @@ class PoolAllocator:
             attr_frame.__enter__()
 
 
-def reshape(buffer: Buffer, shape: List[PrimExpr]):
+def reshape(buffer: Buffer, shape: list[PrimExpr]):
     # auto-infer the shape if shape has only one -1
-    # for example, if buffer.shape is (1024, 1024) and shape is (128, -1, 2), then the new shape will be (128, 4, 2)
+    # for example, if buffer.shape is (1024, 1024) and shape is (128, -1, 2), then the new shape will be (128, 4, 2)  # noqa: E501
     shape = list(shape)
     if -1 in shape and shape.count(-1) == 1:
         size = functools.reduce(lambda x, y: x * y, buffer.shape)
@@ -1338,10 +1339,10 @@ def reshape(buffer: Buffer, shape: List[PrimExpr]):
 
 
 def permute_dims(
-    buffer: Union[BufferRegion, Buffer],
-    order: List[Union[PrimExpr, int]],
-    workspace: Dict[str, Buffer] = None,
-    dispatch: Optional[str] = None,
+    buffer: BufferRegion | Buffer,
+    order: list[PrimExpr | int],
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
     **kwargs,
 ):
     """Permute the tensor dimensions with given order.
@@ -1368,33 +1369,33 @@ def permute_dims(
 
 
 __all__ = [
-    "zero",
-    "sqrt",
+    "PoolAllocator",
     "add",
-    "sub",
-    "mul",
-    "fdiv",
+    "binary_chain",
+    "binary_reduce",
     "cast",
+    "compose_op",
     "copy",
     "copy_async",
-    "gemm_async",
+    "exp",
+    "fdiv",
     "fill",
     "gemm",
-    "reciprocal",
-    "memset",
-    "sum",
+    "gemm_async",
     "max",
-    "min",
-    "compose_op",
     "maximum",
+    "memset",
+    "min",
     "minimum",
-    "exp",
-    "tvm_kernel_replace_point",
-    "binary_reduce",
-    "unary_reduce",
-    "binary_chain",
+    "mul",
+    "permute_dims",
+    "reciprocal",
     "reduce_negate",
     "select",
-    "PoolAllocator",
-    "permute_dims",
+    "sqrt",
+    "sub",
+    "sum",
+    "tvm_kernel_replace_point",
+    "unary_reduce",
+    "zero",
 ]

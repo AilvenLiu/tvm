@@ -16,11 +16,9 @@
 # under the License.
 """Tests for T.inline / Tx.inline with Python LEGB scoping semantics."""
 
-import tvm
-import tvm.testing
 from tvm.ir import assert_structural_equal
-from tvm.script import tir as T, tirx as Tx
-
+from tvm.script import tir as T
+from tvm.script import tirx as Tx
 
 # Module-level constant for testing global visibility
 MODULE_CONST = 42
@@ -31,7 +29,7 @@ def test_local_shadows_enclosing():
 
     @T.prim_func(private=True)
     def func(A: T.Buffer((128,), "int32")) -> None:
-        x = T.int32(10)
+        T.int32(10)
 
         @T.inline
         def write(x):
@@ -42,7 +40,7 @@ def test_local_shadows_enclosing():
 
     @T.prim_func(private=True)
     def expected(A: T.Buffer((128,), "int32")) -> None:
-        x = T.int32(10)
+        T.int32(10)
         A[0] = T.int32(20)
 
     assert_structural_equal(func, expected)
@@ -201,6 +199,7 @@ def test_sibling_calls():
 
 def test_recursive_inline():
     """Recursive inline (defined inside prim_func)."""
+
     # fmt: off
     @Tx.prim_func(tirx=True, private=True)
     def func():

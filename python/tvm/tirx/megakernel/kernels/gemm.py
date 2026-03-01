@@ -19,13 +19,13 @@ from typing import Literal
 
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
-from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
+from tvm.tir.layout import S, TCol, TileLayout, TLane
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager, Barriers
+from tvm.tirx.megakernel.utils.base import Barriers, SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig, ProfileEventType
 from tvm.tirx.megakernel.utils.utils import ceildiv, mbarrier_try_wait
-from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType, F16_BYTES, F32_BYTES
+from tvm.tirx.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
 
 
 class BarTMA2MMA(Barriers):
@@ -107,9 +107,9 @@ class GemmTile(Tile):
         self.b_type = b_type
         assert a_type == "float16", "only float16 is supported for now"
         assert b_type == "float16", "only float16 is supported for now"
-        assert not (
-            use_tma_reduce and split_k_factor == 1
-        ), "use_tma_reduce when split_k_factor == 1 is not supported"
+        assert not (use_tma_reduce and split_k_factor == 1), (
+            "use_tma_reduce when split_k_factor == 1 is not supported"
+        )
         if out_type is None:
             self.out_type = "float32" if split_k_factor > 1 or use_tma_reduce else "float16"
         else:
@@ -188,7 +188,7 @@ class GemmTile(Tile):
         # alloc shared memory
         # use GemmTile instead of cls to avoid re-allocating memory for different subclasses
         # TODO: this cannot be generalized if there are multiple subclasses of GemmTile
-        #       we need to delete these members in class_finalize, and only alloc when there are no members
+        #       we need to delete these members in class_finalize, and only alloc when there are no members  # noqa: E501
         GemmTile.tmem_addr = smem_manager.alloc(
             [1], "uint32", name="tmem_addr", method="persistent"
         )
@@ -371,10 +371,10 @@ class GemmTile(Tile):
     @Tx.inline
     def _run(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             with Tx.cta():
                 Tx.attr({"tirx.scope_partition": True})
                 with Tx.warpgroup()[1:2]:
@@ -457,7 +457,7 @@ class GemmTile(Tile):
 
                         descI: Tx.uint32
                         Tx.ptx.tcgen05.encode_instr_descriptor(
-                            Tx.address_of(descI),
+                            Tx.address_of(descI),  # noqa: F821
                             "float32",
                             self.a_type,
                             self.b_type,
@@ -483,8 +483,7 @@ class GemmTile(Tile):
                             Tx.gemm_async(
                                 self.tmem[
                                     :,
-                                    self.tmem_idx
-                                    * self.M_pad_size : self.tmem_idx
+                                    self.tmem_idx * self.M_pad_size : self.tmem_idx
                                     * self.M_pad_size
                                     + self.BLK_N,
                                 ],
@@ -493,7 +492,7 @@ class GemmTile(Tile):
                                 accum=acc,
                                 dispatch="tcgen05",
                                 cta_group=KernelConfig.CTA_GROUP,
-                                descI=descI,
+                                descI=descI,  # noqa: F821
                             )
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.MMA, lane_id == 0)

@@ -16,29 +16,30 @@
 # under the License.
 
 """Supporting methods for megakernel testing."""
-import numpy as np
-from typing import Literal
-import torch
+
 import threading
 from pathlib import Path
+from typing import Literal
 
+import numpy as np
+import torch
 import tvm_ffi
+
 import tvm
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import export_to_perfetto_trace
-
-from tvm.tirx.megakernel.utils.utils import ceildiv, pack_into_32bit
-from tvm.tirx.megakernel.utils.config import KernelConfig, JobType, event_type_names
-from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
-from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
 from tvm.tirx.megakernel.kernels import (
+    AllreduceTile,
+    GateUpSiluTile,
     GemmTile,
     GroupGEMMTileSM100,
-    SplitKReduceTile,
-    AllreduceTile,
     SiluMultiplyTile,
-    GateUpSiluTile,
+    SplitKReduceTile,
 )
+from tvm.tirx.megakernel.utils.config import JobType, KernelConfig, event_type_names
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
+from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
+from tvm.tirx.megakernel.utils.utils import ceildiv, pack_into_32bit
 
 
 def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_task_num):
@@ -395,7 +396,7 @@ class ProfilerHandler:
                 if rank == -1:
                     file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}.perfetto-trace"
                 else:
-                    file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}-rank{rank}.perfetto-trace"
+                    file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}-rank{rank}.perfetto-trace"  # noqa: E501
                 export_to_perfetto_trace(
                     profiler_buffer[layer_id].numpy(), file_name, event_type_names
                 )

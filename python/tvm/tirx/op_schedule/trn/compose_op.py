@@ -17,29 +17,26 @@
 
 """Implementation of compose operator schedules."""
 
-from typing import Optional, List
-import operator
-from functools import reduce
-
+from tvm.ir import Op
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc, OpCall
+from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
     predicate,
+    register_dispatch,
 )
-from tvm.ir import Op
-from tvm.tirx.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
+from tvm.tirx.operator.op import BinaryChain, BinaryReduce, ReduceNegate, UnaryReduce
+
+from ..common import ReduceOpType
+from .binary import InstType, try_find_inst_nary
 from .common import (
-    init_analyzer,
-    get_reduction_dim_map,
     InstructionGenerator,
+    get_reduction_dim_map,
+    init_analyzer,
     nki_dim,
 )
-from .unary import try_find_inst_unary, get_const_bias_tensor
-from .binary import InstType, try_find_inst_nary
 from .reduction import generate_intermediate_buffer, reduction_trn
-from ..common import ReduceOpType
+from .unary import get_const_bias_tensor, try_find_inst_unary
 
 # Operation code mappings
 opcode_table = {
@@ -62,7 +59,7 @@ optype_table = {
 }
 
 
-def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate a TRN schedule for binary reduction operations."""
     op = OpCall.downcast(op)
     assert isinstance(op, BinaryReduce), f"invalid operator downcast: {op}"
@@ -96,9 +93,9 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
     # Generate axes and validate
-    assert (
-        inst_type[0] == InstType.TENSOR_SCALAR
-    ), f"TensorTensor is not supported for vector reduce: {op}"
+    assert inst_type[0] == InstType.TENSOR_SCALAR, (
+        f"TensorTensor is not supported for vector reduce: {op}"
+    )
 
     # Handle input reversal if needed
     if reverse[0]:
@@ -125,8 +122,9 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Handle source 2 (either buffer region or constant)
     CONST = binary_input2 if not isinstance(binary_input2, BufferRegion) else None
     # Extract buffers and opcodes
-    src1, src2 = binary_input1.buffer, (
-        binary_input2.buffer if isinstance(binary_input2, BufferRegion) else None
+    src1, src2 = (
+        binary_input1.buffer,
+        (binary_input2.buffer if isinstance(binary_input2, BufferRegion) else None),
     )
     dst1, dst2 = binary_output.buffer, reduce_output.buffer
     binary_opcode, reduce_opcode = opcode_table[op.binary_op], opcode_table[op.reduce_op]
@@ -140,16 +138,16 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                 with Tx.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
-                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
+                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})  # noqa: E501
                             src_1_indices = Tx.meta_var(inst_gen.generate_indices(binary_input1))
                             vec_dst_idx = Tx.meta_var(inst_gen.generate_indices(binary_output))
                             reduce_dst_idx = Tx.meta_var(inst_gen.generate_indices(reduce_output))
                             if inst_gen.make_guard(binary_output):
                                 if CONST is None:
-                                    src_2_indices = Tx.meta_var(inst_gen.generate_indices(binary_input2))
-                                    Tx.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse[0])
+                                    src_2_indices = Tx.meta_var(inst_gen.generate_indices(binary_input2))  # noqa: E501
+                                    Tx.nki.tensorscalar_reduce(dst2[tuple(reduce_dst_idx)], dst1[tuple(vec_dst_idx)], src1[tuple(src_1_indices)], src2[tuple(src_2_indices)], binary_opcode, reduce_opcode, reverse[0])  # noqa: E501
                                 else:
-                                    Tx.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse[0])
+                                    Tx.nki.tensorscalar_reduce(dst2[tuple(reduce_dst_idx)], dst1[tuple(vec_dst_idx)], src1[tuple(src_1_indices)], CONST, binary_opcode, reduce_opcode, reverse[0])  # noqa: E501
         # fmt: on
     else:
         # Implementation with intermediate buffer
@@ -161,28 +159,28 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                     with Tx.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                             for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
-                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
+                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})  # noqa: E501
                                 if inst_gen.make_guard(binary_output):
-                                    src_1_indices = Tx.meta_var(inst_gen.generate_indices(binary_input1))
-                                    vec_dst_idx = Tx.meta_var(inst_gen.generate_indices(binary_output))
+                                    src_1_indices = Tx.meta_var(inst_gen.generate_indices(binary_input1))  # noqa: E501
+                                    vec_dst_idx = Tx.meta_var(inst_gen.generate_indices(binary_output))  # noqa: E501
                                     if CONST is None:
-                                        src_2_indices = Tx.meta_var(inst_gen.generate_indices(binary_input2))
-                                        Tx.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse[0])
+                                        src_2_indices = Tx.meta_var(inst_gen.generate_indices(binary_input2))  # noqa: E501
+                                        Tx.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[tuple(vec_dst_idx)], src1[tuple(src_1_indices)], src2[tuple(src_2_indices)], binary_opcode, reduce_opcode, reverse[0])  # noqa: E501
                                     else:
-                                        Tx.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse[0])
+                                        Tx.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[tuple(vec_dst_idx)], src1[tuple(src_1_indices)], CONST, binary_opcode, reduce_opcode, reverse[0])  # noqa: E501
                 with Tx.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in Tx.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
                             inst_gen.set_bind_map_all({p_var: p_loop, spatial_b_var: b_loop})
                             if inst_gen.make_guard(reduce_output):
-                                dst_2_indices = Tx.meta_var(inst_gen.generate_indices(reduce_output))
-                                Tx.nki.tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
+                                dst_2_indices = Tx.meta_var(inst_gen.generate_indices(reduce_output))  # noqa: E501
+                                Tx.nki.tensorreduce(dst2[tuple(dst_2_indices)], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)  # noqa: E501
         # fmt: on
 
     return impl
 
 
-def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate a TRN schedule for unary reduction operations."""
     op = OpCall.downcast(op)
     assert isinstance(op, UnaryReduce), f"invalid operator downcast: {op}"
@@ -257,16 +255,16 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                 with Tx.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
-                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
+                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})  # noqa: E501
                             src_1_indices = Tx.meta_var(inst_gen.generate_indices(unary_input))
                             dst_1_indices = Tx.meta_var(inst_gen.generate_indices(unary_output))
                             dst_2_indices = Tx.meta_var(inst_gen.generate_indices(reduce_output))
                             if inst_gen.make_guard(unary_output):
                                 if isinstance(bias, BufferRegion):
                                     src_bias_indices = Tx.meta_var(inst_gen.generate_indices(bias))
-                                    Tx.evaluate(Tx.nki.activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                    Tx.evaluate(Tx.nki.activation_reduce(dst2[tuple(dst_2_indices)], dst1[tuple(dst_1_indices)], src[tuple(src_1_indices)], unary_opcode, reduce_opcode, bias_buffer[tuple(src_bias_indices)], scale))  # noqa: E501
                                 else:
-                                    Tx.evaluate(Tx.nki.activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
+                                    Tx.evaluate(Tx.nki.activation_reduce(dst2[tuple(dst_2_indices)], dst1[tuple(dst_1_indices)], src[tuple(src_1_indices)], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))  # noqa: E501
         # fmt: on
 
         import tvm
@@ -283,29 +281,29 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                     with Tx.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                             for f_loop in Tx.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
-                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
+                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})  # noqa: E501
                                 src_1_indices = Tx.meta_var(inst_gen.generate_indices(unary_input))
                                 dst_1_indices = Tx.meta_var(inst_gen.generate_indices(unary_output))
                                 if inst_gen.make_guard(unary_output):
                                     if isinstance(bias, BufferRegion):
-                                        src_bias_indices = Tx.meta_var(inst_gen.generate_indices(bias))
-                                        Tx.evaluate(Tx.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                        src_bias_indices = Tx.meta_var(inst_gen.generate_indices(bias))  # noqa: E501
+                                        Tx.evaluate(Tx.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[tuple(dst_1_indices)], src[tuple(src_1_indices)], unary_opcode, reduce_opcode, bias_buffer[tuple(src_bias_indices)], scale))  # noqa: E501
                                     else:
-                                        Tx.evaluate(Tx.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
+                                        Tx.evaluate(Tx.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[tuple(dst_1_indices)], src[tuple(src_1_indices)], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))  # noqa: E501
                 with Tx.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in Tx.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
                             inst_gen.set_bind_map_all({p_var: p_loop, spatial_b_var: b_loop})
                             if inst_gen.make_guard(reduce_output):
-                                dst_2_indices = Tx.meta_var(inst_gen.generate_indices(reduce_output))
-                                # TODO: we should use nki.activation_reduce as second stage reduction
-                                Tx.evaluate(Tx.nki.tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
+                                dst_2_indices = Tx.meta_var(inst_gen.generate_indices(reduce_output))  # noqa: E501
+                                # TODO: we should use nki.activation_reduce as second stage reduction  # noqa: E501
+                                Tx.evaluate(Tx.nki.tensorreduce(dst2[tuple(dst_2_indices)], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))  # noqa: E501
         # fmt: on
 
         return impl
 
 
-def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate a TRN schedule for binary chain operations."""
     op = OpCall.downcast(op)
     assert isinstance(op, BinaryChain), f"invalid operator downcast: {op}"
@@ -317,16 +315,16 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     analyzer = init_analyzer(sctx)
 
     # Find instruction patterns
-    inst_gen = InstructionGenerator([output] + srcs, analyzer)
+    inst_gen = InstructionGenerator([output, *srcs], analyzer)
     inst_result = try_find_inst_nary(
         output, srcs, analyzer, inst_gen, allow_first_op_tensortensor=False
     )
     inst_repr, inst_types, _reverse = inst_result
 
     # Generate axes and validate
-    assert (
-        inst_types[0] == InstType.TENSOR_SCALAR
-    ), "The first operator must be a tensor scalar operator"
+    assert inst_types[0] == InstType.TENSOR_SCALAR, (
+        "The first operator must be a tensor scalar operator"
+    )
 
     # Handle input reversal if needed
     reverse[0] = _reverse[0]
@@ -344,7 +342,7 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     b_extent = inst_gen.fill_in_block_dim(output, b_var)
 
     # Extract buffers and opcodes
-    src, dst = srcs[0].buffer, output.buffer
+    _src, dst = srcs[0].buffer, output.buffer
     opcode0, opcode1 = opcode_table[op.op0], opcode_table[op.op1]
 
     # Determine operation function based on instruction type
@@ -377,20 +375,20 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                         dst_indices = Tx.meta_var(inst_gen.generate_indices(output))
                         srcs = Tx.meta_var(get_srcs(inst_gen))
                         if inst_gen.make_guard(output):
-                            Tx.evaluate(func(dst[*dst_indices], *srcs, opcode0, opcode1, reverse[0], reverse[1]))
+                            Tx.evaluate(func(dst[tuple(dst_indices)], *srcs, opcode0, opcode1, reverse[0], reverse[1]))  # noqa: E501
     # fmt: on
 
     return impl
 
 
-def reduce_negate_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def reduce_negate_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate a TRN schedule for reduce negate operations."""
     op = OpCall.downcast(op)
     assert isinstance(op, ReduceNegate), f"invalid operator downcast: {op}"
     return reduction_trn(op, optype_table[op.reduce_op], sctx, negate=True)
 
 
-def compose_op_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def compose_op_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate a TRN schedule for compose operations."""
     raise NotImplementedError(
         "Generic compose_op must be lowered to specific compose ops before operator-level passes"

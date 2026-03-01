@@ -16,13 +16,12 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments, too-many-locals
 """PTX Data Movement and Conversion Instructions: Asynchronous Copy."""
-import tvm
 
+import tvm
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
 from .utils import parse_str
-
 
 # see https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/copy_sm90_desc.hpp#L186
 CacheHint = {
@@ -76,7 +75,7 @@ def codegen_ptx_cp_async(
         # fill the dst with zero if predicate is false
         assert predicate != -1
         assert fill_mode == "zero"
-        cache_hint_operand = f", %4" if cache_hint != "" else ""
+        cache_hint_operand = ", %4" if cache_hint != "" else ""
         source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* src, int predicate) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
@@ -86,12 +85,12 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src, int predicate)
     :: "r"(dst_addr), "l"(src), "n"({cp_size}), "r"(src_size){cache_hint_arg}
   );
 }}
-"""
+"""  # noqa: E501
         return cuda_func_call(func_name, dst_ptr, src_ptr, predicate, source_code=source_code)
     else:
         if predicate == -1:
             # no predicate, just copy the src to dst
-            cache_hint_operand = f", %3" if cache_hint != "" else ""
+            cache_hint_operand = ", %3" if cache_hint != "" else ""
             source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
@@ -100,11 +99,11 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
     :: "r"(dst_addr), "l"(src), "n"({cp_size}){cache_hint_arg}
   );
 }}
-"""
+"""  # noqa: E501
             return cuda_func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
         else:
             # predicate is true, copy the src to dst
-            cache_hint_operand = f", %4" if cache_hint != "" else ""
+            cache_hint_operand = ", %4" if cache_hint != "" else ""
             source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* src, int predicate) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
@@ -117,7 +116,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src, int predicate)
     :: "r"(dst_addr), "l"(src), "n"({cp_size}), "r"(predicate){cache_hint_arg}
   );
 }}
-"""
+"""  # noqa: E501
             return cuda_func_call(func_name, dst_ptr, src_ptr, predicate, source_code=source_code)
 
 
@@ -167,7 +166,7 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
 
     func_name = (
         f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
-        + (f"_multicast" if is_multicast else "")
+        + ("_multicast" if is_multicast else "")
         + (f"_cta_group_{cta_group}" if cta_group == 2 else "")
         + (f"_{cache_hint}" if cache_hint != "" else "")
     )
@@ -199,12 +198,12 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
         cta_group_str = ""
 
     if cache_hint != "":
-        cache_hint_str = f".L2::cache_hint"
+        cache_hint_str = ".L2::cache_hint"
     else:
         cache_hint_str = ""
 
     if is_multicast:
-        cache_hint_operand = f", %4" if cache_hint != "" else ""
+        cache_hint_operand = ", %4" if cache_hint != "" else ""
         cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
         source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, int cta_mask_arg, {coord_arg_list}) {{
@@ -221,9 +220,9 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
     : "memory"
   );
 }}
-"""
+"""  # noqa: E501
     else:
-        cache_hint_operand = f", %3" if cache_hint != "" else ""
+        cache_hint_operand = ", %3" if cache_hint != "" else ""
         cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
         source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
@@ -239,7 +238,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
     : "memory"
   );
 }}
-"""
+"""  # noqa: E501
 
     if is_multicast:
         return cuda_func_call(
@@ -273,11 +272,11 @@ def codegen_ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *
     coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
 
     if cache_hint != "":
-        cache_hint_str = f".L2::cache_hint"
+        cache_hint_str = ".L2::cache_hint"
     else:
         cache_hint_str = ""
 
-    cache_hint_operand = f", %2" if cache_hint != "" else ""
+    cache_hint_operand = ", %2" if cache_hint != "" else ""
     cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
 
     source_code = f"""
@@ -293,7 +292,7 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
     : "memory"
   );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, src_ptr, tensormap, *coords, source_code=source_code)
 
 
@@ -321,11 +320,11 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, 
     coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
 
     if cache_hint != "":
-        cache_hint_str = f".L2::cache_hint"
+        cache_hint_str = ".L2::cache_hint"
     else:
         cache_hint_str = ""
 
-    cache_hint_operand = f", %1" if cache_hint != "" else ""
+    cache_hint_operand = ", %1" if cache_hint != "" else ""
     cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
 
     source_code = f"""
@@ -370,11 +369,11 @@ def codegen_ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tenso
     coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
 
     if cache_hint != "":
-        cache_hint_str = f".L2::cache_hint"
+        cache_hint_str = ".L2::cache_hint"
     else:
         cache_hint_str = ""
 
-    cache_hint_operand = f", %2" if cache_hint != "" else ""
+    cache_hint_operand = ", %2" if cache_hint != "" else ""
     cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
     source_code = f"""
 __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensormap, {coord_arg_list}) {{
@@ -389,7 +388,7 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
     : "memory"
   );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, src_ptr, tensormap, *coords, source_code=source_code)
 
 

@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments, too-many-locals
 """PTX MMA operations (Volta/Turing/Ampere matrix ops)."""
+
 import re
 from dataclasses import dataclass
 
@@ -163,7 +164,7 @@ def codegen_ptx_mma(
         c_ptr_cast = ""
     else:
         c_inputs = ", ".join([f'"{c_frag_attrs.reg_type}"(c_ptr[{i}])' for i in range(c_args_cnt)])
-        c_signature = f", void* c_ptr_in"
+        c_signature = ", void* c_ptr_in"
         c_ptr_cast = f"{c_frag_attrs.ptr_type}* c_ptr = ({c_frag_attrs.ptr_type}*)(c_ptr_in);"
 
     source_code = f"""
@@ -180,7 +181,7 @@ __forceinline__ __device__ void {func_name}(void* d_ptr_in, void* a_ptr_in, void
         : {a_inputs}, {b_inputs}, {c_inputs}
     );
 }}
-"""
+"""  # noqa: E501
     if no_c_ptr:
         return cuda_func_call(func_name, d_ptr, a_ptr, b_ptr, source_code=source_code)
     else:
@@ -219,7 +220,7 @@ __forceinline__ __device__ void {func_name}(void* local_ptr, void* smem_ptr) {{
       : "r"(addr)
     );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, local_ptr, smem_ptr, source_code=source_code)
 
 
@@ -250,5 +251,5 @@ __forceinline__ __device__ void {func_name}(void* smem_ptr, void* local_ptr) {{
       : {operands}, "r"(addr)
     );
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(func_name, smem_ptr, local_ptr, source_code=source_code)

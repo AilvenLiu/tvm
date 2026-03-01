@@ -38,7 +38,7 @@ def test_cuda_atomic_add():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((1,), "int32"), B: Tx.Buffer((1,), "float32")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread()[tx == 0]:
                 Tx.cuda.atomic_add(A.data, Tx.int32(1))
@@ -59,7 +59,7 @@ def test_cuda_thread_fence():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread()[tx == 0]:
                 Tx.cuda.thread_fence()
@@ -72,7 +72,7 @@ def test_cuda_nano_sleep():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread()[tx == 0]:
                 Tx.cuda.nano_sleep(1)
@@ -85,7 +85,7 @@ def test_cuda_atomic_cas():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread()[tx == 0]:
                 Tx.cuda.atomic_cas(A.data, Tx.int32(1), Tx.int32(2))
@@ -105,7 +105,7 @@ __device__ int32_t add_one(int32_t a) {
         @Tx.prim_func(tirx=True)
         def main(a: Tx.Buffer((16, 16), "int32"), b: Tx.Buffer((16, 16), "int32")):
             with Tx.kernel():
-                bx = Tx.cta_id([1], parent="kernel")
+                Tx.cta_id([1], parent="kernel")
                 tx = Tx.thread_id([32], parent="cta")
                 with Tx.thread()[tx == 0]:
                     for i, j in Tx.grid(16, 16):
@@ -137,7 +137,7 @@ __device__ void print(int32_t a) {
         @Tx.prim_func(tirx=True)
         def main(a: Tx.Buffer((16, 16), "int32")):
             with Tx.kernel():
-                bx = Tx.cta_id([1], parent="kernel")
+                Tx.cta_id([1], parent="kernel")
                 tx = Tx.thread_id([32], parent="cta")
                 with Tx.thread()[tx == 0]:
                     for i, j in Tx.grid(16, 16):
@@ -159,8 +159,8 @@ def test_warp_shuffle_xor_sync():
         A = Tx.match_buffer(A_ptr, (32,), dtype="float32", align=16)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
@@ -198,18 +198,19 @@ def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
         return
 
     N = cp_size // 2
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((N), "float16")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([1], parent="cta")
             with Tx.thread():
                 A_shared = Tx.alloc_shared([N], "float16")
                 for i in Tx.vectorized(N):
                     A_shared[i] = 5.0
                 Tx.ptx.fence.proxy_async("shared::cta")
-                Tx.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)
+                Tx.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)  # noqa: E501
                 Tx.ptx.cp_async.commit_group()
                 Tx.ptx.cp_async.wait_group(0)
                 for i in Tx.serial(N):
@@ -240,7 +241,7 @@ def test_ptx_ldmatrix(trans, num):
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "float16"), B: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             A_shared = Tx.alloc_shared([16, 16], "float16")
             with Tx.thread()[tx == 0]:
@@ -300,7 +301,7 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
         C: Tx.Buffer((16, 8), c_type),
     ):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread():
                 D_local = Tx.alloc_local([4], d_type)
@@ -341,7 +342,7 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
                     Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
-                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))  # noqa: E501
 
                 L2G(D_local, D, 2)
     # fmt: on
@@ -391,7 +392,7 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
         C: Tx.Buffer((16, 8), c_type),
     ):
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx = Tx.thread_id([32], parent="cta")
             with Tx.thread():
                 D_local = Tx.alloc_local([4], d_type)
@@ -432,7 +433,7 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
                     Tx.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
-                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))  # noqa: E501
 
                 L2G(D_local, D, 2)
     # fmt: on

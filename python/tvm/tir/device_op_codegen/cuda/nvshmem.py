@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """NVSHMEM related operations."""
+
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
@@ -52,7 +53,7 @@ def codegen_nvshmem_getmem_nbi(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmem_getmem_nbi(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -64,7 +65,7 @@ def codegen_nvshmem_putmem_nbi(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmem_putmem_nbi(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -76,7 +77,7 @@ def codegen_nvshmem_getmem_nbi_warp(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmemx_getmem_nbi_warp(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -88,7 +89,7 @@ def codegen_nvshmem_putmem_nbi_warp(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmemx_putmem_nbi_warp(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -100,7 +101,7 @@ def codegen_nvshmem_getmem_nbi_block(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmemx_getmem_nbi_block(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -112,7 +113,7 @@ def codegen_nvshmem_putmem_nbi_block(dst, src, nelems, pe):
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, int pe) {{
     nvshmemx_putmem_nbi_block(dest, source, nelems, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
@@ -127,7 +128,7 @@ def codegen_nvshmem_signal_op(sig_addr, signal, sig_op, pe):
 __forceinline__ __device__ void {func_name}(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {{
     nvshmemx_signal_op(sig_addr, signal, sig_op, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     sig_op_val = {"set": 0, "add": 1}
     assert sig_op in sig_op_val, f"Unsupported signal operation in nvshmem_signal_op: {sig_op}"
@@ -182,7 +183,7 @@ def codegen_nvshmem_putmem_signal_nbi(dest, source, nelems, sig_addr, signal, si
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {{
     nvshmem_putmem_signal_nbi(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     sig_op_val = {"set": 0, "add": 1}
     assert sig_op in sig_op_val, f"Unsupported signal operation in nvshmem_signal_op: {sig_op}"
@@ -209,7 +210,7 @@ def codegen_nvshmem_putmem_signal_nbi_warp(dest, source, nelems, sig_addr, signa
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {{
     nvshmemx_putmem_signal_nbi_warp(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     sig_op_val = {"set": 0, "add": 1}
     assert sig_op in sig_op_val, f"Unsupported signal operation in nvshmem_signal_op: {sig_op}"
@@ -236,7 +237,7 @@ def codegen_nvshmem_putmem_signal_nbi_block(dest, source, nelems, sig_addr, sign
 __forceinline__ __device__ void {func_name}(void *dest, const void *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {{
     nvshmemx_putmem_signal_nbi_block(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }}
-"""
+"""  # noqa: E501
     source_code = source_code.format(func_name=func_name)
     sig_op_val = {"set": 0, "add": 1}
     assert sig_op in sig_op_val, f"Unsupported signal operation in nvshmem_signal_op: {sig_op}"

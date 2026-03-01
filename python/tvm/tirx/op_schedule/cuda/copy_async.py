@@ -15,30 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, Union, List
-from enum import Enum
 import copy
 import functools
-import tvm
+from enum import Enum
+from typing import Optional
 
+import tvm
 from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import PrimFunc, Buffer
+from tvm.tir import Buffer, PrimFunc
+from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
 from tvm.tir.stmt import OpCall
-from tvm.tirx.operator.op import CopyAsync
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
-    predicate,
     fail,
+    predicate,
+    register_dispatch,
 )
+
 from .common import (
     CopyInstType,
     copy_vec_load_impl,
-    validate_copy_op,
     single_thread,
+    validate_copy_op,
 )
-from tvm.tir.layout import S, TileLayout, SwizzleLayout, ComposeLayout, TLayout
 
 
 class SwizzleMode(Enum):
@@ -50,7 +50,7 @@ class SwizzleMode(Enum):
     SWIZZLE_128B_ATOM = 3
 
 
-def tma_atom_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int]) -> SwizzleLayout:
+def tma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayout:
     """Generate the TMA atom layout given dtype and swizzle mode."""
     bits = tvm.DataType(dtype).bits
     if isinstance(swizzle_mode, int):
@@ -62,9 +62,7 @@ def tma_atom_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int]) -> Swizzl
     )
 
 
-def tma_atom_shape(
-    dtype: str, swizzle_mode: Union[SwizzleMode, int], shape: Optional[List[int]] = None
-):
+def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int] | None = None):
     """Generate the TMA atom shape given dtype and swizzle mode."""
     bits = tvm.DataType(dtype).bits
     if isinstance(swizzle_mode, int):
@@ -81,7 +79,7 @@ def tma_atom_shape(
     return atom_shape
 
 
-def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape) -> TLayout:
+def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> TLayout:
     """Generate the TMA layout for the shared memory given shape and dtype.
     It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
     """
@@ -108,7 +106,7 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     return True
 
 
-def get_swizzle_mode_from_layout(layout: TLayout) -> Optional[SwizzleMode]:
+def get_swizzle_mode_from_layout(layout: TLayout) -> SwizzleMode | None:
     """Extract swizzle mode from a shared memory layout.
 
     Parameters
@@ -202,7 +200,7 @@ def find_contiguous_region(layout: TileLayout) -> tuple:
     return contiguous_indices, contiguous_extent
 
 
-def sort_strides_partial_order(strides: List, analyzer: Analyzer) -> List[int]:
+def sort_strides_partial_order(strides: list, analyzer: Analyzer) -> list[int]:
     """Sort indices by stride using partial ordering.
 
     For symbolic strides: s0 % s1 == 0 means s0 >= s1.
@@ -230,7 +228,7 @@ def sort_strides_partial_order(strides: List, analyzer: Analyzer) -> List[int]:
     return result
 
 
-def assert_compact_layout(shards: List, total_size, analyzer: Analyzer):
+def assert_compact_layout(shards: list, total_size, analyzer: Analyzer):
     """Assert layout is compact: for each shard, stride * extent == next shard's stride."""
     stride_set = [s for s, _ in shards]
 
@@ -247,7 +245,7 @@ def assert_compact_layout(shards: List, total_size, analyzer: Analyzer):
                     break
             if not found:
                 raise ValueError(
-                    f"Global layout is not compact: stride={stride} * extent={extent} = {expected_next} "
+                    f"Global layout is not compact: stride={stride} * extent={extent} = {expected_next} "  # noqa: E501
                     f"does not match any other stride or total_size={total_size}"
                 )
 
@@ -287,7 +285,7 @@ def compute_box_dim(grouped_shared: TileLayout) -> tuple:
     return list(box_dim), list(contiguous_indices), contiguous_extent
 
 
-def to_tile_layout(layout: TLayout, shape: List[int]) -> TileLayout:
+def to_tile_layout(layout: TLayout, shape: list[int]) -> TileLayout:
     """Convert a layout to a tile layout."""
     if isinstance(layout, ComposeLayout):
         return layout.tile_layout
@@ -300,10 +298,10 @@ def to_tile_layout(layout: TLayout, shape: List[int]) -> TileLayout:
 def _decide_box_dim(
     s_buf: "Buffer",
     g_buf: "Buffer",
-    g_ext: List,
-    s_st: List,
-    s_ext: List,
-    g_st: List,
+    g_ext: list,
+    s_st: list,
+    s_ext: list,
+    g_st: list,
 ) -> tuple:
     """Decide box dimensions for TMA copy.
 
@@ -435,7 +433,7 @@ def _decide_box_dim(
         atom_total = atom_shape[0] * atom_shape[-1]
         if contiguous_extent % atom_total != 0:
             raise ValueError(
-                f"Contiguous region {contiguous_extent} not divisible by TMA atom size {atom_total}. "
+                f"Contiguous region {contiguous_extent} not divisible by TMA atom size {atom_total}. "  # noqa: E501
                 f"box_dim={box_dim}, atom_shape={atom_shape}"
             )
 
@@ -452,10 +450,10 @@ def _decide_box_dim(
 def _decide_tma_global_strides_and_shape(
     g_buf: "Buffer",
     grouped_global: TileLayout,
-    contiguous_indices: List[int],
-    box_dim: List[int],
-    g_st: List,
-    g_ext: List,
+    contiguous_indices: list[int],
+    box_dim: list[int],
+    g_st: list,
+    g_ext: list,
     dtype: str,
 ) -> tuple:
     """Decide TMA global strides and shape.
@@ -561,7 +559,7 @@ def _decide_tma_global_strides_and_shape(
             "Transpose layouts require non-bulk-copy."
         )
 
-    assert len(box_dim) <= 5, f"only support up to 5 dimensions for TMA copy"
+    assert len(box_dim) <= 5, "only support up to 5 dimensions for TMA copy"
 
     # Step 12: Sort strides for shape computation
     sorted_order = sort_strides_partial_order(raw_strides, analyzer)
@@ -599,8 +597,8 @@ def _decide_tma_global_strides_and_shape(
 def _build_iteration_space(
     grouped_shared: TileLayout,
     grouped_global: TileLayout,
-    contiguous_indices: List[int],
-) -> List[dict]:
+    contiguous_indices: list[int],
+) -> list[dict]:
     """Build iteration space from non-contiguous shards.
 
     This function identifies non-contiguous shard indices and builds
@@ -647,7 +645,7 @@ def copy_tma_impl(
     op_call: OpCall,
     sctx: "ScheduleContext",
 ) -> Optional["PrimFunc"]:
-    """Schedule a copy between global <‑> shared memory using CUDA TMA.
+    """Schedule a copy between global <-> shared memory using CUDA TMA.
 
     This is a unified replacement for the previous
     ``copy_g2s_cta_tma_impl`` and ``copy_s2g_cta_tma_impl`` helpers.  The
@@ -661,8 +659,8 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     op_call = OpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
-    src: "Buffer" = src_buffer_region.buffer
-    dst: "Buffer" = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+    dst: Buffer = dst_buffer_region.buffer
 
     src_scope, dst_scope = src.scope(), dst.scope()
     if src_scope == "global" and dst_scope.startswith("shared"):
@@ -733,7 +731,7 @@ def copy_tma_impl(
     use_tma_reduce = op_call.config.get("use_tma_reduce", None)
 
     # ---------------------------------------------------------------------
-    # Device‑side TIR implementation
+    # Device-side TIR implementation
     # ---------------------------------------------------------------------
     analyzer = Analyzer()
 
@@ -815,7 +813,7 @@ def copy_tma_impl(
 
         # Build refined shard list with .stride / .extent attributes
         class _Shard:
-            __slots__ = ("stride", "extent")
+            __slots__ = ("extent", "stride")
 
             def __init__(self, stride, extent):
                 self.stride, self.extent = stride, extent
@@ -900,7 +898,7 @@ def copy_tma_impl(
     def impl():
         for loop_vars in Tx.grid(*loop_extents):
             s_offset, tma_coords = Tx.meta_var(compute_offsets_and_tma_coords(loop_vars))
-            s_buf_w_offset = Tx.decl_buffer(s_buf.shape, s_buf.dtype, s_buf.data, elem_offset=s_buf.elem_offset + s_offset, scope=s_buf.scope(), layout=to_tile_layout(s_buf.layout, s_buf.shape))
+            s_buf_w_offset = Tx.decl_buffer(s_buf.shape, s_buf.dtype, s_buf.data, elem_offset=s_buf.elem_offset + s_offset, scope=s_buf.scope(), layout=to_tile_layout(s_buf.layout, s_buf.shape))  # noqa: E501
 
             # Emit TMA copy with computed offsets and coordinates
             if direction == "g2s":
@@ -935,7 +933,7 @@ def copy_tma_impl(
 
     # fmt: on
     # ---------------------------------------------------------------------
-    # Host‑side tensor‑map creation
+    # Host-side tensor-map creation
     # ---------------------------------------------------------------------
     element_strides = [1] * tma_rank
 
@@ -969,7 +967,7 @@ def copy_tma_impl(
     # fmt: on
     # create_tensor_map.show()
 
-    # Insert host‑side initialization
+    # Insert host-side initialization
     sctx.add_init_stmt(create_tensor_map.body, host=True)
 
     return impl

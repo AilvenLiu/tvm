@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 import functools
-from typing import Tuple
 
 import numpy as np
 
@@ -45,7 +44,7 @@ class Semaphore:
     def semaphore_wait(self, *coord):
         with Tx.thread():
             while 1:
-                Tx.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)))
+                Tx.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)))  # noqa: E501
                 if Tx.cuda.syncthreads_and(self.state[0] == self.cnt):
                     break
                 Tx.cuda.nano_sleep(40)
@@ -55,7 +54,7 @@ class Semaphore:
         with Tx.thread():
             Tx.cuda.cta_sync()
             with Tx.thread()[0:1]:
-                Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)
+                Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)  # noqa: E501
             Tx.cuda.thread_fence()
 
 # reduction on N
@@ -66,12 +65,12 @@ def partial_reduction_ref_stage1(A: Tx.handle, B: Tx.handle):
 
     with Tx.kernel():
         bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
-        tx = Tx.thread_id([1024], parent="cta")
+        Tx.thread_id([1024], parent="cta")
 
         with Tx.cta():
             A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
             B_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])
+            Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])  # noqa: E501
             Tx.sum(B_smem, A_smem)
 
             Tx.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
@@ -84,7 +83,7 @@ def partial_reduction_ref_stage2(B: Tx.handle, C: Tx.handle):
 
     with Tx.kernel():
         bx = Tx.cta_id([NUM_BLOCK_M], parent="kernel")
-        tx = Tx.thread_id([1024], parent="cta")
+        Tx.thread_id([1024], parent="cta")
         with Tx.cta():
             B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
             C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
@@ -98,7 +97,7 @@ TOTAL_SM_CNT = STAGE_1_SM_CNT + STAGE_2_SM_CNT
 
 @Tx.meta_class
 class SpatialTileScheduler:
-    def __init__(self, prefix: str, tile_num: Tuple[int, int], sm_cnt: int):
+    def __init__(self, prefix: str, tile_num: tuple[int, int], sm_cnt: int):
         self.tile_num = tile_num
         self.sm_cnt = sm_cnt
         self.m_idx = Tx.alloc_local([1], "int32", name=prefix + "_m_idx")
@@ -135,17 +134,17 @@ def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore:
 
     with Tx.kernel():
         bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
-        tx = Tx.thread_id([1024], parent="cta")
+        Tx.thread_id([1024], parent="cta")
         sem = Semaphore(NUM_BLOCK_N, sem_ptr)
         with Tx.cta()[0: STAGE_1_SM_CNT]:
             A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
             B_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            stage1_scheduler = SpatialTileScheduler("stage1", (NUM_BLOCK_M, NUM_BLOCK_N), STAGE_1_SM_CNT)
+            stage1_scheduler = SpatialTileScheduler("stage1", (NUM_BLOCK_M, NUM_BLOCK_N), STAGE_1_SM_CNT)  # noqa: E501
             stage1_scheduler.init(bx)
             while stage1_scheduler.valid():
                 m_idx = Tx.meta_var(stage1_scheduler.m_idx[0])
                 n_idx = Tx.meta_var(stage1_scheduler.n_idx[0])
-                Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
+                Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])  # noqa: E501
                 Tx.sum(B_smem, A_smem)
                 Tx.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem)
                 sem.semaphore_notify(m_idx)

@@ -18,10 +18,9 @@
 import tvm
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import CudaProfiler
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
-from tvm.tirx.megakernel.utils.utils import ceildiv
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
 from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
+from tvm.tirx.megakernel.utils.utils import ceildiv
 
 
 def upcast_size(dtype):
@@ -107,7 +106,7 @@ def cast_load(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
         for i in Tx.vectorized(vec_len):
-            buffer_load = Tx.meta_var(Tx.BufferLoad(buf, indices[:-1] + (indices[-1] + i,)))
+            buffer_load = Tx.meta_var(Tx.BufferLoad(buf, (*indices[:-1], indices[-1] + i)))
             v_tmp[i] = buffer_load
         Tx.cast(v[:], v_tmp[:])
 
@@ -118,11 +117,10 @@ def cast_store(v, vec_len, buf, *indices):
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
         Tx.cast(v_tmp[:], v[:])
         for i in Tx.vectorized(vec_len):
-            Tx.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
+            Tx.buffer_store(buf, v_tmp[i], (*indices[:-1], indices[-1] + i))
 
 
 class BatchAttnTile(Tile):
-
     inf = 5e4
 
     num_mma_q = 1
@@ -1299,7 +1297,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                     o_packed_idx[0], self.gqa_group_size
                                                 ),
                                             )
-                                            r = int_var(
+                                            int_var(
                                                 name="r",
                                                 val=Tx.floormod(
                                                     o_packed_idx[0], self.gqa_group_size
@@ -1430,7 +1428,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                     packed_qo_idx[0], self.gqa_group_size
                                                 ),
                                             )
-                                            r = int_var(
+                                            int_var(
                                                 name="r",
                                                 val=Tx.floormod(
                                                     packed_qo_idx[0], self.gqa_group_size

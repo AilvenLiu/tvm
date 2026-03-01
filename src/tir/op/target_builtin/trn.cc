@@ -38,11 +38,11 @@ namespace builtin {
   }                                                \
   TVM_TIR_REGISTER_OP(#OpName)
 
-TIR_DEFINE_BUILTIN_FUNC(nki_load)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_BUILTIN_FUNC(nki_load).set_attr<TCallEffectKind>("TCallEffectKind",
+                                                            Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(nki_store)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_BUILTIN_FUNC(nki_store).set_attr<TCallEffectKind>("TCallEffectKind",
+                                                             Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(nki_tensor_copy)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));

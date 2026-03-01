@@ -683,8 +683,9 @@ ffi::Array<te::Operation> CollectOrderedOps(const ffi::Array<te::Tensor>& arg_li
   for (const te::Operation& op : order) {
     if (!(op->IsInstance<te::PlaceholderOpNode>() || op->IsInstance<te::ComputeOpNode>() ||
           op->IsInstance<te::ExternOpNode>()))
-      TVM_FFI_THROW(InternalError) << "TypeError: Unsupported Operation: " << op->GetTypeKey() << ". "
-                 << "Only te.placeholder and te.compute are allowed for now.";
+      TVM_FFI_THROW(InternalError)
+          << "TypeError: Unsupported Operation: " << op->GetTypeKey() << ". "
+          << "Only te.placeholder and te.compute are allowed for now.";
   }
   return order;
 }
@@ -711,9 +712,10 @@ void RewriteStageToBlock(const te::Operation& op, CreateFuncInfo* info,
     TVM_FFI_ICHECK_EQ(op->num_outputs(), 1);
     const te::Tensor& tensor = op.output(0);
     // Check op is in op list
-    TVM_FFI_ICHECK(info->IsArg(tensor)) << "The operation " << op << " produces tensor " << tensor
-                                << ", but this tensor does not appear as a function argument.  "
-                                << "The function accepts arguments " << info->arg_list;
+    TVM_FFI_ICHECK(info->IsArg(tensor))
+        << "The operation " << op << " produces tensor " << tensor
+        << ", but this tensor does not appear as a function argument.  "
+        << "The function accepts arguments " << info->arg_list;
     // Declare a buffer for any argument tensors without a pre-existing
     // buffer declaration recorded in the tensor2buffer binds map
     if (info->tensor2buffers.count(tensor) == 0) {
@@ -729,7 +731,7 @@ void RewriteStageToBlock(const te::Operation& op, CreateFuncInfo* info,
     root_stmts->push_back(GenerateStmtFromExternOp(extern_op.value(), info));
   } else {
     TVM_FFI_ICHECK(false) << "TypeError: Unsupported Operation: " << op->GetTypeKey() << ". "
-                  << "Only te.placeholder and te.compute are allowed for now.";
+                          << "Only te.placeholder and te.compute are allowed for now.";
   }
 }
 

@@ -15,19 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import math
 
 import numpy as np
-import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
-from tvm.tirx.megakernel.utils.utils import get_source
 from tvm.tirx.megakernel.kernels.topk_softmax import TopkSoftmaxTile
+from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
+from tvm.tirx.megakernel.utils.utils import get_source
 
 
 class TopkSoftmaxKernel:
@@ -58,28 +56,28 @@ class TopkSoftmaxKernel:
     def get_func_static(self, num_experts, dtype="float32"):
         # fmt: off
         @Tx.prim_func(tirx=True)
-        def main(gating_output_ptr: Tx.handle, topk_weights_ptr: Tx.handle, topk_indices_ptr: Tx.handle):
+        def main(gating_output_ptr: Tx.handle, topk_weights_ptr: Tx.handle, topk_indices_ptr: Tx.handle):  # noqa: E501
             Tx.func_attr({"global_symbol": "main", "target": Tx.target("cuda")})
 
             num_tokens = Tx.int32()
             topk = Tx.int32()
 
-            gating_output_global = Tx.match_buffer(gating_output_ptr, [num_tokens, num_experts], dtype, scope="global")
-            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [num_tokens, topk], "float32", scope="global")
-            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [num_tokens, num_experts], dtype, scope="global")  # noqa: E501
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [num_tokens, topk], "float32", scope="global")  # noqa: E501
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
 
             self.set_tiles(num_experts, num_tokens, topk, dtype)
 
             with Tx.kernel():
                 bx = Tx.cta_id([self.topk_softmax_tile.PERSISTENT_SM_NUMBER], parent="kernel")
-                warp_id_in_cta = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = Tx.thread_id([self.topk_softmax_tile.bdx], parent="warp")
+                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                Tx.thread_id([self.topk_softmax_tile.bdx], parent="warp")
                 with Tx.cta():
                     # no need of smem_manager
                     self.device_init_all()
 
                     # TODO: initialize event tensors & tile scheduler
-                    self.run_tile(self.topk_softmax_tile, bx, 0, 0, gating_output_global, topk_weights_global, topk_indices_global)
+                    self.run_tile(self.topk_softmax_tile, bx, 0, 0, gating_output_global, topk_weights_global, topk_indices_global)  # noqa: E501
         # fmt: on
         return main
 
@@ -143,8 +141,8 @@ def test(kernel, num_tokens, num_experts, topk, dtype):
             return tvm_arg_dict["topk_weights"].numpy(), tvm_arg_dict["topk_indices"].numpy()
 
     def sglang(arg_dict):
-        from sgl_kernel import topk_softmax
         import torch
+        from sgl_kernel import topk_softmax
 
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
@@ -193,7 +191,7 @@ if __name__ == "__main__":
                     ROWS_PER_WARP = (VPT * 32) // num_experts
                     num_blocks = ((num_tokens + ROWS_PER_WARP - 1) // ROWS_PER_WARP + 8 - 1) // 8
                     print(
-                        f"experiment {itr}: if nonpersistent, would need <<<{num_blocks}, 256>>>, num_tokens {num_tokens}, num_experts {num_experts}, topk {topk}, dtype {dtype}"
+                        f"experiment {itr}: if nonpersistent, would need <<<{num_blocks}, 256>>>, num_tokens {num_tokens}, num_experts {num_experts}, topk {topk}, dtype {dtype}"  # noqa: E501
                     )
                     test(lib_static["main"], num_tokens, num_experts, topk, dtype)
                     itr += 1

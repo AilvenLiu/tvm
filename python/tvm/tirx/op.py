@@ -16,8 +16,8 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """Operators used in TIR expression."""
-import warnings
-from typing import Any, Optional, Union
+
+from typing import Any
 
 import tvm_ffi
 
@@ -580,7 +580,6 @@ def address_of(obj: Buffer | BufferLoad, span: Span | None = None) -> PrimExpr:
         The call expression.
     """
     if isinstance(obj, Buffer):
-
         n_dim = len(obj.shape)
         buffer_load = BufferLoad(obj, [0] * n_dim)
         return call_intrin("handle", "tirx.address_of", buffer_load, span=span)
@@ -1250,7 +1249,7 @@ def min_value(dtype, span=None):
     return _ffi_api.min_value(dtype, span)  # type: ignore
 
 
-def max_value(dtype: str, span: Optional[Span] = None) -> Any:
+def max_value(dtype: str, span: Span | None = None) -> Any:
     """maximum value of dtype
 
     Parameters
@@ -1269,7 +1268,7 @@ def max_value(dtype: str, span: Optional[Span] = None) -> Any:
     return _ffi_api.max_value(dtype, span)  # type: ignore
 
 
-def infinity(dtype: str, span: Optional[Span] = None) -> Any:
+def infinity(dtype: str, span: Span | None = None) -> Any:
     """infinity value of dtype
 
     Parameters
@@ -1288,7 +1287,7 @@ def infinity(dtype: str, span: Optional[Span] = None) -> Any:
     return _ffi_api.infinity(dtype, span)  # type: ignore
 
 
-def reinterpret(dtype, value, span: Optional[Span] = None) -> Any:
+def reinterpret(dtype, value, span: Span | None = None) -> Any:
     """infinity value of dtype
 
     Parameters
@@ -2654,7 +2653,7 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
             if init is not None:
                 init = [init]
         combiner = CommReducer(lhs, rhs, result, id_elem)
-        if not isinstance(axis, (list, tuple, tvm.ir.Array)):
+        if not isinstance(axis, (list, tuple, tvm.ir.Array)):  # noqa: UP038
             axis = [axis]
         if where is None:
             where = tir.convert(True)
@@ -2668,7 +2667,7 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
 
     # pylint: disable=keyword-arg-before-vararg
     def reducer(expr, axis, where=None, init=None, *args):
-        if isinstance(axis, (tvm.tirx.IterVar, list, tuple)):
+        if isinstance(axis, (tvm.tirx.IterVar, list, tuple)):  # noqa: UP038
             assert not args
             return _make_reduce(expr, axis, where, init)
 
@@ -2876,7 +2875,7 @@ def get_active_lane_mask(dtype, base, limit):
     return call_intrin(dtype, "tir.get_active_lane_mask", base, limit)
 
 
-def get_vscale_expr(dtype: Union[str, tvm_ffi.dtype], min_size: int = 128) -> PrimExpr:
+def get_vscale_expr(dtype: str | tvm_ffi.dtype, min_size: int = 128) -> PrimExpr:
     """
     Create a datatype dependent scalable expression.
 
@@ -3874,7 +3873,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
     return call_intrin(
         "",
         "tir.ptx_cp_async_bulk_tensor_global_to_cluster",
@@ -4334,7 +4333,7 @@ def ptx_wgmma_mma_async_ss(
 
     accums : list
         The accumulators registers.
-    """
+    """  # noqa: E501
     return call_intrin(
         "",
         "tir.ptx_wgmma_mma_async_ss",
@@ -5319,7 +5318,7 @@ def print_buffer(buffer_var, dtype, is_string, is_scalar, dim_num, *shape):
         The call expression.
     """
     final_shape_args = []
-    if len(shape) == 1 and isinstance(shape[0], (tuple, list, tvm.ir.Array)):
+    if len(shape) == 1 and isinstance(shape[0], (tuple, list, tvm.ir.Array)):  # noqa: UP038
         # Case 1: Called as print_buffer(..., dim, (s1, s2, ...))
         # The user provided a tuple/list as the single shape argument.
         final_shape_args = list(shape[0])
@@ -5406,7 +5405,7 @@ def timer_start_cuda(
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin(
         "handle",
@@ -5455,7 +5454,7 @@ def timer_end_cuda(
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin(
         "handle",
@@ -5538,17 +5537,6 @@ def cuda_thread_fence():
         The call expression.
     """
     return call_intrin("", "tir.cuda_thread_fence")
-
-
-def cuda_warp_sync():
-    """TVM intrinsic to call cuda warp sync instruction
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_warp_sync")
 
 
 def cuda_warpgroup_sync(bar_no):
@@ -6023,7 +6011,7 @@ def nvshmem_getmem_nbi(dst, src, nelems, pe):
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin("", "tir.nvshmem_getmem_nbi", dst, src, nelems, pe)
 
@@ -6075,7 +6063,7 @@ def nvshmem_getmem_nbi_warp(dst, src, nelems, pe):
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin("", "tir.nvshmem_getmem_nbi_warp", dst, src, nelems, pe)
 
@@ -6127,7 +6115,7 @@ def nvshmem_getmem_nbi_block(dst, src, nelems, pe):
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin("", "tir.nvshmem_getmem_nbi_block", dst, src, nelems, pe)
 
@@ -6252,7 +6240,7 @@ def nvshmem_putmem_signal_nbi(dst, src, nelems, sig_addr, signal, sig_op, pe):
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin(
         "", "tir.nvshmem_putmem_signal_nbi", dst, src, nelems, sig_addr, signal, sig_op, pe
@@ -6289,7 +6277,7 @@ def nvshmem_putmem_signal_nbi_warp(dst, src, nelems, sig_addr, signal, sig_op, p
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin(
         "", "tir.nvshmem_putmem_signal_nbi_warp", dst, src, nelems, sig_addr, signal, sig_op, pe
@@ -6326,7 +6314,7 @@ def nvshmem_putmem_signal_nbi_block(dst, src, nelems, sig_addr, signal, sig_op, 
     -------
     call : PrimExpr
         The call expression.
-    """
+    """  # noqa: E501
 
     return call_intrin(
         "", "tir.nvshmem_putmem_signal_nbi_block", dst, src, nelems, sig_addr, signal, sig_op, pe

@@ -18,7 +18,7 @@
 import argparse
 import math
 import tempfile
-from typing import Type, Literal, Union
+from typing import Literal
 
 import flashinfer
 import numpy as np
@@ -26,37 +26,35 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-
+from tvm.tirx.megakernel.kernels import (
+    AddRMSNormTile,
+    AllreduceTile,
+    BatchAttnTile,
+    BatchMergeTile,
+    GateUpSiluTile,
+    GemmTile,
+    RMSNormTile,
+    SiluMultiplyTile,
+    SplitKReduceAppendVTile,
+    SplitKReduceRMSnormRopeAppendKTile,
+    SplitKReduceRMSnormRopeQTile,
+    SplitKReduceTile,
+)
+from tvm.tirx.megakernel.utils import dynamic_scheduler, static_scheduler
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SemaphoreBase, TileSchedulerBase
-from tvm.tirx.megakernel.utils.utils import ceildiv, get_source, f_init_const, f_init_unmatched_dim
 from tvm.tirx.megakernel.utils.config import (
-    KernelConfig,
     JobType,
+    KernelConfig,
     ProfileEventType,
     event_type_names,
     get_model_config,
 )
 from tvm.tirx.megakernel.utils.support import generate_exec_queue, get_inverse_plan_info
-from tvm.tirx.megakernel.utils import static_scheduler, dynamic_scheduler
-from tvm.tirx.megakernel.kernels import (
-    AddRMSNormTile,
-    RMSNormTile,
-    AllreduceTile,
-    BatchAttnTile,
-    BatchMergeTile,
-    GemmTile,
-    SplitKReduceTile,
-    SiluMultiplyTile,
-    GateUpSiluTile,
-    SplitKReduceRMSnormRopeQTile,
-    SplitKReduceRMSnormRopeAppendKTile,
-    SplitKReduceAppendVTile,
-)
+from tvm.tirx.megakernel.utils.utils import ceildiv, f_init_const, f_init_unmatched_dim, get_source
 
 
 class MegaKernelDenseLayer(MegaKernelWrapper):
@@ -295,7 +293,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         self,
         batch_size,
         attn_task_num,
-        Semaphore: Type[SemaphoreBase],
+        Semaphore: type[SemaphoreBase],
         etensor_workspace_global,
         ignore_mlp_part=False,
     ):
@@ -352,11 +350,9 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             etensor_workspace_global,
             shape=[batch_size],
             f_init=f_init_const(
-                (
-                    self.SPLIT_O_PROJECT * (self.HIDDEN_SIZE // GemmTile.BLK_N)
-                    if self.world_size == 1
-                    else self.HIDDEN_SIZE // self.o_allreduce_tile.N_TILE
-                )
+                self.SPLIT_O_PROJECT * (self.HIDDEN_SIZE // GemmTile.BLK_N)
+                if self.world_size == 1
+                else self.HIDDEN_SIZE // self.o_allreduce_tile.N_TILE
             ),
         )
         self.evt_attn_mlp = self.add_etensor(
@@ -421,11 +417,9 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                 etensor_workspace_global,
                 shape=[batch_size],
                 f_init=f_init_const(
-                    (
-                        self.DOWN_PROJ_SPLIT_K_FACTOR * (self.HIDDEN_SIZE // GemmTile.BLK_N)
-                        if self.world_size == 1
-                        else self.HIDDEN_SIZE // self.down_proj_allreduce_tile.N_TILE
-                    )
+                    self.DOWN_PROJ_SPLIT_K_FACTOR * (self.HIDDEN_SIZE // GemmTile.BLK_N)
+                    if self.world_size == 1
+                    else self.HIDDEN_SIZE // self.down_proj_allreduce_tile.N_TILE
                 ),
             )
         unit = KernelConfig.WG_NUMBER * (2 + self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
@@ -447,7 +441,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         batch_size,
         attn_task_num,
         is_dynamic_sch,
-        Semaphore: Type[SemaphoreBase],
+        Semaphore: type[SemaphoreBase],
         etensor_workspace_global,
     ):
         self._set_events(batch_size, attn_task_num, Semaphore, etensor_workspace_global)
@@ -775,7 +769,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with Tx.cta():
-            # TODO: Here now cannot handle tha cases that each tile will be allocated with more than 8 tasks
+            # TODO: Here now cannot handle tha cases that each tile will be allocated with more than 8 tasks  # noqa: E501
             attn_task_num = work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]
             self.run_tile_prefetch(
                 self.attn_tile,
@@ -1846,19 +1840,19 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         exec_tail,
         BLK_M,
         is_dynamic_sch: bool,
-        Semaphore: Type[SemaphoreBase],
-        Scheduler: Type[TileSchedulerBase],
+        Semaphore: type[SemaphoreBase],
+        Scheduler: type[TileSchedulerBase],
     ):
         # initialize tile
         self.set_tiles(batch_size, BLK_M)
         self.host_init_all()
 
         with Tx.kernel():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             self.init_profiler(profiler_buffer)
             with Tx.cta():
@@ -1872,53 +1866,53 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                 self.class_init_all(self.smem_manager)
 
                 # initialize event tensors
-                attn_task_num = Tx.meta_var(work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER])
-                self.set_events(batch_size, attn_task_num, is_dynamic_sch, Semaphore, etensor_workspace_global)
+                attn_task_num = Tx.meta_var(work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER])  # noqa: E501
+                self.set_events(batch_size, attn_task_num, is_dynamic_sch, Semaphore, etensor_workspace_global)  # noqa: E501
 
                 # initialize tile scheduler and smem_manager
                 if issubclass(Scheduler, static_scheduler.StaticTileScheduler):
-                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)
+                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)  # noqa: E501
                 else:
-                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)
+                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)  # noqa: E501
                 self.smem_manager.init()
 
                 while self.tile_scheduler.valid():
                     if self.tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
-                        self.task_impl_gemm_qkv_proj(hidden_state_global, qkv_proj_weight_global, partial_qkv_global, is_dynamic_sch)
+                        self.task_impl_gemm_qkv_proj(hidden_state_global, qkv_proj_weight_global, partial_qkv_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.Q_REDUCE_RMS_ROPE.value:
-                        self.task_impl_q_reduce_rms_rope(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, qkv_global, q_rms_weight_global, rope_pos_global, cos_sin_cache_global, is_dynamic_sch)
+                        self.task_impl_q_reduce_rms_rope(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, qkv_global, q_rms_weight_global, rope_pos_global, cos_sin_cache_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.K_REDUCE_RMS_ROPE_APPEND.value:
-                        self.task_impl_k_reduce_rms_rope_append(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, k_rms_weight_global, rope_pos_global, cos_sin_cache_global, append_pos_global, kv_cache_global, is_dynamic_sch)
+                        self.task_impl_k_reduce_rms_rope_append(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, k_rms_weight_global, rope_pos_global, cos_sin_cache_global, append_pos_global, kv_cache_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.V_REDUCE_APPEND.value:
-                        self.task_impl_v_reduce_append(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, kv_cache_global, append_pos_global, is_dynamic_sch)
+                        self.task_impl_v_reduce_append(batch_size, inverse_indptr_global, inverse_indices_global, partial_qkv_global, kv_cache_global, append_pos_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
-                        self.task_impl_batch_attention(self.smem_manager, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, o_global, o_partial_attn_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, batch_size, is_dynamic_sch)
+                        self.task_impl_batch_attention(self.smem_manager, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, o_global, o_partial_attn_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, batch_size, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
-                        self.task_impl_batch_attention_merge(batch_size, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, is_dynamic_sch)
+                        self.task_impl_batch_attention_merge(batch_size, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                        self.task_impl_gemm_o_proj(batch_size, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM), o_proj_weight_global, residual_global if self.world_size == 1 else partial_o_global, is_dynamic_sch)
+                        self.task_impl_gemm_o_proj(batch_size, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM), o_proj_weight_global, residual_global if self.world_size == 1 else partial_o_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
-                        self.task_impl_gemm_o_reduce(batch_size, partial_o_global, hidden_state_attn_mlp_global, before_o_allreduce_global, is_dynamic_sch)
+                        self.task_impl_gemm_o_reduce(batch_size, partial_o_global, hidden_state_attn_mlp_global, before_o_allreduce_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.O_ALLREDUCE.value:
-                        self.task_impl_o_allreduce(batch_size, before_o_allreduce_global, hidden_state_attn_mlp_global, is_dynamic_sch)
+                        self.task_impl_o_allreduce(batch_size, before_o_allreduce_global, hidden_state_attn_mlp_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.ATTN_ADD_RMS_NORM.value:
-                        self.task_impl_attn_add_rms_norm(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global, is_dynamic_sch)
+                        self.task_impl_attn_add_rms_norm(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
-                        self.task_impl_gemm_gate_up_proj(hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global, is_dynamic_sch)
+                        self.task_impl_gemm_gate_up_proj(hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GATE_UP_SILU.value:
-                        self.task_impl_gate_up_silu(hidden_state_attn_mlp_global, gate_up_weight_global, out_silu_multiply_global, is_dynamic_sch)
+                        self.task_impl_gate_up_silu(hidden_state_attn_mlp_global, gate_up_weight_global, out_silu_multiply_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
-                        self.task_impl_gate_up_proj_reduce(partial_out_gate_up_proj_global, out_gate_up_proj_global, is_dynamic_sch)
+                        self.task_impl_gate_up_proj_reduce(partial_out_gate_up_proj_global, out_gate_up_proj_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
-                        self.task_impl_split_silu_multiply(out_gate_up_proj_global, out_silu_multiply_global, is_dynamic_sch)
+                        self.task_impl_split_silu_multiply(out_gate_up_proj_global, out_silu_multiply_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
-                        self.task_impl_gemm_down_proj(batch_size, out_silu_multiply_global, down_weight_global, residual_global if self.world_size == 1 else partial_sum_down_proj_global, is_dynamic_sch)
+                        self.task_impl_gemm_down_proj(batch_size, out_silu_multiply_global, down_weight_global, residual_global if self.world_size == 1 else partial_sum_down_proj_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
-                        self.task_impl_down_proj_reduce(batch_size, partial_sum_down_proj_global, output_global, before_down_proj_allreduce_global, is_dynamic_sch)
+                        self.task_impl_down_proj_reduce(batch_size, partial_sum_down_proj_global, output_global, before_down_proj_allreduce_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.DOWN_PROJ_ALLREDUCE.value:
-                        self.task_impl_down_proj_allreduce(batch_size, before_down_proj_allreduce_global, output_global, is_dynamic_sch)
+                        self.task_impl_down_proj_allreduce(batch_size, before_down_proj_allreduce_global, output_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
-                        self.task_impl_mlp_add_rms_norm(output_global, residual_global, mlp_add_rms_weight_global, is_dynamic_sch)
+                        self.task_impl_mlp_add_rms_norm(output_global, residual_global, mlp_add_rms_weight_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
@@ -2009,93 +2003,93 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             total_page_num = Tx.int32()
 
             # input and output
-            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")  # noqa: E501
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE],
+            qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE],  # noqa: E501
                                                     "float16", scope="global")
-            o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM],
+            o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM],  # noqa: E501
                                                 "float16", scope="global")
-            q_rms_weight_global = Tx.match_buffer(q_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
-            k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
-            gate_up_weight_global = Tx.match_buffer(gate_up_weight_ptr, [self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE],
+            q_rms_weight_global = Tx.match_buffer(q_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")  # noqa: E501
+            k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")  # noqa: E501
+            gate_up_weight_global = Tx.match_buffer(gate_up_weight_ptr, [self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE],  # noqa: E501
                                                 "float16", scope="global")
-            down_weight_global = Tx.match_buffer(down_weight_ptr, [self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
-            mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
+            down_weight_global = Tx.match_buffer(down_weight_ptr, [self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
+            attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
 
             # page cache, kv cache and plan info
-            cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")
-            rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            kv_cache_global = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM],
+            cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")  # noqa: E501
+            rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)  # noqa: E501
+            kv_cache_global = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM],  # noqa: E501
                                             "float16", scope="global")
-            append_pos_global = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            q_indptr_global = Tx.match_buffer(q_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indptr_global = Tx.match_buffer(kv_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            partial_indptr_global = Tx.match_buffer(partial_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indices_global = Tx.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
-            q_len_global = Tx.match_buffer(q_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_len_global = Tx.match_buffer(kv_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            q_start_global = Tx.match_buffer(q_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_start_global = Tx.match_buffer(kv_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_end_global = Tx.match_buffer(kv_end_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_head_idx_global = Tx.match_buffer(kv_head_idx_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            work_indptr_global = Tx.match_buffer(work_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            append_pos_global = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)  # noqa: E501
+            q_indptr_global = Tx.match_buffer(q_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_indptr_global = Tx.match_buffer(kv_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            partial_indptr_global = Tx.match_buffer(partial_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_indices_global = Tx.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)  # noqa: E501
+            q_len_global = Tx.match_buffer(q_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_len_global = Tx.match_buffer(kv_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            q_start_global = Tx.match_buffer(q_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_start_global = Tx.match_buffer(kv_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_end_global = Tx.match_buffer(kv_end_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_head_idx_global = Tx.match_buffer(kv_head_idx_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            work_indptr_global = Tx.match_buffer(work_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
             len_kv_chunk_global = Tx.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
             num_qo_len_global = Tx.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
-            merge_indptr_global = Tx.match_buffer(merge_indptr_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            merge_indptr_global = Tx.match_buffer(merge_indptr_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)  # noqa: E501
+            merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)  # noqa: E501
+            inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
 
             # intermediate buffer
-            partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM],
+            partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM],  # noqa: E501
                                     "float32", scope="global")
-            qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM],
+            qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM],  # noqa: E501
                                     "float16", scope="global")
             o_global = Tx.match_buffer(o_ptr, [batch_size, self.NUM_ATTENTION_HEADS, self.HEAD_DIM],
                                     "float16", scope="global")
-            o_partial_attn_global = Tx.match_buffer(o_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS * self.HEAD_DIM],
+            o_partial_attn_global = Tx.match_buffer(o_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS * self.HEAD_DIM],  # noqa: E501
                                     "float32", scope="global")
-            lse_partial_attn_global = Tx.match_buffer(lse_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS],
+            lse_partial_attn_global = Tx.match_buffer(lse_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS],  # noqa: E501
                                     "float32", scope="global")
-            partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE],
+            partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float32", scope="global")
-            before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],
+            before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float16", scope="global")
-            hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE],
+            hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float16", scope="global")
-            partial_out_gate_up_proj_global = Tx.match_buffer(partial_out_gate_up_proj_ptr, [self.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, self.INTERMEDIATE_SIZE * 2],
+            partial_out_gate_up_proj_global = Tx.match_buffer(partial_out_gate_up_proj_ptr, [self.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, self.INTERMEDIATE_SIZE * 2],  # noqa: E501
                                     "float32", scope="global")
-            out_gate_up_proj_global = Tx.match_buffer(out_gate_up_proj_ptr, [batch_size, self.INTERMEDIATE_SIZE * 2],
+            out_gate_up_proj_global = Tx.match_buffer(out_gate_up_proj_ptr, [batch_size, self.INTERMEDIATE_SIZE * 2],  # noqa: E501
                                 "float16", scope="global")
-            out_silu_multiply_global = Tx.match_buffer(out_silu_multiply_ptr, [batch_size, self.INTERMEDIATE_SIZE],
+            out_silu_multiply_global = Tx.match_buffer(out_silu_multiply_ptr, [batch_size, self.INTERMEDIATE_SIZE],  # noqa: E501
                                 "float16", scope="global")
-            partial_sum_down_proj_global = Tx.match_buffer(partial_sum_down_proj_ptr, [self.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, self.HIDDEN_SIZE],
+            partial_sum_down_proj_global = Tx.match_buffer(partial_sum_down_proj_ptr, [self.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                 "float32")
-            before_down_proj_allreduce_global = Tx.match_buffer(before_down_proj_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],
+            before_down_proj_allreduce_global = Tx.match_buffer(before_down_proj_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                 "float16", scope="global")
 
             # event tensor
             etensor_workspace_size = Tx.int32()
-            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)  # noqa: E501
             # exec queue
-            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")  # noqa: E501
 
             @Tx.inline
             def run(BLK_M):
                 self.fused_body(
-                    batch_size, hidden_state_global, residual_global, output_global, qkv_proj_weight_global, o_proj_weight_global,
-                    q_rms_weight_global, k_rms_weight_global, gate_up_weight_global, down_weight_global, attn_add_rms_weight_global,
-                    mlp_add_rms_weight_global, cos_sin_cache_global, rope_pos_global, kv_cache_global, append_pos_global,
-                    q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global,
-                    kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, num_qo_len_global,
-                    merge_indptr_global, merge_o_indices_global, inverse_indptr_global, inverse_indices_global, partial_qkv_global,
-                    qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global, partial_o_global, before_o_allreduce_global,
-                    hidden_state_attn_mlp_global, partial_out_gate_up_proj_global, out_gate_up_proj_global, out_silu_multiply_global,
-                    partial_sum_down_proj_global, before_down_proj_allreduce_global, etensor_workspace_global,
+                    batch_size, hidden_state_global, residual_global, output_global, qkv_proj_weight_global, o_proj_weight_global,  # noqa: E501
+                    q_rms_weight_global, k_rms_weight_global, gate_up_weight_global, down_weight_global, attn_add_rms_weight_global,  # noqa: E501
+                    mlp_add_rms_weight_global, cos_sin_cache_global, rope_pos_global, kv_cache_global, append_pos_global,  # noqa: E501
+                    q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global,  # noqa: E501
+                    kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, num_qo_len_global,  # noqa: E501
+                    merge_indptr_global, merge_o_indices_global, inverse_indptr_global, inverse_indices_global, partial_qkv_global,  # noqa: E501
+                    qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global, partial_o_global, before_o_allreduce_global,  # noqa: E501
+                    hidden_state_attn_mlp_global, partial_out_gate_up_proj_global, out_gate_up_proj_global, out_silu_multiply_global,  # noqa: E501
+                    partial_sum_down_proj_global, before_down_proj_allreduce_global, etensor_workspace_global,  # noqa: E501
                     profiler_buffer, exec_queue, None, None, None, BLK_M,
                     False, static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
@@ -2184,100 +2178,100 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             cos_sin_cache_len = Tx.int32()
             max_page_num = Tx.int32()
             total_page_num = Tx.int32()
-            attn_tile_num = Tx.int32()
+            Tx.int32()
 
             # input and output
-            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")  # noqa: E501
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE],
+            qkv_proj_weight_global = Tx.match_buffer(qkv_proj_weight_ptr, [(self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, self.HIDDEN_SIZE],  # noqa: E501
                                                     "float16", scope="global")
-            o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM],
+            o_proj_weight_global = Tx.match_buffer(o_proj_weight_ptr, [self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM],  # noqa: E501
                                                 "float16", scope="global")
-            q_rms_weight_global = Tx.match_buffer(q_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
-            k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")
-            gate_up_weight_global = Tx.match_buffer(gate_up_weight_ptr, [self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE],
+            q_rms_weight_global = Tx.match_buffer(q_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")  # noqa: E501
+            k_rms_weight_global = Tx.match_buffer(k_rms_weight_ptr, [self.HEAD_DIM], "float16", scope="global")  # noqa: E501
+            gate_up_weight_global = Tx.match_buffer(gate_up_weight_ptr, [self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE],  # noqa: E501
                                                 "float16", scope="global")
-            down_weight_global = Tx.match_buffer(down_weight_ptr, [self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
-            mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")
+            down_weight_global = Tx.match_buffer(down_weight_ptr, [self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
+            attn_add_rms_weight_global = Tx.match_buffer(attn_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            mlp_add_rms_weight_global = Tx.match_buffer(mlp_add_rms_weight_ptr, [self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
 
             # page cache, kv cache and plan info
-            cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")
-            rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            kv_cache_global = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM],
+            cos_sin_cache_global = Tx.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, self.HEAD_DIM], "float32", scope="global")  # noqa: E501
+            rope_pos_global = Tx.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)  # noqa: E501
+            kv_cache_global = Tx.match_buffer(kv_cache_ptr, [max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM],  # noqa: E501
                                             "float16", scope="global")
-            append_pos_global = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            q_indptr_global = Tx.match_buffer(q_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indptr_global = Tx.match_buffer(kv_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            partial_indptr_global = Tx.match_buffer(partial_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_indices_global = Tx.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
-            q_len_global = Tx.match_buffer(q_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_len_global = Tx.match_buffer(kv_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            q_start_global = Tx.match_buffer(q_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_start_global = Tx.match_buffer(kv_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_end_global = Tx.match_buffer(kv_end_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            kv_head_idx_global = Tx.match_buffer(kv_head_idx_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            work_indptr_global = Tx.match_buffer(work_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            append_pos_global = Tx.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)  # noqa: E501
+            q_indptr_global = Tx.match_buffer(q_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_indptr_global = Tx.match_buffer(kv_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            partial_indptr_global = Tx.match_buffer(partial_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_indices_global = Tx.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)  # noqa: E501
+            q_len_global = Tx.match_buffer(q_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_len_global = Tx.match_buffer(kv_len_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            q_start_global = Tx.match_buffer(q_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_start_global = Tx.match_buffer(kv_start_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_end_global = Tx.match_buffer(kv_end_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            kv_head_idx_global = Tx.match_buffer(kv_head_idx_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            work_indptr_global = Tx.match_buffer(work_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
             len_kv_chunk_global = Tx.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
             num_qo_len_global = Tx.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
-            merge_indptr_global = Tx.match_buffer(merge_indptr_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
-            inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            merge_indptr_global = Tx.match_buffer(merge_indptr_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)  # noqa: E501
+            merge_o_indices_global = Tx.match_buffer(merge_o_indices_ptr, [self.MAX_NUM_KV_SPLITS], "int32", offset_factor=1)  # noqa: E501
+            inverse_indptr_global = Tx.match_buffer(inverse_indptr_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
+            inverse_indices_global = Tx.match_buffer(inverse_indices_ptr, [self.MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)  # noqa: E501
 
             # intermediate buffer
-            partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM],
+            partial_qkv_global = Tx.match_buffer(partial_qkv_ptr, [self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM],  # noqa: E501
                                     "float32", scope="global")
-            qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM],
+            qkv_global = Tx.match_buffer(qkv_ptr, [batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM],  # noqa: E501
                                     "float16", scope="global")
             o_global = Tx.match_buffer(o_ptr, [batch_size, self.NUM_ATTENTION_HEADS, self.HEAD_DIM],
                                     "float16", scope="global")
-            o_partial_attn_global = Tx.match_buffer(o_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS * self.HEAD_DIM],
+            o_partial_attn_global = Tx.match_buffer(o_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS * self.HEAD_DIM],  # noqa: E501
                                     "float32", scope="global")
-            lse_partial_attn_global = Tx.match_buffer(lse_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS],
+            lse_partial_attn_global = Tx.match_buffer(lse_partial_attn_ptr, [self.MAX_NUM_KV_SPLITS * self.NUM_KEY_VALUE_HEADS],  # noqa: E501
                                     "float32", scope="global")
-            partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE],
+            partial_o_global = Tx.match_buffer(partial_o_ptr, [self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float32", scope="global")
-            before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],
+            before_o_allreduce_global = Tx.match_buffer(before_o_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float16", scope="global")
-            hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE],
+            hidden_state_attn_mlp_global = Tx.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                     "float16", scope="global")
-            partial_out_gate_up_proj_global = Tx.match_buffer(partial_out_gate_up_proj_ptr, [self.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, self.INTERMEDIATE_SIZE * 2],
+            partial_out_gate_up_proj_global = Tx.match_buffer(partial_out_gate_up_proj_ptr, [self.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, self.INTERMEDIATE_SIZE * 2],  # noqa: E501
                                     "float32", scope="global")
-            out_gate_up_proj_global = Tx.match_buffer(out_gate_up_proj_ptr, [batch_size, self.INTERMEDIATE_SIZE * 2],
+            out_gate_up_proj_global = Tx.match_buffer(out_gate_up_proj_ptr, [batch_size, self.INTERMEDIATE_SIZE * 2],  # noqa: E501
                                 "float16", scope="global")
-            out_silu_multiply_global = Tx.match_buffer(out_silu_multiply_ptr, [batch_size, self.INTERMEDIATE_SIZE],
+            out_silu_multiply_global = Tx.match_buffer(out_silu_multiply_ptr, [batch_size, self.INTERMEDIATE_SIZE],  # noqa: E501
                                 "float16", scope="global")
-            partial_sum_down_proj_global = Tx.match_buffer(partial_sum_down_proj_ptr, [self.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, self.HIDDEN_SIZE],
+            partial_sum_down_proj_global = Tx.match_buffer(partial_sum_down_proj_ptr, [self.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                 "float32")
-            before_down_proj_allreduce_global = Tx.match_buffer(before_down_proj_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],
+            before_down_proj_allreduce_global = Tx.match_buffer(before_down_proj_allreduce_ptr, [batch_size, self.HIDDEN_SIZE],  # noqa: E501
                                 "float16", scope="global")
 
             # event tensor
             etensor_workspace_size = Tx.int32()
-            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)  # noqa: E501
 
             # exec queue
-            queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [dynamic_scheduler.DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
-            queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
-            queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
+            queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [dynamic_scheduler.DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)  # noqa: E501
+            queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)  # noqa: E501
+            queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)  # noqa: E501
 
             @Tx.inline
             def run(BLK_M):
                 self.fused_body(
-                    batch_size, hidden_state_global, residual_global, output_global, qkv_proj_weight_global, o_proj_weight_global,
-                    q_rms_weight_global, k_rms_weight_global, gate_up_weight_global, down_weight_global, attn_add_rms_weight_global,
-                    mlp_add_rms_weight_global, cos_sin_cache_global, rope_pos_global, kv_cache_global, append_pos_global,
-                    q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global,
-                    kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, num_qo_len_global,
-                    merge_indptr_global, merge_o_indices_global, inverse_indptr_global, inverse_indices_global, partial_qkv_global,
-                    qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global, partial_o_global, before_o_allreduce_global,
-                    hidden_state_attn_mlp_global, partial_out_gate_up_proj_global, out_gate_up_proj_global, out_silu_multiply_global,
-                    partial_sum_down_proj_global, before_down_proj_allreduce_global, etensor_workspace_global,
-                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, BLK_M,
+                    batch_size, hidden_state_global, residual_global, output_global, qkv_proj_weight_global, o_proj_weight_global,  # noqa: E501
+                    q_rms_weight_global, k_rms_weight_global, gate_up_weight_global, down_weight_global, attn_add_rms_weight_global,  # noqa: E501
+                    mlp_add_rms_weight_global, cos_sin_cache_global, rope_pos_global, kv_cache_global, append_pos_global,  # noqa: E501
+                    q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global,  # noqa: E501
+                    kv_start_global, kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global, num_qo_len_global,  # noqa: E501
+                    merge_indptr_global, merge_o_indices_global, inverse_indptr_global, inverse_indices_global, partial_qkv_global,  # noqa: E501
+                    qkv_global, o_global, o_partial_attn_global, lse_partial_attn_global, partial_o_global, before_o_allreduce_global,  # noqa: E501
+                    hidden_state_attn_mlp_global, partial_out_gate_up_proj_global, out_gate_up_proj_global, out_silu_multiply_global,  # noqa: E501
+                    partial_sum_down_proj_global, before_down_proj_allreduce_global, etensor_workspace_global,  # noqa: E501
+                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, BLK_M,  # noqa: E501
                     True, dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 
@@ -2614,7 +2608,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
             exec_queue = generate_exec_queue(
                 batch_size, arg_dict["attn_task_num"].item(), mk.config, mk.world_size, 20, "static"
             )
-            tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
+            tvm_arg_dict["exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, 20, "dynamic")
             for i in range(REPEAT):
@@ -2647,7 +2641,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 )
             else:
                 tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
-        tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
+        tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
         )
 
@@ -2786,7 +2780,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict["etensor_workspace"],
                         # exec queue
                         work_arg_dict["exec_queue"],
-                        work_arg_dict[f"profiler_buffer"],
+                        work_arg_dict["profiler_buffer"],
                     )
                     iter += 1
 
@@ -2852,7 +2846,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict[f"queue_tasks_{iter}"],
                         work_arg_dict[f"queue_head_{iter}"],
                         work_arg_dict[f"queue_tail_{iter}"],
-                        work_arg_dict[f"profiler_buffer"],
+                        work_arg_dict["profiler_buffer"],
                     )
                     iter += 1
 
@@ -2862,7 +2856,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 print(f"TIR time: {ms:.3f} ms")
                 if mk.profiler_on:
                     export_to_perfetto_trace(
-                        tvm_arg_dict[f"profiler_buffer"].numpy(),
+                        tvm_arg_dict["profiler_buffer"].numpy(),
                         f"{scheduler}-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                         event_type_names,
                     )
@@ -2874,8 +2868,8 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                     func()
                 sess._sync_all()
                 sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])
-                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict[f"residual_0"])
-                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])
+                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict["residual_0"])
+                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])  # noqa: E501
                 sess.gather_to_worker0(
                     disco_arg_dict["hidden_state_attn_mlp"], res_dict["hidden_state_attn_mlp_res"]
                 )
@@ -2883,7 +2877,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                     res_dict["hidden_state_attn_mlp_host"], res_dict["hidden_state_attn_mlp_res"]
                 )
                 sess.gather_to_worker0(
-                    disco_arg_dict[f"profiler_buffer"], res_dict["profiler_buffer_res"]
+                    disco_arg_dict["profiler_buffer"], res_dict["profiler_buffer_res"]
                 )
                 sess.copy_from_worker_0(
                     res_dict["profiler_buffer_host"], res_dict["profiler_buffer_res"]
@@ -2902,7 +2896,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         import flashinfer
         import torch
 
-        FULL_INTERMEDIATE_SIZE = mk.INTERMEDIATE_SIZE * mk.world_size
+        mk.INTERMEDIATE_SIZE * mk.world_size
         FULL_NUM_ATTENTION_HEADS = mk.NUM_ATTENTION_HEADS * mk.world_size
         FULL_NUM_KEY_VALUE_HEADS = mk.NUM_KEY_VALUE_HEADS * mk.world_size
 
@@ -3099,7 +3093,6 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument(
         "--model",

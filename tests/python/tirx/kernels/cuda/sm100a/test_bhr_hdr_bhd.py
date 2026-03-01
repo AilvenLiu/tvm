@@ -24,15 +24,15 @@
 # Consumer WG0: TMEM -> RF -> cast(f32->bf16) -> SMEM -> TMA store
 # Scheduler: GroupMajor3D over (M_tiles, N_tiles, H_groups)
 
+import torch
+
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
-from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import GroupMajor3D
-
-import torch
 
 # Architecture
 CTA_GROUP = 1
@@ -114,7 +114,6 @@ def skip():
     pass
 
 
-
 def prepare_data():
     A = torch.randn((B_DIM, H_DIM, R_DIM), dtype=torch.bfloat16, device="cuda")
     B_mat = torch.randn((H_DIM, D_DIM, R_DIM), dtype=torch.bfloat16, device="cuda")
@@ -139,21 +138,19 @@ B_layout = Tx.ComposeLayout(
     Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_N, BLK_K) : (BLK_N * BLK_K, BLK_K, 1)]),
 )
 # D_smem: bf16 output, (EPI_TILE, MMA_N) per stage, no swizzle
-D_layout = Tx.TileLayout(
-    Tx.S[(TMEM_PIPE_DEPTH, EPI_TILE, MMA_N) : (EPI_TILE * MMA_N, MMA_N, 1)]
-)
+D_layout = Tx.TileLayout(Tx.S[(TMEM_PIPE_DEPTH, EPI_TILE, MMA_N) : (EPI_TILE * MMA_N, MMA_N, 1)])
 
 
 # fmt: off
 @Tx.prim_func(tirx=True)
 def bhr_hdr_bhd_gemm(
-    A: Tx.Buffer((B_DIM * H_DIM, R_DIM), a_type),   # [B*H, R] (batches×heads concatenated along M)
+    A: Tx.Buffer((B_DIM * H_DIM, R_DIM), a_type),   # [B*H, R] (batchesxheads concatenated along M)
     B_mat: Tx.Buffer((H_DIM * D_DIM, R_DIM), b_type),  # [H*D, R] (heads concatenated along N)
     D: Tx.Buffer((B_DIM * H_DIM, D_DIM), d_type),    # [B*H, D]
 ):
     with Tx.kernel():
         bx = Tx.cta_id([SM_NUMBER], parent="kernel")
-        wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+        wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
         warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
         lane_id = Tx.thread_id([32], parent="warp")
         with Tx.cta():
@@ -177,7 +174,7 @@ def bhr_hdr_bhd_gemm(
             # Local memory
             reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
             reg_bf16 = Tx.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
-            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
+            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))  # noqa: E501
             stage: Tx.int32
             phase = Tx.alloc_buffer((1,), "int32", scope="local")
             descA: Tx.uint64
@@ -224,7 +221,7 @@ def bhr_hdr_bhd_gemm(
                     phase[0] = phase[0] ^ 1
                 if PIPE_REMAIN_NUM > 0:
                     for ks in Tx.unroll(PIPE_REMAIN_NUM):
-                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks
+                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks  # noqa: F841
                         main_loop(True, ks)
                     epilogue1()
                     for ks in Tx.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
@@ -263,12 +260,12 @@ def bhr_hdr_bhd_gemm(
                                     mma2tma_bar.wait(ks, phase[0] ^ 1)
                                     Tx.copy_async(
                                         A_smem[ks, :, :],
-                                        A[a_m_global : a_m_global + BLK_M, k_start : k_start + BLK_K],
+                                        A[a_m_global : a_m_global + BLK_M, k_start : k_start + BLK_K],  # noqa: E501
                                         **tma_copy,
                                     )
                                     Tx.copy_async(
                                         B_smem[ks, :, :],
-                                        B_mat[b_n_global : b_n_global + BLK_N, k_start : k_start + BLK_K],
+                                        B_mat[b_n_global : b_n_global + BLK_N, k_start : k_start + BLK_K],  # noqa: E501
                                         **tma_copy,
                                     )
                                     tma2mma_bar.arrive(ks, BLK_K * (BLK_M + BLK_N) * F16_BYTES)
@@ -286,7 +283,7 @@ def bhr_hdr_bhd_gemm(
                         tmem_idx = Tx.local_scalar("int32", "tmem_idx")
                         tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                         Tx.ptx.tcgen05.encode_instr_descriptor(
-                            Tx.address_of(descI), "float32", a_type, b_type,
+                            Tx.address_of(descI), "float32", a_type, b_type,  # noqa: F821
                             MMA_N, MMA_M, MMA_K, False, False, CTA_GROUP,
                         )
                         phase[0] = 0
@@ -306,14 +303,14 @@ def bhr_hdr_bhd_gemm(
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
                                     for ki in Tx.unroll(BLK_K // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA),
+                                            Tx.address_of(descA),  # noqa: F821
                                             A_smem.ptr_to([ks, 0, ki * MMA_K]),
                                             ldo=1,
                                             sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
                                             swizzle=SWIZZLE,
                                         )
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB),
+                                            Tx.address_of(descB),  # noqa: F821
                                             B_smem.ptr_to([ks, 0, ki * MMA_K]),
                                             ldo=1,
                                             sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
@@ -325,13 +322,13 @@ def bhr_hdr_bhd_gemm(
                                         ):
                                             Tx.ptx.tcgen05.mma(
                                                 "float32", a_type, b_type,
-                                                tmem_idx * MMA_M, descB, descA, descI,
+                                                tmem_idx * MMA_M, descB, descA, descI,  # noqa: F821
                                                 False, CTA_GROUP, False,
                                             )
                                         else:
                                             Tx.ptx.tcgen05.mma(
                                                 "float32", a_type, b_type,
-                                                tmem_idx * MMA_M, descB, descA, descI,
+                                                tmem_idx * MMA_M, descB, descA, descI,  # noqa: F821
                                                 False, CTA_GROUP, True,
                                             )
                                     mma2tma_bar.arrive(ks, CTA_GROUP, 1)
@@ -372,7 +369,7 @@ def bhr_hdr_bhd_gemm(
                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
                         for ko in Tx.unroll(MMA_M // EPI_TILE):
-                            stage = (tile_scheduler.tile_idx * MMA_M // EPI_TILE + ko) % TMEM_PIPE_DEPTH
+                            stage = (tile_scheduler.tile_idx * MMA_M // EPI_TILE + ko) % TMEM_PIPE_DEPTH  # noqa: E501
 
                             if ko >= TMEM_PIPE_DEPTH:
                                 if lane_id == 0 and warp_id == 0:
@@ -435,8 +432,11 @@ def test_bhr_hdr_bhd():
     target = tvm.target.Target("cuda")
     with target:
         src, mod = get_source(bhr_hdr_bhd_gemm)
-        func = lambda: mod(A_flat, B_flat, D_flat)
-        ms = bench(func, warmup=10, repeat=30, proton_name="tir")
+
+        def run():
+            mod(A_flat, B_flat, D_flat)
+
+        ms = bench(run, warmup=10, repeat=30, proton_name="tir")
         tflops = flops(ms) / 1e12
         print(f"TIR: {tflops:.2f} TFLOPS, time: {ms:.3f} ms")
 

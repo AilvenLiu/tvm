@@ -256,7 +256,8 @@ TVM_DLL Pass VerifyMemory();
  * \param device_func The indicator if it is a device function.
  * \return Whether it is a well-formed TIRX function.
  */
-TVM_DLL bool VerifyTIRxWellFormed(const PrimFunc& func, bool assert_mode = true, bool device_func = false);
+TVM_DLL bool VerifyTIRxWellFormed(const PrimFunc& func, bool assert_mode = true,
+                                  bool device_func = false);
 
 /*!
  * \brief Verify if the TIRX in the given IRMOdule is well-formed.
@@ -265,7 +266,8 @@ TVM_DLL bool VerifyTIRxWellFormed(const PrimFunc& func, bool assert_mode = true,
  * \param device_func The indicator if it is a device function.
  * \return Whether it is a well-formed TIRX module.
  */
-TVM_DLL bool VerifyTIRxWellFormed(const IRModule& mod, bool assert_mode = true, bool device_func = false);
+TVM_DLL bool VerifyTIRxWellFormed(const IRModule& mod, bool assert_mode = true,
+                                  bool device_func = false);
 
 }  // namespace transform
 }  // namespace tirx

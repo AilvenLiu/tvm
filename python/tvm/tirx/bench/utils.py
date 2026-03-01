@@ -15,20 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
 import os
-import torch
-import numpy as np
+import subprocess
 from enum import Enum
-from typing import List, Union
-import triton.testing
+
+import numpy as np
+import torch
 import triton.profiler as proton
+import triton.testing
 import tvm_ffi
 
-import argparse
-import subprocess
-from tvm.contrib import nvcc
 import tvm
-import triton.runtime as runtime
+from tvm.contrib import nvcc
 from tvm.script import tirx as Tx
 
 
@@ -145,7 +144,7 @@ def decode_tag(tag, num_groups):
 def export_to_perfetto_trace(
     profiler_buffer: np.ndarray,
     file_name: str,
-    event_type_names: List[str],
+    event_type_names: list[str],
 ) -> None:
     if is_running_under_pytest():
         return
@@ -222,8 +221,8 @@ class CudaProfiler:
         profiler_buffer: Tx.Buffer,
         write_stride: int,
         num_groups: int,
-        default_leader: Union[None, tvm.tir.PrimExpr, bool] = None,
-        profiler_enabled: Union[bool, tvm.tir.PrimExpr] = True,
+        default_leader: None | tvm.tir.PrimExpr | bool = None,
+        profiler_enabled: bool | tvm.tir.PrimExpr = True,
     ):
         self.buffer = profiler_buffer
         self.write_stride = write_stride
@@ -231,7 +230,7 @@ class CudaProfiler:
         self.default_leader = default_leader
         # Accept either a Python bool or a PrimExpr; normalize simple bools to Tx.bool
         # so we can use it uniformly inside macros for conditional emission.
-        if isinstance(profiler_enabled, (bool, np.bool_)):
+        if isinstance(profiler_enabled, (bool, np.bool_)):  # noqa: UP038
             self.profiler_enabled = Tx.bool(bool(profiler_enabled))
         else:
             # Assume PrimExpr-like input; use as-is
@@ -244,9 +243,9 @@ class CudaProfiler:
             [1], "uint32", scope="local", align=8, name="profiler_write_offset"
         )
 
-    def _leader(self, leader: Union[None, tvm.tir.PrimExpr, bool]):
+    def _leader(self, leader: None | tvm.tir.PrimExpr | bool):
         if leader is not None:
-            if isinstance(leader, (bool, np.bool_)):
+            if isinstance(leader, (bool, np.bool_)):  # noqa: UP038
                 return Tx.bool(bool(leader))
             return leader
         if self.default_leader is not None:
@@ -265,7 +264,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def start(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+    def start(self, event_type: Enum, leader: None | tvm.tir.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_start_cuda(
                 event_type,
@@ -277,7 +276,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def end(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+    def end(self, event_type: Enum, leader: None | tvm.tir.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_end_cuda(
                 event_type,
@@ -289,7 +288,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def finalize(self, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+    def finalize(self, leader: None | tvm.tir.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_finalize_cuda(
                 self.buffer.data,

@@ -27,18 +27,16 @@
 # Scheduler: GroupMajor3D over (M_tiles, N_tiles, H_groups)
 
 import ml_dtypes
-import numpy as np
+import torch
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import GroupMajor3D
-
-import torch
 
 # Architecture
 CTA_GROUP = 1
@@ -210,12 +208,12 @@ def prepare_data():
     sfa_de = sfa.to(torch.float32)
     sfb_de = sfb.to(torch.float32)
 
-    A_de = (A_fp8_de.reshape(B_DIM * H_DIM, R_DIM // QUANT_SIZE, QUANT_SIZE) * sfa_de[:, :, None]).reshape(
-        B_DIM * H_DIM, R_DIM
-    )
-    B_de = (B_fp8_de.reshape(H_DIM * D_DIM, R_DIM // QUANT_SIZE, QUANT_SIZE) * sfb_de[:, :, None]).reshape(
-        H_DIM * D_DIM, R_DIM
-    )
+    A_de = (
+        A_fp8_de.reshape(B_DIM * H_DIM, R_DIM // QUANT_SIZE, QUANT_SIZE) * sfa_de[:, :, None]
+    ).reshape(B_DIM * H_DIM, R_DIM)
+    B_de = (
+        B_fp8_de.reshape(H_DIM * D_DIM, R_DIM // QUANT_SIZE, QUANT_SIZE) * sfb_de[:, :, None]
+    ).reshape(H_DIM * D_DIM, R_DIM)
 
     # Reference: per-head batched matmul D[b,h,d] = A[b,h,r] @ B[h,d,r].T
     # A_de is [H*B, R] (transposed), B_de is [H*D, R]
@@ -268,7 +266,7 @@ def fp8_bhr_hdr_bhd_gemm(
 
             # Local memory
             reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
+            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))  # noqa: E501
             reg_fp16 = Tx.alloc_buffer((BLK_N,), d_type, scope="local")
             stage: Tx.int32
             descA: Tx.uint64
@@ -320,7 +318,7 @@ def fp8_bhr_hdr_bhd_gemm(
                     phase = phase ^ 1
                 if PIPE_REMAIN_NUM > 0:
                     for ks in Tx.unroll(PIPE_REMAIN_NUM):
-                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks
+                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks  # noqa: F841
                         main_loop(ks)
                     epilogue1()
                     for ks in Tx.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
@@ -362,12 +360,12 @@ def fp8_bhr_hdr_bhd_gemm(
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
                                     Tx.copy_async(
                                         A_smem[ks, :, :],
-                                        A[a_m_global : a_m_global + BLK_M, k_start : k_start + BLK_K],
+                                        A[a_m_global : a_m_global + BLK_M, k_start : k_start + BLK_K],  # noqa: E501
                                         **tma_copy,
                                     )
                                     Tx.copy_async(
                                         B_smem[ks, :, :],
-                                        B_mat[b_n_global : b_n_global + BLK_N, k_start : k_start + BLK_K],
+                                        B_mat[b_n_global : b_n_global + BLK_N, k_start : k_start + BLK_K],  # noqa: E501
                                         **tma_copy,
                                     )
                                     if stage % 4 == 0:
@@ -381,9 +379,9 @@ def fp8_bhr_hdr_bhd_gemm(
                                             SFB[stage // 4, b_n_global : b_n_global + BLK_SFB],
                                             **tma_copy,
                                         )
-                                    AB_bytes = Tx.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
+                                    AB_bytes = Tx.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)  # noqa: E501
                                     SFAB_bytes = Tx.meta_var((BLK_SFA + BLK_SFB) * F32_BYTES)
-                                    tma2trans_bar.arrive(ks, Tx.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
+                                    tma2trans_bar.arrive(ks, Tx.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))  # noqa: E501
 
                             @Tx.inline
                             def tma_load_epilogue(ks):
@@ -425,7 +423,7 @@ def fp8_bhr_hdr_bhd_gemm(
                         tmem_idx = Tx.local_scalar("int32", "tmem_idx")
                         tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                         Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(
-                            Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type,
+                            Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type,  # noqa: F821
                             0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP,
                         )
                         phase = 0
@@ -450,49 +448,49 @@ def fp8_bhr_hdr_bhd_gemm(
                                     if stage % 4 == 0:
                                         for ki in Tx.unroll(0, BLK_SFA // 128):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]),
-                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0,
+                                                Tx.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]),  # noqa: E501, F821
+                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0,  # noqa: E501
                                             )
                                             Tx.ptx.tcgen05.cp(
-                                                0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4,
-                                                descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4",
+                                                0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4,  # noqa: E501
+                                                descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4",  # noqa: E501, F821
                                             )
                                         for ki in Tx.unroll(0, BLK_SFB // 128):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]),
-                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0,
+                                                Tx.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]),  # noqa: E501, F821
+                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0,  # noqa: E501
                                             )
                                             Tx.ptx.tcgen05.cp(
-                                                0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4,
-                                                descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4",
+                                                0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4,  # noqa: E501
+                                                descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4",  # noqa: E501, F821
                                             )
 
                                     # Issue block-scaled MMA
-                                    Tx.cuda.runtime_instr_desc(Tx.address_of(descI), stage % 4)
+                                    Tx.cuda.runtime_instr_desc(Tx.address_of(descI), stage % 4)  # noqa: F821
                                     for ki in Tx.unroll(BLK_K // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                            ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE,
+                                            Tx.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                            ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE,  # noqa: E501
                                         )
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                            ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE,
+                                            Tx.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),  # noqa: E501, F821
+                                            ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE,  # noqa: E501
                                         )
                                         if stage == 0 and ki == 0:
                                             Tx.ptx.tcgen05.mma.block_scale(
                                                 "float32", a_type, b_type, sfa_type, sfb_type,
-                                                tmem_idx * MMA_N, descA, descB,
+                                                tmem_idx * MMA_N, descA, descB,  # noqa: F821
                                                 SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
                                                 SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
-                                                descI, False, CTA_GROUP, False,
+                                                descI, False, CTA_GROUP, False,  # noqa: F821
                                             )
                                         else:
                                             Tx.ptx.tcgen05.mma.block_scale(
                                                 "float32", a_type, b_type, sfa_type, sfb_type,
-                                                tmem_idx * MMA_N, descA, descB,
+                                                tmem_idx * MMA_N, descA, descB,  # noqa: F821
                                                 SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
                                                 SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
-                                                descI, False, CTA_GROUP, True,
+                                                descI, False, CTA_GROUP, True,  # noqa: F821
                                             )
                                     mma2tma_bar.arrive(ks, CTA_GROUP, 1)
 
@@ -532,7 +530,7 @@ def fp8_bhr_hdr_bhd_gemm(
                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
                         for ko in Tx.unroll(MMA_N // EPI_TILE):
-                            stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH
+                            stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH  # noqa: E501
 
                             if ko >= TMEM_PIPE_DEPTH:
                                 if tid_in_wg == 0:
@@ -541,13 +539,13 @@ def fp8_bhr_hdr_bhd_gemm(
 
                             # TMEM -> RF (f32) -> cast to bf16 -> SMEM
                             for ki in Tx.unroll(EPI_TILE // TMEM_LD_SIZE):
-                                col_st = Tx.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
+                                col_st = Tx.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)  # noqa: E501
                                 Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                 with Tx.thread():
                                     st = Tx.meta_var(ki * TMEM_LD_SIZE)
                                     Tx.cast(reg_fp16[st : st + TMEM_LD_SIZE], reg[:])
                                     Tx.copy(
-                                        D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE],
+                                        D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE],  # noqa: E501
                                         reg_fp16[st : st + TMEM_LD_SIZE],
                                     )
 
@@ -604,8 +602,11 @@ def test_fp8_bhr_hdr_bhd():
     target = tvm.target.Target("cuda")
     with target:
         src, mod = get_source(fp8_bhr_hdr_bhd_gemm)
-        func = lambda: mod(A_tvm, B_tvm, D_out, sfa_tvm, sfb_tvm)
-        ms = bench(func, warmup=10, repeat=30, proton_name="tir")
+
+        def run():
+            mod(A_tvm, B_tvm, D_out, sfa_tvm, sfb_tvm)
+
+        ms = bench(run, warmup=10, repeat=30, proton_name="tir")
         tflops = flops(ms) / 1e12
         print(f"TIR: {tflops:.2f} TFLOPS, time: {ms:.3f} ms")
 
@@ -644,7 +645,9 @@ def bench_fp8_bhr_hdr_bhd():
         x_fp8 = x_fp8[0].view(B_DIM, H_DIM, R_DIM), x_fp8[1].view(B_DIM, H_DIM, ceildiv(R_DIM, 128))
         y_fp8 = (
             torch.empty_like(B_bf16, dtype=torch.float8_e4m3fn),
-            torch.empty((H_DIM, ceildiv(D_DIM, 128), ceildiv(R_DIM, 128)), device="cuda", dtype=torch.float),
+            torch.empty(
+                (H_DIM, ceildiv(D_DIM, 128), ceildiv(R_DIM, 128)), device="cuda", dtype=torch.float
+            ),
         )
         for i in range(H_DIM):
             y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(B_bf16[i], use_ue8m0=True)

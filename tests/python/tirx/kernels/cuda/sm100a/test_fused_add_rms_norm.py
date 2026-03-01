@@ -51,15 +51,15 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
     block_size = min(256, hidden_size // vec_size)
     bdx = 32
     bdy = ceildiv(block_size, 32)
-    smem_size = (bdy + hidden_size) * F32_BYTES
+    (bdy + hidden_size) * F32_BYTES
     inv_hidden_size = 1.0 / hidden_size
 
     # fmt: off
     @Tx.prim_func(tirx=True)
     def fused_add_rmsnorm(input_ptr: Tx.handle, residual_ptr: Tx.handle, weight_ptr: Tx.handle):
         batch_size = Tx.int32()
-        input_global = Tx.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")
-        residual_global = Tx.match_buffer(residual_ptr, [batch_size, hidden_size], "float16", scope="global")
+        input_global = Tx.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")  # noqa: E501
+        residual_global = Tx.match_buffer(residual_ptr, [batch_size, hidden_size], "float16", scope="global")  # noqa: E501
         weight_global = Tx.match_buffer(weight_ptr, [hidden_size], "float16", scope="global")
 
         with Tx.kernel():
@@ -94,9 +94,9 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                         for ki in Tx.unroll(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = Tx.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tx.copy(input_vec[:], input_global[idx[0], st:st + vec_size], vec_len=vec_size)
-                                Tx.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size], vec_len=vec_size)
-                                Tx.copy(weight_vec[:], weight_global[st:st + vec_size], vec_len=vec_size)
+                                Tx.copy(input_vec[:], input_global[idx[0], st:st + vec_size], vec_len=vec_size)  # noqa: E501
+                                Tx.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size], vec_len=vec_size)  # noqa: E501
+                                Tx.copy(weight_vec[:], weight_global[st:st + vec_size], vec_len=vec_size)  # noqa: E501
                                 Tx.cast(input_vec_f32[:], input_vec[:])
                                 Tx.cast(residual_vec_f32[:], residual_vec[:])
                                 Tx.cast(weight_vec_f32[:], weight_vec[:])
@@ -110,7 +110,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
 
                         # warp reduce sum
                         for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
-                            sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                            sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)  # noqa: E501
                         sum_sq_smem[ty] = sum_sq[0]
                         Tx.cuda.cta_sync()
                         # reduce sum through different warps
@@ -120,7 +120,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                             else:
                                 sum_sq[0] = 0.0
                             for kr in Tx.unroll(find_power_of_two(bdx // 2) + 1):
-                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)  # noqa: E501
                             sum_sq_smem[0] = sum_sq[0]
                         Tx.cuda.cta_sync()
                         # rms norm
@@ -134,12 +134,12 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                                 for kv in Tx.unroll(vec_size):
                                     input_vec_f32[kv] = x_vec[kv] * rms_norm[0]
                                 Tx.cast(input_vec[:], input_vec_f32[:])
-                                Tx.copy(input_global[idx[0], st:st + vec_size], input_vec[:], vec_len=vec_size)
+                                Tx.copy(input_global[idx[0], st:st + vec_size], input_vec[:], vec_len=vec_size)  # noqa: E501
 
                         for ki in Tx.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = Tx.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tx.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], vec_len=vec_size)
+                                Tx.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], vec_len=vec_size)  # noqa: E501
 
                         Tx.cuda.cta_sync()
                         idx[0] += SM_COUNT
@@ -165,9 +165,11 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
         def flashinfer():
             import flashinfer
 
-            func = lambda: flashinfer.norm.fused_add_rmsnorm(
-                x.clone(), residual.clone(), weight, EPS, enable_pdl=False
-            )
+            def func():
+                return flashinfer.norm.fused_add_rmsnorm(
+                    x.clone(), residual.clone(), weight, EPS, enable_pdl=False
+                )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
             print(f"flashinfer time: {ms:.3f} ms")
             x_fused = x.clone()
@@ -180,11 +182,14 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
         def tir():
             DEV = tvm.cuda(0)
             weight_tvm = tvm.runtime.tensor(weight.cpu().numpy(), DEV)
-            func = lambda: mod(
-                tvm.runtime.tensor(x.cpu().numpy(), DEV),
-                tvm.runtime.tensor(residual.cpu().numpy(), DEV),
-                weight_tvm,
-            )
+
+            def func():
+                return mod(
+                    tvm.runtime.tensor(x.cpu().numpy(), DEV),
+                    tvm.runtime.tensor(residual.cpu().numpy(), DEV),
+                    weight_tvm,
+                )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             print(f"tir time: {ms:.3f} ms")
             x_tvm = tvm.runtime.tensor(x.cpu().numpy(), DEV)

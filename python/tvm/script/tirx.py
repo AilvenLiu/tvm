@@ -15,24 +15,26 @@
 # specific language governing permissions and limitations
 # under the License.
 """TVM Script APIs of TVM Python Package for TIRX builtin ops."""
-from typing import TYPE_CHECKING, Any, Callable
 
-from .ir_builder.tir import tirx as _ir_builder_tirx
-from .ir_builder.tir.tirx import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
 from . import tir as _tir
+from .ir_builder.tir import tirx as _ir_builder_tirx
+from .ir_builder.tir.tirx import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import  # noqa: F403
 
 if TYPE_CHECKING:
     # Statically expose all T-namespace attributes (cuda, ptx, nvshmem, nki,
     # meta_var, exec scope helpers, scalar ops, etc.) so that type checkers
     # and IDEs can resolve Tx.cuda.xxx, Tx.meta_var, etc.
     # At runtime these are copied dynamically via the globals() loop below.
-    from .tir import *  # type: ignore[assignment]  # noqa: F811
+    from .tir import *  # type: ignore[assignment]  # noqa: F403
 
 
 def _is_buffer_or_region(x):
     from tvm.tir import Buffer, BufferRegion  # pylint: disable=import-outside-toplevel
 
-    return isinstance(x, (Buffer, BufferRegion))
+    return isinstance(x, (Buffer, BufferRegion))  # noqa: UP038
 
 
 # Overload: one name, dispatch by argument types (expr vs buffer/region).
@@ -106,9 +108,10 @@ def __getattr__(name: str) -> Callable[..., Any]:
     if name.startswith("_"):
         raise AttributeError(f"module 'tvm.script.tirx' has no attribute {name!r}")
 
-    from .ir_builder.tir.tirx import _to_region, f_insert
     from tvm.tir import Buffer
     from tvm.tirx.operator.op import GenericOp
+
+    from .ir_builder.tir.tirx import _to_region, f_insert
 
     def _generic_op(*args, workspace=None, dispatch=None, **kwargs):
         workspace = workspace or {}

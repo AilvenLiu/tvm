@@ -18,21 +18,20 @@ import numpy as np
 
 import tvm
 import tvm.testing
-from tvm import relax
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.base import SmemManager
-import tvm.tirx.megakernel.utils.static_scheduler as static_scheduler
 import tvm.tirx.megakernel.utils.dynamic_scheduler as dynamic_scheduler
+import tvm.tirx.megakernel.utils.static_scheduler as static_scheduler
+from tvm import relax
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as Tx
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
 
 SM_CNT = 148
 NUM_THREADS = 256
 
 
 def test_basic():
-
     M = 1024
     N = 1024
 
@@ -51,18 +50,18 @@ def test_basic():
             A_ptr = Tx.match_buffer(A, (M, N), "float32")
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             with Tx.cta():
-                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)  # noqa: E501
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)  # noqa: E501
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with Tx.cta():
                     Tx.attr({"tirx.tile_class.run": True})
-                    A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
+                    A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")  # noqa: E501
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
-                    Tx.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])
+                    Tx.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])  # noqa: E501
                     Tx.sum(B_smem, A_smem)
                     Tx.copy(B_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n], B_smem)
                     smem_manager.arrive_all("cta")
@@ -74,15 +73,15 @@ def test_basic():
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             C_ptr = Tx.match_buffer(C, (M, 1), "float32")
             with Tx.cta():
-                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)  # noqa: E501
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)  # noqa: E501
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with Tx.cta():
                     Tx.attr({"tirx.tile_class.run": True})
-                    B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
+                    B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")  # noqa: E501
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")
                     Tx.copy(B_smem, B_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, :])
@@ -133,10 +132,18 @@ def test_basic():
     # fmt: on
     # Before.show()
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
+        "mega_kernel",
+        "static",
+        static_scheduler.StaticTileScheduler,
+        static_scheduler.Semaphore,
+        "mega_kernel_",
     )(Before)
     fused_dynamic_scheduler_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "dynamic", dynamic_scheduler.DynamicTileScheduler, dynamic_scheduler.Semaphore, "mega_kernel_"
+        "mega_kernel",
+        "dynamic",
+        dynamic_scheduler.DynamicTileScheduler,
+        dynamic_scheduler.Semaphore,
+        "mega_kernel_",
     )(Before)
     # fused_static_scheduler_mod.show()
     # fused_dynamic_scheduler_mod.show()
@@ -188,18 +195,18 @@ def test_extra_args():
             A_ptr = Tx.match_buffer(A, (M, N), "float32")
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             with Tx.cta():
-                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)  # noqa: E501
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)  # noqa: E501
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with Tx.cta():
                     Tx.attr({"tirx.tile_class.run": True})
-                    A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
+                    A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")  # noqa: E501
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
-                    Tx.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])
+                    Tx.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])  # noqa: E501
                     Tx.sum(B_smem, A_smem)
                     Tx.copy(B_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n], B_smem)
                     smem_manager.arrive_all("cta")
@@ -211,15 +218,15 @@ def test_extra_args():
             B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             C_ptr = Tx.match_buffer(C, (M, 1), "float32")
             with Tx.cta():
-                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
-                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)
+                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)  # noqa: E501
+                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True)  # noqa: E501
                 smem_manager.set_tile(None)
                 with Tx.cta():
                     Tx.attr({"tirx.megakernel.persistent.init": True})
                     smem_manager.init()
                 with Tx.cta():
                     Tx.attr({"tirx.tile_class.run": True})
-                    B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")
+                    B_smem = smem_manager.alloc([BLOCK_M, NUM_BLOCK_N], "float32", align=16, name="B_smem")  # noqa: E501
                     C_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="C_smem")
                     smem_manager.wait_all("cta")
                     Tx.copy(B_smem, B_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, :])
@@ -229,7 +236,7 @@ def test_extra_args():
                     smem_manager.advance()
 
         @R.function
-        def mega_kernel(A: R.Tensor((M, N), "float32"), workspace: R.Tensor((100000,), "int32"), P: R.Tensor((NUM_BLOCK_M,), "int32"), inv_P: R.Tensor((NUM_BLOCK_M,), "int32")):
+        def mega_kernel(A: R.Tensor((M, N), "float32"), workspace: R.Tensor((100000,), "int32"), P: R.Tensor((NUM_BLOCK_M,), "int32"), inv_P: R.Tensor((NUM_BLOCK_M,), "int32")):  # noqa: E501
             cls = Before
 
             with R.dataflow():
@@ -270,10 +277,18 @@ def test_extra_args():
     # fmt: on
     Before.show()
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
+        "mega_kernel",
+        "static",
+        static_scheduler.StaticTileScheduler,
+        static_scheduler.Semaphore,
+        "mega_kernel_",
     )(Before)
     fused_dynamic_scheduler_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "dynamic", dynamic_scheduler.DynamicTileScheduler, dynamic_scheduler.Semaphore, "mega_kernel_"
+        "mega_kernel",
+        "dynamic",
+        dynamic_scheduler.DynamicTileScheduler,
+        dynamic_scheduler.Semaphore,
+        "mega_kernel_",
     )(Before)
 
     # testing correctness

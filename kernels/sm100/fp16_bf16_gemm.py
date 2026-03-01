@@ -16,17 +16,17 @@
 # under the License.
 import argparse
 
-import torch
-import tvm
 import deep_gemm
+import torch
 
+import tvm
 from tvm.script import tirx as Tx
+from tvm.tir.layout import S, TCol, TileLayout, TLane
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-
-from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
-from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tirx.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
+from tvm.tirx.pipeline import MBarrier, PipelineState, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
-from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
 
 
 def parse_args():
@@ -77,7 +77,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
     CTA_GROUP = 2
     NUM_CONSUMER = 2
     BLK_M, BLK_N, BLK_K = 128, 128, 64
-    MMA_M, MMA_N, MMA_K = 256, 256, 16
+    MMA_M, MMA_N, MMA_K = 256, 256, 16  # noqa: F841
 
     PIPE_DEPTH = 4
     K_TILES = K // BLK_K
@@ -95,7 +95,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
     )
 
     SM_COUNT = 148  # number of Stream Multiprocessors for B200
-    WG_NUMBER = 3  # WG2 (warp0: mma, warp1: mma, warp3: load), WG0 (LD_TMEM + writeback), WG1 (LD_TMEM + writeback)
+    WG_NUMBER = 3  # WG2 (warp0: mma, warp1: mma, warp3: load), WG0 (LD_TMEM + writeback), WG1 (LD_TMEM + writeback)  # noqa: E501
 
     @Tx.prim_func(tirx=True)
     def kernel(
@@ -143,11 +143,11 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
             Tx.cuda.cluster_sync()
 
             tmem_addr_local: Tx.uint32
-            tmem_addr_local = tmem_addr[0]
+            tmem_addr_local = tmem_addr[0]  # noqa: F841
 
-            tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]))
+            tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, 512) : (1@TLane, 1@TCol)]))  # noqa: E501
 
-            tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=M // MMA_M // NUM_CONSUMER, num_n_tiles=N // MMA_N, l2_group_size=8, num_clusters=SM_COUNT // CTA_GROUP)
+            tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=M // MMA_M // NUM_CONSUMER, num_n_tiles=N // MMA_N, l2_group_size=8, num_clusters=SM_COUNT // CTA_GROUP)  # noqa: E501
             tile_scheduler.init(bx // CTA_GROUP)
             m_idx = Tx.meta_var(tile_scheduler.m_idx)
             n_idx = Tx.meta_var(tile_scheduler.n_idx)
@@ -160,17 +160,17 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
                     @Tx.inline
                     def tma_load_stage(stage, k_tile):
-                        mma2tma.wait(stage, tma_phase.phase) # both CTAs wait for the mma (issued by warp0/1 of CTA-0) to finish]
-                        tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma2mma_cta0.ptr_to([stage])})
-                        A_tile = A.partition(tile_shape=(NUM_CONSUMER * CTA_GROUP * BLK_M, BLK_K), select=(m_idx, k_tile))
-                        Tx.copy_async(Asmem[stage, 0, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx, 0)), **tma_config)
-                        Tx.copy_async(Asmem[stage, 1, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx + CTA_GROUP, 0)), **tma_config)
+                        mma2tma.wait(stage, tma_phase.phase) # both CTAs wait for the mma (issued by warp0/1 of CTA-0) to finish]  # noqa: E501
+                        tma_config = Tx.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma2mma_cta0.ptr_to([stage])})  # noqa: E501
+                        A_tile = A.partition(tile_shape=(NUM_CONSUMER * CTA_GROUP * BLK_M, BLK_K), select=(m_idx, k_tile))  # noqa: E501
+                        Tx.copy_async(Asmem[stage, 0, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx, 0)), **tma_config)  # noqa: E501
+                        Tx.copy_async(Asmem[stage, 1, :, :], A_tile.partition(tile_shape=(BLK_M, BLK_K), select=(cbx + CTA_GROUP, 0)), **tma_config)  # noqa: E501
                         Tx.copy_async(Bsmem[stage, :, :],
-                                      B.partition(tile_shape=(CTA_GROUP * BLK_N, BLK_K), select=(n_idx, k_tile))
+                                      B.partition(tile_shape=(CTA_GROUP * BLK_N, BLK_K), select=(n_idx, k_tile))  # noqa: E501
                                        .partition(tile_shape=(BLK_N, BLK_K), select=(cbx, 0)),
                                       **tma_config)
                         if cbx == 0:
-                            tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * DTYPE_SIZE) # signal CTA-0 the issue of tma
+                            tma2mma_cta0.arrive(stage, CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * DTYPE_SIZE) # signal CTA-0 the issue of tma  # noqa: E501
 
                     @Tx.inline
                     def tma_load():
@@ -195,15 +195,15 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     @Tx.inline
                     def mma_stage(stage):
                         tma2mma.wait(stage, mma_phase.phase) # wait for the tma to finish
-                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP)
-                        accum = 1
-                        mma2tma.arrive(stage, cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma
+                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + MMA_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP)  # noqa: E501, F821, F823
+                        accum = 1  # noqa: F841
+                        mma2tma.arrive(stage, cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma  # noqa: E501
 
                     @Tx.inline
                     def mma():
                         ld2mma.wait(warp_id, ld_phase.phase)
                         ld_phase.move_to_next_stage()
-                        accum = 0
+                        accum = 0  # noqa: F841
                         for k_tile in Tx.serial(K_TILES):
                             mma_stage(mma_phase.stage)
                             mma_phase.move_to_next_stage()
@@ -220,7 +220,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
 
                 @Tx.inline
                 def writeback():
-                    mma2ld.wait(wg_id, wb_phase.phase) # wait for the issues of all mmas issued by CTA-0 (warp0(1)) to finish
+                    mma2ld.wait(wg_id, wb_phase.phase) # wait for the issues of all mmas issued by CTA-0 (warp0(1)) to finish  # noqa: E501
                     wb_phase.move_to_next_stage()
                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
@@ -228,18 +228,18 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                     for no in Tx.unroll(MMA_N // TMEM_LD_N):
                         Dreg = Tx.alloc_local((TMEM_LD_N,), acc_type)
                         with Tx.warpgroup():
-                            Dreg_wg = Dreg.view(128, TMEM_LD_N, layout=TileLayout(S[(128, TMEM_LD_N) : (1@axis_tid_in_wg, 1)]))
+                            Dreg_wg = Dreg.view(128, TMEM_LD_N, layout=TileLayout(S[(128, TMEM_LD_N) : (1@axis_tid_in_wg, 1)]))  # noqa: E501
                             n_tmem_ld_st = Tx.meta_var(wg_id * MMA_N + no * TMEM_LD_N)
                             Tx.copy(Dreg_wg[:, :], tmem[:, n_tmem_ld_st : n_tmem_ld_st + TMEM_LD_N])
                         with Tx.thread():
                             Tx.cast(Dreg_16b[no * TMEM_LD_N : no * TMEM_LD_N + TMEM_LD_N], Dreg[:])
 
                     # signal the finish of LD_TMEM from TMEM
-                    ld2mma.arrive(wg_id, cta_id=0, pred=True) # signal CTA-0 (warp0(1)) the finish of LD_TMEM from TMEM, such that CTA-0 (warp0(1)) can proceed to issue next mma
+                    ld2mma.arrive(wg_id, cta_id=0, pred=True) # signal CTA-0 (warp0(1)) the finish of LD_TMEM from TMEM, such that CTA-0 (warp0(1)) can proceed to issue next mma  # noqa: E501
 
                     for no in Tx.unroll(MMA_N // EPI_N):
                         with Tx.thread():
-                            Tx.copy(Dsmem[wg_id, warp_id * 32 + lane_id, :], Dreg_16b[no * EPI_N : (no + 1) * EPI_N])
+                            Tx.copy(Dsmem[wg_id, warp_id * 32 + lane_id, :], Dreg_16b[no * EPI_N : (no + 1) * EPI_N])  # noqa: E501
                             Tx.ptx.fence.proxy_async("shared::cta")
                         Tx.cuda.warpgroup_sync(wg_id + 10)
 
@@ -247,7 +247,7 @@ def tir_kernel(dtype: str, M: int, N: int, K: int):
                         with Tx.thread(parent="warpgroup")[warp_id == 0 and lane_id == 0]:
                             D_tile = D.partition(tile_shape=(NUM_CONSUMER * CTA_GROUP * BLK_M, MMA_N), select=(m_idx, n_idx)) \
                                       .partition(tile_shape=(CTA_GROUP * BLK_M, EPI_N), select=(wg_id, no)) \
-                                      .partition(tile_shape=(BLK_M, EPI_N), select=(cbx, 0))
+                                      .partition(tile_shape=(BLK_M, EPI_N), select=(cbx, 0))  # noqa: E501
                             Tx.copy_async(D_tile, Dsmem[wg_id, :, :], dispatch="tma")
                             Tx.ptx.cp_async.bulk.commit_group()
                             Tx.ptx.cp_async.bulk.wait_group(0)

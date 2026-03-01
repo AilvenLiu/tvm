@@ -17,10 +17,9 @@
 
 import tvm
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES, F32_BYTES
 
 
 def upcast_size(dtype):
@@ -106,7 +105,7 @@ def cast_load(v, vec_len, buf, *indices):
     with Tx.thread():
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
         for i in Tx.vectorized(vec_len):
-            buffer_load = Tx.meta_var(Tx.BufferLoad(buf, indices[:-1] + (indices[-1] + i,)))
+            buffer_load = Tx.meta_var(Tx.BufferLoad(buf, (*indices[:-1], indices[-1] + i)))
             v_tmp[i] = buffer_load
         Tx.cast(v[:], v_tmp[:])
 
@@ -117,11 +116,10 @@ def cast_store(v, vec_len, buf, *indices):
         v_tmp = Tx.alloc_local([vec_len], buf.dtype)
         Tx.cast(v_tmp[:], v[:])
         for i in Tx.vectorized(vec_len):
-            Tx.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
+            Tx.buffer_store(buf, v_tmp[i], (*indices[:-1], indices[-1] + i))
 
 
 class BatchMergeTile(Tile):
-
     num_warps = KernelConfig.NUM_THREADS // 32
     num_smem_stages = 1
     num_workers = num_warps * KernelConfig.SM_NUMBER
@@ -150,9 +148,9 @@ class BatchMergeTile(Tile):
                 m_prev = float_var(name="m_prev", val=self.m[0])
                 d_prev = float_var(name="d_prev", val=self.d[0])
                 self.m[0] = Tx.max(m_prev[0], other_m)
-                self.d[0] = d_prev[0] * ptx_exp2(m_prev[0] - self.m[0]) + other_d * ptx_exp2(other_m - self.m[0])
+                self.d[0] = d_prev[0] * ptx_exp2(m_prev[0] - self.m[0]) + other_d * ptx_exp2(other_m - self.m[0])  # noqa: E501
                 for i in Tx.unroll(self.vec_size):
-                    self.o[i] = self.o[i] * ptx_exp2(m_prev[0] - self.m[0]) + other_o[i] * ptx_exp2(other_m - self.m[0])
+                    self.o[i] = self.o[i] * ptx_exp2(m_prev[0] - self.m[0]) + other_o[i] * ptx_exp2(other_m - self.m[0])  # noqa: E501
         # fmt: on
 
         # fmt: off
@@ -247,8 +245,10 @@ __syncwarp();
                         )
 
                         partial_idx_to_offset = Tx.meta_var(
-                            lambda off: (merge_indptr_tvm[packed_qo_idx[0]] + off) * self.kv_heads
-                            + kv_head_idx[0]
+                            lambda off: (
+                                (merge_indptr_tvm[packed_qo_idx[0]] + off) * self.kv_heads
+                                + kv_head_idx[0]
+                            )
                         )
                         merge_idx_to_offset = Tx.meta_var(
                             (merge_o_indices_tvm[packed_qo_idx[0]] * self.kv_heads + kv_head_idx[0])
@@ -286,17 +286,17 @@ __syncwarp();
                         for it in Tx.serial(ceildiv(num_index_sets[0], self.bdy)):
                             with Tx.thread():
                                 if it % self.bdx == 0:
-                                    self.s_smem[
-                                        warp_id, ty[0] * self.bdx + tx[0]
-                                    ] = Tx.if_then_else(
-                                        it * self.bdy + (ty[0] * self.bdx + tx[0])
-                                        < num_index_sets[0],
-                                        partial_lse_tvm[
-                                            partial_idx_to_offset(
-                                                it * self.bdy + ty[0] * self.bdx + tx[0]
-                                            )
-                                        ],
-                                        Tx.float32(0),
+                                    self.s_smem[warp_id, ty[0] * self.bdx + tx[0]] = (
+                                        Tx.if_then_else(
+                                            it * self.bdy + (ty[0] * self.bdx + tx[0])
+                                            < num_index_sets[0],
+                                            partial_lse_tvm[
+                                                partial_idx_to_offset(
+                                                    it * self.bdy + ty[0] * self.bdx + tx[0]
+                                                )
+                                            ],
+                                            Tx.float32(0),
+                                        )
                                     )
                                     self._warp_sync()
                                 Tx.ptx.cp_async.wait_group(self.num_smem_stages - 1)

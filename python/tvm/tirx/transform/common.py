@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict, List
 
 from tvm.tir import (
     AllocBuffer,
@@ -30,10 +29,9 @@ from tvm.tir import (
     decl_buffer,
 )
 from tvm.tir.buffer import Buffer
+from tvm.tir.layout import Iter, TileLayout
 from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
-from tvm.tir.buffer import Buffer
 from tvm.tirx.operator.op import KernelReplacePoint
-from tvm.tir.layout import TileLayout, Iter
 
 
 # FIXME: this pass does not replace var in the shape/layout of a buffer
@@ -43,7 +41,9 @@ class BufferReplacer(StmtExprMutator):
     Also replace the data of the buffer with another var.
     """
 
-    def __init__(self, buffer_map: Dict[Buffer, Buffer] = None, var_map: Dict[Var, Var] = None):
+    def __init__(
+        self, buffer_map: dict[Buffer, Buffer] | None = None, var_map: dict[Var, Var] | None = None
+    ):
         super().__init__()
         self.buffer_map = buffer_map if buffer_map is not None else {}
         self.var_map = var_map if var_map is not None else {}
@@ -127,7 +127,7 @@ class BufferReplacer(StmtExprMutator):
             return DeclBuffer(new_buffer, op.body)
         return op
 
-    def visit_array_prim_expr_(self, op: List[PrimExpr]):
+    def visit_array_prim_expr_(self, op: list[PrimExpr]):
         return [self.visit_expr(expr) for expr in op]
 
     def visit_alloc_buffer_(self, op: AllocBuffer):

@@ -16,20 +16,23 @@
 # under the License.
 # pylint: disable=no-member
 """Async structures for TIRX"""
+
 import inspect
+from collections.abc import Callable
+
+from tvm_ffi import register_object
+
+from tvm.runtime import Object
+from tvm.tirx import PrimExpr, Var
 
 from . import _ffi_api
-from typing import List, Callable
-from tvm_ffi import register_object
-from tvm.runtime import Object
-from tvm.tirx import Var, PrimExpr
 
 
 @register_object("tirx.Predicate")
 class Predicate(Object):
     """A predicate object for TIRX"""
 
-    vars: List[Var]
+    vars: list[Var]
     pred: PrimExpr
 
     def __init__(self, f_pred: Callable[..., PrimExpr]):
@@ -37,6 +40,6 @@ class Predicate(Object):
         pred = f_pred(*vars)
         self.__init_handle_by_constructor__(_ffi_api.Predicate, vars, pred)
 
-    def apply(self, indices: List[PrimExpr]) -> PrimExpr:
+    def apply(self, indices: list[PrimExpr]) -> PrimExpr:
         """Apply the predicate to the given indices"""
         return _ffi_api.PredicateApply(self, indices)

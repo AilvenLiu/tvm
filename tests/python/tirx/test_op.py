@@ -15,11 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+
 import tvm
 from tvm.ir import Op
-from tvm.tir.buffer import decl_buffer
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
+from tvm.tir.buffer import decl_buffer
 from tvm.tir.stmt import OpCall
 
 

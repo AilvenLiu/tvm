@@ -16,14 +16,14 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tir.layout import TileLayout, S, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import S, TileLayout
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
+from tvm.tirx.megakernel.utils.utils import silu
 
 from .gemm import GemmTile
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.utils import silu
-from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
 
 
 class GateUpSiluTile(GemmTile):

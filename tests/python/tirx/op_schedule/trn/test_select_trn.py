@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout, P, F, S
-import numpy as np
 import tvm.testing
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
 from tvm.ir import assert_structural_equal
+from tvm.script import tirx as Tx
+from tvm.tir.layout import F, P, S, TileLayout
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -51,7 +48,7 @@ def test_select():
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
-                        Tx.nki.affine_select(B_sbuf[p_loop, f_loop], p_loop < f_loop, A_sbuf[p_loop, f_loop], Tx.float32(0.0))
+                        Tx.nki.affine_select(B_sbuf[p_loop, f_loop], p_loop < f_loop, A_sbuf[p_loop, f_loop], Tx.float32(0.0))  # noqa: E501
     # fmt: on
 
     with target:
@@ -86,7 +83,7 @@ def test_select_in_loop():
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
-                        Tx.nki.affine_select(B_sbuf[p_loop, f_loop], (i + 1) * p_loop < f_loop, A_sbuf[p_loop, i * 8192 + f_loop], Tx.float32(0.0))
+                        Tx.nki.affine_select(B_sbuf[p_loop, f_loop], (i + 1) * p_loop < f_loop, A_sbuf[p_loop, i * 8192 + f_loop], Tx.float32(0.0))  # noqa: E501
 
     # fmt: on
     with target:
@@ -101,6 +98,7 @@ def test_select_expr_affine():
     src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def select() -> None:
@@ -119,7 +117,7 @@ def test_select_expr_affine():
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
-                        Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))
+                        Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})
@@ -133,6 +131,7 @@ def test_select_with_guard():
     src_layout = TileLayout(S[(4, 128, 512) : (512 @ F, 1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def select() -> None:
@@ -141,7 +140,7 @@ def test_select_with_guard():
             B_sbuf = Tx.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 for j in range(4):
-                    Tx.select(B_sbuf[0: (i+1) * 128, 0: (j+1) * 128], A_sbuf[0: (i+1) * 128, 0: (j+1) * 128], 0.0, lambda a, b: a < b)
+                    Tx.select(B_sbuf[0: (i+1) * 128, 0: (j+1) * 128], A_sbuf[0: (i+1) * 128, 0: (j+1) * 128], 0.0, lambda a, b: a < b)  # noqa: E501
 
     @Tx.prim_func(tirx=True)
     def expected():
@@ -154,7 +153,7 @@ def test_select_with_guard():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - i < 1 and f_loop < j * 128 + 128:
-                            Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))
+                            Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})

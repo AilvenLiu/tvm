@@ -17,19 +17,19 @@
 import argparse
 import math
 
-import torch
-import tvm
 import deep_gemm
-from deep_gemm.utils.math import per_block_cast_to_fp8, per_token_cast_to_fp8
+import torch
 from deep_gemm.testing import calc_diff
+from deep_gemm.utils.math import per_block_cast_to_fp8, per_token_cast_to_fp8
 
+import tvm
 from tvm.script import tirx as Tx
+from tvm.tir.layout import R, S, TCol, TileLayout, TLane
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
+from tvm.tirx.pipeline import MBarrier, PipelineState, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
-from tvm.tirx.pipeline import PipelineState, MBarrier, TMABar, TCGen05Bar
-
-from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
-from tvm.tir.layout import TileLayout, S, R, TLane, TCol, tid_in_wg as axis_tid_in_wg
 
 
 def parse_args():
@@ -94,14 +94,14 @@ def tir_kernel(M: int, N: int, K: int):
     N_CLUSTER = 1
     WG_NUMBER = 2
     WARP_NUMBER = 4
-    NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
+    NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # noqa: F841
     SM_NUMBER = 148
 
     SMEM_PIPE_DEPTH = 6
     TMEM_PIPE_DEPTH = 2
 
     F8_BYTES = 1
-    F16_BYTES = 2
+    F16_BYTES = 2  # noqa: F841
     F32_BYTES = 4
     F128_BYTES = 16
 
@@ -121,7 +121,7 @@ def tir_kernel(M: int, N: int, K: int):
     SFB_TMEM_START_COL = TMEM_PIPE_DEPTH * MMA_N + TMEM_PIPE_DEPTH * BLK_SFA // 32
     CTA_GROUP = 2
     QUANT_SIZE = BLK_K
-    SWIZZLE = 3
+    SWIZZLE = 3  # noqa: F841
 
     assert TMEM_PIPE_DEPTH * (MMA_N + BLK_SFA // 32 + BLK_SFB // 32) <= 512
 
@@ -145,7 +145,7 @@ def tir_kernel(M: int, N: int, K: int):
     SFB_layout = Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_SFB // 32, 32) : (BLK_SFB, 32, 1)])
 
     # TMEM SF layouts: stride-0 K_MMA (all MMA iters share same SF since
-    # quantization group = BLK_K = 128 = 4 MMAs × 32).
+    # quantization group = BLK_K = 128 = 4 MMAs × 32).  # noqa: RUF003
     # Shard: [pipe, M, 32, K_MMA] — pipe as leading dim for natural slicing.
     sf_mma_k = 1  # fp8 + e8m0fnu
     M_sf = 128 // 32  # 4 row chunks
@@ -207,8 +207,8 @@ def tir_kernel(M: int, N: int, K: int):
                 A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
                 B_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
                 D_smem = pool.alloc((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), d_type, layout=D_layout)
-                SFA_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), "uint32", layout=SFA_layout)
-                SFB_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", layout=SFB_layout)
+                SFA_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), "uint32", layout=SFA_layout)  # noqa: E501
+                SFB_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", layout=SFB_layout)  # noqa: E501
                 SFA_smem_2d = SFA_smem.view(SMEM_PIPE_DEPTH, BLK_SFA)
                 SFB_smem_2d = SFB_smem.view(SMEM_PIPE_DEPTH, BLK_SFB)
                 pool.commit()
@@ -224,7 +224,7 @@ def tir_kernel(M: int, N: int, K: int):
                 descSFB: Tx.uint64
                 descI: Tx.uint32
 
-                tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, l2_group_size=TILE_GROUPS_ROW_SIZE, num_clusters=SM_NUMBER // 2)
+                tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, l2_group_size=TILE_GROUPS_ROW_SIZE, num_clusters=SM_NUMBER // 2)  # noqa: E501
 
                 # initialize barriers
                 tma2trans.init(1)
@@ -244,9 +244,9 @@ def tir_kernel(M: int, N: int, K: int):
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.cluster_sync()
                 Tx.cuda.trap_when_assert_failed(tmem_addr[0] == 0)
-                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))
-                SFA_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, 128, K_PER_PIPE), sfa_type, scope="tmem", allocated_addr=SFA_TMEM_START_COL, layout=SFA_tmem_layout)
-                SFB_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, BLK_SFB, K_PER_PIPE), sfb_type, scope="tmem", allocated_addr=SFB_TMEM_START_COL, layout=SFB_tmem_layout)
+                tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(S[(128, N_COLS) : (1@TLane, 1@TCol)]))  # noqa: E501
+                SFA_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, 128, K_PER_PIPE), sfa_type, scope="tmem", allocated_addr=SFA_TMEM_START_COL, layout=SFA_tmem_layout)  # noqa: E501
+                SFB_tmem = Tx.decl_buffer((TMEM_PIPE_DEPTH, BLK_SFB, K_PER_PIPE), sfb_type, scope="tmem", allocated_addr=SFB_TMEM_START_COL, layout=SFB_tmem_layout)  # noqa: E501
 
                 with Tx.cta():
                     Tx.attr({"tirx.scope_partition": True})
@@ -266,16 +266,16 @@ def tir_kernel(M: int, N: int, K: int):
                                 def tma_load(ks, k_tile):
                                     k_start = Tx.meta_var(k_tile * BLK_K)
                                     mma2tma.wait(ks, tma_state.phase)
-                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2trans.ptr_to([ks]), "cta_group": CTA_GROUP})
+                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2trans.ptr_to([ks]), "cta_group": CTA_GROUP})  # noqa: E501
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
-                                        Tx.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)
-                                        Tx.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)
+                                        Tx.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)  # noqa: E501
                                         if k_tile % 4 == 0:
-                                            Tx.copy_async(SFA_smem_2d[ks, :], SFA[k_tile // 4, m_start: m_start + BLK_M], **tma_copy)
-                                            Tx.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[k_tile // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)
-                                        AB_bytes = Tx.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
-                                        SFAB_bytes = Tx.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
-                                        tma2trans.arrive(ks, Tx.if_then_else(k_tile % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
+                                            Tx.copy_async(SFA_smem_2d[ks, :], SFA[k_tile // 4, m_start: m_start + BLK_M], **tma_copy)  # noqa: E501
+                                            Tx.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[k_tile // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)  # noqa: E501
+                                        AB_bytes = Tx.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)  # noqa: E501
+                                        SFAB_bytes = Tx.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)  # noqa: E501
+                                        tma2trans.arrive(ks, Tx.if_then_else(k_tile % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))  # noqa: E501
 
                                 for k_tile in Tx.serial(K_TILES):
                                     tma_load(tma_state.stage, k_tile)
@@ -311,7 +311,7 @@ def tir_kernel(M: int, N: int, K: int):
                             if cbx == 0:
                                 tmem_idx: Tx.int32
                                 tmem_phase: Tx.int32
-                                Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
+                                Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)  # noqa: E501, F821
                                 mma_state = PipelineState("mma", SMEM_PIPE_DEPTH)
                                 mma_state.init(is_producer=False)
                                 accum: Tx.int32
@@ -320,7 +320,7 @@ def tir_kernel(M: int, N: int, K: int):
                                     n_idx = Tx.meta_var(tile_scheduler.n_idx)
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
                                         tmem_idx = tile_scheduler.tile_idx % TMEM_PIPE_DEPTH
-                                        tmem_phase = (tile_scheduler.tile_idx // TMEM_PIPE_DEPTH) & 1
+                                        tmem_phase = (tile_scheduler.tile_idx // TMEM_PIPE_DEPTH) & 1  # noqa: E501
 
                                         # wait for the tmem result to be consumed
                                         ld2mma.wait(tmem_idx, tmem_phase ^ 1)
@@ -335,16 +335,16 @@ def tir_kernel(M: int, N: int, K: int):
                                             # copy sf to tmem
                                             if k_tile % 4 == 0:
                                                 for ki in Tx.unroll(0, BLK_SFA // 128):
-                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)
-                                                    Tx.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4, descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)  # noqa: E501, F821
+                                                    Tx.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4, descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")  # noqa: E501, F821
                                                 for ki in Tx.unroll(0, BLK_SFB // 128):
-                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)
-                                                    Tx.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4, descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]), ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0)  # noqa: E501, F821
+                                                    Tx.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4, descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")  # noqa: E501, F821
 
                                             # issue mma
-                                            Tx.cuda.runtime_instr_desc(Tx.address_of(descI), k_tile % 4)
-                                            Tx.gemm_async(tmem[:, tmem_idx * MMA_N: tmem_idx * MMA_N + MMA_N], A_smem[ks, :, :], B_smem[ks, :, :], SFA=SFA_tmem[tmem_idx, :, :], SFB=SFB_tmem[tmem_idx, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
-                                            accum = 1
+                                            Tx.cuda.runtime_instr_desc(Tx.address_of(descI), k_tile % 4)  # noqa: E501, F821
+                                            Tx.gemm_async(tmem[:, tmem_idx * MMA_N: tmem_idx * MMA_N + MMA_N], A_smem[ks, :, :], B_smem[ks, :, :], SFA=SFA_tmem[tmem_idx, :, :], SFB=SFB_tmem[tmem_idx, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)  # noqa: E501, F821, F823
+                                            accum = 1  # noqa: F841
                                             mma2tma.arrive(ks, cta_group=CTA_GROUP, cta_mask=3)
 
                                         accum = 0
@@ -374,7 +374,7 @@ def tir_kernel(M: int, N: int, K: int):
                             Tx.ptx.tcgen05.fence.after_thread_sync()
 
                             for ko in Tx.unroll(MMA_N // EPI_TILE):
-                                stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH
+                                stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH  # noqa: E501
 
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
@@ -384,12 +384,12 @@ def tir_kernel(M: int, N: int, K: int):
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in Tx.unroll(EPI_TILE // TMEM_LD_SIZE):
-                                    col_st = Tx.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
+                                    col_st = Tx.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)  # noqa: E501
                                     Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     Tx.cast(reg_16b_wg[:, :], reg_wg[:, :])
                                     with Tx.thread():
                                         st = Tx.meta_var(ki * TMEM_LD_SIZE)
-                                        Tx.copy(D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE], reg_16b[:])
+                                        Tx.copy(D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE], reg_16b[:])  # noqa: E501
 
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:
@@ -403,7 +403,7 @@ def tir_kernel(M: int, N: int, K: int):
                                 m_start: Tx.let = (m_idx * CTA_GROUP + cbx) * BLK_M
                                 n_start: Tx.let = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
                                 with Tx.thread(parent="warpgroup")[tid_in_wg == 0]:
-                                    Tx.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
+                                    Tx.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
 
                             tile_scheduler.next_tile()
@@ -449,7 +449,7 @@ def deepgemm(A_fp8, B_fp8, sfa, sfb, C_ref, warmup, repeat, A_origin, B_origin):
     a = per_token_cast_to_fp8(A_origin, use_ue8m0=True)
     b = per_block_cast_to_fp8(B_origin, use_ue8m0=True)
     out = torch.zeros_like(C_ref).to(torch.bfloat16).to("cuda")
-    func = lambda: deep_gemm.fp8_gemm_nt(
+    func = lambda: deep_gemm.fp8_gemm_nt(  # noqa: E731
         a,
         b,
         out,

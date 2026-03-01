@@ -74,17 +74,18 @@ class BlockVarAccessVerifier : public StmtExprVisitor {
       has_error_ = true;
       if (assert_mode_) {
         if (it->second == 0) {
-          TVM_FFI_THROW(InternalError) << "Well-formedness check failed: "
-                     << "Loop iterator var " << op->name_hint
-                     << " is defined outside of any block, "
-                     << "but is used inside the non-opaque current block \""
-                     << block_stack_.back()->name_hint << "\".";
+          TVM_FFI_THROW(InternalError)
+              << "Well-formedness check failed: "
+              << "Loop iterator var " << op->name_hint << " is defined outside of any block, "
+              << "but is used inside the non-opaque current block \""
+              << block_stack_.back()->name_hint << "\".";
         } else {
-          TVM_FFI_THROW(InternalError) << "Well-formedness check failed: "
-                     << "Loop iterator var " << op->name_hint << " is defined in block \""
-                     << block_stack_[it->second - 1]->name_hint << "\", "
-                     << "but is used inside the non-opaque current block \""
-                     << block_stack_.back()->name_hint << "\".";
+          TVM_FFI_THROW(InternalError)
+              << "Well-formedness check failed: "
+              << "Loop iterator var " << op->name_hint << " is defined in block \""
+              << block_stack_[it->second - 1]->name_hint << "\", "
+              << "but is used inside the non-opaque current block \""
+              << block_stack_.back()->name_hint << "\".";
         }
       }
     }
@@ -369,18 +370,19 @@ bool VerifyWellFormed(const IRModule& mod, bool assert_mode) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.analysis.VerifyWellFormed", [](const ObjectRef& obj,
-                                                            bool assert_mode) {
-    if (auto opt = obj.as<PrimFunc>()) {
-      return VerifyWellFormed(opt.value(), assert_mode);
-    } else if (auto opt = obj.as<IRModule>()) {
-      return VerifyWellFormed(opt.value(), assert_mode);
-    } else {
-      TVM_FFI_THROW(InternalError) << "Expected VerifyWellFormed argument to be a PrimFunc or IRModule, but found "
-                 << obj->GetTypeKey();
-    }
-  });
+  refl::GlobalDef().def(
+      "tirx.analysis.VerifyWellFormed", [](const ObjectRef& obj, bool assert_mode) {
+        if (auto opt = obj.as<PrimFunc>()) {
+          return VerifyWellFormed(opt.value(), assert_mode);
+        } else if (auto opt = obj.as<IRModule>()) {
+          return VerifyWellFormed(opt.value(), assert_mode);
+        } else {
+          TVM_FFI_THROW(InternalError)
+              << "Expected VerifyWellFormed argument to be a PrimFunc or IRModule, but found "
+              << obj->GetTypeKey();
+        }
+      });
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

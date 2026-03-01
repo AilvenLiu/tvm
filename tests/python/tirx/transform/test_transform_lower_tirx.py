@@ -14,15 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from functools import partial
 
 import pytest
 
 import tvm
 import tvm.testing
-from tvm.tir.layout import laneid, warpid, tid_in_wg
 from tvm.script import tirx as Tx
 from tvm.tir.function import PrimFunc
+from tvm.tir.layout import laneid, tid_in_wg, warpid
 from tvm.tir.transform import LowerTIRx
 
 
@@ -48,11 +47,11 @@ def test_lower_view_get():
     def before1(in_buf: Tx.Buffer(64, "float32"), out: Tx.Buffer(64, "float32")) -> None:
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
+            Tx.warp_id([1], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))  # noqa: E501
                 B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 # load in_buf into A
                 with Tx.warp():
@@ -85,25 +84,26 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta
+        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32  # noqa: F841
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.thread():
                 A = Tx.alloc_local((2,), "float16", layout=None)
                 with Tx.warp():
                     B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with Tx.thread():
-                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         for i in Tx.vectorized(2):
                             A_local[i] = Tx.Cast("float16", in_buf_1[threadIdx_x * 2 + i])
                 with Tx.warp():
-                    B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+                    B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)  # noqa: F841
                     with Tx.thread():
-                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         for i in Tx.vectorized(2):
                             out_1[threadIdx_x * 2 + i] = Tx.Cast("float32", A_local[i])
     # fmt: on
@@ -112,10 +112,10 @@ def test_lower_view_get():
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
-    def before2(in_buf: Tx.Buffer((16, 16), "float32"), out: Tx.Buffer((16, 16), "float32")) -> None:
+    def before2(in_buf: Tx.Buffer((16, 16), "float32"), out: Tx.Buffer((16, 16), "float32")) -> None:  # noqa: E501
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
+            Tx.warp_id([1], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
@@ -123,7 +123,7 @@ def test_lower_view_get():
                 tile = Tx.TileLayout(Tx.S[(2, 2) : (2, 1)])
                 warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
 
-                A = Tx.alloc_buffer([4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))
+                A = Tx.alloc_buffer([4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))  # noqa: E501
                 B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
 
                 # load in_buf into A
@@ -135,7 +135,7 @@ def test_lower_view_get():
                         A_local = B.local(2, 2, 2)
                         for i in Tx.unroll(4):
                             for j in Tx.vectorized(2):
-                                A_local[i // 2, i % 2, j] = in_buf[i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j]
+                                A_local[i // 2, i % 2, j] = in_buf[i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j]  # noqa: E501
                 # write A into out
                 with Tx.warp():
                     # warp view of this write
@@ -144,7 +144,7 @@ def test_lower_view_get():
                         # done by each thread
                         A_local = B.local(8)
                         for i in Tx.vectorized(2):
-                            out[lane_id // 4 * 8 + i // 2 * 8 + lane_id % 4, lane_id % 4 * 2 + i % 2] = A_local[i]
+                            out[lane_id // 4 * 8 + i // 2 * 8 + lane_id % 4, lane_id % 4 * 2 + i % 2] = A_local[i]  # noqa: E501
 
     @Tx.prim_func(private=True, tirx=True)
     def after2(in_buf_handle: Tx.handle, out_handle: Tx.handle):
@@ -156,13 +156,14 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta
+        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32  # noqa: F841
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.thread():
                 A = Tx.alloc_local((8,), layout=None)
                 with Tx.warp():
@@ -171,9 +172,9 @@ def test_lower_view_get():
                         A_local = Tx.decl_buffer((8,), data=A.data, scope="local", layout=None)
                         for i in Tx.unroll(4):
                             for j in Tx.vectorized(2):
-                                A_local[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
+                                A_local[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]  # noqa: E501
                 with Tx.warp():
-                    B = Tx.decl_buffer((256,), data=A.data, scope="local", layout=None)
+                    B = Tx.decl_buffer((256,), data=A.data, scope="local", layout=None)  # noqa: F841
                     with Tx.thread():
                         A_local = Tx.decl_buffer((8,), data=A.data, scope="local", layout=None)
                         for i in Tx.vectorized(2):
@@ -184,7 +185,7 @@ def test_lower_view_get():
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
-    def before3_wgmma_layout(in_buf: Tx.Buffer((128, 128), "float32"), out: Tx.Buffer((128, 128), "float32")) -> None:
+    def before3_wgmma_layout(in_buf: Tx.Buffer((128, 128), "float32"), out: Tx.Buffer((128, 128), "float32")) -> None:  # noqa: E501
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
             wg_id = Tx.warpgroup_id([2], parent="cta")
@@ -202,7 +203,7 @@ def test_lower_view_get():
                 L_warp = Tx.TileLayout(Tx.S[8 : 1@warpid])
                 layout = warp_layout.tile(L_warp, (8, 1), (16, 128))
                 # alloc
-                acc = Tx.alloc_buffer([64,], dtype="float32", scope="local", layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
+                acc = Tx.alloc_buffer([64,], dtype="float32", scope="local", layout=atom.tile(tile, (2, 128 // 8), (1, 2)))  # noqa: E501
 
                 # load in_buf into acc
                 with Tx.cta():
@@ -214,7 +215,7 @@ def test_lower_view_get():
                         for i in Tx.serial(128 // 8):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    acc_local[i, j, vec] = in_buf[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+                                    acc_local[i, j, vec] = in_buf[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]  # noqa: E501
 
                 # write acc into out
                 with Tx.cta():
@@ -226,7 +227,7 @@ def test_lower_view_get():
                         for i in Tx.serial(128 // 8):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    out[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = acc_local[i * 4 + j * 2 + vec]
+                                    out[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = acc_local[i * 4 + j * 2 + vec]  # noqa: E501
 
     @Tx.prim_func(private=True, tirx=True)
     def after3_wgmma_layout(in_buf_handle: Tx.handle, out_handle: Tx.handle):
@@ -238,32 +239,32 @@ def test_lower_view_get():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        wg_id: Tx.let[Tx.int32] = warp_id_in_cta // 4
-        warp_id_in_wg: Tx.let[Tx.int32] = warp_id_in_cta % 4
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        wg_id: Tx.let[Tx.int32] = warp_id_in_cta // 4  # noqa: F841
+        warp_id_in_wg: Tx.let[Tx.int32] = warp_id_in_cta % 4  # noqa: F841
+        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32  # noqa: F841
         with Tx.kernel():
             with Tx.thread():
                 acc = Tx.alloc_local((64,), layout=None)
                 with Tx.cta():
-                    A = Tx.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
+                    B = Tx.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
                     with Tx.thread():
                         acc_local = Tx.decl_buffer((64,), data=acc.data, scope="local", layout=None)
                         for i in range(16):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
+                                    acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]  # noqa: E501
                 with Tx.cta():
-                    A = Tx.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
+                    B = Tx.decl_buffer((16384,), data=acc.data, scope="local", layout=None)  # noqa: F841
                     with Tx.thread():
                         acc_local = Tx.decl_buffer((64,), data=acc.data, scope="local", layout=None)
                         for i in range(16):
                             for j in Tx.unroll(2):
                                 for vec in Tx.vectorized(2):
-                                    out_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
+                                    out_1[warp_id_in_cta * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]  # noqa: E501
     # fmt: on
 
     compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRx)
@@ -327,7 +328,7 @@ def test_lower_tirx_dedup_cu_tensormap():
     @Tx.prim_func(private=True, tirx=True)
     def after(A_ptr: Tx.handle, cond: Tx.bool) -> None:
         A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)
+        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
         tmap: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         if cond:
             Tx.call_packed(
@@ -395,7 +396,7 @@ def test_lower_tirx_keep_different_cu_tensormaps():
     @Tx.prim_func(private=True, tirx=True)
     def after(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)
+        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
         map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed(
@@ -460,7 +461,7 @@ def test_lower_tirx_keep_different_swizzle():
     @Tx.prim_func(private=True, tirx=True)
     def after(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)
+        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
         map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed(
@@ -490,19 +491,19 @@ def test_lower_tirx_keep_different_swizzle():
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
-    def before4_multi_view_get(in_buf: Tx.Buffer(64, "float32"), out: Tx.Buffer(64, "float32")) -> None:
+    def before4_multi_view_get(in_buf: Tx.Buffer(64, "float32"), out: Tx.Buffer(64, "float32")) -> None:  # noqa: E501
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
+            Tx.warp_id([1], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
-                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))
+                A = Tx.alloc_buffer([2], dtype="float16", scope="local", layout=Tx.TileLayout(Tx.S[2 : 1]))  # noqa: E501
                 B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 with Tx.warp():
                     # warp view of this load
-                    B = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters
-                    B_1 = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters
+                    B = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters  # noqa: E501
+                    B_1 = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters  # noqa: E501
                     # B[i] = in_buf[i]
                     with Tx.thread():
                         # done by each thread
@@ -537,30 +538,31 @@ def test_lower_tirx_keep_different_swizzle():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta
+        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32  # noqa: F841
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.thread():
                 A = Tx.alloc_local((2,), "float16", layout=None)
                 with Tx.warp():
                     B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     B_1 = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with Tx.thread():
-                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         A_local[0] = Tx.Cast("float16", in_buf_1[threadIdx_x * 2])
-                        A_local_1 = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local_1 = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         A_local_1[1] = Tx.Cast("float16", in_buf_1[threadIdx_x * 2 + 1])
                 with Tx.warp():
-                    B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
-                    B_1 = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+                    B = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)  # noqa: F841
+                    B_1 = Tx.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)  # noqa: F841
                     with Tx.thread():
-                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         out_1[threadIdx_x * 2] = Tx.Cast("float32", A_local[0])
-                        A_local_1 = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local_1 = Tx.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)  # noqa: E501
                         out_1[threadIdx_x * 2 + 1] = Tx.Cast("float32", A_local_1[1])
     # fmt: on
 
@@ -584,7 +586,7 @@ def test_lower_scope_id():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 32)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: F841,E501
         bx: Tx.let[Tx.int32] = blockIdx_x
         by: Tx.let[Tx.int32] = blockIdx_y
         bz: Tx.let[Tx.int32] = blockIdx_z
@@ -616,7 +618,7 @@ def test_lower_scope_id():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 8)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 8)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
         cbx: Tx.let[Tx.int32] = clusterCtaIdx_x
         cby: Tx.let[Tx.int32] = clusterCtaIdx_y
         cbz: Tx.let[Tx.int32] = clusterCtaIdx_z
@@ -660,7 +662,7 @@ def test_lower_scope_id():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 8)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 384)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 10)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
         bx: Tx.let[Tx.int32] = blockIdx_x
         by: Tx.let[Tx.int32] = blockIdx_y
         bz: Tx.let[Tx.int32] = blockIdx_z
@@ -713,11 +715,11 @@ def test_lower_scope_id2():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
         wg_id: Tx.let[Tx.int32] = warp_id_in_cta // 4
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
         warp_id: Tx.let[Tx.int32] = warp_id_in_cta
         tx: Tx.let[Tx.int32] = threadIdx_x
         with Tx.kernel():
@@ -758,7 +760,7 @@ def test_lower_scope_id3():
             threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
             blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
             blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
-            warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+            warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
             bx: Tx.let[Tx.int32] = blockIdx_x
             by: Tx.let[Tx.int32] = blockIdx_y
             bz: Tx.let[Tx.int32] = blockIdx_z
@@ -772,7 +774,7 @@ def test_lower_scope_id3():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 7)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 8)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
         bx: Tx.let[Tx.int32] = blockIdx_x
         by: Tx.let[Tx.int32] = blockIdx_y
         bz: Tx.let[Tx.int32] = blockIdx_z
@@ -811,14 +813,14 @@ def test_lower_scope_slice():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
         warp_id: Tx.let[Tx.int32] = warp_id_in_cta
         tx: Tx.let[Tx.int32] = threadIdx_x
         with Tx.kernel():
-            if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:
+            if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:  # noqa: E501
                 with Tx.cta():
                     if threadIdx_x >= 0 and threadIdx_x < 64:
                         with Tx.thread():
@@ -841,7 +843,7 @@ def test_lower_scope_partition1():
     def before():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
+            Tx.warp_id([4], parent="cta")
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.cta():
@@ -861,13 +863,14 @@ def test_lower_scope_partition1():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 4)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 5)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta
         tx: Tx.let[Tx.int32] = threadIdx_x
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.cta():
                 if threadIdx_x >= 0 and threadIdx_x < 32:
                     with Tx.thread():
@@ -895,10 +898,10 @@ def test_lower_scope_partition2():
     def before():
         with Tx.kernel():
             cbx, cby = Tx.cta_id([2, 1], parent="cluster")
-            bx = Tx.cta_id([148], parent="kernel")
-            wg_id = Tx.warpgroup_id([2], parent="cta")
+            Tx.cta_id([148], parent="kernel")
+            Tx.warpgroup_id([2], parent="cta")
             warp_id = Tx.warp_id([4], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 Tx.attr({"tirx.scope_partition": True})
                 with Tx.warpgroup()[1:2]:
@@ -921,14 +924,17 @@ def test_lower_scope_partition2():
         clusterCtaIdx_y = Tx.launch_thread("clusterCtaIdx.y", 1)
         blockIdx_x = Tx.launch_thread("blockIdx.x", 148)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 256)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        cbx: Tx.let[Tx.int32] = clusterCtaIdx_x
-        cby: Tx.let[Tx.int32] = clusterCtaIdx_y
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        wg_id: Tx.let[Tx.int32] = warp_id_in_cta // 4
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        cbx: Tx.let[Tx.int32] = clusterCtaIdx_x  # noqa: F841
+        cby: Tx.let[Tx.int32] = clusterCtaIdx_y  # noqa: F841
+        v: Tx.let[Tx.int32] = blockIdx_x
+        v_1: Tx.let[Tx.int32] = warp_id_in_cta // 4
         warp_id: Tx.let[Tx.int32] = warp_id_in_cta % 4
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        v_2: Tx.let[Tx.int32] = threadIdx_x % 32
         with Tx.kernel():
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
+            Tx.evaluate(v_2)
             with Tx.cta():
                 if warp_id_in_cta // 4 >= 1 and warp_id_in_cta // 4 < 2:
                     with Tx.warpgroup():
@@ -959,12 +965,12 @@ def test_lower_layout():
     def before(A: Tx.Buffer((128, 32), "float16")) -> None:
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
             tid = Tx.thread_id([128], parent="cta")
 
             with Tx.cta():
-                A_smem = Tx.alloc_buffer([128, 32], dtype="float16", scope="shared", layout=Tx.SwizzleLayout(3, 3, 3))
+                A_smem = Tx.alloc_buffer([128, 32], dtype="float16", scope="shared", layout=Tx.SwizzleLayout(3, 3, 3))  # noqa: E501
 
                 with Tx.thread():
                     thread_col = Tx.meta_var(4)
@@ -984,20 +990,22 @@ def test_lower_layout():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
-        tid: Tx.let[Tx.int32] = threadIdx_x
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta
+        v_1: Tx.let[Tx.int32] = threadIdx_x % 32
+        tid: Tx.let[Tx.int32] = threadIdx_x  # noqa: F841
         with Tx.kernel():
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
             with Tx.cta():
                 A_smem = Tx.alloc_shared((4096,), "float16", layout=None)
                 with Tx.thread():
                     for tile in range(4):
                         for vec in Tx.vectorized(8):
-                            A_smem[Tx.shift_left(Tx.bitwise_xor(tile * 128 + threadIdx_x, Tx.shift_right(Tx.bitwise_and(tile * 128 + threadIdx_x, 56), 3)), 3) + vec] = A_1[tile * 1024 + threadIdx_x * 8 + vec]
+                            A_smem[Tx.shift_left(Tx.bitwise_xor(tile * 128 + threadIdx_x, Tx.shift_right(Tx.bitwise_and(tile * 128 + threadIdx_x, 56), 3)), 3) + vec] = A_1[tile * 1024 + threadIdx_x * 8 + vec]  # noqa: E501
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -1011,8 +1019,8 @@ def test_lower_opcall_fail():
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([64], dtype="float32", scope="shared")
 
@@ -1032,8 +1040,8 @@ def test_lower_decl_buffer_access_ptr():
     @Tx.prim_func(private=True, tirx=True)
     def before():
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([128], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([128], parent="cta")
             with Tx.cta():
                 buf = Tx.alloc_buffer([1024], "uint8", scope="shared.dyn")
                 A = Tx.decl_buffer([128], "float16", buf.data, elem_offset=32)
@@ -1045,15 +1053,17 @@ def test_lower_decl_buffer_access_ptr():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        tx: Tx.let[Tx.int32] = threadIdx_x
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: F841,E501
+        v: Tx.let[Tx.int32] = blockIdx_x
+        v_1: Tx.let[Tx.int32] = threadIdx_x
         with Tx.kernel():
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
             with Tx.cta():
                 buf = Tx.alloc_buffer((1024,), "uint8", scope="shared.dyn", layout=None)
-                A = Tx.decl_buffer((128,), "float16", data=buf.data, elem_offset=32, scope="shared.dyn", layout=None)
+                A = Tx.decl_buffer((128,), "float16", data=buf.data, elem_offset=32, scope="shared.dyn", layout=None)  # noqa: F841,E501
                 with Tx.thread():
-                    Tx.tvm_access_ptr(Tx.type_annotation("float16"), buf.data, Tx.Add(32, 64), Tx.Sub(128, 64), 3)
+                    Tx.tvm_access_ptr(Tx.type_annotation("float16"), buf.data, Tx.Add(32, 64), Tx.Sub(128, 64), 3)  # noqa: E501
     # fmt: on
 
     compare(before, after, LowerTIRx)
@@ -1064,7 +1074,7 @@ def test_lower_separate_scope_id_def():
     @Tx.prim_func(private=True, tirx=True)
     def before():
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             with Tx.cta():
                 tx = Tx.thread_id([128], parent="cta")
                 with Tx.thread()[tx == 0]:
@@ -1074,10 +1084,11 @@ def test_lower_separate_scope_id_def():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: F841,E501
         tx: Tx.let[Tx.int32] = threadIdx_x
-        bx: Tx.let[Tx.int32] = blockIdx_x
+        v: Tx.let[Tx.int32] = blockIdx_x
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.cta():
                 if tx == 0:
                     with Tx.thread():
@@ -1092,12 +1103,12 @@ def test_lower_buffer_offset():
     @Tx.prim_func(private=True, tirx=True)
     def before():
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             with Tx.cta():
-                tx = Tx.thread_id([128], parent="cta")
+                Tx.thread_id([128], parent="cta")
                 with Tx.thread():
                     A = Tx.alloc_buffer([64, 64], "float16", scope="local")
-                    A0 = Tx.decl_buffer([64], "float16", A.data, elem_offset=A.elem_offset_of([32, 32]))
+                    A0 = Tx.decl_buffer([64], "float16", A.data, elem_offset=A.elem_offset_of([32, 32]))  # noqa: E501
                     with Tx.thread():
                         Tx.evaluate(Tx.address_of(A0[32]))
     # fmt: on
@@ -1107,14 +1118,16 @@ def test_lower_buffer_offset():
     def after():
         blockIdx_x = Tx.launch_thread("blockIdx.x", 1)
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        tx: Tx.let[Tx.int32] = threadIdx_x
-        bx: Tx.let[Tx.int32] = blockIdx_x
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: F841,E501
+        v: Tx.let[Tx.int32] = threadIdx_x
+        v_1: Tx.let[Tx.int32] = blockIdx_x
         with Tx.kernel():
+            Tx.evaluate(v_1)
             with Tx.cta():
+                Tx.evaluate(v)
                 with Tx.thread():
                     A = Tx.alloc_local((4096,), "float16", layout=None)
-                    A0 = Tx.decl_buffer((64,), "float16", data=A.data, elem_offset=2080, scope="local", layout=None)
+                    A0 = Tx.decl_buffer((64,), "float16", data=A.data, elem_offset=2080, scope="local", layout=None)  # noqa: E501
                     with Tx.thread():
                         Tx.address_of(A0[32])
     # fmt: on
@@ -1129,7 +1142,7 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
         def __init__(self, smem):
             self.A = Tx.alloc_local([1], "float16", name="A")
             self.B = Tx.alloc_local([1], "float16", name="B")
-            self.C = Tx.decl_buffer([1], "float16", smem, elem_offset=0, scope="shared.dyn", name="C")
+            self.C = Tx.decl_buffer([1], "float16", smem, elem_offset=0, scope="shared.dyn", name="C")  # noqa: E501
 
     def int_var1(val):
         buf = Tx.local_scalar("int32")
@@ -1171,7 +1184,7 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
                 smem = Tx.alloc_buffer([100], "uint8", scope="shared.dyn", layout=None)
                 A = Tx.alloc_local((1,), "float16", layout=None)
                 B = Tx.alloc_local((1,), "float16", layout=None)
-                C = Tx.decl_buffer((1,), "float16", data=smem.data, elem_offset=0, scope="shared.dyn", layout=None)
+                C = Tx.decl_buffer((1,), "float16", data=smem.data, elem_offset=0, scope="shared.dyn", layout=None)  # noqa: E501
                 A[0] = Tx.float16(1)
                 B[0] = Tx.float16(2)
                 C[0] = Tx.float16(3)
@@ -1197,13 +1210,14 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
 
 
 def test_alloc_buffer_with_thread_axis_layout():
-    """alloc_buffer with thread-axis layout should lower to 1D physical buffer with memory-axis span."""
+    """alloc_buffer with thread-axis layout should lower to 1D physical buffer with memory-axis span."""  # noqa: E501
+
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
     def before(out: Tx.Buffer((128, 4), "float32")) -> None:
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            wg_id = Tx.warpgroup_id([1], parent="cta")
+            Tx.warpgroup_id([1], parent="cta")
             warp_id = Tx.warp_id([4], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
 
@@ -1211,7 +1225,7 @@ def test_alloc_buffer_with_thread_axis_layout():
                 with Tx.thread():
                     # Single-step alloc with thread-axis layout
                     reg_wg = Tx.alloc_buffer((128, 4), "float32", scope="local",
-                                              layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ tid_in_wg, 1)]))
+                                              layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ tid_in_wg, 1)]))  # noqa: E501
                     # Access via .local() to decompose thread and memory axes
                     reg = reg_wg.local(4)
                     for i in Tx.serial(4):
@@ -1225,14 +1239,15 @@ def test_alloc_buffer_with_thread_axis_layout():
         threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
         blockIdx_y = Tx.launch_thread("blockIdx.y", 1)
         blockIdx_z = Tx.launch_thread("blockIdx.z", 1)
-        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)
-        bx: Tx.let[Tx.int32] = blockIdx_x
-        by: Tx.let[Tx.int32] = blockIdx_y
-        bz: Tx.let[Tx.int32] = blockIdx_z
-        wg_id: Tx.let[Tx.int32] = warp_id_in_cta // 4
-        warp_id: Tx.let[Tx.int32] = warp_id_in_cta % 4
-        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32
+        warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+        bx: Tx.let[Tx.int32] = blockIdx_x  # noqa: F841
+        by: Tx.let[Tx.int32] = blockIdx_y  # noqa: F841
+        bz: Tx.let[Tx.int32] = blockIdx_z  # noqa: F841
+        v: Tx.let[Tx.int32] = warp_id_in_cta // 4
+        warp_id: Tx.let[Tx.int32] = warp_id_in_cta % 4  # noqa: F841
+        lane_id: Tx.let[Tx.int32] = threadIdx_x % 32  # noqa: F841
         with Tx.kernel():
+            Tx.evaluate(v)
             with Tx.warpgroup():
                 with Tx.thread():
                     reg_wg = Tx.alloc_local((4,), layout=None)
@@ -1290,6 +1305,7 @@ def test_empty_kernel_no_thread_id():
 
     Before the fix, this would crash late in codegen with poor diagnostics.
     """
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def func():

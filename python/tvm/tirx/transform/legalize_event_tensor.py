@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict, Tuple
 
 from tvm import DataTypeCode
 from tvm.ir import PointerType, PrimType
@@ -28,7 +27,7 @@ from .common import BufferReplacer
 
 
 class EventTensorReplacer(BufferReplacer):
-    def __init__(self, buffer_map: Dict[Buffer, Buffer], var_map: Dict[Var, Var]):
+    def __init__(self, buffer_map: dict[Buffer, Buffer], var_map: dict[Var, Var]):
         super().__init__(buffer_map, var_map)
 
     def visit_alloc_buffer_(self, op: AllocBuffer):
@@ -42,7 +41,7 @@ class EventTensorReplacer(BufferReplacer):
         return super().visit_alloc_buffer_(op)
 
 
-def convert_event_tensor(buffer: Buffer) -> Tuple[Buffer, Var]:
+def convert_event_tensor(buffer: Buffer) -> tuple[Buffer, Var]:
     new_dtype = buffer.dtype.with_code(DataTypeCode.INT)
     new_buffer = buffer.with_dtype(new_dtype)
     data = buffer.data

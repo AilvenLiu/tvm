@@ -17,8 +17,8 @@
 
 import argparse
 import tempfile
+
 import numpy as np
-import math
 
 import tvm
 import tvm.testing
@@ -26,15 +26,14 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tirx.megakernel.utils.config import ProfileEventType, KernelConfig
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.utils import get_source
+from tvm.tirx.megakernel.kernels.ep_combine import EPCombineRecvTile, EPCombineSendTile
 from tvm.tirx.megakernel.kernels.ep_dispatch import (
     EPDispatchPrecomputeTile,
-    EPDispatchSendTile,
     EPDispatchRecvTile,
+    EPDispatchSendTile,
 )
-from tvm.tirx.megakernel.kernels.ep_combine import EPCombineSendTile, EPCombineRecvTile
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
 
 
 class EPDispatchKernel:
@@ -156,22 +155,22 @@ class EPDispatchKernel:
             Tx.func_attr({"global_symbol": "main_dispatch", "target": Tx.target("cuda")})
 
             # match buffers
-            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")
-            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
-            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")
-            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
-            target_wait_global = Tx.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
-            actual_wait_global = Tx.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
-            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
-            dst_token_idx_global = Tx.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")
+            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")  # noqa: E501
+            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")  # noqa: E501
+            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")  # noqa: E501
+            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")  # noqa: E501
+            target_wait_global = Tx.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")  # noqa: E501
+            actual_wait_global = Tx.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")  # noqa: E501
+            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
+            dst_token_idx_global = Tx.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")  # noqa: E501
 
-            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
+            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)  # noqa: E501
 
             with Tx.kernel():
                 bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = Tx.thread_id([32], parent="warp")
-                tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                Tx.thread_id([32], parent="warp")
+                Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
                 rank = Tx.nvshmem.my_pe()
 
                 with Tx.cta():
@@ -183,14 +182,14 @@ class EPDispatchKernel:
                     smem_manager.init()
 
                     with Tx.cta()[KernelConfig.SM_NUMBER - 16 : KernelConfig.SM_NUMBER]:
-                        dst_expert_st = Tx.meta_var(Tx.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)
-                        self.run_tile(self.ep_dispatch_precompute_tile, dst_expert_st, route_experts_global, target_wait_global, rank)
+                        dst_expert_st = Tx.meta_var(Tx.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)  # noqa: E501
+                        self.run_tile(self.ep_dispatch_precompute_tile, dst_expert_st, route_experts_global, target_wait_global, rank)  # noqa: E501
                     with Tx.cta()[0:num_tokens]:
-                        self.run_tile(self.ep_dispatch_send_tile, bx, send_tokens_global, route_experts_global, recv_tokens_global, actual_wait_global, dst_token_indices_global, dst_token_idx_global, rank)
+                        self.run_tile(self.ep_dispatch_send_tile, bx, send_tokens_global, route_experts_global, recv_tokens_global, actual_wait_global, dst_token_indices_global, dst_token_idx_global, rank)  # noqa: E501
                     with Tx.cta()[0:total_num_experts]:
                         local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
                         src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
-                        self.run_tile(self.ep_dispatch_recv_tile, local_expert_idx, src_rank_idx, num_recv_tokens_global, target_wait_global, actual_wait_global, rank)
+                        self.run_tile(self.ep_dispatch_recv_tile, local_expert_idx, src_rank_idx, num_recv_tokens_global, target_wait_global, actual_wait_global, rank)  # noqa: E501
 
                     smem_manager.exit_tile_runtime()
                     self.class_finalize_all()
@@ -338,22 +337,22 @@ class EPCombineKernel:
             Tx.func_attr({"global_symbol": "main_combine", "target": Tx.target("cuda")})
 
             # match buffers
-            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")
-            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
-            route_weights_global = Tx.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")
-            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
-            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
-            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")
-            buf_wait_global = Tx.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")
-            buf_recv_global = Tx.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")
+            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
+            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")  # noqa: E501
+            route_weights_global = Tx.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")  # noqa: E501
+            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")  # noqa: E501
+            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
+            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
+            buf_wait_global = Tx.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")  # noqa: E501
+            buf_recv_global = Tx.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
 
-            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
+            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)  # noqa: E501
 
             with Tx.kernel():
                 bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                lane_id = Tx.thread_id([32], parent="warp")
-                tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                Tx.thread_id([32], parent="warp")
+                Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
                 rank = Tx.nvshmem.my_pe()
 
                 with Tx.cta():
@@ -367,9 +366,9 @@ class EPCombineKernel:
                     with Tx.cta()[0:total_num_experts]:
                         local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
                         src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
-                        self.run_tile(self.ep_combine_send_tile, local_expert_idx, src_rank_idx, send_tokens_global, buf_recv_global, buf_wait_global, num_recv_tokens_global, rank)
+                        self.run_tile(self.ep_combine_send_tile, local_expert_idx, src_rank_idx, send_tokens_global, buf_recv_global, buf_wait_global, num_recv_tokens_global, rank)  # noqa: E501
                     with Tx.cta()[0:num_tokens]:
-                        self.run_tile(self.ep_combine_recv_tile, bx, recv_tokens_global, route_experts_global, route_weights_global, buf_recv_global, buf_wait_global, dst_token_indices_global, rank)
+                        self.run_tile(self.ep_combine_recv_tile, bx, recv_tokens_global, route_experts_global, route_weights_global, buf_recv_global, buf_wait_global, dst_token_indices_global, rank)  # noqa: E501
 
                     smem_manager.exit_tile_runtime()
                     self.class_finalize_all()
@@ -637,7 +636,7 @@ def test(
 
             sess._sync_all()
 
-            print(f"Gathering output to worker 0...")
+            print("Gathering output to worker 0...")
             sess.gather_to_worker0(tvm_arg_dict["output"], res_dict["output_all_workers"])
             sess.copy_from_worker_0(res_dict["output_all_tvm"], res_dict["output_all_workers"])
             if debug:
@@ -664,7 +663,7 @@ def test(
                     res_dict["buf_recv_all_tvm"], res_dict["buf_recv_all_workers"]
                 )
             sess._sync_all()
-            print(f"Kernel execution all finished.")
+            print("Kernel execution all finished.")
 
         finalize_dfunc = sess.get_global_func("runtime.disco.nvshmem.finalize_nvshmem")
         finalize_dfunc()
@@ -744,7 +743,7 @@ if __name__ == "__main__":
     )
 
     print(
-        f"running: EP={world_size}, DP={world_size}, hidden_dim={hidden_dim}, total_num_experts={total_num_experts}, topk={topk}, num_tokens={num_tokens}, in_dtype={in_dtype}, out_dtype={out_dtype}"
+        f"running: EP={world_size}, DP={world_size}, hidden_dim={hidden_dim}, total_num_experts={total_num_experts}, topk={topk}, num_tokens={num_tokens}, in_dtype={in_dtype}, out_dtype={out_dtype}"  # noqa: E501
     )
     test(
         dispatch_static_module,

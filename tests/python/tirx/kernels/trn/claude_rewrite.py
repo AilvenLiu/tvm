@@ -19,9 +19,11 @@
 """
 This script is a workaround for a bug in the Neuron compiler.
 """
-import anthropic
-import os
+
 import hashlib
+import os
+
+import anthropic
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -51,7 +53,7 @@ def rewrite_program(program, func_name):
     program_hash = hashlib.sha256(program.encode()).hexdigest()
     if os.path.exists(f"cache/output_{func_name}_{program_hash}.txt"):
         # Read content from the cache if it exists
-        with open(f"cache/output_{func_name}_{program_hash}.txt", "r") as file:
+        with open(f"cache/output_{func_name}_{program_hash}.txt") as file:
             content_str = file.read()
         print("Cache loaded successfully")
     else:
@@ -124,7 +126,7 @@ def rewrite_program(program, func_name):
         ```
             {program}
         ```
-            """,
+            """,  # noqa: E501
                 }
             ],
             thinking={

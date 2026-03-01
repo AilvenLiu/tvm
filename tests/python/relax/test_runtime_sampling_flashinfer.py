@@ -16,20 +16,17 @@
 # under the License.
 
 
-from typing import Tuple
-
 import numpy as np
 import pytest
 import torch
 
 import tvm
 import tvm.testing
-from tvm import relax
 
 generator = None
 
 
-def get_seed_and_offset(increment: int) -> Tuple[int, int]:
+def get_seed_and_offset(increment: int) -> tuple[int, int]:
     global generator
     if generator is None:
         generator = torch.Generator(device=torch.device("cuda"))
@@ -59,7 +56,7 @@ def test_sampling():
     output_tvm = tvm.runtime.empty((batch_size,), "int32", device=dev)
 
     device = tvm.cuda()
-    target = tvm.target.Target.from_device(device)
+    tvm.target.Target.from_device(device)
     sampling_func = tvm.get_global_func("flashinfer.top_p_sampling_from_prob")
 
     counts = np.zeros((batch_size, vocab_size), dtype="int32")
@@ -68,7 +65,7 @@ def test_sampling():
         # Generate seed and a random offset.
         philox_seed, philox_offset = get_seed_and_offset(32 * batch_size)
 
-        # the kernel expects (probs, output, maybe_indices, deterministic, philox_seed, philox_offset, cuda_stream)
+        # the kernel expects (probs, output, maybe_indices, deterministic, philox_seed, philox_offset, cuda_stream)  # noqa: E501
         sampling_func(
             prob_tvm,
             output_tvm,

@@ -26,7 +26,8 @@ from tvm.ir import PointerType, PrimType
 from tvm.ir.type import TensorMapType
 from tvm.script import tirx as Tx
 from tvm.tir import IntImm, StringImm, Var
-from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import S, TCol, TileLayout, TLane
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tir.stmt import DeclBuffer, OpCall
 from tvm.tir.stmt_functor import StmtExprVisitor
 from tvm.tirx.op_schedule.cuda.copy_async import (
@@ -34,7 +35,6 @@ from tvm.tirx.op_schedule.cuda.copy_async import (
     tma_atom_shape,
     tma_shared_layout,
 )
-
 
 # ===========================================================================
 # Helpers
@@ -91,16 +91,14 @@ def _make_tma_call(
     """
     from tvm.ir import Range
     from tvm.tir import Var
-    from tvm.tir.stmt import BufferRegion
     from tvm.tir.exec_scope import ExecScope
-    from tvm.tirx.operator.op import CopyAsync
-    from tvm.tirx.op_schedule.schedule_context import ScheduleContext
+    from tvm.tir.stmt import BufferRegion
     from tvm.tirx.op_schedule.cuda.copy_async import copy_tma_impl
+    from tvm.tirx.op_schedule.schedule_context import ScheduleContext
+    from tvm.tirx.operator.op import CopyAsync
 
     g_buf = tvm.tir.decl_buffer(g_shape, dtype, "A", layout=gmem_layout)
-    s_buf = tvm.tir.decl_buffer(
-        s_shape, dtype, "A_smem", scope="shared.dyn", layout=smem_layout
-    )
+    s_buf = tvm.tir.decl_buffer(s_shape, dtype, "A_smem", scope="shared.dyn", layout=smem_layout)
 
     g_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in g_region]
     s_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in s_region]
@@ -142,25 +140,24 @@ def _build_expected_host_init(dtype, encode_args):
         runtime.cuTensorMapEncodeTiled(tensormap, dtype_str, ndim, A_ptr, *encode_args)
     where ndim = encode_args[0] and the rest are the tensor map parameters.
     """
-    A_tensormap = Var(
-        "A_tensormap", PointerType(TensorMapType(), "global")
-    )
+    A_tensormap = Var("A_tensormap", PointerType(TensorMapType(), "global"))
     stack_alloca = tvm.tir.Call(
         "handle",
         tvm.ir.Op.get("tir.tvm_stack_alloca"),
         [StringImm("tensormap"), IntImm("int32", 1)],
     )
     A_var = Var("A", PointerType(PrimType(dtype), "global"))
-    call_args = [
-        StringImm("runtime.cuTensorMapEncodeTiled"),
-        A_tensormap,
-        StringImm(dtype),
-        IntImm("int32", encode_args[0]),  # ndim
-        A_var,
-    ] + [IntImm("int32", v) for v in encode_args[1:]]
-    encode_call = tvm.tir.Call(
-        "int32", tvm.ir.Op.get("tir.tvm_call_packed"), call_args
+    call_args = (
+        [
+            StringImm("runtime.cuTensorMapEncodeTiled"),
+            A_tensormap,
+            StringImm(dtype),
+            IntImm("int32", encode_args[0]),  # ndim
+            A_var,
+        ]
+        + [IntImm("int32", v) for v in encode_args[1:]]
     )
+    encode_call = tvm.tir.Call("int32", tvm.ir.Op.get("tir.tvm_call_packed"), call_args)
     replace_point = OpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
     return tvm.tir.LetStmt(
         A_tensormap,
@@ -209,20 +206,20 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
         "s_buf_w_offset_ptr",
         PointerType(PrimType(dtype), "shared.dyn"),
     )
-    elem_offset = (
-        elem_offset_fn(loop_vars) if elem_offset_fn else IntImm("int32", 0)
-    )
+    elem_offset = elem_offset_fn(loop_vars) if elem_offset_fn else IntImm("int32", 0)
     s_buf = tvm.tir.decl_buffer(
-        s_shape, dtype, "s_buf_w_offset",
-        data=s_buf_ptr, elem_offset=elem_offset,
-        scope="shared.dyn", layout=buf_layout,
+        s_shape,
+        dtype,
+        "s_buf_w_offset",
+        data=s_buf_ptr,
+        elem_offset=elem_offset,
+        scope="shared.dyn",
+        layout=buf_layout,
     )
 
     # Free variables
     mbar_ptr = Var("mbar_ptr", "handle")
-    A_tensormap = Var(
-        "A_tensormap", PointerType(TensorMapType(), "global")
-    )
+    A_tensormap = Var("A_tensormap", PointerType(TensorMapType(), "global"))
 
     # address_of(s_buf[s_start...])
     s_start = impl_spec.get("s_start")
@@ -242,24 +239,21 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
     # Build PTX call based on direction
     if direction == "g2s":
         # g2c(dim, addr, mbar, tensormap, *coords, cta_mask, cta_group, cache_hint)
-        ptx_op = tvm.ir.Op.get(
-            "tir.ptx_cp_async_bulk_tensor_global_to_cluster"
-        )
-        ptx_args = (
-            [IntImm("int32", dim), addr_of, mbar_ptr, A_tensormap]
-            + coords
-            + [IntImm("int32", 0), IntImm("int32", 1), StringImm("")]
-        )
+        ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_global_to_cluster")
+        ptx_args = [
+            IntImm("int32", dim),
+            addr_of,
+            mbar_ptr,
+            A_tensormap,
+            *coords,
+            IntImm("int32", 0),
+            IntImm("int32", 1),
+            StringImm(""),
+        ]
     else:  # s2g
         # s2g(dim, addr, tensormap, *coords, cache_hint)
-        ptx_op = tvm.ir.Op.get(
-            "tir.ptx_cp_async_bulk_tensor_shared_to_global"
-        )
-        ptx_args = (
-            [IntImm("int32", dim), addr_of, A_tensormap]
-            + coords
-            + [StringImm("")]
-        )
+        ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_shared_to_global")
+        ptx_args = [IntImm("int32", dim), addr_of, A_tensormap, *coords, StringImm("")]
 
     eval_stmt = tvm.tir.Evaluate(tvm.tir.Call("", ptx_op, ptx_args))
 
@@ -389,11 +383,11 @@ GOLDEN_PARAMS = {
         [2, 64, 128, 128, 64, 128, 1, 1, 0, 3, 2, 0],
     ),
     "g2s-edge-partial-offset": (
-        dict(loop_extents=[1], dim=2, coord_fn=lambda lv: [IntImm("int32", 0), IntImm("int32", 64)]),
+        dict(loop_extents=[1], dim=2, coord_fn=lambda lv: [IntImm("int32", 0), IntImm("int32", 64)]),  # noqa: E501
         [2, 64, 128, 128, 64, 24, 1, 1, 0, 3, 2, 0],
     ),
     "g2s-edge-large-region": (
-        dict(loop_extents=[1], dim=2, coord_fn=lambda lv: [IntImm("int32", 0), IntImm("int32", 128)]),
+        dict(loop_extents=[1], dim=2, coord_fn=lambda lv: [IntImm("int32", 0), IntImm("int32", 128)]),  # noqa: E501
         [2, 64, 256, 128, 64, 128, 1, 1, 0, 3, 2, 0],
     ),
     "g2s-4d-reorder-a": (
@@ -429,7 +423,7 @@ GOLDEN_PARAMS = {
         [3, 128, 16, 8, 256, 4096, 128, 16, 4, 1, 1, 1, 0, 0, 2, 0],
     ),
     "g2s-3d-stride-gap-outer": (
-        dict(loop_extents=[8], dim=2, coord_fn=_stride_gap_coords, elem_offset_fn=_stride_gap_elem_offset),
+        dict(loop_extents=[8], dim=2, coord_fn=_stride_gap_coords, elem_offset_fn=_stride_gap_elem_offset),  # noqa: E501
         [2, 64, 256, 128, 64, 32, 1, 1, 0, 0, 2, 0],
     ),
     # ---- S2G cases ----
@@ -468,17 +462,11 @@ GOLDEN_PARAMS = {
 def _assert_golden(golden_key, direction, dtype, s_shape, smem_layout, impl, host_init_stmts):
     """Build expected impl + host_init from GOLDEN_PARAMS and assert structural equality."""
     impl_spec, encode_args = GOLDEN_PARAMS[golden_key]
-    expected_impl = _build_expected_impl(
-        direction, dtype, s_shape, smem_layout, impl_spec
-    )
+    expected_impl = _build_expected_impl(direction, dtype, s_shape, smem_layout, impl_spec)
     expected_host_init = _build_expected_host_init(dtype, encode_args)
     tvm.ir.assert_structural_equal(impl, expected_impl, map_free_vars=True)
-    assert len(host_init_stmts) == 1, (
-        f"Expected 1 host_init_stmt, got {len(host_init_stmts)}"
-    )
-    tvm.ir.assert_structural_equal(
-        host_init_stmts[0], expected_host_init, map_free_vars=True
-    )
+    assert len(host_init_stmts) == 1, f"Expected 1 host_init_stmt, got {len(host_init_stmts)}"
+    tvm.ir.assert_structural_equal(host_init_stmts[0], expected_host_init, map_free_vars=True)
 
 
 # ===========================================================================
@@ -522,7 +510,7 @@ def _assert_golden(golden_key, direction, dtype, s_shape, smem_layout, impl, hos
             TileLayout(S[64, 64]),  # layoutB
             TileLayout(S[32, 32]),  # layoutS
         ),
-        ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
+        ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################  # noqa: E501
         (
             (4, 32, 32),  # g_shape
             (32, 32),  # s_shape
@@ -552,17 +540,17 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
-                Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="non-bulk-copy")
+                Tx.copy_async(A_smem[tuple(r_smem)], A[tuple(r_gmem)], dispatch="non-bulk-copy")
                 Tx.ptx.cp_async.commit_group()
                 Tx.ptx.cp_async.wait_group()
                 Tx.cuda.cta_sync()
-                Tx.copy(B[*r_gmem], A_smem[*r_smem])
+                Tx.copy(B[tuple(r_gmem)], A_smem[tuple(r_smem)])
     # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -581,7 +569,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         mod(A, B)
 
         B_ref = B_np.copy()
-        B_ref[*r_gmem] = A_np[*r_gmem]
+        B_ref[tuple(r_gmem)] = A_np[tuple(r_gmem)]
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
@@ -622,21 +610,21 @@ def test_copy_tmem2reg_async(dtype, width_32b):
         B_flat = B.view(-1)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            wg_id = Tx.warpgroup_id([1], parent="cta")
-            warp_id = Tx.warp_id([4], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            Tx.warp_id([4], parent="warpgroup")
+            Tx.thread_id([32], parent="warp")
             tid_in_wg = Tx.thread_id([128], parent="cta")
 
             tmem_addr = Tx.alloc_shared([1], "uint32")
 
             with Tx.warpgroup()[0:1]:
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)  # noqa: E501
 
                 Tx.tvm_storage_sync("shared")
 
-                tmem = Tx.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
+                tmem = Tx.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],  # noqa: E501
                                      layout=TileLayout(S[(128, WIDTH) : (1 @ TLane, 1 @ TCol)]))
 
                 A_reg = Tx.alloc_local((WIDTH), dtype)
@@ -648,7 +636,7 @@ def test_copy_tmem2reg_async(dtype, width_32b):
                 with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
                         g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
-                        Tx.copy(A_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])
+                        Tx.copy(A_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])  # noqa: E501
                     for i in range(WIDTH):
                         B_reg[i] = Tx.cast(0, dtype)
                 Tx.cuda.cta_sync()
@@ -667,11 +655,11 @@ def test_copy_tmem2reg_async(dtype, width_32b):
                 with Tx.thread():
                     for i in range(WIDTH // VEC_LEN):
                         g_offset = Tx.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
-                        Tx.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN])
+                        Tx.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN])  # noqa: E501
 
                 with Tx.warp()[0:1]:
                     Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+                    Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)  # noqa: E501
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -1012,9 +1000,7 @@ TMA_S2G_CASES = [
     "g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout",
     TMA_FAIL_CASES,
 )
-def test_copy_tma_codegen_fail(
-    g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout
-):
+def test_copy_tma_codegen_fail(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout):
     """Verify that copy_tma_impl raises DispatchFail for unsupported layouts."""
     from tvm.tirx.op_schedule.dispatcher import DispatchFail
 
@@ -1086,7 +1072,7 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
         Tx.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], **tma_copy)
 
     Where M is a symbolic dimension in the global buffer.
-    """
+    """  # noqa: E501
     # Fixed dimensions
     K = 256
     BLK_M = 64
@@ -1100,9 +1086,7 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
     # Shared memory layout with swizzle
     shared_layout = Tx.ComposeLayout(
         Tx.SwizzleLayout(3, swizzle_len, 3, swizzle_inner=True),
-        Tx.TileLayout(
-            Tx.S[(SMEM_PIPE_DEPTH, BLK_M, BLK_K) : (BLK_M * BLK_K, BLK_K, 1)]
-        ),
+        Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_M, BLK_K) : (BLK_M * BLK_K, BLK_K, 1)]),
     )
 
     # Compute bytes for mbarrier
@@ -1117,13 +1101,13 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
         B = Tx.match_buffer(B_ptr, [SMEM_PIPE_DEPTH, BLK_M, BLK_K], dtype)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.thread():
                 dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
                 A_smem = Tx.decl_buffer(
-                    [SMEM_PIPE_DEPTH, BLK_M, BLK_K], dtype, dyn.data, elem_offset=0, layout=shared_layout
+                    [SMEM_PIPE_DEPTH, BLK_M, BLK_K], dtype, dyn.data, elem_offset=0, layout=shared_layout  # noqa: E501
                 )
                 mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
                 mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
@@ -1209,8 +1193,8 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
         B = Tx.match_buffer(B_ptr, (32, 4, 64), dtype)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([128], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([128], parent="cta")
 
             with Tx.thread():
                 dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
@@ -1341,9 +1325,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_copy_tma_gpu_smoke_g2s(task, dtype):
     """Smoke test: compile and run TMA G2S copy on GPU to verify end-to-end correctness."""
-    g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = (
-        task
-    )
+    g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)
 
     shared_layout = layoutS_fn(dtype)
@@ -1369,12 +1351,12 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
             B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
             with Tx.kernel():
-                bx = Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([thread_cnt], parent="cta")
+                Tx.cta_id([1], parent="kernel")
+                Tx.thread_id([thread_cnt], parent="cta")
 
                 with Tx.thread():
                     dyn = Tx.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
-                    A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                    A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)  # noqa: E501
                     mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
                     phase: Tx.int32
 
@@ -1386,7 +1368,7 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
 
                     for stage in range(n):
                         with Tx.thread()[0:1]:
-                            Tx.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], dispatch="tma", mbar=mbarrier.ptr_to([0]))
+                            Tx.copy_async(A_smem[tuple(r_smem)], A[tuple(r_gmem(stage))], dispatch="tma", mbar=mbarrier.ptr_to([0]))  # noqa: E501
                             Tx.ptx.mbarrier.arrive.expect_tx(mbarrier.ptr_to([0]), smem_bytes)
 
                         Tx.ptx.mbarrier.try_wait(mbarrier.ptr_to([0]), phase)
@@ -1395,7 +1377,7 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
                         Tx.ptx.fence.proxy_async("shared::cta")
                         Tx.cuda.cta_sync()
                         with Tx.cta():
-                            Tx.copy(B[*r_gmem(stage)], A_smem[*r_smem])
+                            Tx.copy(B[tuple(r_gmem(stage))], A_smem[tuple(r_smem)])
         # fmt: on
 
         np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -1431,12 +1413,12 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
             B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
             with Tx.kernel():
-                bx = Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([thread_cnt], parent="cta")
+                Tx.cta_id([1], parent="kernel")
+                Tx.thread_id([thread_cnt], parent="cta")
 
                 with Tx.thread():
                     dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
-                    A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                    A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)  # noqa: E501
                     mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
                     mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
 
@@ -1446,13 +1428,13 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
                     Tx.cuda.cta_sync()
 
                     with Tx.thread()[0:1]:
-                        Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                        Tx.copy_async(A_smem[tuple(r_smem)], A[tuple(r_gmem)], dispatch="tma", mbar=mbar_ptr)  # noqa: E501
                         Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
                     Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
                     Tx.cuda.cta_sync()
 
                     with Tx.cta():
-                        Tx.copy(B[*r_gmem], A_smem[*r_smem])
+                        Tx.copy(B[tuple(r_gmem)], A_smem[tuple(r_smem)])
         # fmt: on
 
         np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -1470,7 +1452,7 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
             mod(A, B)
 
             B_ref = np.zeros(g_shape, dtype=np_dtype)
-            B_ref[*r_gmem] = A_np[*r_gmem]
+            B_ref[tuple(r_gmem)] = A_np[tuple(r_gmem)]
             np.testing.assert_allclose(B_ref, B.numpy())
 
 
@@ -1506,18 +1488,18 @@ def test_copy_tma_gpu_smoke_s2g(dtype):
         B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.thread():
                 dyn = Tx.alloc_buffer([smem_bytes], "uint8", scope="shared.dyn")
-                A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                A_smem = Tx.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)  # noqa: E501
 
                 for stage in range(n):
-                    Tx.copy(A_smem[*r_smem], A[*r_gmem(stage)])
+                    Tx.copy(A_smem[tuple(r_smem)], A[tuple(r_gmem(stage))])
                     Tx.ptx.fence.proxy_async("shared::cta")
                     with Tx.thread()[0:1]:
-                        Tx.copy_async(B[*r_gmem(stage)], A_smem[*r_smem], dispatch="tma")
+                        Tx.copy_async(B[tuple(r_gmem(stage))], A_smem[tuple(r_smem)], dispatch="tma")  # noqa: E501
                         Tx.ptx.cp_async.bulk.commit_group()
                         Tx.ptx.cp_async.bulk.wait_group()
                     Tx.cuda.cta_sync()

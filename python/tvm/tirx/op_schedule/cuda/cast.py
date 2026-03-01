@@ -19,19 +19,17 @@
 
 import functools
 import operator
-from typing import Optional
 
 from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import Buffer, BufferRegion, IntImm, PrimFunc
 from tvm.tir.layout import TileLayout
 from tvm.tir.stmt import OpCall
-from tvm.tirx.operator.op import Cast
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
-    predicate,
     fail,
+    predicate,
+    register_dispatch,
 )
 
 from .common import get_indices, get_st_extent, get_vec_len
@@ -157,7 +155,7 @@ def _cast_layout_supported_for_local(layout) -> bool:
 
     Returns:
         True if layout is valid for local cast, False otherwise.
-    """
+    """  # noqa: E501
     return _get_layout_thread_local_partition(layout) is not None
 
 
@@ -365,7 +363,7 @@ def cast_local_view_impl(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
 
@@ -389,24 +387,21 @@ def cast_local_view_impl(
         var = _resolve_thread_var(axis, sctx)
         if var is None:
             fail(
-                f"Cannot find thread var for axis {axis} in launch_params: {list(sctx.launch_params.keys())}"
+                f"Cannot find thread var for axis {axis} in launch_params: {list(sctx.launch_params.keys())}"  # noqa: E501
             )
         thread_vars[axis] = var
 
-    ndim = len(src_extent)
+    len(src_extent)
 
-    use_joint_decomposition = False
-    thread_decomp_info = None
     if len(src_thread_groups) > 1:
         unique_var_ids = set(id(thread_vars[a]) for a in src_thread_groups)
         if len(unique_var_ids) == 1:
-            use_joint_decomposition = True
             thread_dims_ordered = []
             for _axis, (dim_indices, extents) in src_thread_groups.items():
                 for i, dim_idx in enumerate(dim_indices):
                     thread_dims_ordered.append((dim_idx, extents[i]))
             thread_dims_ordered.sort(key=lambda x: x[0])
-            thread_decomp_info = {
+            {
                 "var": next(iter(thread_vars.values())),
                 "extents": [src_layout.shard[dim_idx].extent for dim_idx, _ in thread_dims_ordered],
                 "dim_to_pos": {
@@ -416,7 +411,7 @@ def cast_local_view_impl(
             }
 
     src_local_region_extents = [src_extent[i] for i in src_local_dims]
-    dst_local_region_extents = [dst_extent[i] for i in src_local_dims]
+    [dst_extent[i] for i in src_local_dims]
     local_total = functools.reduce(operator.mul, src_local_region_extents, 1)
 
     # Decide vec2 availability
@@ -491,8 +486,7 @@ def cast_thread_wise_impl(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
-
+) -> PrimFunc | None:
     if sctx.exec_scope.name != "thread":
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
@@ -536,7 +530,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
                     source_code=source_code,
                 )
             else:
-                dst[*dst_indices] = Tx.cast(src[*src_indices], dst.dtype)
+                dst[tuple(dst_indices)] = Tx.cast(src[tuple(src_indices)], dst.dtype)
     # fmt: on
     return impl
 

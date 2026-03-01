@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
 """Causal linear attention kernel with SM100 warp specialization.
 
 Warp-specialized rewrite using tcgen05 MMA, TMEM, and producer/consumer
@@ -47,31 +48,30 @@ Key challenge: F=128 and D=128 exceed TMEM N_COLS=64 limit.
   - att@V -> split into V_lo/V_hi, two MMA phases.
   - Q@kvs -> staging_a + staging_b via SMEM MMA (Phases 3-4).
   - K_dec^T@V -> offloaded to MMA via staging buffers (Phases 5-8).
-"""
+"""  # noqa: RUF002
 
-import math
-import pytest
 import numpy as np
+import pytest
 import torch
 
 import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # Constants
 CHUNK = 64
-F = 128       # Q/K feature dimension
-D = 128       # V/O output dimension
-HALF = 64     # half of F and D for TMA/MMA splitting
+F = 128  # Q/K feature dimension
+D = 128  # V/O output dimension
+HALF = 64  # half of F and D for TMA/MMA splitting
 SM_COUNT = 148
 
 # Warp-specialized layout
-WG_NUMBER = 2        # WG0=consumer, WG1=producer+MMA
-WARP_NUMBER = 4      # per warpgroup
+WG_NUMBER = 2  # WG0=consumer, WG1=producer+MMA
+WARP_NUMBER = 4  # per warpgroup
 NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # 256
 
 # MMA dimensions
@@ -89,7 +89,7 @@ PIPE_DEPTH = 2
 F16_BYTES = 2
 F32_BYTES = 4
 F128_BYTES = 16
-N_COLS = 64          # MMA output width (f32 columns for results)
+N_COLS = 64  # MMA output width (f32 columns for results)
 TMEM_LD_SIZE = 64
 
 # SMEM budget (bytes):
@@ -111,8 +111,8 @@ def ceildiv(a, b):
 
 
 def prepare_data(batch, heads, seq_len):
-    q = torch.randn(batch * heads, seq_len, F, dtype=torch.float16, device="cuda") / (F ** 0.5)
-    k = torch.randn(batch * heads, seq_len, F, dtype=torch.float16, device="cuda") / (F ** 0.5)
+    q = torch.randn(batch * heads, seq_len, F, dtype=torch.float16, device="cuda") / (F**0.5)
+    k = torch.randn(batch * heads, seq_len, F, dtype=torch.float16, device="cuda") / (F**0.5)
     v = torch.randn(batch * heads, seq_len, D, dtype=torch.float16, device="cuda")
     slopes = torch.rand(batch * heads, dtype=torch.float32, device="cuda")
     return q, k, v, slopes
@@ -153,7 +153,9 @@ def naive_linear_attention(q, k, v, slopes):
         block_decay = torch.exp(-slopes * CHUNK)  # (BH,)
         k_decay = torch.exp(-slopes.unsqueeze(-1) * (CHUNK - idx.unsqueeze(0)))  # (BH, CHUNK)
         k_dec = kc * k_decay.unsqueeze(-1)  # (BH, CHUNK, F)
-        kv_state = kv_state * block_decay.unsqueeze(-1).unsqueeze(-1) + torch.matmul(k_dec.transpose(-2, -1), vc)
+        kv_state = kv_state * block_decay.unsqueeze(-1).unsqueeze(-1) + torch.matmul(
+            k_dec.transpose(-2, -1), vc
+        )
 
     return o.reshape(BH, L, D).half()
 
@@ -173,7 +175,7 @@ half_layout = Tx.ComposeLayout(
 
 
 def get_linear_attention_kernel():
-    a_type = tvm.DataType("float16")
+    a_type = tvm.DataType("float16")  # noqa: F841
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -189,7 +191,7 @@ def get_linear_attention_kernel():
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
             warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
 
@@ -240,12 +242,12 @@ def get_linear_attention_kernel():
                 consumer2mma_bar.init(128)  # full consumer WG
                 workitem_sync_bar.init(1)
 
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))  # noqa: E501
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
                     Tx.cuda.warp_sync()
 
                 Tx.ptx.fence.proxy_async("shared::cta")
@@ -290,17 +292,17 @@ def get_linear_attention_kernel():
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
                                         tic = Tx.meta_var(cid_tma % PIPE_DEPTH)
                                         q_row = Tx.meta_var(cid_tma * CHUNK)
-                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})  # noqa: E501
                                         # Wait for MMA to release this SMEM slot
                                         if cid_tma >= PIPE_DEPTH:
                                             mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V halves (6 TMA loads per chunk)
-                                        Tx.copy_async(Q_lo[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(Q_hi[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, HALF : F], **tma_copy)
-                                        Tx.copy_async(K_lo[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(K_hi[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, HALF : F], **tma_copy)
-                                        Tx.copy_async(V_lo[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(V_hi[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, HALF : D], **tma_copy)
+                                        Tx.copy_async(Q_lo[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(Q_hi[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, HALF : F], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_lo[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_hi[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, HALF : F], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_lo[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_hi[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, HALF : D], **tma_copy)  # noqa: E501
                                         # Signal that load is done (total bytes for 6 halves)
                                         tma2mma_bar.arrive(tic, 6 * CHUNK * HALF * F16_BYTES)
                                     if cid_tma % PIPE_DEPTH == PIPE_DEPTH - 1:
@@ -312,19 +314,19 @@ def get_linear_attention_kernel():
                             # ---- MMA warp ----
                             # Phase 1: Q@K^T — transA=False, transB=False
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI), "float32", "float16", "float16",
+                                Tx.address_of(descI), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, False, CTA_GROUP)
 
                             # Phases 2a/2b/3/4: transA=False, transB=True
                             descI_tb: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_tb), "float32", "float16", "float16",
+                                Tx.address_of(descI_tb), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
 
                             # Phases 5-8: K_dec^T@V — transA=True, transB=True
                             descI_state: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_state), "float32", "float16", "float16",
+                                Tx.address_of(descI_state), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, True, True, CTA_GROUP)
 
                             # staging_b_lo/hi are [64,64] with same SDO as other half buffers
@@ -348,24 +350,24 @@ def get_linear_attention_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI, False, CTA_GROUP, True)
+                                                descA, descB, descI, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
@@ -375,14 +377,14 @@ def get_linear_attention_kernel():
                                         # == Phase 2a: work @ V_lo -> o_intra_lo ==
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2a
@@ -392,14 +394,14 @@ def get_linear_attention_kernel():
                                         # == Phase 2b: work @ V_hi -> o_intra_hi ==
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2b
@@ -413,57 +415,57 @@ def get_linear_attention_kernel():
                                             # First half: Q_lo_dec[64,64] @ staging_b (K=64)
                                             for ki in Tx.unroll(HALF // MMA_K):
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descA), staging_a_lo.ptr_to([0, ki * MMA_K]),
+                                                    Tx.address_of(descA), staging_a_lo.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                     MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descB), staging_b_lo.ptr_to([ki * MMA_K, 0]),
+                                                    Tx.address_of(descB), staging_b_lo.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                     MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                     Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                    descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                            # Second half: Q_hi_dec[64,64] @ staging_b (K=64, accumulate)
+                                                    descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: E501, F821
+                                            # Second half: Q_hi_dec[64,64] @ staging_b (K=64, accumulate)  # noqa: E501
                                             for ki in Tx.unroll(HALF // MMA_K):
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descA), staging_a_hi.ptr_to([0, ki * MMA_K]),
+                                                    Tx.address_of(descA), staging_a_hi.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                     MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                    Tx.address_of(descB), staging_b_hi.ptr_to([ki * MMA_K, 0]),
+                                                    Tx.address_of(descB), staging_b_hi.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                     MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                     Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                    descA, descB, descI_tb, False, CTA_GROUP, True)
+                                                    descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                             mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                             consumer2mma_bar.wait(0, phase_c2m ^ (1 - phase_i % 2))
                                             Tx.ptx.tcgen05.fence.after_thread_sync()
 
                                         # == Phases 5-8: K_dec^T @ V -> kvs update ==
-                                        # staging_a_lo holds K_lo_dec[64,64], staging_a_hi holds K_hi_dec[64,64]
-                                        # staging_a is swizzled (half_layout), use SWIZZLE in descriptor
+                                        # staging_a_lo holds K_lo_dec[64,64], staging_a_hi holds K_hi_dec[64,64]  # noqa: E501
+                                        # staging_a is swizzled (half_layout), use SWIZZLE in descriptor  # noqa: E501
                                         for state_i in Tx.unroll(4):
                                             for ki in Tx.unroll(CHUNK // MMA_K):
-                                                # A: staging_a_lo (state_i<2) or staging_a_hi (state_i>=2)
+                                                # A: staging_a_lo (state_i<2) or staging_a_hi (state_i>=2)  # noqa: E501
                                                 # transA=True: A is [K=pos, M=f], iterate K dim rows
                                                 if state_i < 2:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descA), staging_a_lo.ptr_to([ki * MMA_K, 0]),
+                                                        Tx.address_of(descA), staging_a_lo.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 else:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descA), staging_a_hi.ptr_to([ki * MMA_K, 0]),
+                                                        Tx.address_of(descA), staging_a_hi.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 # B: V_lo (state_i even) or V_hi (state_i odd)
                                                 if state_i % 2 == 0:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),
+                                                        Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 else:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),
+                                                        Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                     Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                    descA, descB, descI_state, False, CTA_GROUP, ki > 0)
+                                                    descA, descB, descI_state, False, CTA_GROUP, ki > 0)  # noqa: E501, F821
                                             mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                             consumer2mma_bar.wait(0, phase_c2m ^ (1 - state_i % 2))
@@ -533,7 +535,7 @@ def get_linear_attention_kernel():
                                         slope_val = Tx.meta_var(slopes_s[0])
                                         for j in Tx.serial(CHUNK):
                                             if out_row >= j:
-                                                diff_val = Tx.meta_var(Tx.cast(out_row - j, "float32"))
+                                                diff_val = Tx.meta_var(Tx.cast(out_row - j, "float32"))  # noqa: E501
                                                 reg[j] = reg[j] * Tx.exp(0.0 - slope_val * diff_val)
                                             else:
                                                 reg[j] = 0.0
@@ -544,7 +546,7 @@ def get_linear_attention_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 2a: Read o_intra_lo, prep Q_dec staging + kvs_lo cast ========
+                                # ======== Phase 2a: Read o_intra_lo, prep Q_dec staging + kvs_lo cast ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -565,22 +567,22 @@ def get_linear_attention_kernel():
                                         flat = Tx.meta_var(tid_flat * 32 + i)
                                         srow = Tx.meta_var(flat // HALF)
                                         scol = Tx.meta_var(flat % HALF)
-                                        q_decay_v = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(srow, "float32")))
+                                        q_decay_v = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(srow, "float32")))  # noqa: E501
                                         staging_a_lo[srow, scol] = Tx.cast(
-                                            Tx.cast(Q_lo[tic_c, srow, scol], "float32") * q_decay_v, "float16")
+                                            Tx.cast(Q_lo[tic_c, srow, scol], "float32") * q_decay_v, "float16")  # noqa: E501
                                         staging_a_hi[srow, scol] = Tx.cast(
-                                            Tx.cast(Q_hi[tic_c, srow, scol], "float32") * q_decay_v, "float16")
+                                            Tx.cast(Q_hi[tic_c, srow, scol], "float32") * q_decay_v, "float16")  # noqa: E501
 
                                 # staging_b_lo[f,d] = f16(kvs[f,d]) for f in [0,64), d in [0,64)
-                                # staging_b_hi[f,d] = f16(kvs[HALF+f,d]) for f in [0,64), d in [0,64)
+                                # staging_b_hi[f,d] = f16(kvs[HALF+f,d]) for f in [0,64), d in [0,64)  # noqa: E501
                                 with Tx.thread():
                                     tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
                                     for i in Tx.serial(32):
                                         flat = Tx.meta_var(tid_flat * 32 + i)
                                         brow = Tx.meta_var(flat // HALF)
                                         bcol = Tx.meta_var(flat % HALF)
-                                        staging_b_lo[brow, bcol] = Tx.cast(kvs[brow, bcol], "float16")
-                                        staging_b_hi[brow, bcol] = Tx.cast(kvs[HALF + brow, bcol], "float16")
+                                        staging_b_lo[brow, bcol] = Tx.cast(kvs[brow, bcol], "float16")  # noqa: E501
+                                        staging_b_hi[brow, bcol] = Tx.cast(kvs[HALF + brow, bcol], "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
@@ -624,8 +626,8 @@ def get_linear_attention_kernel():
                                         flat = Tx.meta_var(tid_flat * 32 + i)
                                         brow = Tx.meta_var(flat // HALF)
                                         bcol = Tx.meta_var(flat % HALF)
-                                        staging_b_lo[brow, bcol] = Tx.cast(kvs[brow, HALF + bcol], "float16")
-                                        staging_b_hi[brow, bcol] = Tx.cast(kvs[HALF + brow, HALF + bcol], "float16")
+                                        staging_b_lo[brow, bcol] = Tx.cast(kvs[brow, HALF + bcol], "float16")  # noqa: E501
+                                        staging_b_hi[brow, bcol] = Tx.cast(kvs[HALF + brow, HALF + bcol], "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
@@ -656,10 +658,10 @@ def get_linear_attention_kernel():
                                 Tx.cuda.warpgroup_sync(10)
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     q_row_out = Tx.meta_var(cid_con * CHUNK)
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : HALF],
-                                                  D_out_lo[:, :], dispatch="tma", cache_hint="evict_last")
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, HALF : D],
-                                                  D_out_hi[:, :], dispatch="tma", cache_hint="evict_last")
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : HALF],  # noqa: E501
+                                                  D_out_lo[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, HALF : D],  # noqa: E501
+                                                  D_out_hi[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
                                     Tx.ptx.cp_async.bulk.wait_group(0)
                                 Tx.cuda.warpgroup_sync(10)
@@ -677,17 +679,17 @@ def get_linear_attention_kernel():
                                         flat = Tx.meta_var(tid_flat * 32 + i)
                                         srow = Tx.meta_var(flat // HALF)  # pos
                                         scol = Tx.meta_var(flat % HALF)   # f
-                                        k_decay_v = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(CHUNK - srow, "float32")))
+                                        k_decay_v = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(CHUNK - srow, "float32")))  # noqa: E501
                                         staging_a_lo[srow, scol] = Tx.cast(
-                                            Tx.cast(K_lo[tic_c, srow, scol], "float32") * k_decay_v, "float16")
+                                            Tx.cast(K_lo[tic_c, srow, scol], "float32") * k_decay_v, "float16")  # noqa: E501
                                         staging_a_hi[srow, scol] = Tx.cast(
-                                            Tx.cast(K_hi[tic_c, srow, scol], "float32") * k_decay_v, "float16")
+                                            Tx.cast(K_hi[tic_c, srow, scol], "float32") * k_decay_v, "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phases 5-8: Read K_dec^T@V from TMEM → update kvs ========
+                                # ======== Phases 5-8: Read K_dec^T@V from TMEM → update kvs ========  # noqa: E501
                                 for state_i in Tx.serial(4):
                                     mma2consumer_bar.wait(0, phase_m2c)
                                     phase_m2c = phase_m2c ^ 1
@@ -702,7 +704,7 @@ def get_linear_attention_kernel():
                                     with Tx.thread():
                                         tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
                                         slope_val = Tx.meta_var(slopes_s[0])
-                                        block_decay = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(CHUNK, "float32")))
+                                        block_decay = Tx.meta_var(Tx.exp(0.0 - slope_val * Tx.cast(CHUNK, "float32")))  # noqa: E501
                                         for i in Tx.serial(32):
                                             flat = Tx.meta_var(tid_flat * 32 + i)
                                             drow = Tx.meta_var(flat // HALF)
@@ -710,11 +712,11 @@ def get_linear_attention_kernel():
                                             if state_i == 0:
                                                 kvs[drow, dcol] = kvs[drow, dcol] * block_decay
                                             elif state_i == 1:
-                                                kvs[drow, HALF + dcol] = kvs[drow, HALF + dcol] * block_decay
+                                                kvs[drow, HALF + dcol] = kvs[drow, HALF + dcol] * block_decay  # noqa: E501
                                             elif state_i == 2:
-                                                kvs[HALF + drow, dcol] = kvs[HALF + drow, dcol] * block_decay
+                                                kvs[HALF + drow, dcol] = kvs[HALF + drow, dcol] * block_decay  # noqa: E501
                                             else:
-                                                kvs[HALF + drow, HALF + dcol] = kvs[HALF + drow, HALF + dcol] * block_decay
+                                                kvs[HALF + drow, HALF + dcol] = kvs[HALF + drow, HALF + dcol] * block_decay  # noqa: E501
 
                                     # Add TMEM result to correct kvs quadrant (64 active threads)
                                     with Tx.thread():
@@ -724,11 +726,11 @@ def get_linear_attention_kernel():
                                                 if state_i == 0:
                                                     kvs[out_row, j] = kvs[out_row, j] + reg[j]
                                                 elif state_i == 1:
-                                                    kvs[out_row, HALF + j] = kvs[out_row, HALF + j] + reg[j]
+                                                    kvs[out_row, HALF + j] = kvs[out_row, HALF + j] + reg[j]  # noqa: E501
                                                 elif state_i == 2:
-                                                    kvs[HALF + out_row, j] = kvs[HALF + out_row, j] + reg[j]
+                                                    kvs[HALF + out_row, j] = kvs[HALF + out_row, j] + reg[j]  # noqa: E501
                                                 else:
-                                                    kvs[HALF + out_row, HALF + j] = kvs[HALF + out_row, HALF + j] + reg[j]
+                                                    kvs[HALF + out_row, HALF + j] = kvs[HALF + out_row, HALF + j] + reg[j]  # noqa: E501
 
                                     Tx.ptx.tcgen05.fence.before_thread_sync()
                                     consumer2mma_bar.arrive(0)
@@ -747,7 +749,9 @@ def get_linear_attention_kernel():
     return linear_attention
 
 
-@pytest.mark.parametrize("batch,heads,seq_len", [(1, 8, 256), (1, 8, 1024), (2, 4, 512), (10, 16, 128)])
+@pytest.mark.parametrize(
+    "batch,heads,seq_len", [(1, 8, 256), (1, 8, 1024), (2, 4, 512), (10, 16, 128)]
+)
 def test_linear_attention(batch, heads, seq_len):
     q, k, v, slopes = prepare_data(batch, heads, seq_len)
     o_ref = naive_linear_attention(q, k, v, slopes)
@@ -799,9 +803,9 @@ def bench_linear_attention():
         consumer_flops = nc * BH * (2 * 64 * F * D + 2 * 64 * F * D)
         return (mma_flops + consumer_flops) / (ms * 1e-3)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Linear Attention Benchmark (B={batch}, H={heads})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     with ProtonContext("linear_attention"):
         for seq_len in [1024, 2048, 4096, 8192]:
@@ -814,7 +818,7 @@ def bench_linear_attention():
             slopes_tvm = tvm.runtime.tensor(slopes.cpu().numpy(), DEV)
             o_tvm = tvm.runtime.tensor(o_np, DEV)
 
-            func = lambda: mod(q_tvm, k_tvm, v_tvm, slopes_tvm, o_tvm)
+            func = lambda: mod(q_tvm, k_tvm, v_tvm, slopes_tvm, o_tvm)  # noqa: E731
             ms = bench(func, warmup=100, repeat=300, proton_name=f"linear_attn_N{seq_len}")
             tflops = flops(ms, seq_len) / 1e12
             print(f"  N={seq_len:>5d}: {tflops:.2f} TFLOPS, {ms:.3f} ms")

@@ -228,7 +228,7 @@ def test_scope_partition():
     def test1():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
+            Tx.warp_id([4], parent="cta")
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.cta():
@@ -241,7 +241,7 @@ def test_scope_partition():
     def test2():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
+            Tx.warp_id([4], parent="cta")
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.cta():
@@ -254,7 +254,7 @@ def test_scope_partition():
     def test3():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
+            Tx.warp_id([4], parent="cta")
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.thread():
@@ -266,7 +266,7 @@ def test_scope_partition():
     def test4():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
+            Tx.warp_id([4], parent="cta")
             tx = Tx.thread_id([128], parent="cta")
 
             with Tx.thread():
@@ -291,9 +291,9 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
         with Tx.kernel():
-            bx = Tx.cta_id([32], parent="kernel")
-            wid = Tx.warp_id([4], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32], parent="kernel")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
                 pass
@@ -301,10 +301,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
         with Tx.kernel():
-            bx = Tx.cta_id([32], parent="kernel")
-            wid = Tx.warp_id([4], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([128], parent="cta")
+            Tx.cta_id([32], parent="kernel")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            Tx.thread_id([128], parent="cta")
 
             with Tx.thread():
                 pass
@@ -312,10 +312,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3():
         with Tx.kernel():
-            bx = Tx.cta_id([32], parent="kernel")
-            wid = Tx.warp_id([2], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([128], parent="cta")
+            Tx.cta_id([32], parent="kernel")
+            Tx.warp_id([2], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            Tx.thread_id([128], parent="cta")
 
             with Tx.thread():
                 pass
@@ -392,9 +392,9 @@ def test_layout():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
         with Tx.kernel():
-            bx = Tx.cta_id([32], parent="kernel")
-            wid = Tx.warp_id([4], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32], parent="kernel")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
                 A = Tx.alloc_buffer((2,), layout=Tx.TileLayout(Tx.S[2, 1]))
@@ -408,9 +408,9 @@ def test_layout():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
         with Tx.kernel():
-            bx = Tx.cta_id([32], parent="kernel")
-            wid = Tx.warp_id([4], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32], parent="kernel")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.thread():
                 A = Tx.alloc_buffer((512,), scope="shared", layout=Tx.SwizzleLayout(3, 3, 3))
@@ -427,7 +427,7 @@ def test_host():
         A = Tx.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
 
         A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)  # noqa: E501
 
         with Tx.kernel():
             for blockIdx in Tx.thread_binding(1, thread="blockIdx.x"):
@@ -455,23 +455,23 @@ def test_device_func():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1(A: Tx.Buffer((128,), "float32")):
         with Tx.cta():
-            thread_id = Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
 
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2(A: Tx.Buffer((128,), "float32")):
         with Tx.kernel():
-            cta_id = Tx.cta_id([128], parent="kernel")
-            thread_id = Tx.thread_id([128], parent="cta")
+            Tx.cta_id([128], parent="kernel")
+            Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
 
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3(A: Tx.Buffer((128,), "float32")):
         with Tx.cta():
-            thread_id = Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
         with Tx.cta():
-            thread_id = Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128], parent="cta")
             Tx.fill(A, 0.)
     # fmt: on
     verify(test1, device_func=True)

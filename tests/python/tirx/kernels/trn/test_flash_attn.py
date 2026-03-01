@@ -21,7 +21,7 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 
-from .utils import run_on_remote_and_check_correct, ssh_client
+from .utils import run_on_remote_and_check_correct
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -36,7 +36,6 @@ p_size = 128
 
 @pytest.mark.dependency(depends=["ssh_success"])
 def test_flash_attn(ssh_client, causal=True):
-
     BLOCK_KV = 8192
     NUM_BLOCKS_KV = seqlen_kv // BLOCK_KV
     BLOCK_Q = 128
@@ -51,19 +50,19 @@ def test_flash_attn(ssh_client, causal=True):
     # fmt: off
     @Tx.inline
     def mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, block_q, block_kv):
-        mm1_dot_psum = Tx.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",layout="FPF", allocated_addr=(0,0))
+        mm1_dot_psum = Tx.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",layout="FPF", allocated_addr=(0,0))  # noqa: E501
         for i in Tx.serial(0, NUM_MM1_PER_BLOCK):
-            k_mm_range = Tx.meta_var(Tx.max(0, Tx.min((block_q//4*4+4) * BLOCK_Q - block_kv * BLOCK_KV - i * 512, 512)) if causal else 512)
-            Tx.gemm(mm1_dot_psum[i % 8, :, 0:k_mm_range], q_loaded[block_q % 2], k_loaded[i * 512: i * 512 + k_mm_range, :], mm1_dot_psum[i % 8, :, 0:k_mm_range], transpose_B=True)
+            k_mm_range = Tx.meta_var(Tx.max(0, Tx.min((block_q//4*4+4) * BLOCK_Q - block_kv * BLOCK_KV - i * 512, 512)) if causal else 512)  # noqa: E501
+            Tx.gemm(mm1_dot_psum[i % 8, :, 0:k_mm_range], q_loaded[block_q % 2], k_loaded[i * 512: i * 512 + k_mm_range, :], mm1_dot_psum[i % 8, :, 0:k_mm_range], transpose_B=True)  # noqa: E501
             if not causal:
-                Tx.binary_reduce(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_partial_max[:, i], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale), binary_op="mul", reduce_op="max", reduce_axes=-1)
+                Tx.binary_reduce(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_partial_max[:, i], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale), binary_op="mul", reduce_op="max", reduce_axes=-1)  # noqa: E501
             else:
                 if block_kv * BLOCK_KV + (i+1) * 512 < block_q * BLOCK_Q:
-                    Tx.binary_reduce(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_partial_max[:, i], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale), binary_op="mul", reduce_op="max", reduce_axes=-1)
+                    Tx.binary_reduce(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_partial_max[:, i], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale), binary_op="mul", reduce_op="max", reduce_axes=-1)  # noqa: E501
                 else:
-                    Tx.mul(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale))
-                    Tx.select(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], -9984.0, pred=lambda _, q, k: block_q * BLOCK_Q + q >= block_kv * BLOCK_KV + i * 512 + k)
-                    Tx.max(mm1_dot_partial_max[:, i], qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], axes=-1)
+                    Tx.mul(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], mm1_dot_psum[i % 8, :, 0:k_mm_range], Tx.float32(softmax_scale))  # noqa: E501
+                    Tx.select(qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], -9984.0, pred=lambda _, q, k: block_q * BLOCK_Q + q >= block_kv * BLOCK_KV + i * 512 + k)  # noqa: E501
+                    Tx.max(mm1_dot_partial_max[:, i], qk[block_q % 2, :, i * 512: i * 512 + k_mm_range], axes=-1)  # noqa: E501
         # mm1_dot_max = -max(Q@K.T)
         Tx.reduce_negate(mm1_dot_max, mm1_dot_partial_max, reduce_op="max", reduce_axes=-1)
 
@@ -74,7 +73,9 @@ def test_flash_attn(ssh_client, causal=True):
             # we enforce kv_range to be a multiple of 512
             # this is to prevent having f_loop/p_loop in the mask of matmul.
             # Neuron compiler does not support this in a proper way.
-            return Tx.max(Tx.min((block_q // 4 * 4 + 4) * BLOCK_Q - block_kv * BLOCK_KV, BLOCK_KV), 0)
+            return Tx.max(
+                Tx.min((block_q // 4 * 4 + 4) * BLOCK_Q - block_kv * BLOCK_KV, BLOCK_KV), 0
+            )
         else:
             return BLOCK_KV
 
@@ -87,7 +88,7 @@ def test_flash_attn(ssh_client, causal=True):
         running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q, block_kv
     ):
         # running_max = min(-max(Q@K.T), running_max)
-        # scaling_factor = exp(-prev_running_max + running_max) (this is because we apply negate to the max value)
+        # scaling_factor = exp(-prev_running_max + running_max) (this is because we apply negate to the max value)  # noqa: E501
         if block_kv == 0:
             Tx.copy(running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
         else:
@@ -111,9 +112,9 @@ def test_flash_attn(ssh_client, causal=True):
     def exp(p, qk, running_max, partial_rowsum_p, rowsum_p, block_q, block_kv):
         # p = exp(Q@K.T + running_max)
         # FIXME: this still fails to be simplified. Try to use explicit mask later
-        # Most masks are of 2 kinds: 1. out-of-bound mask, 2. mask that reduce redundant computation.
+        # Most masks are of 2 kinds: 1. out-of-bound mask, 2. mask that reduce redundant computation.  # noqa: E501
         # We can set an attribute to the mask, showing that the second kind of mask can be relaxed.
-        # F loop can always be relaxed to a constant, so that the mask only contains out-of-bound mask.
+        # F loop can always be relaxed to a constant, so that the mask only contains out-of-bound mask.  # noqa: E501
         if causal:
             Tx.memset(partial_rowsum_p, 0.0)
             p_reshape = p.view(BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE)
@@ -161,7 +162,7 @@ def test_flash_attn(ssh_client, causal=True):
 
     @Tx.inline
     def write_back(
-        l,
+        l,  # noqa: E741
         l_reciprocal,
         scaling_factor,
         rowsum_p,
@@ -214,33 +215,33 @@ def test_flash_attn(ssh_client, causal=True):
     @Tx.prim_func(tirx=True)
     def flash_attn(q_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, out_ptr: Tx.handle):
         Tx.func_attr({"num_inputs": 3})
-        q = Tx.match_buffer(q_ptr, (seqlen_q, head_q, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_q, head_q, d), (1, seqlen_q * d, seqlen_q)))
-        k = Tx.match_buffer(k_ptr, (seqlen_kv, head_kv, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_kv, head_kv, d), (1, seqlen_kv * d, seqlen_kv)))
-        v = Tx.match_buffer(v_ptr, (seqlen_kv, head_kv, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_kv, head_kv, d), (d, seqlen_kv * d, 1)))
-        out = Tx.match_buffer(out_ptr, (seqlen_q, head_q, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_q, head_q, d), (d, seqlen_q * d, 1)))
+        q = Tx.match_buffer(q_ptr, (seqlen_q, head_q, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_q, head_q, d), (1, seqlen_q * d, seqlen_q)))  # noqa: E501
+        k = Tx.match_buffer(k_ptr, (seqlen_kv, head_kv, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_kv, head_kv, d), (1, seqlen_kv * d, seqlen_kv)))  # noqa: E501
+        v = Tx.match_buffer(v_ptr, (seqlen_kv, head_kv, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_kv, head_kv, d), (d, seqlen_kv * d, 1)))  # noqa: E501
+        out = Tx.match_buffer(out_ptr, (seqlen_q, head_q, d), dtype="float16", layout=Tx.TileLayout.from_tuple((seqlen_q, head_q, d), (d, seqlen_q * d, 1)))  # noqa: E501
         with Tx.kernel():
             for head in Tx.serial(0, head_q):
-                # running_max and prev_running_max are used to store the max value of the previous block, with the value multiplied by -1
-                running_max = Tx.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout)
-                l = Tx.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout)
+                # running_max and prev_running_max are used to store the max value of the previous block, with the value multiplied by -1  # noqa: E501
+                running_max = Tx.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout)  # noqa: E501
+                l = Tx.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout)  # noqa: E501, E741
                 for block_kv in Tx.serial(0, NUM_BLOCKS_KV):
-                    k_loaded = Tx.alloc_buffer((BLOCK_KV, d), dtype=k.dtype, scope="trn.sbuf", layout = "FP")
-                    v_loaded = Tx.alloc_buffer((BLOCK_KV, d), dtype=v.dtype, scope="trn.sbuf", layout = "PF")
+                    k_loaded = Tx.alloc_buffer((BLOCK_KV, d), dtype=k.dtype, scope="trn.sbuf", layout = "FP")  # noqa: E501
+                    v_loaded = Tx.alloc_buffer((BLOCK_KV, d), dtype=v.dtype, scope="trn.sbuf", layout = "PF")  # noqa: E501
                     #TODO: integrate neuron runtime
-                    q_loaded = Tx.alloc_buffer((2, BLOCK_Q, d), dtype=q.dtype, scope="trn.sbuf", layout= "FFP")
-                    qk = Tx.alloc_buffer((2, BLOCK_Q, BLOCK_KV), dtype="float32", scope="trn.sbuf", layout= "FPF")
-                    mm1_dot_partial_max = Tx.alloc_buffer((BLOCK_Q, NUM_MM1_PER_BLOCK), dtype="float32", scope="trn.sbuf", layout= "PF")
-                    mm1_dot_max = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")
-                    scaling_factor = Tx.alloc_buffer((2, BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "FPF")
-                    prev_running_max = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")
-                    p = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "PF")
-                    partial_rowsum_p = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", layout="PF",scope="trn.sbuf")
-                    rowsum_p = Tx.alloc_buffer((2, BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "FPF")
-                    p_transposed = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "FP")
-                    mm2_out = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")
-                    prev_output = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")
-                    scaled_output = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")
-                    l_reciprocal = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")
+                    q_loaded = Tx.alloc_buffer((2, BLOCK_Q, d), dtype=q.dtype, scope="trn.sbuf", layout= "FFP")  # noqa: E501
+                    qk = Tx.alloc_buffer((2, BLOCK_Q, BLOCK_KV), dtype="float32", scope="trn.sbuf", layout= "FPF")  # noqa: E501
+                    mm1_dot_partial_max = Tx.alloc_buffer((BLOCK_Q, NUM_MM1_PER_BLOCK), dtype="float32", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    mm1_dot_max = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    scaling_factor = Tx.alloc_buffer((2, BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "FPF")  # noqa: E501
+                    prev_running_max = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    p = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    partial_rowsum_p = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", layout="PF",scope="trn.sbuf")  # noqa: E501
+                    rowsum_p = Tx.alloc_buffer((2, BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "FPF")  # noqa: E501
+                    p_transposed = Tx.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "FP")  # noqa: E501
+                    mm2_out = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    prev_output = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    scaled_output = Tx.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")  # noqa: E501
+                    l_reciprocal = Tx.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")  # noqa: E501
 
                     # load k and v
                     Tx.copy(k_loaded, k[block_kv * BLOCK_KV: (block_kv + 1) * BLOCK_KV, head, :])
@@ -249,34 +250,34 @@ def test_flash_attn(ssh_client, causal=True):
 
                     load_q(q_loaded, q, 0, head)
                     mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, 0, block_kv)
-                    update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, 0, block_kv)
+                    update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, 0, block_kv)  # noqa: E501
                     exp(p, qk, running_max, partial_rowsum_p, rowsum_p, 0, block_kv)
                     transpose(p, p_transposed, 0, block_kv)
                     load_q(q_loaded, q, 1, head)
                     mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, 1, block_kv)
-                    update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, 1, block_kv)
+                    update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, 1, block_kv)  # noqa: E501
                     for block_q in Tx.serial(0, NUM_BLOCKS_Q-2):
                         # load q
                         load_q(q_loaded, q, block_q+2, head)
                         # p = exp(Q@K.T + running_max)
                         exp(p, qk, running_max, partial_rowsum_p, rowsum_p, block_q+1, block_kv)
                         # Q@K.T
-                        mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, block_q+2, block_kv)
+                        mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, block_q+2, block_kv)  # noqa: E501
                         # mm2_out = P@V
                         pv(mm2_out, p_transposed, v_loaded, block_q, block_kv)
                         # transpose p
                         transpose(p, p_transposed, block_q+1, block_kv)
                         # write back
-                        write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, block_q, block_kv)
+                        write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, block_q, block_kv)  # noqa: E501
                         # running_max = min(-max(Q@K.T), running_max)
-                        # scaling_factor = exp(-prev_running_max + running_max) (this is because we apply negate to the max value)
-                        update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q+2, block_kv)
+                        # scaling_factor = exp(-prev_running_max + running_max) (this is because we apply negate to the max value)  # noqa: E501
+                        update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q+2, block_kv)  # noqa: E501
                     pv(mm2_out, p_transposed, v_loaded, NUM_BLOCKS_Q-2, block_kv)
-                    write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, NUM_BLOCKS_Q-2, block_kv)
+                    write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, NUM_BLOCKS_Q-2, block_kv)  # noqa: E501
                     exp(p, qk, running_max, partial_rowsum_p, rowsum_p, NUM_BLOCKS_Q-1, block_kv)
                     transpose(p, p_transposed, NUM_BLOCKS_Q-1, block_kv)
                     pv(mm2_out, p_transposed, v_loaded, NUM_BLOCKS_Q-1, block_kv)
-                    write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, NUM_BLOCKS_Q-1, block_kv)
+                    write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, NUM_BLOCKS_Q-1, block_kv)  # noqa: E501
 
     # fmt: on
     with target:

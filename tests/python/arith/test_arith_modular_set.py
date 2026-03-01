@@ -17,6 +17,7 @@
 # ruff: noqa: F841
 import tvm
 import tvm.testing
+from tvm import te
 
 
 def test_cast():

@@ -17,12 +17,10 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout, P, F, S
-import numpy as np
 import tvm.testing
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
 from tvm.ir import assert_structural_equal
+from tvm.script import tirx as Tx
+from tvm.tir.layout import F, P, S, TileLayout
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -42,12 +40,13 @@ Tx_func_map = {
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 def test_simple_reduction(op_type):
     src_shape = [128, 512]
-    src_layout = TileLayout(S[(128, 512) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
     dst_shape = [128, 1]
-    dst_layout = TileLayout(S[(128, 1) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 1) : (1 @ P, 1 @ F)])
 
     opcode = opcode_map[op_type]
     tx_func = Tx_func_map[op_type]
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def reduction() -> None:
@@ -66,7 +65,7 @@ def test_simple_reduction(op_type):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
-                        Tx.nki.tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], opcode, False, -1)
+                        Tx.nki.tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], opcode, False, -1)  # noqa: E501
 
     # fmt: on
     with target:
@@ -77,9 +76,9 @@ def test_simple_reduction(op_type):
 
 def test_reduction_with_multiple_axes():
     src_shape = [128, 512, 4]
-    src_layout = TileLayout(S[(128, 512, 4) : (1@P, 1@F, 512@F)])
+    src_layout = TileLayout(S[(128, 512, 4) : (1 @ P, 1 @ F, 512 @ F)])
     dst_shape = [128]
-    dst_layout = TileLayout(S[128 : 1@P])
+    dst_layout = TileLayout(S[128 : 1 @ P])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -99,7 +98,7 @@ def test_reduction_with_multiple_axes():
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 2048, annotations={"nki_dim":"F"}):
-                        Tx.nki.tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], "add", False, -1)
+                        Tx.nki.tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], "add", False, -1)  # noqa: E501
 
     # fmt: on
     with target:
@@ -110,9 +109,9 @@ def test_reduction_with_multiple_axes():
 
 def test_reduction_in_loop():
     src_shape = [128, 512, 4]
-    src_layout = TileLayout(S[(128, 512, 4) : (1@P, 4@F, 1@F)])
+    src_layout = TileLayout(S[(128, 512, 4) : (1 @ P, 4 @ F, 1 @ F)])
     dst_shape = [128, 4]
-    dst_layout = TileLayout(S[(128, 4) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -133,7 +132,7 @@ def test_reduction_in_loop():
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
-                        Tx.nki.tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", False, -1)
+                        Tx.nki.tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", False, -1)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
@@ -143,9 +142,9 @@ def test_reduction_in_loop():
 
 def test_reduction_two_stage():
     src_shape = [128, 32, 4, 32]
-    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1 @ P, 1 @ F)])
     dst_shape = [128, 4]
-    dst_layout = TileLayout(S[(128, 4) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -167,11 +166,11 @@ def test_reduction_two_stage():
                     Tx.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                         for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
-                            Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)
+                            Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)  # noqa: E501
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
-                        Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)
+                        Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)  # noqa: E501
 
     # fmt: on
     with target:
@@ -183,9 +182,9 @@ def test_reduction_two_stage():
 
 def test_reduction_with_guard():
     src_shape = [512, 2048]
-    src_layout = TileLayout(S[(4, 128, 2048) : (2048@F, 1@P, 1@F)])
+    src_layout = TileLayout(S[(4, 128, 2048) : (2048 @ F, 1 @ P, 1 @ F)])
     dst_shape = [512, 1]
-    dst_layout = TileLayout(S[(4, 128) : (1@F, 1@P)])
+    dst_layout = TileLayout(S[(4, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -195,7 +194,7 @@ def test_reduction_with_guard():
             B_sbuf = Tx.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 for j in range(4):
-                    Tx.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], max_inst_size=512)
+                    Tx.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], max_inst_size=512)  # noqa: E501
 
     @Tx.prim_func(tirx=True)
     def expected():
@@ -210,13 +209,13 @@ def test_reduction_with_guard():
                         Tx.attr(0, "tensorized_nki_instruction", 1)
                         for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                             for f_loop in Tx.serial(512, annotations={"nki_dim": "F"}):
-                                if b_loop - i < 1 and reduction_b_loop * 512 + f_loop < j * 256 + 256:
-                                    Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, b_loop * 2048 + reduction_b_loop * 512 + f_loop], "add", Tx.bool(False), -1)
+                                if b_loop - i < 1 and reduction_b_loop * 512 + f_loop < j * 256 + 256:  # noqa: E501
+                                    Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, b_loop * 2048 + reduction_b_loop * 512 + f_loop], "add", Tx.bool(False), -1)  # noqa: E501
                     Tx.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                         for f_loop in Tx.serial(2, annotations={"nki_dim": "F"}):
                             if b_loop - i < 1 and f_loop * 2 - j < 1:
-                                Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", Tx.bool(False), -1)
+                                Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", Tx.bool(False), -1)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
@@ -228,9 +227,9 @@ def test_reduction_with_guard():
 
 def test_reduction_two_stage_workspace():
     src_shape = [128, 32, 4, 32]
-    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1 @ P, 1 @ F)])
     dst_shape = [128, 4]
-    dst_layout = TileLayout(S[(128, 4) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -253,11 +252,11 @@ def test_reduction_two_stage_workspace():
                     Tx.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                         for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
-                            Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)
+                            Tx.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)  # noqa: E501
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
-                        Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)
+                        Tx.nki.tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)  # noqa: E501
 
     # fmt: on
     with target:

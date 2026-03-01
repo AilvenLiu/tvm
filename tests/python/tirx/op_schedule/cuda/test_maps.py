@@ -20,10 +20,9 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import laneid, tid_in_wg, tx, warpid
-from tvm.tir.layout import TileLayout, S
-
+from tvm.tir.layout import S, TileLayout, laneid, tid_in_wg, tx, warpid
 from tvm.tirx.op_schedule.cuda.cast import _cast_layout_supported_for_local
+
 
 @pytest.mark.parametrize(
     "input",
@@ -67,25 +66,25 @@ def test_unary_op_shared(input, op_type, dtype):
         A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=g_layout)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(s_shape, dtype, scope="shared", layout=s_layout)
-                Tx.copy(A_smem[*copy_slice], A[*copy_slice])
+                Tx.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
                 if op_type == "zero":
-                    Tx.zero(A_smem[*map_slice_res], A_smem[*map_slice_a])
+                    Tx.zero(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
                 elif op_type == "sqrt":
-                    Tx.sqrt(A_smem[*map_slice_res], A_smem[*map_slice_a])
-                Tx.copy(A[*copy_slice], A_smem[*copy_slice])
+                    Tx.sqrt(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
+                Tx.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
     # fmt: on
 
     def get_ref(A_np):
         A_ref = A_np.copy()
         if op_type == "zero":
-            A_ref[*map_slice_res] = 0.0
+            A_ref[tuple(map_slice_res)] = 0.0
         elif op_type == "sqrt":
-            A_ref[*map_slice_res] = np.sqrt(A_np[*map_slice_a])
+            A_ref[tuple(map_slice_res)] = np.sqrt(A_np[tuple(map_slice_a)])
 
         return A_ref
 
@@ -154,7 +153,6 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         return
 
     g_shape, st_a, st_b, st_res, ext_a, ext_b, ext_res, thread_cnt, dev = input
-    s_shape = g_shape
     g_layout = s_layout = TileLayout(S[g_shape])
 
     copy_slice = list(slice(None) for i in range(len(g_shape)))
@@ -171,59 +169,59 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=g_layout)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(g_shape, dtype, scope="shared", layout=s_layout)
                 B_smem = Tx.alloc_buffer(g_shape, dtype, scope="shared", layout=s_layout)
 
-                Tx.copy(A_smem[*copy_slice], A[*copy_slice])
-                Tx.copy(B_smem[*copy_slice], B[*copy_slice])
+                Tx.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
+                Tx.copy(B_smem[tuple(copy_slice)], B[tuple(copy_slice)])
                 if op_type == "add":
-                    Tx.add(A_smem[*map_slice_res], A_smem[*map_slice_a], B_smem[*map_slice_b])
+                    Tx.add(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
                 elif op_type == "sub":
-                    Tx.sub(A_smem[*map_slice_res], A_smem[*map_slice_a], B_smem[*map_slice_b])
+                    Tx.sub(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
                 elif op_type == "mul":
-                    Tx.mul(A_smem[*map_slice_res], A_smem[*map_slice_a], B_smem[*map_slice_b])
+                    Tx.mul(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
                 elif op_type == "fdiv":
-                    Tx.fdiv(A_smem[*map_slice_res], A_smem[*map_slice_a], B_smem[*map_slice_b])
-                Tx.copy(A[*copy_slice], A_smem[*copy_slice])
+                    Tx.fdiv(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
+                Tx.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
 
     @Tx.prim_func(tirx=True)
     def binary_op_const_region_or_region_const(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=g_layout)
-        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=g_layout)
+        _B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=g_layout)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(g_shape, dtype, scope="shared", layout=s_layout)
 
-                Tx.copy(A_smem[*copy_slice], A[*copy_slice])
+                Tx.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
                 if op_type == "add":
                     if operands_type == "const_region":
-                        Tx.add(A_smem[*map_slice_res], const, A_smem[*map_slice_a])
+                        Tx.add(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
                     elif operands_type == "region_const":
-                        Tx.add(A_smem[*map_slice_res], A_smem[*map_slice_a], const)
+                        Tx.add(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], const)
                 elif op_type == "sub":
                     if operands_type == "const_region":
-                        Tx.sub(A_smem[*map_slice_res], const, A_smem[*map_slice_a])
+                        Tx.sub(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
                     elif operands_type == "region_const":
-                        Tx.sub(A_smem[*map_slice_res], A_smem[*map_slice_a], const)
+                        Tx.sub(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], const)
                 elif op_type == "mul":
                     if operands_type == "const_region":
-                        Tx.mul(A_smem[*map_slice_res], const, A_smem[*map_slice_a])
+                        Tx.mul(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
                     elif operands_type == "region_const":
-                        Tx.mul(A_smem[*map_slice_res], A_smem[*map_slice_a], const)
+                        Tx.mul(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], const)
                 elif op_type == "fdiv":
                     if operands_type == "const_region":
-                        Tx.fdiv(A_smem[*map_slice_res], const, A_smem[*map_slice_a])
+                        Tx.fdiv(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
                     elif operands_type == "region_const":
-                        Tx.fdiv(A_smem[*map_slice_res], A_smem[*map_slice_a], const)
-                Tx.copy(A[*copy_slice], A_smem[*copy_slice])
+                        Tx.fdiv(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], const)
+                Tx.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
     # fmt: on
 
     def get_prim_func(operands_type):
@@ -237,24 +235,24 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         A_ref = A_np.copy()
         if op_type == "add":
             if operands_type == "region_region":
-                A_ref[*map_slice_res] = A_np[*map_slice_a] + B_np[*map_slice_b]
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] + B_np[tuple(map_slice_b)]
             elif operands_type in ["const_region", "region_const"]:
-                A_ref[*map_slice_res] = A_np[*map_slice_a] + 3.0
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] + 3.0
         elif op_type == "sub":
             if operands_type == "region_region":
-                A_ref[*map_slice_res] = A_np[*map_slice_a] - B_np[*map_slice_b]
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] - B_np[tuple(map_slice_b)]
             elif operands_type in ["const_region", "region_const"]:
-                A_ref[*map_slice_res] = A_np[*map_slice_a] - 3.0
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] - 3.0
         elif op_type == "mul":
             if operands_type == "region_region":
-                A_ref[*map_slice_res] = A_np[*map_slice_a] * B_np[*map_slice_b]
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] * B_np[tuple(map_slice_b)]
             elif operands_type in ["const_region", "region_const"]:
-                A_ref[*map_slice_res] = A_np[*map_slice_a] * 3.0
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] * 3.0
         elif op_type == "fdiv":
             if operands_type == "region_region":
-                A_ref[*map_slice_res] = A_np[*map_slice_a] / B_np[*map_slice_b]
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] / B_np[tuple(map_slice_b)]
             elif operands_type in ["const_region", "region_const"]:
-                A_ref[*map_slice_res] = A_np[*map_slice_a] / 3.0
+                A_ref[tuple(map_slice_res)] = A_np[tuple(map_slice_a)] / 3.0
 
         return A_ref
 
@@ -486,12 +484,12 @@ def test_binary_op_local(input, op_type, dtype):
                     for i in Tx.serial(NUM_COL // 8):
                         for j in Tx.unroll(2):
                             for vec in Tx.vectorized(2):
-                                A_buffer[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+                                A_buffer[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]  # noqa: E501
 
                 # load B into B_buffer
                 with Tx.thread():
                     for i in Tx.unroll(2):
-                        B_buffer[i] = B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4]
+                        B_buffer[i] = B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4]  # noqa: E501
 
                 # binary op
                 with Tx.warp():
@@ -509,7 +507,7 @@ def test_binary_op_local(input, op_type, dtype):
                     for i in Tx.serial(NUM_COL // 8):
                         for j in Tx.unroll(2):
                             for vec in Tx.vectorized(2):
-                                A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = A_buffer[j, i * 2 + vec]
+                                A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = A_buffer[j, i * 2 + vec]  # noqa: E501
 
     # fmt: on
 
@@ -559,8 +557,8 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, shape, B_dtype, layout=TileLayout(S[shape]))
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
                 A_local = Tx.alloc_local(shape, dtype=A_dtype, layout=TileLayout(S[shape]))
@@ -581,13 +579,14 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
 
 @pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
 def test_cast_warpgroup_local_view(A_dtype, B_dtype):
-    """Tx.cast in warpgroup scope with offset (tid_in_wg + layout offset). Covers offset/tid_in_wg/warpgroup scope."""
+    """Tx.cast in warpgroup scope with offset (tid_in_wg + layout offset). Covers offset/tid_in_wg/warpgroup scope."""  # noqa: E501
     N_THREADS, LOCAL_LEN = 128, 8
     g_shape = (N_THREADS, LOCAL_LEN)
     g_layout = TileLayout(S[g_shape])
     use_offset = True
     if use_offset:
-        from tvm.tir.layout import Iter, Axis
+        from tvm.tir.layout import Axis, Iter
+
         m_axis = Axis.get("m")
         shard = [Iter(N_THREADS, 1, tid_in_wg), Iter(LOCAL_LEN, 1, m_axis)]
         cast_layout = TileLayout.from_iters(shard, [], {m_axis: 0})
@@ -608,8 +607,8 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            wg_id = Tx.warpgroup_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
             tid_in_wg = Tx.thread_id([N_THREADS], parent="warpgroup")
 
             with Tx.thread():
@@ -658,7 +657,7 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             tx_var = Tx.thread_id([N_THREADS], parent="cta")
 
             with Tx.thread():
@@ -687,7 +686,7 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
 
 def test_cast_layout_partition_and_validation():
     """Partition table (simplified): partition structure and _cast_layout_supported_for_local."""
-    from tvm.tir.layout import Iter, Axis, warpid
+    from tvm.tir.layout import Axis, Iter
     from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
 
     m_axis = Axis.get("m")
@@ -695,20 +694,34 @@ def test_cast_layout_partition_and_validation():
     # (layout, expected_supported, optional check: part -> None or assert)
     cases = [
         # Supported: single tx, tid_in_wg, thread in middle (from_iters), mixed warpid+laneid
-        (TileLayout(S[(128, 8) : (1 @ tx, 1)]), True,
-         lambda p: p[0].get(tx) == ([0], [128]) and p[1] == [1] and p[2] == [8]),
-        (TileLayout(S[(128, 8) : (1 @ tid_in_wg, 1)]), True,
-         lambda p: p[0].get(tid_in_wg) == ([0], [128])),
-        (TileLayout.from_iters(
-            [Iter(4, 16, "m"), Iter(8, 2, tx), Iter(2, 1, "m")], [], {}), True,
-         lambda p: p[0].get(tx) == ([1], [8]) and p[1] == [0, 2]),
-        (TileLayout(S[(2, 8, 4, 2) : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)]), True,
-         lambda p: warpid in p[0] and laneid in p[0] and p[1] == [3] and p[2] == [2]),
+        (
+            TileLayout(S[(128, 8) : (1 @ tx, 1)]),
+            True,
+            lambda p: p[0].get(tx) == ([0], [128]) and p[1] == [1] and p[2] == [8],
+        ),
+        (
+            TileLayout(S[(128, 8) : (1 @ tid_in_wg, 1)]),
+            True,
+            lambda p: p[0].get(tid_in_wg) == ([0], [128]),
+        ),
+        (
+            TileLayout.from_iters([Iter(4, 16, "m"), Iter(8, 2, tx), Iter(2, 1, "m")], [], {}),
+            True,
+            lambda p: p[0].get(tx) == ([1], [8]) and p[1] == [0, 2],
+        ),
+        (
+            TileLayout(S[(2, 8, 4, 2) : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)]),
+            True,
+            lambda p: warpid in p[0] and laneid in p[0] and p[1] == [3] and p[2] == [2],
+        ),
         # Rejected: no thread, no local, thread in replica
         (TileLayout(S[(64, 8) : (1, 1)]), False, None),
         (TileLayout(S[(8, 8) : (1 @ tx, 1 @ laneid)]), False, None),
-        (TileLayout.from_iters(
-            [Iter(128, 1, tx), Iter(8, 1, m_axis)], [Iter(2, 1, laneid)], {}), False, None),
+        (
+            TileLayout.from_iters([Iter(128, 1, tx), Iter(8, 1, m_axis)], [Iter(2, 1, laneid)], {}),
+            False,
+            None,
+        ),
     ]
 
     for layout, expected_supported, check in cases:
@@ -722,7 +735,6 @@ def test_cast_layout_partition_and_validation():
 
 def test_cast_mixed_axes_and_subregion():
     """Test cast with mixed axes and subregion."""
-    from tvm.tir.layout import warpid
 
     N_WARPS, LANES = 2, 32
     LOCAL_LEN = 4
@@ -750,7 +762,7 @@ def test_cast_mixed_axes_and_subregion():
         A = Tx.match_buffer(A_ptr, full_shape, "float32", layout=g_layout)
         B = Tx.match_buffer(B_ptr, full_shape, "float16", layout=g_layout)
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             warp_id = Tx.warp_id([N_WARPS], parent="cta")
             lane_id = Tx.thread_id([LANES], parent="warp")
             with Tx.thread():
@@ -781,14 +793,14 @@ def test_cast_mixed_axes_and_subregion():
     tvm.testing.assert_allclose(
         B.numpy()[:, :, :, SLICE_START:SLICE_END],
         B_ref[:, :, :, SLICE_START:SLICE_END],
-        atol=1e-2, rtol=0,
+        atol=1e-2,
+        rtol=0,
     )
 
 
 def test_cast_joint_decomposition_extents_order():
     """Test joint decomposition uses thread dims in layout order with correct extents."""
     from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
-    from tvm.tir.layout import warpid
 
     layout = TileLayout(S[(2, 32, 4) : (2 @ warpid, 32 @ laneid, 1)])
     part = _get_layout_thread_local_partition(layout)
@@ -813,20 +825,21 @@ def test_cast_joint_decomposition_extents_order():
 
 
 def test_cast_validate_extent_mismatch_rejected():
-    """Validation rejects when src and dst layouts have same thread positions but different extents."""
-    from tvm.tir.layout import warpid
+    """Validation rejects when src and dst layouts have same thread positions but different extents."""  # noqa: E501
 
     view_shape = (2, 8, 4, 8)
     g_layout = TileLayout(S[view_shape])
     src_layout = TileLayout(S[view_shape : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)])
-    dst_layout = TileLayout(S[view_shape : (2 @ warpid, 8 @ laneid, 1 @ laneid, 1)])  # dim1 extent 8 != 4
+    dst_layout = TileLayout(
+        S[view_shape : (2 @ warpid, 8 @ laneid, 1 @ laneid, 1)]
+    )  # dim1 extent 8 != 4
 
     @Tx.prim_func(tirx=True)
     def kernel(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, view_shape, "float32", layout=g_layout)
         B = Tx.match_buffer(B_ptr, view_shape, "float16", layout=g_layout)
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
+            Tx.cta_id([1], parent="kernel")
             warp_id = Tx.warp_id([2], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
             with Tx.thread():

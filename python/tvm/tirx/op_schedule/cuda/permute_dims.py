@@ -15,17 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 import math
-from typing import Optional
 
 from tvm.script import tirx as Tx
-from tvm.tir import PrimFunc, Buffer, BufferRegion
+from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tirx.operator.op import PermuteDims
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
     predicate,
+    register_dispatch,
 )
+
 from .common import get_indices, get_st_extent
 
 
@@ -45,7 +44,8 @@ def validate_deepgemm_permute_dims(
     if sctx.exec_scope.name == "warp":
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
         ndim = len(order)
-        if not list(order) == list(range(ndim - 2)) + [ndim - 1, ndim - 2]:
+        expected_order = [*list(range(ndim - 2)), ndim - 1, ndim - 2]
+        if list(order) != expected_order:
             return False
         if not math.prod(extent[:-2]) == 1:
             return False
@@ -59,7 +59,7 @@ def validate_deepgemm_permute_dims(
 def vectorized_permute_dims_last_2d_impl(
     op_call: OpCall,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     op_call = OpCall.downcast(op_call)
     if isinstance(op_call.buffer, Buffer):
         buffer: Buffer = op_call.buffer
@@ -87,23 +87,24 @@ def vectorized_permute_dims_last_2d_impl(
     if sctx.exec_scope.name == "warp":
         tid_x = sctx.launch_params["threadIdx.x"]
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+
         # fmt: off
         @Tx.prim_func(tirx=True)
         def impl():
             warp_size = Tx.meta_var(32)
             lane_id = Tx.meta_var(tid_x % warp_size)
-            reg_trans = Tx.alloc_buffer((N // warp_size, M // vec_len, vec_len), buffer.dtype, scope="local")
+            reg_trans = Tx.alloc_buffer((N // warp_size, M // vec_len, vec_len), buffer.dtype, scope="local")  # noqa: E501
             for wi in Tx.unroll(0, N // warp_size):
                 for vi in Tx.unroll(0, M // vec_len):
                     for vec in Tx.unroll(vec_len):
-                        old_index = Tx.meta_var(get_indices((vi * vec_len + vec) * N + wi * warp_size + lane_id, st, extent))
-                        reg_trans[wi, vi, vec] = buffer[*old_index]
+                        old_index = Tx.meta_var(get_indices((vi * vec_len + vec) * N + wi * warp_size + lane_id, st, extent))  # noqa: E501
+                        reg_trans[wi, vi, vec] = buffer[tuple(old_index)]
             Tx.cuda.warp_sync()
             for wi in Tx.unroll(0, N // warp_size):
                 for vi in Tx.unroll(0, M // vec_len):
                     for vec in Tx.vectorized(vec_len):
-                        new_index = Tx.meta_var(get_indices((wi * warp_size + lane_id) * M + vi * vec_len + vec, st, extent))
-                        buffer[*new_index] = reg_trans[wi, vi, vec]
+                        new_index = Tx.meta_var(get_indices((wi * warp_size + lane_id) * M + vi * vec_len + vec, st, extent))  # noqa: E501
+                        buffer[tuple(new_index)] = reg_trans[wi, vi, vec]
             Tx.cuda.warp_sync()
         # fmt: on
     else:
@@ -126,5 +127,5 @@ def vectorized_permute_dims_last_2d_impl(
         )
     ],
 )
-def permute_dims_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def permute_dims_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     return vectorized_permute_dims_last_2d_impl(op, sctx)

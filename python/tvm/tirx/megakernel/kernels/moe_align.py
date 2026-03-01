@@ -16,10 +16,9 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, next_power_of_two
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 class MOEAlignTile(Tile):
@@ -185,7 +184,6 @@ class MOEAlignTile(Tile):
 
 
 class CountAndSortExpertTokens(Tile):
-
     VEC_SIZE = 16 // F16_BYTES
     PIPE_DEPTH = 8
 
@@ -212,7 +210,7 @@ class CountAndSortExpertTokens(Tile):
 
     # fmt: off
     @Tx.inline
-    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer, data, reordered_data):
+    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer, data, reordered_data):  # noqa: E501
         idx = Tx.alloc_local([1], "int32", name="idx")
         cnt = Tx.alloc_local([1], "int32", name="cnt")
         col_idx = Tx.alloc_local([1], "int32", name="col_idx")
@@ -222,7 +220,7 @@ class CountAndSortExpertTokens(Tile):
             self.smem_manager.wait_all("cta")
             if process_token_idx < self.numel:
                 expert_id: Tx.let = topk_ids[process_token_idx]
-                rank_post_pad: Tx.let = Tx.cuda.atomic_add(Tx.address_of(cumsum_buffer[expert_id]), 1)
+                rank_post_pad: Tx.let = Tx.cuda.atomic_add(Tx.address_of(cumsum_buffer[expert_id]), 1)  # noqa: E501
                 sorted_token_ids[rank_post_pad] = process_token_idx
                 self.s_rank_post_pad[tid] = rank_post_pad
             idx[0] = m_idx
@@ -231,22 +229,22 @@ class CountAndSortExpertTokens(Tile):
             for i in Tx.unroll(self.PIPE_DEPTH - 1):
                 with Tx.thread():
                     if idx[0] < self.numel and col_idx[0] < self.hidden_size:
-                        Tx.copy_async(self.fetched_data[i, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                        Tx.copy_async(self.fetched_data[i, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)  # noqa: E501
                     Tx.ptx.cp_async.commit_group()
                 idx[0] += KernelConfig.SM_NUMBER
             cnt[0] = 0
             while idx[0] < self.numel + (self.PIPE_DEPTH - 1) * KernelConfig.SM_NUMBER:
                 with Tx.thread():
                     if idx[0] < self.numel and col_idx[0] < self.hidden_size:
-                        cp_pipe_idx = Tx.meta_var((idx[0] // KernelConfig.SM_NUMBER) % self.PIPE_DEPTH)
-                        Tx.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                        cp_pipe_idx = Tx.meta_var((idx[0] // KernelConfig.SM_NUMBER) % self.PIPE_DEPTH)  # noqa: E501
+                        Tx.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)  # noqa: E501
                     Tx.ptx.cp_async.commit_group()
                     Tx.ptx.cp_async.wait_group(self.PIPE_DEPTH - 1)
                     rank_post_pad: Tx.let = self.s_rank_post_pad[cnt[0]]
                     pipe_idx = Tx.meta_var(cnt[0] % self.PIPE_DEPTH)
                     if col_idx[0] < self.hidden_size:
                         for vec in Tx.vectorized(self.VEC_SIZE):
-                            reordered_data[rank_post_pad, col_idx[0] + vec] = self.fetched_data[pipe_idx, tid, vec]
+                            reordered_data[rank_post_pad, col_idx[0] + vec] = self.fetched_data[pipe_idx, tid, vec]  # noqa: E501
                     idx[0] += KernelConfig.SM_NUMBER
                     cnt[0] += 1
             self.smem_manager.arrive_all("cta")

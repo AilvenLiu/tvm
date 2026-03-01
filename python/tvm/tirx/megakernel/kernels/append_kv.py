@@ -16,14 +16,12 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
 from tvm.tirx.megakernel.utils.base import KernelConfig, Tile
-from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.megakernel.utils.config import F16_BYTES
+from tvm.tirx.megakernel.utils.utils import ceildiv
 
 
 class AppendKVTile(Tile):
-
     # kv_cache_tvm: [max_page_num, 2, kv_heads, page_size, head_dim]
     # qkv_tvm: [batch_size, qo_heads + 2 * kv_heads, head_dim]
     # kv_indptr_tvm: [batch_size + 1]
@@ -74,7 +72,6 @@ class AppendKVTile(Tile):
                     batch_idx = Tx.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
                     head_idx = Tx.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
                     if batch_idx < self.batch_size and head_idx < self.kv_heads:
-
                         self.pos[0] = Tx.cuda.ldg(Tx.address_of(pos_map[batch_idx]), "int32")
                         page_id = Tx.meta_var(self.pos[0] // self.page_size)
                         offset = Tx.meta_var(self.pos[0] % self.page_size)

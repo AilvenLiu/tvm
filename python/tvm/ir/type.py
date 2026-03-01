@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Unified type system in the project."""
+
 import tvm_ffi
 
 import tvm
@@ -123,5 +124,6 @@ class TensorMapType(Type):
 
     def __init__(self, span=None):
         self.__init_handle_by_constructor__(
-            _ffi_api.TensorMapType, span  # pylint: disable=no-member
+            _ffi_api.TensorMapType,
+            span,  # pylint: disable=no-member
         )

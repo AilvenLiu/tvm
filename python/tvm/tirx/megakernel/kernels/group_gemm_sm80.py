@@ -15,13 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import tvm
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 def int_cell(value):
@@ -67,7 +64,7 @@ return __half2float(x);
 
 # fmt: off
 @Tx.inline
-def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
+def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):  # noqa: E501
     with Tx.thread():
         C_mma = Tx.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
         A_mma = Tx.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
@@ -86,7 +83,6 @@ def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b
 
 
 class GroupGEMMTile(Tile):
-
     VEC_LEN = 128 // (F16_BYTES * 8)
 
     def __init__(self, N, K, BLK_M, BLK_N, BLK_K, num_stages):
@@ -153,14 +149,14 @@ class GroupGEMMTile(Tile):
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         start_offset = smem_manager.pool_allocator.offset
-        A_smem = smem_manager.alloc(
+        smem_manager.alloc(
             [self.num_stages * self.BLK_M * self.BLK_K], "float16", align=16, name="A_smem"
         )
-        B_smem = smem_manager.alloc(
+        smem_manager.alloc(
             [self.num_stages * self.BLK_N * self.BLK_K], "float16", align=16, name="B_smem"
         )
         smem_manager.pool_allocator.move_base_to(start_offset)
-        C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
+        smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
 
     @Tx.inline
     def run(
@@ -178,6 +174,6 @@ class GroupGEMMTile(Tile):
         num_tokens_post_pad,
     ):
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
+            Tx.thread_id([32], parent="warp")

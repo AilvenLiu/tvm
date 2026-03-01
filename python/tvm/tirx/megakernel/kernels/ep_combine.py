@@ -16,8 +16,7 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
 from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
@@ -82,17 +81,17 @@ class EPCombineSendTile(Tile):
         rank,
     ):
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # each CTA is responsible for one expert and one source GPU
             dst_expert = Tx.meta_var(Tx.int32(self.local_num_experts * rank + local_expert_idx))
             num_recv = Tx.meta_var(num_recv_tokens[local_expert_idx, src_rank_idx])
             Tx.nvshmem.putmem_signal_nbi.block(
                 dst=buf_recv.access_ptr("w", offset=buf_recv.elem_offset_of([dst_expert, 0, 0])),
-                src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([local_expert_idx, src_rank_idx, 0, 0])),
+                src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([local_expert_idx, src_rank_idx, 0, 0])),  # noqa: E501
                 nelems=num_recv * self.hidden_dim * self.nbytes,
                 sig_addr=buf_wait.access_ptr("w", offset=buf_wait.elem_offset_of([dst_expert])),
                 signal=1,
@@ -168,10 +167,10 @@ class EPCombineRecvTile(Tile):
         rank,
     ):
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
 
             # each CTA is responsible for one token
             if token_idx < self.num_tokens:

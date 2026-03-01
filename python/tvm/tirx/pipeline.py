@@ -97,6 +97,7 @@ class MBarrier:
     def remote_view(self, rank):
         """Create a view of this barrier mapped to another CTA's shared memory."""
         from functools import partial
+
         from tvm.ir import PointerType, PrimType
         from tvm.tir import Var as TIRVar
 

@@ -17,23 +17,21 @@
 
 """Implementation of binary operator schedules."""
 
-from typing import Optional, Union, List, Tuple, Dict
-import operator
-import functools
 from enum import Enum
+
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc, FloatImm
+from tvm.tir import BufferRegion, FloatImm, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
+from ..common import MapOpType
 from .common import (
+    InstructionGenerator,
     get_ewise_dim_map,
     init_analyzer,
-    InstructionGenerator,
     nki_dim,
 )
-from ..common import MapOpType
 
 binary_map_ops = {
     MapOpType.ADD: "add",
@@ -51,18 +49,18 @@ class InstType(Enum):
 
 def try_find_inst_nary(
     _dst: BufferRegion,
-    _srcs: List[Union[BufferRegion, FloatImm]],
+    _srcs: list[BufferRegion | FloatImm],
     analyzer: Analyzer,
     inst_gen: InstructionGenerator,
-    allowed_f_dim_dst: Optional[Tuple[int]] = None,
-    allowed_f_dim_srcs: Optional[Tuple[Tuple[int]]] = None,
+    allowed_f_dim_dst: tuple[int] | None = None,
+    allowed_f_dim_srcs: tuple[tuple[int]] | None = None,
     allow_first_op_tensortensor: bool = True,
 ):
     """Find instruction parameters for n-ary operations."""
     # Validate inputs and handle source swapping if needed
-    assert not (
-        isinstance(_srcs[0], FloatImm) and isinstance(_srcs[1], FloatImm)
-    ), "Nary operation does not support taking all FloatImm sources"
+    assert not (isinstance(_srcs[0], FloatImm) and isinstance(_srcs[1], FloatImm)), (
+        "Nary operation does not support taking all FloatImm sources"
+    )
     assert 2 <= len(_srcs) <= 3, "Only 2-3 sources are supported for nary operation"
 
     if isinstance(_srcs[0], FloatImm):
@@ -72,9 +70,10 @@ def try_find_inst_nary(
         reverse = [False] * (len(_srcs) - 1)
 
     # Extract buffers and validate properties
-    dst, srcs = _dst.buffer, [
-        _src.buffer if isinstance(_src, BufferRegion) else None for _src in _srcs
-    ]
+    dst, srcs = (
+        _dst.buffer,
+        [_src.buffer if isinstance(_src, BufferRegion) else None for _src in _srcs],
+    )
     dst_region = _dst.region
 
     valid_buffers = all(
@@ -180,9 +179,9 @@ def try_find_inst_nary(
             if i not in broadcast_dims
         }
         inst_gen.link_buffer_regions(_srcs[0], src, src0_to_src_dim_map)
-        assert inst_gen.check_partition_dim_match(
-            _srcs[0], src
-        ), f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
+        assert inst_gen.check_partition_dim_match(_srcs[0], src), (
+            f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
+        )
 
     # Find instruction parameters for each source
     inst_types = []
@@ -207,7 +206,6 @@ def try_find_inst_nary(
         if not allow_tt:
             plan = "tensorscalar"
         else:
-
             if (
                 inst_repr_bcast.stride == 1
                 and inst_repr_non_bcast.stride > 1
@@ -239,7 +237,7 @@ def binary_trn(
     op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Generate a binary operation schedule for Trainium."""
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         fail("requires Trainium target and kernel exec_scope")
@@ -276,9 +274,9 @@ def binary_trn(
 
     # Select appropriate NKI function based on instruction type
     _func = Tx.nki.tensortensor if inst_types[0] == InstType.TENSOR_TENSOR else Tx.nki.tensorscalar
-    func = lambda *args: (
-        _func(*args, reverse[0]) if inst_types[0] == InstType.TENSOR_SCALAR else _func(*args)
-    )
+
+    def func(*args):
+        return _func(*args, reverse[0]) if inst_types[0] == InstType.TENSOR_SCALAR else _func(*args)
 
     # Define the implementation function
     @Tx.prim_func(tirx=True)
@@ -296,15 +294,20 @@ def binary_trn(
                                 src2_indices = Tx.meta_var(inst_gen.generate_indices(_src2))
                                 Tx.evaluate(
                                     func(
-                                        dst[*dst_indices],
-                                        src1[*src1_indices],
-                                        src2[*src2_indices],
+                                        dst[tuple(dst_indices)],
+                                        src1[tuple(src1_indices)],
+                                        src2[tuple(src2_indices)],
                                         opcode,
                                     )
                                 )
                             else:
                                 Tx.evaluate(
-                                    func(dst[*dst_indices], src1[*src1_indices], CONST, opcode)
+                                    func(
+                                        dst[tuple(dst_indices)],
+                                        src1[tuple(src1_indices)],
+                                        CONST,
+                                        opcode,
+                                    )
                                 )
 
     return impl

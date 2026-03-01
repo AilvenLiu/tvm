@@ -649,8 +649,8 @@ Stmt StmtMutator::VisitStmt_(const ExecScopeStmtNode* op) {
     if (slices_changed || extents_changed || sid_changed) {
       scope_changed = true;
       auto new_slice = ExecScopeSlice(slices_changed ? new_slices : slice->slices,
-                                      extents_changed ? new_extents : slice->extents,
-                                      slice->parent, slice->name);
+                                      extents_changed ? new_extents : slice->extents, slice->parent,
+                                      slice->name);
       if (sid_changed) {
         new_slice.CopyOnWrite()->scope_id_def = std::move(new_scope_id_def);
       } else {

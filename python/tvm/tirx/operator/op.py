@@ -17,13 +17,10 @@
 
 """Implementation of TIR operator."""
 
-from typing import List
-
-from tvm.tir.stmt import OpCall, normalize_const_arg
-from tvm.tir.stmt import _ffi_api
-from tvm.tir import PrimExpr, BufferRegion, FloatImm, IntImm
 from tvm.ir import Op
+from tvm.tir import BufferRegion, FloatImm, IntImm, PrimExpr
 from tvm.tir.predicate import Predicate
+from tvm.tir.stmt import OpCall, _ffi_api, normalize_const_arg
 
 
 def get_tirx_op(op_name: str):
@@ -52,29 +49,29 @@ class UnaryOp(OpCall):
     input = ArgProperty(1)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expression (input) of the operator."""
         return [self.input]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expression (output) of the operator."""
         return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
         if self.scalar_input:
-            assert isinstance(
-                self.input, (FloatImm, IntImm)
-            ), f"{self} expects FloatImm or IntImm as value, got {self.input}"
+            assert isinstance(self.input, (FloatImm, IntImm)), (  # noqa: UP038
+                f"{self} expects FloatImm or IntImm as value, got {self.input}"
+            )
         else:
-            assert isinstance(
-                self.input, BufferRegion
-            ), f"{self} expects BufferRegion as value, got {self.input}"
+            assert isinstance(self.input, BufferRegion), (
+                f"{self} expects BufferRegion as value, got {self.input}"
+            )
 
 
 class UnaryOpWithBiasScale(UnaryOp):
@@ -82,22 +79,22 @@ class UnaryOpWithBiasScale(UnaryOp):
 
     These operators support additional bias and scale parameters for more complex operations (only on trn).
     output = unary(input * scale + bias)
-    """
+    """  # noqa: E501
 
     bias = ArgProperty(2)
     scale = ArgProperty(3)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.input, self.bias, self.scale]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
-        assert all(
-            isinstance(arg, BufferRegion) for arg in (self.output, self.input)
-        ), f"{self} expects BufferRegion arguments as input and output, got {self.args[:2]}"
+        assert all(isinstance(arg, BufferRegion) for arg in (self.output, self.input)), (
+            f"{self} expects BufferRegion arguments as input and output, got {self.args[:2]}"
+        )
 
 
 class BinaryOp(OpCall):
@@ -111,24 +108,24 @@ class BinaryOp(OpCall):
     output = ArgProperty(0)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.lhs, self.rhs]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expression (output) of the operator."""
         return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 3, f"{self} expects 3 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.dsts[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as inputs, got {self.srcs}"
+        assert isinstance(self.dsts[0], BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+        )
+        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as inputs, got {self.srcs}"
+        )
 
 
 class ReduceOp(OpCall):
@@ -143,27 +140,27 @@ class ReduceOp(OpCall):
     accum = ArgProperty(3)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expression (input) of the operator."""
         return [self.input]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expression (output) of the operator."""
         return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
-        assert isinstance(
-            self.input, BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.input}"
-        assert isinstance(
-            self.accum, (bool, IntImm)
-        ), f"{self} expects bool or IntImm as accum, got {self.accum}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
+        assert isinstance(self.input, BufferRegion), (
+            f"{self} expects BufferRegion as input, got {self.input}"
+        )
+        assert isinstance(self.accum, (bool, IntImm)), (  # noqa: UP038
+            f"{self} expects bool or IntImm as accum, got {self.accum}"
+        )
 
 
 ### Schedule Operators ###
@@ -233,24 +230,24 @@ class Copy(OpCall):
     src = ArgProperty(1)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.src]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return [self.dst]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.dst, BufferRegion
-        ), f"{self} expects BufferRegion as dst, got {self.dst}"
-        assert isinstance(
-            self.src, BufferRegion
-        ), f"{self} expects BufferRegion as src, got {self.src}"
+        assert isinstance(self.dst, BufferRegion), (
+            f"{self} expects BufferRegion as dst, got {self.dst}"
+        )
+        assert isinstance(self.src, BufferRegion), (
+            f"{self} expects BufferRegion as src, got {self.src}"
+        )
 
 
 class CopyAsync(OpCall):
@@ -267,24 +264,24 @@ class CopyAsync(OpCall):
     src = ArgProperty(1)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.src]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return [self.dst]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.dst, BufferRegion
-        ), f"{self} expects BufferRegion as dst, got {self.dst}"
-        assert isinstance(
-            self.src, BufferRegion
-        ), f"{self} expects BufferRegion as src, got {self.src}"
+        assert isinstance(self.dst, BufferRegion), (
+            f"{self} expects BufferRegion as dst, got {self.dst}"
+        )
+        assert isinstance(self.src, BufferRegion), (
+            f"{self} expects BufferRegion as src, got {self.src}"
+        )
 
 
 class Gemm(OpCall):
@@ -312,33 +309,33 @@ class Gemm(OpCall):
     beta = ArgProperty(7)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source matrices."""
         return [self.lhs, self.rhs, self.bias]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination matrix."""
         return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 8, f"{self} expects 8 arguments, got {len(self.args)}"
-        assert all(
-            isinstance(arg, BufferRegion) for arg in (self.output, self.lhs, self.rhs)
-        ), f"{self} expects BufferRegion arguments as output, lhs and rhs, got {(self.output, self.lhs, self.rhs)}"
-        assert isinstance(
-            self.bias, (BufferRegion, FloatImm)
-        ), f"{self} expects BufferRegion or FloatImm arguments as bias, got {self.bias}"
-        assert isinstance(
-            self.transpose_A, (bool, IntImm)
-        ), f"{self} expects bool or IntImm arguments as transpose_A, got {self.transpose_A}"
-        assert isinstance(
-            self.transpose_B, (bool, IntImm)
-        ), f"{self} expects bool arguments as transpose_B, got {self.transpose_B}"
-        assert isinstance(
-            self.alpha, FloatImm
-        ), f"{self} expects FloatImm as alpha, got {self.alpha}"
+        assert all(isinstance(arg, BufferRegion) for arg in (self.output, self.lhs, self.rhs)), (
+            f"{self} expects BufferRegion arguments as output, lhs and rhs, got {(self.output, self.lhs, self.rhs)}"  # noqa: E501
+        )
+        assert isinstance(self.bias, (BufferRegion, FloatImm)), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as bias, got {self.bias}"
+        )
+        assert isinstance(self.transpose_A, (bool, IntImm)), (  # noqa: UP038
+            f"{self} expects bool or IntImm arguments as transpose_A, got {self.transpose_A}"
+        )
+        assert isinstance(self.transpose_B, (bool, IntImm)), (  # noqa: UP038
+            f"{self} expects bool arguments as transpose_B, got {self.transpose_B}"
+        )
+        assert isinstance(self.alpha, FloatImm), (
+            f"{self} expects FloatImm as alpha, got {self.alpha}"
+        )
         assert isinstance(self.beta, FloatImm), f"{self} expects FloatImm as beta, got {self.beta}"
 
 
@@ -383,7 +380,7 @@ class GemmAsync(OpCall):
         return self.args[7] if self.is_block_scaled else self.args[5]
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source matrices (including scale factors if block-scaled)."""
         srcs = [self.lhs, self.rhs]
         if self.is_block_scaled:
@@ -391,7 +388,7 @@ class GemmAsync(OpCall):
         return srcs
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination matrix."""
         return [self.output]
 
@@ -469,15 +466,15 @@ class Select(BinaryOp):
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in (self.lhs, self.rhs)
-        ), f"{self} expects BufferRegion or FloatImm arguments as inputs, got {(self.lhs, self.rhs)}"
-        assert isinstance(
-            self.predicate, Predicate
-        ), f"{self} expects Predicate as predicate, got {self.predicate}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
+        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in (self.lhs, self.rhs)), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as inputs, got {(self.lhs, self.rhs)}"  # noqa: E501
+        )
+        assert isinstance(self.predicate, Predicate), (
+            f"{self} expects Predicate as predicate, got {self.predicate}"
+        )
 
 
 class KernelReplacePoint(OpCall):
@@ -486,12 +483,12 @@ class KernelReplacePoint(OpCall):
     op = get_tirx_op("tvm_kernel_replace_point")
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return []
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return []
 
@@ -505,7 +502,7 @@ class BinaryReduce(OpCall):
     """Combine a binary operation with a reduction operation.
 
     binary_reduce(binary_output, reduce_output, binary_input1, binary_input2, binary_op, reduce_op, reduce_axes, )
-    """
+    """  # noqa: E501
 
     op = get_tirx_op("binary_reduce")
 
@@ -518,36 +515,36 @@ class BinaryReduce(OpCall):
     reduce_axes = ArgProperty(6)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.binary_input1, self.binary_input2]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return [self.binary_output, self.reduce_output]
 
     def validate(self) -> None:
         assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
-        assert all(
-            isinstance(arg, BufferRegion) for arg in self.dsts
-        ), f"{self} expects BufferRegion arguments as binary_output and reduce_output, got {self.dsts}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as binary_input1 and binary_input2, got {self.srcs}"
-        assert isinstance(
-            self.binary_op, Op
-        ), f"{self} expects Op as binary_op, got {self.binary_op}"
-        assert isinstance(
-            self.reduce_op, Op
-        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        assert all(isinstance(arg, BufferRegion) for arg in self.dsts), (
+            f"{self} expects BufferRegion arguments as binary_output and reduce_output, got {self.dsts}"  # noqa: E501
+        )
+        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as binary_input1 and binary_input2, got {self.srcs}"  # noqa: E501
+        )
+        assert isinstance(self.binary_op, Op), (
+            f"{self} expects Op as binary_op, got {self.binary_op}"
+        )
+        assert isinstance(self.reduce_op, Op), (
+            f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        )
 
 
 class UnaryReduce(OpCall):
     """Combine a unary operation with a reduction operation.
 
     unary_reduce(unary_output, reduce_output, unary_input, unary_op, reduce_op, bias, scale, reduce_axes)
-    """
+    """  # noqa: E501
 
     op = get_tirx_op("unary_reduce")
 
@@ -561,28 +558,28 @@ class UnaryReduce(OpCall):
     reduce_axes = ArgProperty(7)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.unary_input, self.bias, self.scale]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return [self.unary_output, self.reduce_output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 8, f"{self} expects 8 arguments, got {len(self.args)}"
-        assert all(
-            isinstance(arg, BufferRegion) for arg in self.dsts
-        ), f"{self} expects BufferRegion arguments as unary_output and reduce_output, got {self.dsts}"
-        assert isinstance(
-            self.unary_input, (BufferRegion, FloatImm)
-        ), f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.unary_input}"
+        assert all(isinstance(arg, BufferRegion) for arg in self.dsts), (
+            f"{self} expects BufferRegion arguments as unary_output and reduce_output, got {self.dsts}"  # noqa: E501
+        )
+        assert isinstance(self.unary_input, (BufferRegion, FloatImm)), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.unary_input}"  # noqa: E501
+        )
         assert isinstance(self.unary_op, Op), f"{self} expects Op as unary_op, got {self.unary_op}"
-        assert isinstance(
-            self.reduce_op, Op
-        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        assert isinstance(self.reduce_op, Op), (
+            f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        )
 
 
 class BinaryChain(OpCall):
@@ -607,24 +604,24 @@ class BinaryChain(OpCall):
     reverse1 = ArgProperty(6)
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         return [self.data, self.operand0, self.operand1]
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
+        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
+            f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"  # noqa: E501
+        )
         assert isinstance(self.op0, Op), f"{self} expects Op as op0, got {self.op0}"
         assert isinstance(self.op1, Op), f"{self} expects Op as op1, got {self.op1}"
 
@@ -643,15 +640,15 @@ class ReduceNegate(ReduceOp):
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 5, f"{self} expects 5 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
-        assert isinstance(
-            self.input, BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.input}"
-        assert isinstance(
-            self.reduce_op, Op
-        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
+        assert isinstance(self.input, BufferRegion), (
+            f"{self} expects BufferRegion as input, got {self.input}"
+        )
+        assert isinstance(self.reduce_op, Op), (
+            f"{self} expects Op as reduce_op, got {self.reduce_op}"
+        )
 
 
 class ComposeOp(OpCall):
@@ -665,17 +662,17 @@ class ComposeOp(OpCall):
     op = get_tirx_op("compose_op")
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
         raise NotImplementedError(
-            "Generic compose_op must be lowered to specific compose ops before operator-level passes"
+            "Generic compose_op must be lowered to specific compose ops before operator-level passes"  # noqa: E501
         )
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
         raise NotImplementedError(
-            "Generic compose_op must be lowered to specific compose ops before operator-level passes"
+            "Generic compose_op must be lowered to specific compose ops before operator-level passes"  # noqa: E501
         )
 
 
@@ -684,7 +681,6 @@ class PermuteDims(OpCall):
 
     op = get_tirx_op("permute_dims")
 
-    buffer = ArgProperty(0)
     order = ArgProperty(1)
 
     @property

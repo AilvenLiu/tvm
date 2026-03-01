@@ -20,16 +20,11 @@ All operator dispatch is handled by the rich dispatcher. This module exposes
 the global entry `tirx.f_op_scheduler` used by the C++ lowering pass to query a
 dispatch result.
 """
-from typing import Optional
-import os
 
 from tvm_ffi import register_global_func
-from tvm.ir import Op
-from tvm.tir import PrimFunc
+
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
-from tvm.tirx.operator import get_tirx_op
-
 
 # Note: legacy `register_schedule` is intentionally removed.
 
@@ -51,7 +46,7 @@ def f_op_scheduler(op_call: OpCall, sctx: ScheduleContext):
         The result of the operator implementation
     """
     assert sctx.target is not None, "Target not found"
-    key = (op_call.op, str(sctx.target.kind))
+    (op_call.op, str(sctx.target.kind))
 
     # Use rich dispatcher for all dispatching
     try:

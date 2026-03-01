@@ -17,28 +17,25 @@
 
 """Implementation of select schedules."""
 
-from functools import reduce
-from typing import Optional
-import operator
-
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc, OpCall, FloatImm
+from tvm.tir import BufferRegion, FloatImm, OpCall, PrimFunc
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
-    predicate,
     fail,
+    predicate,
+    register_dispatch,
 )
 from tvm.tirx.operator.op import Select
+
 from .common import (
-    init_analyzer,
-    get_ewise_dim_map,
     InstructionGenerator,
+    get_ewise_dim_map,
+    init_analyzer,
     nki_dim,
 )
 
 
-def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def select_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Generate schedule for select operation on Trainium."""
     if sctx.exec_scope.name != "kernel":
         fail("requires kernel exec_scope for TRN select")
@@ -51,9 +48,9 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     pred = op.predicate
 
     # Check that one of the sources is a float immediate
-    assert isinstance(true_value, FloatImm) or isinstance(
-        false_value, FloatImm
-    ), f"{op} expects one of the source to be a float"
+    assert isinstance(true_value, FloatImm) or isinstance(false_value, FloatImm), (
+        f"{op} expects one of the source to be a float"
+    )
 
     # Ensure true_value is the buffer and false_value is the float immediate
     if isinstance(true_value, FloatImm):
@@ -111,6 +108,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Get buffer references and guard function
     dst_buffer = dst.buffer
     true_value_buffer = true_value.buffer
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def impl():
@@ -122,8 +120,8 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                         if inst_gen.make_guard(dst):
                             dst_indices = Tx.meta_var(inst_gen.generate_indices(dst))
                             true_value_indices = Tx.meta_var(inst_gen.generate_indices(true_value))
-                            pred = Tx.meta_var(analyzer.simplify(op.predicate.apply(inst_gen.generate_axes(dst))))
-                            Tx.evaluate(Tx.nki.affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
+                            pred = Tx.meta_var(analyzer.simplify(op.predicate.apply(inst_gen.generate_axes(dst))))  # noqa: E501
+                            Tx.evaluate(Tx.nki.affine_select(dst_buffer[tuple(dst_indices)], pred, true_value_buffer[tuple(true_value_indices)], false_value))  # noqa: E501
     # fmt: on
 
     return impl

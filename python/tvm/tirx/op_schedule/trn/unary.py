@@ -17,24 +17,21 @@
 
 """Implementation of unary operator schedules."""
 
-from typing import Optional, Union, Tuple
-import operator
-from functools import reduce
-
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc, FloatImm
-from tvm.tirx.op_schedule import ScheduleContext, fail
+from tvm.tir import BufferRegion, FloatImm, PrimFunc
 from tvm.tir.stmt import OpCall
-from .common import (
-    init_analyzer,
-    check_workspace_buffer,
-    InstructionGenerator,
-    get_ewise_dim_map,
-    nki_dim,
-)
+from tvm.tirx.op_schedule import ScheduleContext, fail
+
 from ..common import MapOpType
 from .binary import try_find_inst_nary
+from .common import (
+    InstructionGenerator,
+    check_workspace_buffer,
+    get_ewise_dim_map,
+    init_analyzer,
+    nki_dim,
+)
 
 # Operation type classifications
 non_activation_unary_map_ops = [MapOpType.RECIPROCAL, MapOpType.MEMSET]
@@ -55,8 +52,8 @@ def try_find_inst_unary(
     src_buffer_region: BufferRegion,
     analyzer: Analyzer,
     inst_gen: InstructionGenerator,
-    allowed_f_dim_dst: Optional[Tuple[int]] = None,
-    allowed_f_dim_src: Optional[Tuple[int]] = None,
+    allowed_f_dim_dst: tuple[int] | None = None,
+    allowed_f_dim_src: tuple[int] | None = None,
 ):
     """Find instruction parameters for a unary operation."""
     dst = dst_buffer_region.buffer
@@ -74,9 +71,9 @@ def try_find_inst_unary(
     )
 
     if not valid_layout_scope:
-        assert (
-            False
-        ), f"scope or layout mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+        assert False, (
+            f"scope or layout mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+        )
 
     # Extract and validate dimensions
     dst_region = dst_buffer_region.region
@@ -94,9 +91,9 @@ def try_find_inst_unary(
     )
 
     if not dims_match:
-        assert (
-            False
-        ), f"shape or dimension mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+        assert False, (
+            f"shape or dimension mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+        )
     dim_map = get_ewise_dim_map(src_buffer_region, dst_buffer_region, analyzer)
     inst_gen.link_buffer_regions(src_buffer_region, dst_buffer_region, dim_map)
     # Find optimal instruction parameters
@@ -108,9 +105,9 @@ def try_find_inst_unary(
 def get_const_bias_tensor(bias, shape, dtype, workspace, sctx):
     """Create or retrieve a constant bias tensor."""
     if "const_bias" not in workspace:
-        assert (
-            sctx.alloc_only
-        ), "Constant bias tensor must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
+        assert sctx.alloc_only, (
+            "Constant bias tensor must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."  # noqa: E501
+        )
         # Create new bias buffer
         bias_buffer = Tx.buffer(shape, dtype, scope="trn.sbuf", buffer_name="const_bias")
         sctx.add_alloc_buffer(bias_buffer)
@@ -168,7 +165,7 @@ def generate_unary_func(
     src = _src.buffer if isinstance(_src, BufferRegion) else None
 
     # Handle bias tensor
-    if isinstance(bias, (FloatImm, float)):
+    if isinstance(bias, (FloatImm, float)):  # noqa: UP038
         bias_buffer = get_const_bias_tensor(
             bias, (p_size, inst_repr.size), dst.dtype, workspace, sctx
         )
@@ -186,16 +183,16 @@ def generate_unary_func(
                         dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_buffer_region))
                         if inst_gen.make_guard(dst_buffer_region):
                             if unary_op == MapOpType.MEMSET:
-                                Tx.evaluate(Tx.nki.memset(dst[*dst_indices], _src))
+                                Tx.evaluate(Tx.nki.memset(dst[tuple(dst_indices)], _src))
                             else:
                                 src_indices = Tx.meta_var(inst_gen.generate_indices(_src))
                                 if unary_op == MapOpType.RECIPROCAL:
-                                    Tx.evaluate(Tx.nki.reciprocal(dst[*dst_indices], src[*src_indices]))
+                                    Tx.evaluate(Tx.nki.reciprocal(dst[tuple(dst_indices)], src[tuple(src_indices)]))  # noqa: E501
                                 elif isinstance(bias, BufferRegion):
                                     bias_indices = Tx.meta_var(inst_gen.generate_indices(bias))
-                                    Tx.evaluate(Tx.nki.activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
+                                    Tx.evaluate(Tx.nki.activation(dst[tuple(dst_indices)], src[tuple(src_indices)], opcode, scale=scale, bias=bias_buffer[tuple(bias_indices)]))  # noqa: E501
                                 else:
-                                    Tx.evaluate(Tx.nki.activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[p_loop, f_loop]))
+                                    Tx.evaluate(Tx.nki.activation(dst[tuple(dst_indices)], src[tuple(src_indices)], opcode, scale=scale, bias=bias_buffer[p_loop, f_loop]))  # noqa: E501
     # fmt: on
 
     return impl
@@ -205,7 +202,7 @@ def unary_trn(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule unary operation on Trainium."""
     # Check execution environment
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
@@ -254,7 +251,7 @@ def unary_with_bias_scale_trn(
     op: OpCall,
     unary_op: MapOpType = MapOpType.SQRT,
     sctx: ScheduleContext = None,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule unary operation with bias and scale on Trainium."""
     # Check execution environment
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):

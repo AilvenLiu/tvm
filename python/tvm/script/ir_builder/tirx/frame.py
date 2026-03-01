@@ -34,8 +34,8 @@ class PrimFuncFrame(TIRFrame): ...
 
 
 @_register_object("script.ir_builder.tir.SSBlockFrame")
-class SBlockFrame(TIRFrame):
-    ...
+class SBlockFrame(TIRFrame): ...
+
 
 @_register_object("script.ir_builder.tir.ExecScopeFrame")
 class ExecScopeFrame(TIRFrame):

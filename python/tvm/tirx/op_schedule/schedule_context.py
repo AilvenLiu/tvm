@@ -15,13 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """TIRx operator schedule context."""
-from typing import Dict, List
 
 from tvm_ffi import register_object
+
 from tvm.ir import Range
-from tvm.tir import PrimExpr, Var, Buffer, Stmt, IterVar
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
+from tvm.tir import Buffer, IterVar, Stmt, Var
 from tvm.tir.exec_scope import ExecScope
 from tvm.tirx import _ffi_api
 
@@ -50,10 +50,10 @@ class ScheduleContext(Object, Scriptable):
 
     target: Target
     exec_scope: ExecScope
-    launch_params: Dict[str, IterVar]
-    var_range_map: Dict[Var, Range]
+    launch_params: dict[str, IterVar]
+    var_range_map: dict[Var, Range]
     alloc_only: bool
-    callbacks: Dict[str, Object]
+    callbacks: dict[str, Object]
 
     kPrivateAlloc = "private_alloc"
     kDeviceInitStmt = "device_init_stmt"
@@ -64,10 +64,10 @@ class ScheduleContext(Object, Scriptable):
         self,
         target: Target,
         exec_scope: ExecScope,
-        launch_params: Dict[str, IterVar],
-        var_range_map: Dict[Var, Range],
+        launch_params: dict[str, IterVar],
+        var_range_map: dict[Var, Range],
         alloc_only: bool = False,
-        callbacks: Dict[str, Object] = {},
+        callbacks: dict[str, Object] = {},
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.ScheduleContext,  # pylint: disable=no-member
@@ -88,7 +88,7 @@ class ScheduleContext(Object, Scriptable):
         ----------
         buffer : Buffer
             The buffer to be added.
-        """
+        """  # noqa: E501
         _ffi_api.ScheduleContextAddAllocBuffer(self, buffer)  # pylint: disable=no-member
 
     def add_init_stmt(self, stmt: Stmt, host: bool = False) -> None:
@@ -105,7 +105,7 @@ class ScheduleContext(Object, Scriptable):
             Whether the statement is a host statement.
             If True, the statement will be added to the host code (before the kernel).
             If False, the statement will be added to the kernel body (at the beginning of the kernel).
-        """
+        """  # noqa: E501
         _ffi_api.ScheduleContextAddInitStmt(self, stmt, host)  # pylint: disable=no-member
 
     def add_post_buffer_def_stmt(self, buffer: Buffer, stmt: Stmt) -> None:

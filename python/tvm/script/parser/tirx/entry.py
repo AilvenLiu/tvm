@@ -18,7 +18,7 @@
 
 import inspect
 from collections.abc import Callable
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 from tvm.ir.base import deprecated
 from tvm.tirx import Buffer, PrimFunc
@@ -112,10 +112,10 @@ class TIRInline(ScriptMacro):
     def __init__(
         self,
         source,
-        closure_vars: Dict[str, Any],
+        closure_vars: dict[str, Any],
         func: Callable,
-        definition_depth: Optional[int] = None,
-        defining_var_table: Optional[VarTable] = None,
+        definition_depth: int | None = None,
+        defining_var_table: VarTable | None = None,
     ) -> None:
         # hygienic=True for the base class (field kept for compat but not used in dispatch)
         super().__init__(source, closure_vars, func, hygienic=True)
@@ -161,7 +161,7 @@ class TIRInline(ScriptMacro):
         return parse_result
 
 
-def inline(*args, definition_depth: Optional[int] = None, defining_var_table=None) -> Callable:
+def inline(*args, definition_depth: int | None = None, defining_var_table=None) -> Callable:
     """Decorator for inline function definitions with Python LEGB scoping.
 
     @T.inline follows Python's lexical scoping with late binding:
@@ -209,7 +209,6 @@ def inline(*args, definition_depth: Optional[int] = None, defining_var_table=Non
 
 
 setattr(inline, "dispatch_token", "tir.inline")
-
 
 
 class BufferProxy:

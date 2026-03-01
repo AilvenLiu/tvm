@@ -29,13 +29,13 @@ def test_call_tir_device():
         @Tx.prim_func(tirx=True, private=True)
         def test1(A: Tx.Buffer((2048,), "float32"), m: Tx.int32):
             with Tx.cta():
-                thread_id = Tx.thread_id([128], parent="cta")
+                Tx.thread_id([128], parent="cta")
                 Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
         @Tx.prim_func(tirx=True, private=True)
         def test2(A: Tx.Buffer((2048, 2048), "float32"), m: Tx.int32, n: Tx.int32):
             with Tx.cta():
-                thread_id = Tx.thread_id([128], parent="cta")
+                Tx.thread_id([128], parent="cta")
                 Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function
@@ -66,7 +66,7 @@ def test_call_tir_device():
             with Tx.kernel():
                 m = Tx.cta_id([16], parent="kernel")
                 with Tx.cta():
-                    thread_id = Tx.thread_id([128], parent="cta")
+                    Tx.thread_id([128], parent="cta")
                     Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
         @Tx.prim_func(tirx=True, private=True)
@@ -74,7 +74,7 @@ def test_call_tir_device():
             with Tx.kernel():
                 m, n = Tx.cta_id([16, 16], parent="kernel")
                 with Tx.cta():
-                    thread_id = Tx.thread_id([128], parent="cta")
+                    Tx.thread_id([128], parent="cta")
                     Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function

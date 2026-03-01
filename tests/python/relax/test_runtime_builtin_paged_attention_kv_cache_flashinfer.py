@@ -16,6 +16,7 @@
 # under the License.
 # ruff: noqa: E741
 
+
 import pytest
 import torch
 
@@ -98,7 +99,7 @@ def set_global_func():
     )
     fdebug_get_kv = tvm.get_global_func("vm.builtin.attention_kv_cache_debug_get_kv")
 
-    def load_module(name: str, static_modules: List[tvm.runtime.Module]):
+    def load_module(name: str, static_modules: list[tvm.runtime.Module]):
         assert len(static_modules) > 0
         if len(static_modules) == 1:
             return static_modules[0]

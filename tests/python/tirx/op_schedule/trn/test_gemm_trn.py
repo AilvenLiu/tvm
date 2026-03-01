@@ -14,15 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal
-from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, P, F, S
+from tvm.tir.layout import F, P, S, TileLayout
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -32,6 +30,7 @@ def test_simple_gemm():
     B_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)])
 
     C_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -53,7 +52,7 @@ def test_simple_gemm():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[0, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_f_loop], B_sbuf[p_loop, rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[0, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_f_loop], B_sbuf[p_loop, rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -66,6 +65,7 @@ def test_larger_gemm():
     B_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(2, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -87,7 +87,7 @@ def test_larger_gemm():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[0, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[0, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -100,6 +100,7 @@ def test_gemm_in_a_loop():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -128,7 +129,7 @@ def test_gemm_in_a_loop():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -141,6 +142,7 @@ def test_gemm_with_stride():
     B_layout = TileLayout(S[(128, 8, 2, 128) : (1 @ P, 512 @ F, 256 @ F, 2 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -169,7 +171,7 @@ def test_gemm_with_stride():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + reduction_b_loop * 256 + k * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 1024 + k * 512 + rhs_f_loop * 2], True)
+                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + reduction_b_loop * 256 + k * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 1024 + k * 512 + rhs_f_loop * 2], True)  # noqa: E501
     # fmt: on
 
     with target:
@@ -183,6 +185,7 @@ def test_gemm_swap_lhs_rhs():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -211,7 +214,7 @@ def test_gemm_swap_lhs_rhs():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -224,6 +227,7 @@ def test_gemm_with_sbuf_output():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -253,11 +257,11 @@ def test_gemm_with_sbuf_output():
                     for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                       for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                         for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                            Tx.nki.matmul(buffer[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)
+                            Tx.nki.matmul(buffer[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)  # noqa: E501
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
-                    Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], buffer[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])
+                    Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], buffer[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -272,6 +276,7 @@ def test_gemm_different_shape():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -300,7 +305,7 @@ def test_gemm_different_shape():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop + 4096], True)
+                        Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop + 4096], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -335,7 +340,7 @@ def test_gemm_too_large_f_size():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 512, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, rhs_b_loop * 512 + rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, rhs_b_loop * 512 + rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -348,6 +353,7 @@ def test_gemm_sbuf_output_with_workspace():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -355,7 +361,7 @@ def test_gemm_sbuf_output_with_workspace():
             A_sbuf = Tx.alloc_buffer((512, 1024), "float32", scope="trn.sbuf", layout=A_layout)
             B_sbuf = Tx.alloc_buffer((1024, 256), "float32", scope="trn.sbuf", layout=B_layout)
             C_sbuf = Tx.alloc_buffer((512, 256), "float32", scope="trn.sbuf", layout=C_layout)
-            C_psum = Tx.alloc_buffer((1, 128, 512), "float32", scope="trn.psum", allocated_addr=(0, 0))
+            C_psum = Tx.alloc_buffer((1, 128, 512), "float32", scope="trn.psum", allocated_addr=(0, 0))  # noqa: E501
             for i in range(2):
                 for k in range(2):
                     Tx.gemm(
@@ -379,11 +385,11 @@ def test_gemm_sbuf_output_with_workspace():
                     for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                       for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                         for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                            Tx.nki.matmul(C_psum[0, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)
+                            Tx.nki.matmul(C_psum[0, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)  # noqa: E501
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
-                    Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], C_psum[0, lhs_f_loop, rhs_f_loop])
+                    Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], C_psum[0, lhs_f_loop, rhs_f_loop])  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -397,6 +403,7 @@ def test_gemm_pf_mismatch_fail():
     B_layout = TileLayout(S[(2, 128, 8, 128) : (128 @ F, 1 @ F, 256 @ F, 1 @ P)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -424,6 +431,7 @@ def test_gemm_transpose_AB():
     B_layout = TileLayout(S[(2, 128, 8, 128) : (128 @ F, 1 @ F, 256 @ F, 1 @ P)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -454,7 +462,7 @@ def test_gemm_transpose_AB():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
-                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)
+                        Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
 
     #fmt: off
     with target:
@@ -468,6 +476,7 @@ def test_gemm_guard():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -498,13 +507,13 @@ def test_gemm_guard():
                     for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                       for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                         for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                            if reduction_b_loop - k * 4 < 4 and lhs_b_loop - j < 1 and 0 < i and reduction_b_loop - k * 4 < 4:
-                                Tx.nki.matmul(acc_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, rhs_b_loop * 1024 + reduction_b_loop * 128 + rhs_f_loop], True)
+                            if reduction_b_loop - k * 4 < 4 and lhs_b_loop - j < 1 and 0 < i and reduction_b_loop - k * 4 < 4:  # noqa: E501
+                                Tx.nki.matmul(acc_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, rhs_b_loop * 1024 + reduction_b_loop * 128 + rhs_f_loop], True)  # noqa: E501
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                     if 0 < i and lhs_b_loop - j < 1:
-                        Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], acc_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])
+                        Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], acc_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -519,6 +528,7 @@ def test_gemm_guard2():
     B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
     C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)]).to_psum()
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -548,7 +558,7 @@ def test_gemm_guard2():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         if reduction_b_loop - j < 1 and reduction_b_loop - j < 1:
-                            Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)
+                            Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})

@@ -16,6 +16,7 @@
 # under the License.
 
 """Utility functions for megakernel."""
+
 import numpy as np
 
 import tvm
@@ -66,7 +67,7 @@ __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* ta
     *n_idx_ptr = (task_info >> 18) & 0b1111111111;
     *k_idx_ptr = (task_info >> 28) & 0b1111;
 }
-"""
+"""  # noqa: E501
 
 
 @Tx.inline
@@ -99,12 +100,12 @@ def rsqrt(x):
     return Tx.cuda.func_call(
         "_rsqrt",
         x,
-        source_code=f"""
-__forceinline__ __device__ float _rsqrt(float x) {{
+        source_code="""
+__forceinline__ __device__ float _rsqrt(float x) {
   float y;
   asm volatile("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
   return y;
-}}
+}
 """,
         return_type="float32",
     )
@@ -114,12 +115,12 @@ def exp2(x):
     return Tx.cuda.func_call(
         "ptx_exp2",
         x,
-        source_code=f"""
-    __forceinline__ __device__ float ptx_exp2(float x) {{
+        source_code="""
+    __forceinline__ __device__ float ptx_exp2(float x) {
   float y;
   asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
   return y;
-}}
+}
 """,
         return_type="float32",
     )
@@ -129,10 +130,10 @@ def silu(x):
     return Tx.cuda.func_call(
         "silu",
         x,
-        source_code=f"""
-    __forceinline__ __device__ float silu(float x) {{
+        source_code="""
+    __forceinline__ __device__ float silu(float x) {
   return x / (1.0f + __expf(-x));
-}}
+}
 """,
         return_type="float32",
     )
@@ -154,10 +155,10 @@ def any_sync(mask, pred):
         "any_sync",
         mask,
         pred,
-        source_code=f"""
-__forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
+        source_code="""
+__forceinline__ __device__ int any_sync(unsigned mask, int pred) {
   return __any_sync(mask, pred);
-}}
+}
 """,
         return_type="int32",
     )
@@ -168,10 +169,10 @@ def gt(lhs, rhs):
         "gt",
         lhs,
         rhs,
-        source_code=f"""
-__forceinline__ __device__ bool gt(int32_t a, int32_t b) {{
+        source_code="""
+__forceinline__ __device__ bool gt(int32_t a, int32_t b) {
     return a > b;
-}}
+}
 """,
         return_type="bool",
     )
@@ -218,7 +219,7 @@ __forceinline__ __device__ int32_t atomic_add_int32_remote(int32_t* addr, int32_
         return atomicAdd(addr, value);
     }
 }
-"""
+"""  # noqa: E501
     return Tx.cuda.func_call(
         "atomic_add_int32_remote",
         addr,
@@ -326,15 +327,15 @@ def while_ld_global_acquire(addr, task_info):
         "while_ld_global_acquire",
         addr,
         task_info,
-        source_code=f"""
-__forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* task_info) {{
+        source_code="""
+__forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* task_info) {
   asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
-  while (*task_info == -1) {{
+  while (*task_info == -1) {
     __nanosleep(800);
     asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
-  }}
-}}
-""",
+  }
+}
+""",  # noqa: E501
     )
 
 
@@ -355,7 +356,8 @@ __forceinline__ __device__ void sts(int32_t v, void* dst_addr) {
     )
 
 
-f_init_const = lambda c: lambda *args: c
+def f_init_const(c):
+    return lambda *args: c
 
 
 def f_init_unmatched_dim(dim_len, in_par_size, out_par_size):

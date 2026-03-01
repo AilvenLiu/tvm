@@ -16,14 +16,12 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
 from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.config import F32_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.megakernel.utils.config import KernelConfig, F32_BYTES
 
 
 class SplitKReduceTile(Tile):
-
     VEC_SIZE = 16 // F32_BYTES
     N_UNIT = 128
     N_REPEAT = 1

@@ -18,9 +18,8 @@ import numpy as np
 import pytest
 
 import tvm
-from tvm.script import tirx as Tx
 import tvm.testing
-from tvm.tir.transform import LowerTIRx
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 
 
@@ -30,13 +29,10 @@ from tvm.tirx.bench.utils import ProtonContext, bench
 def test_hgemm_ampere():
     M, N, K = 8192, 8192, 8192
     MI, NI, KI = 128, 128, 32
-    MII, NII, KII = 64, 64, 16
+    MII, NII, _KII = 64, 64, 16
     wmmaM, wmmaN = 16, 16
-    warp_size = 32
 
-    BLK_M, BLK_N, BLK_K = 128, 128, 32
-    VEC = 8
-    DEPTH = 2
+    _BLK_M, _BLK_N, _BLK_K = 128, 128, 32
 
     @Tx.inline
     def load_global_to_shared_A(
@@ -341,7 +337,9 @@ def test_hgemm_ampere():
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.runtime.tensor(C_np, device=DEV)
 
-            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+            def func():
+                return mod(A_tvm, B_tvm, C_tvm)
+
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR time: {ms} ms")
         return C_tvm.numpy()
@@ -354,7 +352,10 @@ def test_hgemm_ampere():
         A_torch = torch.tensor(A_np, device=torch_dev)
         B_torch = torch.tensor(B_np, device=torch_dev)
         C_torch = torch.zeros((M, N), device=torch_dev)
-        func = lambda: torch.matmul(A_torch, B_torch.T)
+
+        def func():
+            return torch.matmul(A_torch, B_torch.T)
+
         ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
         print(f"cublas time: {ms} ms")
         C_torch = func()

@@ -933,8 +933,8 @@ class SBlock : public Stmt {
       Span span = Span());
 
   TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,
-                         ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
-                         Span span = Span());
+                          ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
+                          Span span = Span());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);

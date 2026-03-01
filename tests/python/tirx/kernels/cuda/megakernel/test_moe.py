@@ -16,70 +16,62 @@
 # under the License.
 
 import argparse
-import math
-import tempfile
 import functools
-from typing import Literal, Type, Union
+from typing import Literal
 
-import flashinfer
+import flashinfer.fused_moe as fused_moe
 import numpy as np
 import pytest
 import torch
-
-import tvm
-import tvm.testing
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
-from tvm.runtime import ShapeTuple
-from tvm.runtime import disco as di
-from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
-
-from tvm.tirx.megakernel.utils.config import (
-    ProfileEventType,
-    KernelConfig,
-    JobType,
-    event_type_names,
-    qwen3_30b_a3b_config,
-)
-from tvm.tirx.megakernel.utils.base import SmemManager, MegaKernelWrapper
-from tvm.tirx.megakernel.utils.utils import get_source, ceildiv, f_init_const
-from tvm.tirx.megakernel.utils import static_scheduler, dynamic_scheduler
-from tvm.tirx.megakernel.kernels import (
-    GemmTile,
-    MOETopKReduceTile,
-    TopkSoftmaxTile,
-    MOEAlignTile,
-    CountAndSortExpertTokens,
-    GroupGEMMTileSM100,
-    GroupGEMMSiluTile,
-)
-from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
-from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
-from tvm.tirx.megakernel.utils.support import (
-    generate_exec_queue_moe,
-    get_max_num_tokens_padded,
-    get_max_blocks_padded_relaxed,
-)
-
-from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from sgl_kernel import topk_softmax
+from sglang.srt.layers.moe import MoeRunnerConfig
 from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
-from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
-    try_get_optimal_moe_config,
-)
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe import (
     fused_moe as fused_moe_triton,
 )
+from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
+    try_get_optimal_moe_config,
+)
+from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from sglang.srt.layers.moe.topk import StandardTopKOutput
-from sglang.srt.layers.moe import MoeRunnerConfig
-import flashinfer.fused_moe as fused_moe
 from triton import language as tl
+
+import tvm
+import tvm.testing
+from tvm.runtime import disco as di
+from tvm.script import tirx as Tx
+from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
+from tvm.tirx.megakernel.kernels import (
+    CountAndSortExpertTokens,
+    GemmTile,
+    GroupGEMMSiluTile,
+    GroupGEMMTileSM100,
+    MOEAlignTile,
+    MOETopKReduceTile,
+    TopkSoftmaxTile,
+)
+from tvm.tirx.megakernel.utils import dynamic_scheduler, static_scheduler
+from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
+from tvm.tirx.megakernel.utils.config import (
+    JobType,
+    KernelConfig,
+    ProfileEventType,
+    event_type_names,
+    qwen3_30b_a3b_config,
+)
+from tvm.tirx.megakernel.utils.dynamic_scheduler import DynamicTileScheduler
+from tvm.tirx.megakernel.utils.static_scheduler import StaticTileScheduler
+from tvm.tirx.megakernel.utils.support import (
+    generate_exec_queue_moe,
+    get_max_blocks_padded_relaxed,
+    get_max_num_tokens_padded,
+)
+from tvm.tirx.megakernel.utils.utils import ceildiv, f_init_const, get_source
 
 # TODO: fix abnormal slowness of batch-attn on the first tile
 
 
 class MegaKernelMOE(MegaKernelWrapper):
-
     MOE_M_PAD_SIZE = 128
     GATING_BLK_M = 128
 
@@ -162,7 +154,7 @@ class MegaKernelMOE(MegaKernelWrapper):
     def _set_events(
         self,
         batch_size,
-        Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
+        Semaphore: type[static_scheduler.Semaphore | dynamic_scheduler.Semaphore],
         etensor_workspace_global,
         unfused=False,
     ):
@@ -233,7 +225,7 @@ class MegaKernelMOE(MegaKernelWrapper):
         self,
         is_dynamic_sch,
         batch_size,
-        Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
+        Semaphore: type[static_scheduler.Semaphore | dynamic_scheduler.Semaphore],
         etensor_workspace_global,
         unfused=False,
     ):
@@ -299,7 +291,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_topk_softmax,
                     lambda notify_idx: (1, -1, 0),
-                    lambda trigger_idx: (lambda push_idx: (JobType.MOE_ALIGN.value, 1, 0, 0, 0)),
+                    lambda trigger_idx: lambda push_idx: (JobType.MOE_ALIGN.value, 1, 0, 0, 0),
                     "thread",
                     "thread",
                 )
@@ -571,22 +563,22 @@ class MegaKernelMOE(MegaKernelWrapper):
         low_batch,
         unfused,
         is_dynamic_sch,
-        Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
-        Scheduler: Type[Union[static_scheduler.StaticTileScheduler, dynamic_scheduler.DynamicTileScheduler]],
+        Semaphore: type[static_scheduler.Semaphore | dynamic_scheduler.Semaphore],
+        Scheduler: type[static_scheduler.StaticTileScheduler | dynamic_scheduler.DynamicTileScheduler],  # noqa: E501
     ):
         # initialize tile
         self.set_tiles(batch_size, low_batch)
         self.host_init_all()
 
         with Tx.kernel():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
-            profiler_write_offset = Tx.alloc_buffer([1], "uint32", scope="local", align=8)
-            profiler_tag = Tx.alloc_buffer([1], "uint64", scope="local", align=8)
+            Tx.alloc_buffer([1], "uint32", scope="local", align=8)
+            Tx.alloc_buffer([1], "uint64", scope="local", align=8)
             self.init_profiler(profiler_buffer)
             with Tx.cta():
                 buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
@@ -598,30 +590,30 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.class_init_all(self.smem_manager)
 
                 # initialize event tensors
-                self.set_events(is_dynamic_sch, batch_size, Semaphore, etensor_workspace_global, unfused)
+                self.set_events(is_dynamic_sch, batch_size, Semaphore, etensor_workspace_global, unfused)  # noqa: E501
 
                 # initialize tile scheduler and smem_manager
                 if not is_dynamic_sch:
-                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)
+                    self.init_tile_scheduler(False, Scheduler, "layer", exec_queue, self.smem_manager)  # noqa: E501
                 else:
-                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)
+                    self.init_tile_scheduler(True, Scheduler, exec_task, exec_head, exec_tail, self.smem_manager, self.profiler)  # noqa: E501
                 self.smem_manager.init()
 
                 topk_ids_flattened = topk_indices_global.view(-1)
                 topk_weights_flattened = topk_weights_global.view(-1)
                 while self.tile_scheduler.valid():
                     if self.tile_scheduler.task_type == JobType.MOE_GATING.value:
-                        self.task_impl_moe_gating(hidden_state_global, gate_weight_global, gating_output_global, is_dynamic_sch)
+                        self.task_impl_moe_gating(hidden_state_global, gate_weight_global, gating_output_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
-                        self.task_impl_moe_topk_softmax(gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=False)
+                        self.task_impl_moe_topk_softmax(gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=False)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
-                        self.task_impl_moe_align(topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch)
+                        self.task_impl_moe_align(topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORTx.value:
-                        self.task_impl_moe_count_and_sort(topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch)
+                        self.task_impl_moe_count_and_sort(topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value:
-                        self.task_impl_moe_group_gemm_gate_up_silu(reordered_hidden_state_global, grp_gate_up_weight_global, silu_mul_output_global, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
+                        self.task_impl_moe_group_gemm_gate_up_silu(reordered_hidden_state_global, grp_gate_up_weight_global, silu_mul_output_global, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
-                        self.task_impl_moe_group_gemm_down(silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
+                        self.task_impl_moe_group_gemm_down(silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
@@ -682,44 +674,44 @@ class MegaKernelMOE(MegaKernelWrapper):
             batch_size = Tx.int32()
 
             # input and output
-            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
 
             # intermediate buffer
-            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
-            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
-            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")  # noqa: E501
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")  # noqa: E501
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")  # noqa: E501
             max_num_tokens_padded = Tx.int32()
-            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
-            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
-            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
-            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
-            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")  # noqa: E501
+            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")  # noqa: E501
+            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")  # noqa: E501
+            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")  # noqa: E501
+            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")  # noqa: E501
+            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")  # noqa: E501
+            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
+            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
 
             # event tensor
             etensor_workspace_size = Tx.int32()
-            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")  # noqa: E501
 
             # exec queue
-            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")  # noqa: E501
 
             @Tx.inline
             def run(low_batch, dynamic_gemm_size):
-                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
+                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)  # noqa: E501
                 self.fused_body(
-                    batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
-                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,
-                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
+                    batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,  # noqa: E501
+                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,  # noqa: E501
+                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,  # noqa: E501
                     etensor_workspace_global,
                     profiler_buffer, exec_queue, None, None, None, 1, low_batch, unfused,
                     False, static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
@@ -780,48 +772,48 @@ class MegaKernelMOE(MegaKernelWrapper):
             batch_size = Tx.int32()
 
             # input and output
-            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            hidden_state_global = Tx.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            residual_global = Tx.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
             output_global = Tx.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
-            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")
-            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")
+            gate_weight_global = Tx.match_buffer(gate_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            grp_gate_up_weight_global = Tx.match_buffer(grp_gate_up_weight_ptr, [self.NUM_EXPERTS, self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            grp_down_weight_global = Tx.match_buffer(grp_down_weight_ptr, [self.NUM_EXPERTS, self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
 
             # intermediate buffer
-            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")
-            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")
-            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
+            gating_output_global = Tx.match_buffer(gating_output_ptr, [batch_size, self.NUM_EXPERTS], "float32", scope="global")  # noqa: E501
+            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "float32", scope="global")  # noqa: E501
+            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")  # noqa: E501
             max_num_tokens_padded = Tx.int32()
-            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
-            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
-            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
-            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
-            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
-            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            sorted_token_ids_global = Tx.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")  # noqa: E501
+            expert_ids_global = Tx.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")  # noqa: E501
+            num_valid_tokens_global = Tx.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")  # noqa: E501
+            num_tokens_post_pad_global = Tx.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")  # noqa: E501
+            cumsum_buffer_global = Tx.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")  # noqa: E501
+            reordered_hidden_state_global = Tx.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
+            gate_up_output_global = Tx.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")  # noqa: E501
+            silu_mul_output_global = Tx.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
+            topk_reduce_output_global = Tx.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")  # noqa: E501
 
             # event tensor
             etensor_workspace_size = Tx.int32()
-            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")  # noqa: E501
 
             # exec queue
-            queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
-            queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)
-            queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
+            queue_tasks_global = Tx.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)  # noqa: E501
+            queue_head_global = Tx.match_buffer(queue_head_ptr, [1], "int32", scope="global", offset_factor=1)  # noqa: E501
+            queue_tail_global = Tx.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)  # noqa: E501
 
             @Tx.inline
             def run(low_batch, dynamic_gemm_size, down_proj_task_size):
-                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
+                num_valid_tokens = Tx.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)  # noqa: E501
                 self.fused_body(
-                    batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
-                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,
-                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
+                    batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,  # noqa: E501
+                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,  # noqa: E501
+                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,  # noqa: E501
                     etensor_workspace_global,
-                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, down_proj_task_size, low_batch, False,
+                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, down_proj_task_size, low_batch, False,  # noqa: E501
                     True, dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 
@@ -973,7 +965,7 @@ def test(
             exec_queue = generate_exec_queue_moe(
                 batch_size, mk.config, mk.num_etensors[False], "static"
             )
-            tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
+            tvm_arg_dict["exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             exec_queue = generate_exec_queue_moe(
                 batch_size, mk.config, mk.num_etensors[True], "dynamic"
@@ -1001,7 +993,7 @@ def test(
             tvm_arg_dict[f"topk_reduce_output_{i}"] = tvm.runtime.tensor(
                 arg_dict["topk_reduce_output"], device=DEV
             )
-        tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
+        tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
         )
 
@@ -1046,7 +1038,7 @@ def test(
                         work_arg_dict["etensor_workspace"],
                         # exec queue
                         work_arg_dict["exec_queue"],
-                        work_arg_dict[f"profiler_buffer"],
+                        work_arg_dict["profiler_buffer"],
                     )
                     iter += 1
 
@@ -1084,7 +1076,7 @@ def test(
                         work_arg_dict[f"queue_tasks_{iter}"],
                         work_arg_dict[f"queue_head_{iter}"],
                         work_arg_dict[f"queue_tail_{iter}"],
-                        work_arg_dict[f"profiler_buffer"],
+                        work_arg_dict["profiler_buffer"],
                     )
                     iter += 1
 
@@ -1093,7 +1085,7 @@ def test(
                 print(f"TIR time: {ms:.3f} ms")
                 if mk.profiler_on:
                     export_to_perfetto_trace(
-                        tvm_arg_dict[f"profiler_buffer"].numpy(),
+                        tvm_arg_dict["profiler_buffer"].numpy(),
                         f"{scheduler}-moe-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                         event_type_names,
                     )
@@ -1117,30 +1109,34 @@ def test(
                 for i in range(REPEAT):
                     func()
                 sess._sync_all()
-                sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])
-                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict[f"residual_0"])
-                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])
+                sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])  # noqa: F821
+                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict["residual_0"])  # noqa: F821
+                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])  # noqa: E501
                 sess.gather_to_worker0(
-                    disco_arg_dict["hidden_state_attn_mlp"], res_dict["hidden_state_attn_mlp_res"]
+                    disco_arg_dict["hidden_state_attn_mlp"],  # noqa: F821
+                    res_dict["hidden_state_attn_mlp_res"],  # noqa: F821
                 )
                 sess.copy_from_worker_0(
-                    res_dict["hidden_state_attn_mlp_host"], res_dict["hidden_state_attn_mlp_res"]
+                    res_dict["hidden_state_attn_mlp_host"],  # noqa: F821
+                    res_dict["hidden_state_attn_mlp_res"],  # noqa: F821
                 )
                 sess.gather_to_worker0(
-                    disco_arg_dict[f"profiler_buffer"], res_dict["profiler_buffer_res"]
+                    disco_arg_dict["profiler_buffer"],  # noqa: F821
+                    res_dict["profiler_buffer_res"],  # noqa: F821
                 )
                 sess.copy_from_worker_0(
-                    res_dict["profiler_buffer_host"], res_dict["profiler_buffer_res"]
+                    res_dict["profiler_buffer_host"],  # noqa: F821
+                    res_dict["profiler_buffer_res"],  # noqa: F821
                 )
                 sess._sync_all()
                 if mk.profiler_on:
                     for r in range(mk.world_size):
                         export_to_perfetto_trace(
-                            res_dict["profiler_buffer_host"].numpy()[r],
+                            res_dict["profiler_buffer_host"].numpy()[r],  # noqa: F821
                             f"{scheduler}-moe-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                             event_type_names,
                         )
-                return res_dict["output_host"].numpy(), res_dict["residual_host"].numpy()
+                return res_dict["output_host"].numpy(), res_dict["residual_host"].numpy()  # noqa: F821
 
     def std(arg_dict, mk: MegaKernelMOE):
         import flashinfer
@@ -1244,7 +1240,7 @@ def test(
             return ret.cpu().numpy()
 
         output = func()
-        ms = bench(func, warmup=10, repeat=30, proton_name=f"std")
+        ms = bench(func, warmup=10, repeat=30, proton_name="std")
         print(f"std time: {ms:.3f} ms")
         return output
 
@@ -1286,7 +1282,7 @@ def test(
             nonlocal graph
             graph.replay()
 
-        ms = bench(func, warmup=10, repeat=30, proton_name=f"flashinfer")
+        ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
         print(f"flashinfer time: {ms:.3f} ms")
         return output.cpu().numpy()
 
@@ -1295,7 +1291,7 @@ def test(
         std_arg_dict = {}
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.clone().to(torch_dev)
-        output = torch.zeros_like(std_arg_dict["hidden_state"])
+        torch.zeros_like(std_arg_dict["hidden_state"])
         stream = torch.cuda.Stream()
         graph = torch.cuda.CUDAGraph()
 
@@ -1327,7 +1323,7 @@ def test(
             nonlocal graph
             graph.replay()
 
-        ms = bench(func, warmup=10, repeat=30, proton_name=f"sglang_fused")
+        ms = bench(func, warmup=10, repeat=30, proton_name="sglang_fused")
         print(f"sglang_fused time: {ms:.3f} ms")
         return out.cpu().numpy()
 
@@ -1374,7 +1370,6 @@ def test(
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument(
         "--scheduler",

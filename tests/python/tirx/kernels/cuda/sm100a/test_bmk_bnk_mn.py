@@ -24,15 +24,15 @@
 # Consumer WG0: TMEM -> RF -> SMEM -> TMA store
 # K-loop iterates over S * (K / BLK_K) stages total
 
+import torch
+
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
-from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 from tvm.tirx.tile_scheduler import GroupMajor3D
-
-import torch
 
 # Architecture
 CTA_GROUP = 1
@@ -113,8 +113,6 @@ def skip():
     pass
 
 
-
-
 def prepare_data():
     A = torch.randn((S_DIM, M, K), dtype=torch.bfloat16, device="cuda")
     B = torch.randn((S_DIM, N, K), dtype=torch.bfloat16, device="cuda")
@@ -133,9 +131,7 @@ B_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
     Tx.TileLayout(Tx.S[(SMEM_PIPE_DEPTH, BLK_N, BLK_K) : (BLK_N * BLK_K, BLK_K, 1)]),
 )
-D_layout = Tx.TileLayout(
-    Tx.S[(TMEM_PIPE_DEPTH, BLK_M, EPI_TILE) : (BLK_M * EPI_TILE, EPI_TILE, 1)]
-)
+D_layout = Tx.TileLayout(Tx.S[(TMEM_PIPE_DEPTH, BLK_M, EPI_TILE) : (BLK_M * EPI_TILE, EPI_TILE, 1)])
 
 
 # fmt: off
@@ -147,7 +143,7 @@ def bmk_bnk_mn_gemm(
 ):
     with Tx.kernel():
         bx = Tx.cta_id([SM_NUMBER], parent="kernel")
-        wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+        wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
         warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
         lane_id = Tx.thread_id([32], parent="warp")
         with Tx.cta():
@@ -170,7 +166,7 @@ def bmk_bnk_mn_gemm(
 
             # Local memory
             reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
+            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))  # noqa: E501
             stage: Tx.int32
             phase = Tx.alloc_buffer((1,), "int32", scope="local")
             descA: Tx.uint64
@@ -217,7 +213,7 @@ def bmk_bnk_mn_gemm(
                     phase[0] = phase[0] ^ 1
                 if PIPE_REMAIN_NUM > 0:
                     for ks in Tx.unroll(PIPE_REMAIN_NUM):
-                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks
+                        stage = PIPE_CYCLE * SMEM_PIPE_DEPTH + ks  # noqa: F841
                         main_loop(True, ks)
                     epilogue1()
                     for ks in Tx.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
@@ -283,7 +279,7 @@ def bmk_bnk_mn_gemm(
                         tmem_idx = Tx.local_scalar("int32", "tmem_idx")
                         tmem_phase = Tx.local_scalar("int32", "tmem_phase")
                         Tx.ptx.tcgen05.encode_instr_descriptor(
-                            Tx.address_of(descI), "float32", a_type, b_type,
+                            Tx.address_of(descI), "float32", a_type, b_type,  # noqa: F821
                             MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP,
                         )
                         phase[0] = 0
@@ -304,14 +300,14 @@ def bmk_bnk_mn_gemm(
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
                                     for ki in Tx.unroll(BLK_K // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA),
+                                            Tx.address_of(descA),  # noqa: F821
                                             A_smem.ptr_to([ks, 0, ki * MMA_K]),
                                             ldo=1,
                                             sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
                                             swizzle=SWIZZLE,
                                         )
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB),
+                                            Tx.address_of(descB),  # noqa: F821
                                             B_smem.ptr_to([ks, 0, ki * MMA_K]),
                                             ldo=1,
                                             sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
@@ -323,13 +319,13 @@ def bmk_bnk_mn_gemm(
                                         ):
                                             Tx.ptx.tcgen05.mma(
                                                 "float32", a_type, b_type,
-                                                tmem_idx * MMA_N, descA, descB, descI,
+                                                tmem_idx * MMA_N, descA, descB, descI,  # noqa: F821
                                                 False, CTA_GROUP, False,
                                             )
                                         else:
                                             Tx.ptx.tcgen05.mma(
                                                 "float32", a_type, b_type,
-                                                tmem_idx * MMA_N, descA, descB, descI,
+                                                tmem_idx * MMA_N, descA, descB, descI,  # noqa: F821
                                                 False, CTA_GROUP, True,
                                             )
                                     mma2tma_bar.arrive(ks, CTA_GROUP, 1)
@@ -371,7 +367,7 @@ def bmk_bnk_mn_gemm(
                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
                         for ko in Tx.unroll(MMA_N // EPI_TILE):
-                            stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH
+                            stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH  # noqa: E501
 
                             if ko >= TMEM_PIPE_DEPTH:
                                 if lane_id == 0 and warp_id == 0:
@@ -434,8 +430,12 @@ def test_bmk_bnk_mn():
     target = tvm.target.Target("cuda")
     with target:
         src, mod = get_source(bmk_bnk_mn_gemm)
-        func = lambda: (D_out.zero_(), mod(A_flat, B_flat, D_out))[-1]
-        ms = bench(func, warmup=10, repeat=30, proton_name="tir")
+
+        def run():
+            D_out.zero_()
+            mod(A_flat, B_flat, D_out)
+
+        ms = bench(run, warmup=10, repeat=30, proton_name="tir")
         tflops = flops(ms) / 1e12
         print(f"TIR: {tflops:.2f} TFLOPS, time: {ms:.3f} ms")
 

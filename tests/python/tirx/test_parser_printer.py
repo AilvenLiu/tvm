@@ -19,9 +19,9 @@ import pytest
 import tvm
 import tvm.script
 import tvm.testing
-from tvm.ir import assert_structural_equal, PointerType, PrimType
-from tvm.tir.layout import laneid
+from tvm.ir import PointerType, PrimType, assert_structural_equal
 from tvm.script import tirx as Tx
+from tvm.tir.layout import laneid
 
 
 def from_source(code):
@@ -36,7 +36,7 @@ def test_roundtrip_scopeid1():
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
+            Tx.warp_id([1], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 with Tx.warp():
@@ -55,7 +55,7 @@ def test_roundtrip_scopeid2():
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _ = Tx.match_buffer(A_ptr, (64,), "float32", scope="global")
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
@@ -79,12 +79,12 @@ def test_roundtrip_exec_scope():
     @Tx.prim_func(tirx=True)
     def test():
         with Tx.world():
-            kid = Tx.kernel_id([2])
+            Tx.kernel_id([2])
             with Tx.kernel():
                 bx, by, bz = Tx.cta_id([32, 32, 1], parent="kernel")
                 tx, ty, tz = Tx.thread_id([16, 8, 1], parent="cta")
-                warp_id = Tx.warp_id([4], parent="cta")
-                lane_id = Tx.thread_id([32], parent="warp")
+                Tx.warp_id([4], parent="cta")
+                Tx.thread_id([32], parent="warp")
                 with Tx.cluster():
                     with Tx.cta():
                         with Tx.warpgroup():
@@ -118,7 +118,7 @@ def test_roundtrip_layout():
 
     def get_layout3():
         return Tx.TileLayout(
-            Tx.S[(8, 16, 8, 16):(1024, 16, 128, 1)],
+            Tx.S[(8, 16, 8, 16) : (1024, 16, 128, 1)],
         )
 
     def get_layout4():
@@ -133,21 +133,21 @@ def test_roundtrip_layout():
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64,), "float32", scope="global")
+        _ = Tx.match_buffer(A_ptr, (64,), "float32", scope="global")
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             C = Tx.alloc_buffer([128, 128], dtype="float16", scope="shared", layout=get_layout3())
             D = Tx.alloc_buffer([128, 32], dtype="float16", scope="shared", layout=get_layout4())
 
             with Tx.cta():
-                A_warp = Tx.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
-                B_warp = Tx.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
+                A_warp = Tx.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())  # noqa: E501
+                B_warp = Tx.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())  # noqa: E501
 
-                E = Tx.alloc_buffer([64, 256], dtype="float16", scope="shared", layout=get_layout5())
+                E = Tx.alloc_buffer([64, 256], dtype="float16", scope="shared", layout=get_layout5())  # noqa: E501
 
                 with Tx.thread():
                     Tx.evaluate(A_warp[0, 0] + B_warp[0, 0] + C[0, 0] + D[0, 0] + E[0, 0])
@@ -212,8 +212,8 @@ def test_roundtrip_buffer_view_get2():
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([32, 32, 1], parent="kernel")
             tx, ty, tz = Tx.thread_id([16, 8, 1], parent="cta")
-            warp_id = Tx.warp_id([4], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
                 A = Tx.alloc_buffer([2,], dtype="float16", scope="local")
@@ -259,8 +259,8 @@ def test_roundtrip_op1():
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([1], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([64], dtype="float32", scope="shared")
 
@@ -286,8 +286,8 @@ def test_roundtrip_op2():
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([128, 32], dtype="float16", scope="shared")
                 B_smem = Tx.alloc_buffer([32, 64], dtype="float16", scope="shared")
@@ -318,8 +318,8 @@ def test_roundtrip_op3():
 
         with Tx.kernel():
             bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.warp_id([4], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([NUM_STAGES, 128, 32], dtype="float16", scope="shared")
@@ -351,7 +351,7 @@ def test_roundtrip_tensormap():
     @Tx.prim_func(tirx=True)
     def func1(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "func"})
-        A = Tx.match_buffer(A_ptr, [128], "float32")
+        _ = Tx.match_buffer(A_ptr, [128], "float32")
 
         A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         Tx.call_packed("runtime.tensormap_init", A_map, A_ptr)
@@ -687,7 +687,7 @@ def test_alloc_apis():
             self.inner_pool = inner_pool
             self.Tb = Tx.shared_scalar("float16", "Tb")
             self.idx = Tx.local_scalar("int32", "idx")
-            self.inner_pool2 = Tx.decl_scalar("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")
+            self.inner_pool2 = Tx.decl_scalar("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")  # noqa: E501
 
         @Tx.inline
         def init(self):
@@ -718,14 +718,14 @@ def test_alloc_apis():
             F = Tx.alloc_local((1,), "float16")
             with Tx.thread():
                 Ta: Tx.float16
-                inner_pool = Tx.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")
-                test = Test(Ta, inner_pool)
+                inner_pool = Tx.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")  # noqa: E501
+                test = Test(Ta, inner_pool)  # noqa: F821
                 test.init()
                 A[0] = C
-                A[0] = C + D
+                A[0] = C + D  # noqa: F821
                 A[1] = B[0] * C
-                D.buffer[0] = D + Tx.float16(1)
-                D = D + Tx.float16(1)
+                D.buffer[0] = D + Tx.float16(1)  # noqa: F821
+                D = D + Tx.float16(1)  # noqa: F821
                 C = D
                 Tx.evaluate(E)
                 E = E + Tx.float16(1)
@@ -832,7 +832,7 @@ def test_list_comprehension():
                 Tx.evaluate(regs[0])
                 Tx.evaluate(tvm.tir.all(*regs))
                 Tx.evaluate(tvm.tir.all(*[acc[_] for _ in range(10)]))
-                Tx.evaluate(tvm.tir.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))
+                Tx.evaluate(tvm.tir.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))  # noqa: E501
     # fmt: on
     code = test.script()
     print(code)
@@ -844,7 +844,7 @@ def test_range():
     # fmt: off
     @Tx.prim_func(tirx=True, private=True)
     def test():
-        l = Tx.meta_var([i for i in range(10)])
+        l = Tx.meta_var([i for i in range(10)])  # noqa: E741
         Tx.evaluate(l[3])
 
     @Tx.prim_func(tirx=True, private=True)
@@ -872,21 +872,21 @@ def test_buffer():
         G_ptr: Tx.handle,
         H_ptr: Tx.handle,
     ):
-        E = Tx.match_buffer(E_ptr, [10, 11], "float16", layout=None)
-        F = Tx.match_buffer(F_ptr, [10, 11], "float16", scope="global")
-        G = Tx.match_buffer(G_ptr, [10, 11], "float16", layout="default")
-        H = Tx.match_buffer(H_ptr, [10, 11], "float16", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
+        _E = Tx.match_buffer(E_ptr, [10, 11], "float16", layout=None)
+        _F = Tx.match_buffer(F_ptr, [10, 11], "float16", scope="global")
+        _G = Tx.match_buffer(G_ptr, [10, 11], "float16", layout="default")
+        _H = Tx.match_buffer(H_ptr, [10, 11], "float16", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))  # noqa: E501
 
-        A0 = Tx.decl_buffer((10, 11), "float32", data=A.data, layout=None)
-        B0 = Tx.decl_buffer((10, 11), "float32", data=B.data, scope="global")
-        C0 = Tx.decl_buffer((10, 11), "float32", data=C.data, layout="default")
-        D0 = Tx.decl_buffer((10, 11), "float32", data=D.data, layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
+        _A0 = Tx.decl_buffer((10, 11), "float32", data=A.data, layout=None)
+        _B0 = Tx.decl_buffer((10, 11), "float32", data=B.data, scope="global")
+        _C0 = Tx.decl_buffer((10, 11), "float32", data=C.data, layout="default")
+        _D0 = Tx.decl_buffer((10, 11), "float32", data=D.data, layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))  # noqa: E501
 
         with Tx.kernel():
-            A1 = Tx.alloc_buffer((10, 11), "float32", layout=None)
-            B1 = Tx.alloc_buffer((10, 11), "float32", scope="global")
-            C1 = Tx.alloc_buffer((10, 11), "float32", layout="default")
-            D1 = Tx.alloc_buffer((10, 11), "float32", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))
+            _A1 = Tx.alloc_buffer((10, 11), "float32", layout=None)
+            _B1 = Tx.alloc_buffer((10, 11), "float32", scope="global")
+            _C1 = Tx.alloc_buffer((10, 11), "float32", layout="default")
+            _D1 = Tx.alloc_buffer((10, 11), "float32", layout=Tx.TileLayout(Tx.S[(10, 11) : (1, 10)]))  # noqa: E501
 
             pass
     # fmt: on
@@ -914,8 +914,7 @@ def test_workspace_default_none():
     binary_chain, reduce_negate) should handle workspace=None (the default)
     without error. Previously these functions were missing the
     ``if workspace is None: workspace = {}`` guard."""
-    from tvm.script.ir_builder.tir import tirx as tirx_builder
-    from tvm.tir import BufferRegion, Buffer
+    from tvm.tir import BufferRegion
 
     A_buf = tvm.tir.decl_buffer((128, 128), "float16", name="A")
     B_buf = tvm.tir.decl_buffer((128, 128), "float16", name="B")
@@ -973,7 +972,7 @@ def test_scalar_assign_in_macro():
         with Tx.kernel():
             with Tx.thread([128]):
                 counter: Tx.int32
-                state = Tx.meta_var(State(counter))
+                state = Tx.meta_var(State(counter))  # noqa: F821
                 state.add_one()
                 Tx.evaluate(state.counter)
     # fmt: on
@@ -1020,6 +1019,7 @@ def func():
 
 def test_scalar_annotation_syntax():
     """Test the scalar annotation syntax: x: Tx.int32 = init, x: Tx.int32, and T.let."""
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test():
@@ -1046,6 +1046,7 @@ def test_scalar_annotation_syntax():
 
 def test_let_annotation_syntax():
     """Test explicit LetStmt syntax: T.let[T.int32] and T.let."""
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test():
@@ -1077,7 +1078,7 @@ def test_annotation_syntax_comprehensive():
         with Tx.kernel():
             smem = Tx.alloc_shared([128], "float16")
             with Tx.thread([128]):
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret(
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret(  # noqa: E501
                     "handle", smem.access_ptr("rw")
                 )
                 Tx.evaluate(ptr)
@@ -1176,7 +1177,7 @@ def test_roundtrip_buffer_local_auto():
 
 
 ###############################################################################
-# IR verification tests – verify DeclBuffer properties, not just round-trip
+# IR verification tests - verify DeclBuffer properties, not just round-trip
 ###############################################################################
 
 
@@ -1185,7 +1186,7 @@ def _collect_buffers(func):
     bufs = {}
 
     def _visit(node):
-        if isinstance(node, (tvm.tir.DeclBuffer, tvm.tir.AllocBuffer)):
+        if isinstance(node, (tvm.tir.DeclBuffer, tvm.tir.AllocBuffer)):  # noqa: UP038
             bufs[node.buffer.name] = node.buffer
 
     tvm.tir.stmt_functor.post_order_visit(func.body, _visit)

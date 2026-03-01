@@ -19,16 +19,14 @@
 
 import functools
 import operator
-from typing import Optional, Union
 
 from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
 from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, OpCall, PrimFunc
-from tvm.tir.layout import laneid
 from tvm.tir.expr import FloatImm
+from tvm.tir.layout import laneid
 from tvm.tirx.op_schedule import ScheduleContext, fail
-from tvm.tirx.operator.op import BinaryOp
 
 from ..common import MapOpType
 from .common import get_indices
@@ -58,7 +56,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """
     Schedule binary map operation on CUDA in shared memory.
 
@@ -69,8 +67,8 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     """
     op = OpCall.downcast(op)
     _dst: BufferRegion = op.output
-    _src1: Union[BufferRegion, FloatImm] = op.lhs
-    _src2: Union[BufferRegion, FloatImm] = op.rhs
+    _src1: BufferRegion | FloatImm = op.lhs
+    _src2: BufferRegion | FloatImm = op.rhs
 
     if sctx.exec_scope.name != "cta":
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")
@@ -168,7 +166,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
                     if fused_idx < num_elements:
                         idx_dst = Tx.meta_var(get_indices(fused_idx, dst_start, dst_extent))
                         idx_src1 = Tx.meta_var(get_indices(fused_idx, src1_start, src1_extent))
-                        dst[*idx_dst] = op_func(src1[*idx_src1], CONST)
+                        dst[tuple(idx_dst)] = op_func(src1[tuple(idx_src1)], CONST)
             Tx.tvm_storage_sync("shared")
 
         return impl
@@ -186,7 +184,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
                             idx_src1, src1_start, src1_extent, src2_start, src2_extent
                         )
                     )
-                    dst[*idx_dst] = op_func(src1[*idx_src1], src2[*idx_src2])
+                    dst[tuple(idx_dst)] = op_func(src1[tuple(idx_src1)], src2[tuple(idx_src2)])
         Tx.tvm_storage_sync("shared")
 
     return impl
@@ -196,7 +194,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """
     Schedule binary map operation on CUDA on warp-level logical tensor.
 
@@ -222,8 +220,8 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     """
     op = OpCall.downcast(op)
     _dst: BufferRegion = op.output
-    _src1: Union[BufferRegion, FloatImm] = op.lhs
-    _src2: Union[BufferRegion, FloatImm] = op.rhs
+    _src1: BufferRegion | FloatImm = op.lhs
+    _src2: BufferRegion | FloatImm = op.rhs
 
     # Ensure at least one source is not a constant.
     CONST = None
@@ -244,7 +242,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     src2_region = None if CONST is not None else _src2.region
     dtype = dst.dtype
 
-    dst_start = [r.min for r in dst_region]
+    [r.min for r in dst_region]
     src1_start = [r.min for r in src1_region]
     src1_extent = [r.extent for r in src1_region]
     dst_extent = [r.extent for r in dst_region]
@@ -277,7 +275,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         fail(f"unsupported binary op: {binary_op}")
 
     # no slicing allowed, since op is on local tensor
-    analyzer = Analyzer()
+    Analyzer()
     if not all(
         [
             len(src1_region) == 2 and len(dst_region) == 2,
@@ -297,7 +295,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         fail("unsupported layout/scope/dtype or exec_scope for local logical-view binary map")
 
     # For non-constant second source, switch broadcasting if needed.
-    analyzer = Analyzer()
+    Analyzer()
     if CONST is None:
         src1_num = functools.reduce(operator.mul, src1_extent, 1)
         src2_num = functools.reduce(operator.mul, src2_extent, 1)
@@ -351,7 +349,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     # 5. (ROW_RED, ROW_RED, const)
 
     # WGMMA layout check
-    atom = Tx.TileLayout(Tx.S[(1, 2):(2, 1)])
+    atom = Tx.TileLayout(Tx.S[(1, 2) : (2, 1)])
     warp_layout = Tx.TileLayout(Tx.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
@@ -362,7 +360,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             return None
 
     # ROW_RED layout check
-    red_atom = Tx.TileLayout(Tx.S[(1, 1):(1, 1)])
+    red_atom = Tx.TileLayout(Tx.S[(1, 1) : (1, 1)])
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     def check_row_red(buf):
@@ -449,7 +447,7 @@ def binary_cuda_impl(
     op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Dispatch to shared memory scheduler or logical tensor of local memory scheduler
     based on the storage scope of buffers.
     """

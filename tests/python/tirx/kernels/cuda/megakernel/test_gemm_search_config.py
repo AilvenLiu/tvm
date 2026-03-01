@@ -17,26 +17,24 @@
 
 import argparse
 import operator
+
 import numpy as np
 import pytest
-from typing import Type, Literal
 
 import tvm
 import tvm.testing
-from tvm.script import ir as I
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-
+from tvm.tirx.megakernel.kernels import GemmTile, SplitKReduceTile
+from tvm.tirx.megakernel.utils import static_scheduler
 from tvm.tirx.megakernel.utils.base import MegaKernelWrapper, SemaphoreBase
-from tvm.tirx.megakernel.utils.utils import ceildiv, get_source, f_init_const, pack_into_32bit
 from tvm.tirx.megakernel.utils.config import (
-    KernelConfig,
     JobType,
+    KernelConfig,
     ProfileEventType,
     event_type_names,
 )
-from tvm.tirx.megakernel.utils import static_scheduler
-from tvm.tirx.megakernel.kernels import GemmTile, SplitKReduceTile
+from tvm.tirx.megakernel.utils.utils import ceildiv, f_init_const, get_source, pack_into_32bit
 
 
 class GemmConfigSearcher(MegaKernelWrapper):
@@ -85,7 +83,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self.reset()
         self._set_tiles()
 
-    def _set_events(self, Semaphore: Type[SemaphoreBase], etensor_workspace_global):
+    def _set_events(self, Semaphore: type[SemaphoreBase], etensor_workspace_global):
         self.evt = self.add_etensor(
             Semaphore,
             etensor_workspace_global,
@@ -93,7 +91,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
             f_init=f_init_const(self.split_k * (self.reduce_tile.N_TILE // self.gemm_tile.BLK_N)),
         )
 
-    def set_events(self, Semaphore: Type[static_scheduler.Semaphore], etensor_workspace_global):
+    def set_events(self, Semaphore: type[static_scheduler.Semaphore], etensor_workspace_global):
         self._set_events(Semaphore, etensor_workspace_global)
         self.set_events_complete(False, Semaphore, etensor_workspace_global)
 
@@ -170,19 +168,19 @@ class GemmConfigSearcher(MegaKernelWrapper):
         etensor_workspace,
         profiler_buffer,
         exec_queue,
-        Semaphore: Type[static_scheduler.Semaphore],
-        Scheduler: Type[static_scheduler.StaticTileScheduler],
+        Semaphore: type[static_scheduler.Semaphore],
+        Scheduler: type[static_scheduler.StaticTileScheduler],
     ):
         # initialize tile
         self.set_tiles()
         self.host_init_all()
 
         with Tx.kernel():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            Tx.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             self.init_profiler(profiler_buffer)
             with Tx.cta():
@@ -202,7 +200,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
                 while self.tile_scheduler.valid():
 
                     if self.tile_scheduler.task_type == 0:
-                        self.task_impl_gemm(A_global, B_global, partial_global, output_global, output32_global)
+                        self.task_impl_gemm(A_global, B_global, partial_global, output_global, output32_global)  # noqa: E501
                     elif self.tile_scheduler.task_type == 1:
                         self.task_reduce(partial_global, output_global)
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
@@ -238,19 +236,19 @@ class GemmConfigSearcher(MegaKernelWrapper):
             # match buffer
             A_global = Tx.match_buffer(A_ptr, [self.batch_size, self.k], "float16", scope="global")
             B_global = Tx.match_buffer(B_ptr, [self.n, self.k], "float16", scope="global")
-            partial_global = Tx.match_buffer(partial_ptr, [self.split_k, self.batch_size, self.n], "float32", scope="global")
-            output_global = Tx.match_buffer(output_ptr, [self.batch_size, self.n], "float16", scope="global")
-            output32_global = Tx.match_buffer(output32_ptr, [self.batch_size, self.n], "float32", scope="global")
+            partial_global = Tx.match_buffer(partial_ptr, [self.split_k, self.batch_size, self.n], "float32", scope="global")  # noqa: E501
+            output_global = Tx.match_buffer(output_ptr, [self.batch_size, self.n], "float16", scope="global")  # noqa: E501
+            output32_global = Tx.match_buffer(output32_ptr, [self.batch_size, self.n], "float32", scope="global")  # noqa: E501
 
             etensor_workspace_size = Tx.int32()
-            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)
+            etensor_workspace_global = Tx.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global", offset_factor=1)  # noqa: E501
 
             # exec queue
-            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = Tx.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, static_scheduler.StaticTileScheduler.MAX_TASKS], "int32", scope="global")  # noqa: E501
 
             # main
             self.fused_body(
-                A_global, B_global, partial_global, output_global, output32_global, etensor_workspace_global, profiler_buffer, exec_queue,
+                A_global, B_global, partial_global, output_global, output32_global, etensor_workspace_global, profiler_buffer, exec_queue,  # noqa: E501
                 static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
             )
 
@@ -270,7 +268,7 @@ def prepare_data(mk: GemmConfigSearcher, repeat=100):
     arg_dict["B"] = torch.randn((mk.n, mk.k), dtype=torch.float16)
     arg_dict["partial"] = torch.zeros((mk.split_k, mk.batch_size, mk.n), dtype=torch.float32)
     arg_dict["output"] = torch.zeros((mk.batch_size, mk.n), dtype=torch.float16)
-    arg_dict[f"etensor_workspace"] = torch.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=torch.int32)
+    arg_dict["etensor_workspace"] = torch.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=torch.int32)
     for i in range(repeat):
         arg_dict[f"output32_{i}"] = torch.zeros((mk.batch_size, mk.n), dtype=torch.float32)
 
@@ -284,7 +282,6 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
     arg_dict = prepare_data(mega_kernel_wrapper, REPEAT)
 
     def tir(arg_dict, mk: GemmConfigSearcher):
-
         DEV = tvm.cuda(0)
         tvm_arg_dict = {}
         for key, value in arg_dict.items():
@@ -321,7 +318,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
         for bx in range(KernelConfig.SM_NUMBER):
             exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value, debug=True)
         tvm_arg_dict["exec_queue"] = tvm.runtime.tensor(exec_queue, device=DEV)
-        tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
+        tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
         )
 
@@ -338,9 +335,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                     tvm_arg_dict["partial"],
                     tvm_arg_dict["output"],
                     tvm_arg_dict[f"output32_{iter}"],
-                    tvm_arg_dict[f"etensor_workspace"],
+                    tvm_arg_dict["etensor_workspace"],
                     tvm_arg_dict["exec_queue"],
-                    tvm_arg_dict[f"profiler_buffer"],
+                    tvm_arg_dict["profiler_buffer"],
                 )
                 iter += 1
 
@@ -348,12 +345,12 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                 func,
                 warmup=1,
                 repeat=3,
-                proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{'-tmareduce' if mk.use_tma_reduce else ''}",
+                proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{'-tmareduce' if mk.use_tma_reduce else ''}",  # noqa: E501
             )
             print(f"TIR time: {ms:.3f} ms")
             if mk.profiler_on:
                 export_to_perfetto_trace(
-                    tvm_arg_dict[f"profiler_buffer"].numpy(),
+                    tvm_arg_dict["profiler_buffer"].numpy(),
                     f"blkn{mk.blk_n}-splitk{mk.split_k}.perfetto-trace",
                     event_type_names,
                 )
@@ -375,7 +372,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             return output.cpu().numpy()
 
         output = func()
-        ms = bench(func, warmup=10, repeat=30, proton_name=f"std")
+        ms = bench(func, warmup=10, repeat=30, proton_name="std")
         print(f"std time: {ms:.3f} ms")
         return output
 
@@ -396,7 +393,6 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument(
         "--batch-size", type=int, nargs="+", default=[1], help="A list of batch sizes to test."
@@ -446,5 +442,5 @@ if __name__ == "__main__":
         print("Top 10 configs:")
         for (split_k, blk_n, use_tma_reduce), ms in sorted_items_asc[:10]:
             print(
-                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms"
+                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms"  # noqa: E501
             )

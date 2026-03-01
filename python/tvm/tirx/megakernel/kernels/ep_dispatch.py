@@ -16,8 +16,7 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
 from tvm.tirx.megakernel.utils.config import KernelConfig
 
 
@@ -80,10 +79,10 @@ class EPDispatchPrecomputeTile(Tile):
         rank,
     ):
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
             warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
 
             # TODO: tune number of CTAs for precompute based on profiling results
             # for now, each warp in a CTA is responsible for one expert; total CTA: 16
@@ -98,7 +97,7 @@ class EPDispatchPrecomputeTile(Tile):
                     col_idx = Tx.meta_var(Tx.int32((tid % 2) * 4))
                     if row_idx < self.num_tokens:
                         for vec in Tx.vectorized(vec_size):
-                            self.smem_buf[tid * vec_size + vec] = route_experts[row_idx, col_idx + vec]
+                            self.smem_buf[tid * vec_size + vec] = route_experts[row_idx, col_idx + vec]  # noqa: E501
                     Tx.tvm_storage_sync("shared")
 
                     # thread count
@@ -111,14 +110,14 @@ class EPDispatchPrecomputeTile(Tile):
 
                     # warp scan
                     for kr in Tx.unroll(5):
-                        self.count[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.count[0], 16 >> kr, 32, 32)
+                        self.count[0] += Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, self.count[0], 16 >> kr, 32, 32)  # noqa: E501
 
                     # a single thread in warp signal the count
                     dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % self.local_num_experts))
                     dst_rank = Tx.meta_var(Tx.int32(dst_expert // self.local_num_experts))
                     if lane_id == 0:
                         Tx.nvshmem.signal_op(
-                            sig_addr=target_wait.access_ptr("w", offset=target_wait.elem_offset_of([dst_local_expert, rank])),
+                            sig_addr=target_wait.access_ptr("w", offset=target_wait.elem_offset_of([dst_local_expert, rank])),  # noqa: E501
                             signal=self.count[0] + 1,
                             sig_op="set",
                             pe=dst_rank,
@@ -188,14 +187,14 @@ class EPDispatchSendTile(Tile):
         recv_tokens, # (local_num_experts, world_size, num_tokens, hidden_dim)
         actual_wait, # (local_num_experts, world_size)
         dst_token_indices, # (num_tokens, topk)
-        dst_token_idx, # (total_num_experts,), the token_idx that the CTA is sending to in recv_tokens
+        dst_token_idx, # (total_num_experts,), the token_idx that the CTA is sending to in recv_tokens  # noqa: E501
         rank,
     ):
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
             warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
             lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+            Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
 
             # each warp sends to one dest expert
             if warp_id < self.topk:
@@ -203,14 +202,14 @@ class EPDispatchSendTile(Tile):
                 dst_local_expert = Tx.meta_var(Tx.int32(dst_expert % self.local_num_experts))
                 dst_rank = Tx.meta_var(Tx.int32(dst_expert // self.local_num_experts))
                 if lane_id == 0:
-                    self.dst_index[0] = Tx.cuda.atomic_add(dst_token_idx.access_ptr("rw", offset=dst_expert), 1)
+                    self.dst_index[0] = Tx.cuda.atomic_add(dst_token_idx.access_ptr("rw", offset=dst_expert), 1)  # noqa: E501
                     dst_token_indices[src_token_idx, warp_id] = self.dst_index[0]
                 self.dst_index[0] = Tx.tvm_warp_shuffle(0xffffffff, self.dst_index[0], 0, 32, 32)
                 Tx.nvshmem.putmem_signal_nbi.warp(
-                    dst=recv_tokens.access_ptr("w", offset=recv_tokens.elem_offset_of([dst_local_expert, rank, self.dst_index[0], 0])),
-                    src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([src_token_idx, 0])),
+                    dst=recv_tokens.access_ptr("w", offset=recv_tokens.elem_offset_of([dst_local_expert, rank, self.dst_index[0], 0])),  # noqa: E501
+                    src=send_tokens.access_ptr("r", offset=send_tokens.elem_offset_of([src_token_idx, 0])),  # noqa: E501
                     nelems=self.hidden_dim * self.nbytes,
-                    sig_addr=actual_wait.access_ptr("w", offset=actual_wait.elem_offset_of([dst_local_expert, rank])),
+                    sig_addr=actual_wait.access_ptr("w", offset=actual_wait.elem_offset_of([dst_local_expert, rank])),  # noqa: E501
                     signal=1,
                     sig_op="add",
                     pe=dst_rank,
@@ -279,21 +278,21 @@ class EPDispatchRecvTile(Tile):
         rank,
     ):
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
 
             # TODO: can adjust the granularity of tile when fusing with GEMM
             # for now, each CTA is responsible for one expert and one source GPU
             Tx.nvshmem.wait_until(
-                ivar=target_wait.access_ptr("r", offset=target_wait.elem_offset_of([local_expert_idx, src_rank_idx])),
+                ivar=target_wait.access_ptr("r", offset=target_wait.elem_offset_of([local_expert_idx, src_rank_idx])),  # noqa: E501
                 cmp="ne",
                 cmp_value=0,
             )
             recv_num = target_wait[local_expert_idx, src_rank_idx] - 1
             Tx.nvshmem.wait_until(
-                ivar=actual_wait.access_ptr("r", offset=actual_wait.elem_offset_of([local_expert_idx, src_rank_idx])),
+                ivar=actual_wait.access_ptr("r", offset=actual_wait.elem_offset_of([local_expert_idx, src_rank_idx])),  # noqa: E501
                 cmp="eq",
                 cmp_value=recv_num,
             )

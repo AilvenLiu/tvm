@@ -15,9 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 import os
-import subprocess
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import paramiko
@@ -25,8 +24,6 @@ import pytest
 import torch
 
 import tvm
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc
 
 from .claude_rewrite import rewrite_program
@@ -79,13 +76,13 @@ def generate_test_function(func: PrimFunc, target: tvm.target.Target):
             continue
         buffer = func.buffer_map[param]
         assert buffer.dtype in dtype_map, f"Unsupported dtype {buffer.dtype}"
-        func_str += f"  param_{cnt} = ((np.random.rand(*{buffer.shape}) - 0.5) * 2).astype({dtype_map[buffer.dtype]})\n"
+        func_str += f"  param_{cnt} = ((np.random.rand(*{buffer.shape}) - 0.5) * 2).astype({dtype_map[buffer.dtype]})\n"  # noqa: E501
         cnt += 1
     func_str += f"  {func_name}_kernel({', '.join([f'param_{i}' for i in range(cnt)])})\n"
     num_inputs = int(func.attrs["num_inputs"])
     total_params = len(func.params)
     for i in range(num_inputs, total_params):
-        func_str += f"  np.save('output_{i-num_inputs}.npy', param_{i})\n"
+        func_str += f"  np.save('output_{i - num_inputs}.npy', param_{i})\n"
     func_str += "np.random.seed(0)\n"
     func_str += "test_func()\n"
     func_str = rewrite_program(func_str, func_name)
@@ -148,7 +145,7 @@ def fetch_npy_files(ssh_client, remote_dir, local_dir):
     print(f"Listing files in remote directory: {remote_dir}")
     try:
         remote_files = sftp.listdir(remote_dir)
-    except IOError as e:
+    except OSError as e:
         print(f"Error listing directory {remote_dir}: {e}")
         sftp.close()
         return

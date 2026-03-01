@@ -16,14 +16,12 @@
 # under the License.
 
 import re
-from difflib import unified_diff
 
 import numpy as np
 
 import tvm
-from tvm.script import tirx as Tx
 import tvm.testing
-from tvm import te
+from tvm.script import tirx as Tx
 
 
 def generate_random_data(shape, dtype):
@@ -97,7 +95,7 @@ def verify_cuda_code_array(func, dim_num, dtype, *dims):
 
     if not printf_pattern.search(print_buffer_section):
         raise AssertionError(
-            f'Expected element printf statement with format "{expected_printf_specifier}" and a buffer access, but not found'
+            f'Expected element printf statement with format "{expected_printf_specifier}" and a buffer access, but not found'  # noqa: E501
         )
 
 
@@ -116,7 +114,7 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
         raise AssertionError(f"Unsupported dtype for scalar verification: {dtype}")
 
     value_pattern = ""
-    if isinstance(expected_value_or_varname, (int, float)):
+    if isinstance(expected_value_or_varname, (int, float)):  # noqa: UP038
         if "float" in dtype:
             value_pattern = re.escape(str(float(expected_value_or_varname))) + "f?"
         else:

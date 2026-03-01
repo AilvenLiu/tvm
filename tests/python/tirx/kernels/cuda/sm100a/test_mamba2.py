@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
 """Mamba2 SSD forward kernel with SM100 warp specialization.
 
 Warp-specialized rewrite using tcgen05 MMA, TMEM, and producer/consumer
@@ -28,18 +29,17 @@ Architecture:
   WG0 (Consumer): TMEM read, elementwise, SMEM writeback
 """
 
-import math
-import pytest
 import numpy as np
+import pytest
 import torch
 
 import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # Kernel constants
 CHUNK = 64
@@ -47,12 +47,12 @@ D_MODEL = 64
 SM_COUNT = 148
 
 # Warp-specialized layout
-WG_NUMBER = 2        # WG0=consumer, WG1=producer+MMA
-WARP_NUMBER = 4      # per warpgroup
+WG_NUMBER = 2  # WG0=consumer, WG1=producer+MMA
+WARP_NUMBER = 4  # per warpgroup
 NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # 256
 
 # MMA dimensions
-MMA_M = 64     # actual MMA M dimension (64 valid rows)
+MMA_M = 64  # actual MMA M dimension (64 valid rows)
 TMEM_ROWS = 128  # TMEM always has 128 TLanes; copy dispatch requires 128
 MMA_N = 64
 MMA_K = 16
@@ -68,7 +68,6 @@ F32_BYTES = 4
 F128_BYTES = 16
 N_COLS = 64  # TMEM columns
 TMEM_LD_SIZE = 64  # read full row at once
-
 
 
 def ceildiv(a, b):
@@ -139,7 +138,7 @@ D_out_layout = Tx.ComposeLayout(
 
 
 def get_mamba2_kernel():
-    a_type = tvm.DataType("float16")
+    a_type = tvm.DataType("float16")  # noqa: F841
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -155,7 +154,7 @@ def get_mamba2_kernel():
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
             warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
 
@@ -198,12 +197,12 @@ def get_mamba2_kernel():
                 consumer2mma_bar.init(128)  # full consumer WG
                 workitem_sync_bar.init(1)
 
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))  # noqa: E501
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
                     Tx.cuda.warp_sync()
 
                 Tx.ptx.fence.proxy_async("shared::cta")
@@ -245,19 +244,19 @@ def get_mamba2_kernel():
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
                                         tic = Tx.meta_var(cid_tma % PIPE_DEPTH)
                                         q_row = Tx.meta_var(cid_tma * CHUNK)
-                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})  # noqa: E501
                                         # Wait for MMA to release this SMEM slot
                                         # Skip wait for first PIPE_DEPTH loads (pipeline priming)
                                         if cid_tma >= PIPE_DEPTH:
                                             mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V, A for this chunk
-                                        Tx.copy_async(Q_smem[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)
-                                        Tx.copy_async(K_smem[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)
-                                        Tx.copy_async(V_smem[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)
+                                        Tx.copy_async(Q_smem[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_smem[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_smem[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)  # noqa: E501
                                         # A is f32 scalar vector — use TMA for it too
-                                        Tx.copy_async(A_smem[tic, :], a_g[wid_tma, q_row : q_row + CHUNK], **tma_copy)
+                                        Tx.copy_async(A_smem[tic, :], a_g[wid_tma, q_row : q_row + CHUNK], **tma_copy)  # noqa: E501
                                         # Signal that load is done
-                                        tma2mma_bar.arrive(tic, (3 * CHUNK * D_MODEL * F16_BYTES + CHUNK * F32_BYTES))
+                                        tma2mma_bar.arrive(tic, (3 * CHUNK * D_MODEL * F16_BYTES + CHUNK * F32_BYTES))  # noqa: E501
                                     if cid_tma % PIPE_DEPTH == PIPE_DEPTH - 1:
                                         phase[0] = phase[0] ^ 1
                                     cid_tma = cid_tma + 1
@@ -268,17 +267,17 @@ def get_mamba2_kernel():
                             # Manual descriptor encoding (gemm_async computes wrong ldo for 64x64)
                             # Instruction descriptor: transB=False for Phase 1 (B=[N,K] format)
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI), "float32", "float16", "float16",
+                                Tx.address_of(descI), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, False, CTA_GROUP)
                             # Instruction descriptor: transB=True for Phases 2-4 (B=[K,N] format)
                             descI_tb: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_tb), "float32", "float16", "float16",
+                                Tx.address_of(descI_tb), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
 
                             # SMEM descriptor params for 64x64 f16 tiles with 128B swizzle
                             MMA_LDO = 1  # leading byte offset in 16B units
-                            MMA_SDO = 8 * D_MODEL * F16_BYTES // F128_BYTES  # stride byte offset (=64)
+                            MMA_SDO = 8 * D_MODEL * F16_BYTES // F128_BYTES  # stride byte offset (=64)  # noqa: E501
 
                             phase[0] = 0
                             wid_mma = Tx.local_scalar("int32", "wid_mma")
@@ -302,14 +301,14 @@ def get_mamba2_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
                                         for ki in Tx.unroll(D_MODEL // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_smem.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_smem.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_smem.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
@@ -318,17 +317,17 @@ def get_mamba2_kernel():
 
                                         # == Phase 2: att @ V -> o_intra (in TMEM) ==
                                         # work[M,K=CHUNK], V[K=CHUNK,N=D_MODEL] -> o[M,N]
-                                        # V is [K,N] format (K contiguous if reading columns) -> transB=True
+                                        # V is [K,N] format (K contiguous if reading columns) -> transB=True  # noqa: E501
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2
@@ -336,18 +335,18 @@ def get_mamba2_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
                                         # == Phase 3: q_dec @ kv -> o_inter (in TMEM) ==
-                                        # work[M,K=D_MODEL], Q_smem[tic] reused for kv[K=D_MODEL,N=D_MODEL]
+                                        # work[M,K=D_MODEL], Q_smem[tic] reused for kv[K=D_MODEL,N=D_MODEL]  # noqa: E501
                                         # kv stored as [K,N] format -> transB=True
                                         for ki in Tx.unroll(D_MODEL // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), Q_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), Q_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 3
@@ -355,18 +354,18 @@ def get_mamba2_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
                                         # == Phase 4: k_dec_t @ V -> kv_update (in TMEM) ==
-                                        # work[M=D_MODEL,K=CHUNK] (k_dec transposed), V[K=CHUNK,N=D_MODEL]
+                                        # work[M=D_MODEL,K=CHUNK] (k_dec transposed), V[K=CHUNK,N=D_MODEL]  # noqa: E501
                                         # V is [K,N] format -> transB=True
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_smem.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         mma2tma_bar.arrive(tic, CTA_GROUP, 1)  # release SMEM slot
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
@@ -481,12 +480,12 @@ def get_mamba2_kernel():
                                         decay_val = Tx.meta_var(Tx.exp(my_acs))
                                         for j in Tx.serial(D_MODEL):
                                             work_smem[out_row, j] = Tx.cast(
-                                                Tx.cast(Q_smem[tic_c, out_row, j], "float32") * decay_val, "float16")
+                                                Tx.cast(Q_smem[tic_c, out_row, j], "float32") * decay_val, "float16")  # noqa: E501
 
                                         # Also prepare kv_f16 into Q_smem[tic] (reuse buffer)
                                         # kv_f32 is (D,D), thread tid handles row tid
                                         for j in Tx.serial(D_MODEL):
-                                            Q_smem[tic_c, out_row, j] = Tx.cast(kv_f32[out_row, j], "float16")
+                                            Q_smem[tic_c, out_row, j] = Tx.cast(kv_f32[out_row, j], "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
@@ -512,8 +511,8 @@ def get_mamba2_kernel():
                                 Tx.cuda.warpgroup_sync(10)
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     q_row_out = Tx.meta_var(cid_con * CHUNK)
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : D_MODEL],
-                                                  D_out_smem[:, :], dispatch="tma", cache_hint="evict_last")
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : D_MODEL],  # noqa: E501
+                                                  D_out_smem[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
                                     Tx.ptx.cp_async.bulk.wait_group(0)
                                 Tx.cuda.warpgroup_sync(10)
@@ -525,7 +524,7 @@ def get_mamba2_kernel():
                                         last_acs = Tx.meta_var(acs_smem[CHUNK - 1])
                                         k_decay = Tx.meta_var(Tx.exp(last_acs - acs_smem[out_row]))
                                         for j in Tx.serial(D_MODEL):
-                                            kv_row[j] = Tx.cast(K_smem[tic_c, out_row, j], "float32") * k_decay
+                                            kv_row[j] = Tx.cast(K_smem[tic_c, out_row, j], "float32") * k_decay  # noqa: E501
 
                                         # Transpose K_dec: write row tid to column tid of work_smem
                                         # k_dec_t[j, out_row] = kv_row[j]
@@ -546,7 +545,7 @@ def get_mamba2_kernel():
                                 with Tx.thread():
                                     out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                     if lane_id < 16:
-                                        # Decay kv_state before adding update: kv_f32 *= exp(acs[-1])
+                                        # Decay kv_state before adding update: kv_f32 *= exp(acs[-1])  # noqa: E501
                                         # (moved from Phase 3 to balance consumer work)
                                         last_acs = Tx.meta_var(acs_smem[CHUNK - 1])
                                         total_decay = Tx.meta_var(Tx.exp(last_acs))
@@ -640,9 +639,9 @@ def bench_mamba2():
         f += num_chunks * heads * chunk * D_MODEL
         return batch * f / (ms * 1e-3)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Mamba2 SSD Benchmark (B={batch}, H={heads})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     with ProtonContext("mamba2"):
         for seq_len in [1024, 2048, 4096, 8192]:
@@ -655,7 +654,7 @@ def bench_mamba2():
             a_tvm = tvm.runtime.tensor(a.cpu().numpy(), DEV)
             o_tvm = tvm.runtime.tensor(o_np, DEV)
 
-            func = lambda: mod(q_tvm, k_tvm, v_tvm, a_tvm, o_tvm)
+            func = lambda: mod(q_tvm, k_tvm, v_tvm, a_tvm, o_tvm)  # noqa: E731
             ms = bench(func, warmup=100, repeat=300, proton_name=f"mamba2_N{seq_len}")
             tflops = flops(ms, seq_len) / 1e12
             print(f"  N={seq_len:>5d}: {tflops:.2f} TFLOPS, {ms:.3f} ms")

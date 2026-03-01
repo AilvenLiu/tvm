@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
 """Monarch FFT convolution kernel with SM100 warp specialization.
 
 Warp-specialized rewrite using tcgen05 MMA, TMEM, and producer/consumer
@@ -42,16 +43,17 @@ Algorithm (Monarch FFT convolution):
 """
 
 import math
-import pytest
+
 import numpy as np
+import pytest
 import torch
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # Constants
 N1 = 64
@@ -59,8 +61,8 @@ N = N1 * N1  # 4096
 SM_COUNT = 148
 
 # Warp-specialized layout
-WG_NUMBER = 2        # WG0=consumer, WG1=producer+MMA
-WARP_NUMBER = 4      # per warpgroup
+WG_NUMBER = 2  # WG0=consumer, WG1=producer+MMA
+WARP_NUMBER = 4  # per warpgroup
 NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # 256
 
 # MMA dimensions
@@ -141,10 +143,21 @@ def prepare_data(batch, heads):
 
     u_f16 = u_2d.half()
 
-    return (u_f16, kf_real, kf_imag,
-            f_real, f_imag, finv_real, finv_imag,
-            tw_real, tw_imag, twinv_real, twinv_imag,
-            u, k)
+    return (
+        u_f16,
+        kf_real,
+        kf_imag,
+        f_real,
+        f_imag,
+        finv_real,
+        finv_imag,
+        tw_real,
+        tw_imag,
+        twinv_real,
+        twinv_imag,
+        u,
+        k,
+    )
 
 
 def ref_fftconv(u, k):
@@ -237,7 +250,7 @@ def get_fftconv_kernel():
                 pool.commit()
 
                 # ---- Local variables ----
-                descI: Tx.uint32
+                descI: Tx.uint32  # noqa: F842
                 descA: Tx.uint64
                 descB: Tx.uint64
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
@@ -250,7 +263,7 @@ def get_fftconv_kernel():
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
                     Tx.cuda.warp_sync()
 
                 # ---- Load 8 constant matrices from global -> SMEM ----
@@ -268,8 +281,8 @@ def get_fftconv_kernel():
                         F_imag_s[row, col] = f_imag_g[row, col]
                         Finv_real_s[row, col] = finv_real_g[row, col]
                         Finv_imag_s[row, col] = finv_imag_g[row, col]
-                        neg_F_real_s[row, col] = Tx.cast(0.0 - Tx.cast(f_real_g[row, col], "float32"), "float16")
-                        neg_Finv_real_s[row, col] = Tx.cast(0.0 - Tx.cast(finv_real_g[row, col], "float32"), "float16")
+                        neg_F_real_s[row, col] = Tx.cast(0.0 - Tx.cast(f_real_g[row, col], "float32"), "float16")  # noqa: E501
+                        neg_Finv_real_s[row, col] = Tx.cast(0.0 - Tx.cast(finv_real_g[row, col], "float32"), "float16")  # noqa: E501
                         tw_real_s[row, col] = tw_real_g[row, col]
                         tw_imag_s[row, col] = tw_imag_g[row, col]
                         twinv_real_s[row, col] = twinv_real_g[row, col]
@@ -318,9 +331,9 @@ def get_fftconv_kernel():
                                     tic = Tx.meta_var(0)
                                     head_tma = wid_tma % H
                                     batch_tma = wid_tma // H
-                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.ptr_to([tic]), "cta_group": CTA_GROUP})  # noqa: E501
                                     # Load X for this work item
-                                    Tx.copy_async(X_smem[tic, :, :], x_g[batch_tma, head_tma, 0 : N1, 0 : N1], **tma_copy)
+                                    Tx.copy_async(X_smem[tic, :, :], x_g[batch_tma, head_tma, 0 : N1, 0 : N1], **tma_copy)  # noqa: E501
                                     tma2mma_bar.arrive(tic, N1 * N1 * F16_BYTES)
                                 phase[0] = phase[0] ^ 1
                                 wid_tma = wid_tma + SM_COUNT
@@ -330,7 +343,7 @@ def get_fftconv_kernel():
                             # All phases use transB=True (B operand is [K,N])
                             descI_tb: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_tb), "float32", "float16", "float16",
+                                Tx.address_of(descI_tb), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
 
                             phase[0] = 0
@@ -350,14 +363,14 @@ def get_fftconv_kernel():
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
                                     for ki in Tx.unroll(N1 // MMA_K):  # 4 iterations
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), F_real_s.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), F_real_s.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), X_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                            Tx.address_of(descB), X_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 1
@@ -367,14 +380,14 @@ def get_fftconv_kernel():
                                     # == Phase 2: FI @ X -> W.imag (in TMEM) ==
                                     for ki in Tx.unroll(N1 // MMA_K):  # 4 iterations
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), F_imag_s.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), F_imag_s.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), X_smem.ptr_to([tic, ki * MMA_K, 0]),
+                                            Tx.address_of(descB), X_smem.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 2 (tw multiply, write work_A/B)
@@ -383,64 +396,64 @@ def get_fftconv_kernel():
                                     # Release X_smem for TMA (no longer needed after phase 2)
                                     Tx.ptx.mbarrier.arrive(mma2tma_bar.ptr_to([tic]))
 
-                                    # == Phase 3: WR@FR + (-WI)@FI -> new W.real (cross-buffer accum) ==
+                                    # == Phase 3: WR@FR + (-WI)@FI -> new W.real (cross-buffer accum) ==  # noqa: E501
                                     # work_A has W'.real, work_B has -W'.imag
                                     # First half: work_A @ F_real (4 iters, init)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), F_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), F_real_s.ptr_to([ki * MMA_K, 0]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     # Second half: work_B @ F_imag (4 iters, accumulate)
                                     # work_B = -W'.imag, F_imag = FI
-                                    # (-WI) @ FI accumulated onto WR@FR gives WR@FR - WI@FI = new_W.real
+                                    # (-WI) @ FI accumulated onto WR@FR gives WR@FR - WI@FI = new_W.real  # noqa: E501
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), F_imag_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), F_imag_s.ptr_to([ki * MMA_K, 0]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, True)
+                                            descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 3 (save W.real, flip work_B)
                                     consumer2mma_bar.wait(0, phase_c2m)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                    # == Phase 4: WR@FI + WI@FR -> new W.imag (cross-buffer accum) ==
+                                    # == Phase 4: WR@FI + WI@FR -> new W.imag (cross-buffer accum) ==  # noqa: E501
                                     # work_A still has W'.real, work_B now has +W'.imag
                                     # First half: work_A @ F_imag (4 iters, init)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), F_imag_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), F_imag_s.ptr_to([ki * MMA_K, 0]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     # Second half: work_B @ neg_F_real (4 iters, accumulate)
                                     # work_B = -WI, neg_FR = -FR -> (-WI)@(-FR) = WI@FR
                                     # WR@FI + WI@FR = new_W.imag (no sign flip needed!)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), neg_F_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), neg_F_real_s.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, True)
+                                            descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 4 (kf multiply, write work_A/B)
@@ -450,24 +463,24 @@ def get_fftconv_kernel():
                                     # == Phase 5: WR@FiR + (-WI)@FiI -> new W.real ==
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), Finv_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), Finv_real_s.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), Finv_imag_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), Finv_imag_s.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, True)
+                                            descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 5
@@ -477,30 +490,30 @@ def get_fftconv_kernel():
                                     # == Phase 6: WR@FiI + WI@FiR -> new W.imag ==
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_A.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), Finv_imag_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), Finv_imag_s.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     # Second half: work_B @ neg_Finv_real (4 iters, accumulate)
                                     # work_B = -WI, neg_FiR = -FiR -> (-WI)@(-FiR) = WI@FiR
                                     # WR@FiI + WI@FiR = new_W.imag (no sign flip needed!)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), neg_Finv_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), neg_Finv_real_s.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, True)
+                                            descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                    # Wait consumer done with Phase 6 (twinv multiply, write work_A/B)
+                                    # Wait consumer done with Phase 6 (twinv multiply, write work_A/B)  # noqa: E501
                                     consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
@@ -509,26 +522,26 @@ def get_fftconv_kernel():
                                     # work_A has W'.real, work_B has -W'.imag
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), Finv_real_s.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), Finv_real_s.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), work_A.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), work_A.ptr_to([ki * MMA_K, 0]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                            descA, descB, descI_tb, False, CTA_GROUP, ki > 0)  # noqa: F821
                                     # FiI @ (-WI): Finv_imag @ work_B (work_B = -W'.imag)
                                     # FiI @ (-WI) accumulated = FiR@WR - FiI@WI = real part
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descA), Finv_imag_s.ptr_to([0, ki * MMA_K]),
+                                            Tx.address_of(descA), Finv_imag_s.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), work_B.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), work_B.ptr_to([ki * MMA_K, 0]),  # noqa: F821
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                            descA, descB, descI_tb, False, CTA_GROUP, True)
+                                            descA, descB, descI_tb, False, CTA_GROUP, True)  # noqa: F821
                                     mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 7 (TMA store)
@@ -608,7 +621,7 @@ def get_fftconv_kernel():
                             phase_c2m_c = phase_c2m_c ^ 1
 
                             # ======== Phase 2: Read W.imag from TMEM -> registers ========
-                            # Then apply tw multiply and write work_A/work_B (all in registers, no sync needed)
+                            # Then apply tw multiply and write work_A/work_B (all in registers, no sync needed)  # noqa: E501
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -621,13 +634,13 @@ def get_fftconv_kernel():
                                     # Save W.imag to registers, then immediately apply tw multiply
                                     for j in Tx.serial(N1):
                                         w_imag_reg[j] = reg[j]
-                                    # tw multiply: compute new_imag first (uses old w_real), then new_real
+                                    # tw multiply: compute new_imag first (uses old w_real), then new_real  # noqa: E501
                                     for j in Tx.serial(N1):
                                         tr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
                                         ti = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
                                         # new_imag = wr*ti + wi*tr (written first, reads old w_real)
-                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr
-                                        # new_real = wr*tr - wi*ti (reads old w_real before overwrite)
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr  # noqa: E501
+                                        # new_real = wr*tr - wi*ti (reads old w_real before overwrite)  # noqa: E501
                                         w_real_reg[j] = w_real_reg[j] * tr - w_imag_reg[j] * ti
                                         w_imag_reg[j] = shuf_real_buf[j % 32]
                                     # Lanes 0-15 write columns 0-31
@@ -636,12 +649,12 @@ def get_fftconv_kernel():
                                         work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
                                 # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
                                 for j in Tx.serial(32):
-                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
-                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)  # noqa: E501
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)  # noqa: E501
                                 if lane_id >= 16:
                                     for j in Tx.serial(32):
-                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
-                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")  # noqa: E501
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")  # noqa: E501
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
@@ -683,11 +696,11 @@ def get_fftconv_kernel():
                                     # Save W.imag to registers, then immediately apply kf multiply
                                     for j in Tx.serial(N1):
                                         w_imag_reg[j] = reg[j]
-                                    # kf multiply: compute new_imag first (uses old w_real), then new_real
+                                    # kf multiply: compute new_imag first (uses old w_real), then new_real  # noqa: E501
                                     for j in Tx.serial(N1):
                                         kr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
                                         ki_val = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
-                                        shuf_real_buf[j % 32] = w_real_reg[j] * ki_val + w_imag_reg[j] * kr
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ki_val + w_imag_reg[j] * kr  # noqa: E501
                                         w_real_reg[j] = w_real_reg[j] * kr - w_imag_reg[j] * ki_val
                                         w_imag_reg[j] = shuf_real_buf[j % 32]
                                     # Lanes 0-15 write columns 0-31
@@ -696,12 +709,12 @@ def get_fftconv_kernel():
                                         work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
                                 # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
                                 for j in Tx.serial(32):
-                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
-                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)  # noqa: E501
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)  # noqa: E501
                                 if lane_id >= 16:
                                     for j in Tx.serial(32):
-                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
-                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")  # noqa: E501
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")  # noqa: E501
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
@@ -740,14 +753,14 @@ def get_fftconv_kernel():
                             with Tx.thread():
                                 out_row = Tx.meta_var(warp_id * 16 + (lane_id % 16))
                                 if lane_id < 16:
-                                    # Save W.imag to registers, then immediately apply twinv multiply
+                                    # Save W.imag to registers, then immediately apply twinv multiply  # noqa: E501
                                     for j in Tx.serial(N1):
                                         w_imag_reg[j] = reg[j]
-                                    # twinv multiply: compute new_imag first (uses old w_real), then new_real
+                                    # twinv multiply: compute new_imag first (uses old w_real), then new_real  # noqa: E501
                                     for j in Tx.serial(N1):
                                         tr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
                                         ti = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
-                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr  # noqa: E501
                                         w_real_reg[j] = w_real_reg[j] * tr - w_imag_reg[j] * ti
                                         w_imag_reg[j] = shuf_real_buf[j % 32]
                                     # Lanes 0-15 write columns 0-31
@@ -756,12 +769,12 @@ def get_fftconv_kernel():
                                         work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
                                 # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
                                 for j in Tx.serial(32):
-                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
-                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)  # noqa: E501
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)  # noqa: E501
                                 if lane_id >= 16:
                                     for j in Tx.serial(32):
-                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
-                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")  # noqa: E501
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")  # noqa: E501
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
@@ -782,10 +795,10 @@ def get_fftconv_kernel():
                                         D_out[out_row, j] = Tx.cast(reg[j], "float16")
                                 # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
                                 for j in Tx.serial(32):
-                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, reg[32 + j], 16, 32, 32)
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, reg[32 + j], 16, 32, 32)  # noqa: E501
                                 if lane_id >= 16:
                                     for j in Tx.serial(32):
-                                        D_out[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
+                                        D_out[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")  # noqa: E501
 
                             Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.cuda.warpgroup_sync(10)
@@ -814,10 +827,21 @@ def get_fftconv_kernel():
 
 @pytest.mark.parametrize("batch,heads", [(2, 4), (1, 8), (10, 16)])
 def test_fftconv(batch, heads):
-    (u_f16, kf_real, kf_imag,
-     f_real, f_imag, finv_real, finv_imag,
-     tw_real, tw_imag, twinv_real, twinv_imag,
-     u_orig, k_orig) = prepare_data(batch, heads)
+    (
+        u_f16,
+        kf_real,
+        kf_imag,
+        f_real,
+        f_imag,
+        finv_real,
+        finv_imag,
+        tw_real,
+        tw_imag,
+        twinv_real,
+        twinv_imag,
+        u_orig,
+        k_orig,
+    ) = prepare_data(batch, heads)
 
     # Reference
     o_ref = ref_fftconv(u_orig, k_orig)
@@ -848,10 +872,20 @@ def test_fftconv(batch, heads):
     twinv_imag_tvm = tvm.runtime.tensor(twinv_imag.cpu().numpy(), DEV)
     o_tvm = tvm.runtime.tensor(o_np, DEV)
 
-    mod(x_tvm, kf_real_tvm, kf_imag_tvm,
-        f_real_tvm, f_imag_tvm, finv_real_tvm, finv_imag_tvm,
-        tw_real_tvm, tw_imag_tvm, twinv_real_tvm, twinv_imag_tvm,
-        o_tvm)
+    mod(
+        x_tvm,
+        kf_real_tvm,
+        kf_imag_tvm,
+        f_real_tvm,
+        f_imag_tvm,
+        finv_real_tvm,
+        finv_imag_tvm,
+        tw_real_tvm,
+        tw_imag_tvm,
+        twinv_real_tvm,
+        twinv_imag_tvm,
+        o_tvm,
+    )
 
     o_tir = o_tvm.numpy().reshape(batch, heads, N).astype(np.float32)
     o_ref_flat = o_ref_np.reshape(batch, heads, N)
@@ -874,16 +908,27 @@ def bench_fftconv():
     def flops(ms, batch, heads):
         return 2 * (10 * N * math.log2(N) * heads * batch) / (ms * 1e-3)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"FFTConv Benchmark (N={N}={N1}x{N1})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     with ProtonContext("fftconv"):
         for batch, heads in [(1, 128), (2, 64), (4, 32)]:
-            (u_f16, kf_real, kf_imag,
-             f_real, f_imag, finv_real, finv_imag,
-             tw_real, tw_imag, twinv_real, twinv_imag,
-             _, _) = prepare_data(batch, heads)
+            (
+                u_f16,
+                kf_real,
+                kf_imag,
+                f_real,
+                f_imag,
+                finv_real,
+                finv_imag,
+                tw_real,
+                tw_imag,
+                twinv_real,
+                twinv_imag,
+                _,
+                _,
+            ) = prepare_data(batch, heads)
 
             o_np = np.zeros((batch, heads, N1, N1), dtype=np.float16)
             x_tvm = tvm.runtime.tensor(u_f16.cpu().numpy(), DEV)
@@ -899,10 +944,18 @@ def bench_fftconv():
             twinv_imag_tvm = tvm.runtime.tensor(twinv_imag.cpu().numpy(), DEV)
             o_tvm = tvm.runtime.tensor(o_np, DEV)
 
-            func = lambda: mod(
-                x_tvm, kf_real_tvm, kf_imag_tvm,
-                f_real_tvm, f_imag_tvm, finv_real_tvm, finv_imag_tvm,
-                tw_real_tvm, tw_imag_tvm, twinv_real_tvm, twinv_imag_tvm,
+            func = lambda: mod(  # noqa: E731
+                x_tvm,
+                kf_real_tvm,
+                kf_imag_tvm,
+                f_real_tvm,
+                f_imag_tvm,
+                finv_real_tvm,
+                finv_imag_tvm,
+                tw_real_tvm,
+                tw_imag_tvm,
+                twinv_real_tvm,
+                twinv_imag_tvm,
                 o_tvm,
             )
             ms = bench(func, warmup=100, repeat=300, proton_name=f"fftconv_B{batch}_H{heads}")

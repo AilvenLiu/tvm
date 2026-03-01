@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import numpy as np
-import pytest
 
 import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal
-from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, P, F, S
+from tvm.tir.layout import F, P, S, TileLayout
 from tvm.tirx.transform import PrivateBufferAlloc
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
@@ -30,9 +27,9 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_copy_transpose():
     src_shape = [512, 512]
-    src_layout = TileLayout(S[(128, 2048) : (1 @ P, 1@F)])
+    src_layout = TileLayout(S[(128, 2048) : (1 @ P, 1 @ F)])
     dst_shape = [512, 512]
-    dst_layout = TileLayout(S[(2048, 128) : (1@F, 1@P)])
+    dst_layout = TileLayout(S[(2048, 128) : (1 @ F, 1 @ P)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -56,7 +53,7 @@ def test_copy_transpose():
                                     layout=Tx.TileLayout(Tx.S[(128, 2048) : (1 @ P, 1@F)]))
             B_sbuf = Tx.alloc_buffer((512, 512), scope="trn.sbuf",
                                     layout=Tx.TileLayout(Tx.S[(2048, 128) : (1@F, 1@P)]))
-            Tx.copy(B_sbuf[0:512, 0:512], A_sbuf[0:512, 0:512], workspace={"acc_psum": acc_psum, "identity": identity})
+            Tx.copy(B_sbuf[0:512, 0:512], A_sbuf[0:512, 0:512], workspace={"acc_psum": acc_psum, "identity": identity})  # noqa: E501
 
     # fmt: on
     with target:
@@ -69,7 +66,8 @@ def test_normal_copy():
     src_shape = [128, 512]
     src_layout = TileLayout(S[(128, 512) : (512, 1)])
     dst_shape = [128, 512]
-    dst_layout = TileLayout(S[(128, 512) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 512) : (1 @ P, 1 @ F)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def copy(A_ptr: Tx.handle) -> None:
@@ -86,11 +84,12 @@ def test_normal_copy():
 
 def test_unary_with_bias_scale():
     src_shape = [512, 1024]
-    src_layout = TileLayout(S[(128, 4096) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 4096) : (1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
     bias = Tx.float32(1.0)
     scale = Tx.float32(2.0)
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def unary() -> None:
@@ -112,7 +111,7 @@ def test_unary_with_bias_scale():
                                     layout=Tx.TileLayout(Tx.S[(128, 4096) : (1@P, 1@F)]))
             C_sbuf = Tx.alloc_buffer((512, 1024), scope="trn.sbuf",
                                     layout=Tx.TileLayout(Tx.S[(128, 4096) : (1@P, 1@F)]))
-            Tx.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], Tx.float32(1.0), Tx.float32(2.0), workspace={"const_bias": const_bias})
+            Tx.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], Tx.float32(1.0), Tx.float32(2.0), workspace={"const_bias": const_bias})  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -122,9 +121,9 @@ def test_unary_with_bias_scale():
 
 def test_reduction_two_stage():
     src_shape = [128, 32, 4, 32]
-    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 32 * 32 * 4) : (1 @ P, 1 @ F)])
     dst_shape = [128, 4]
-    dst_layout = TileLayout(S[(128, 4) : (1@P, 1@F)])
+    dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -143,7 +142,7 @@ def test_reduction_two_stage():
                                     layout=Tx.TileLayout(Tx.S[(128, 32 * 32 * 4) : (1@P, 1@F)]))
             B_sbuf = Tx.alloc_buffer((128, 4), scope="trn.sbuf",
                                     layout=Tx.TileLayout(Tx.S[(128, 4) : (1@P, 1@F)]))
-            Tx.sum(B_sbuf[0:128, 0:4], A_sbuf[0:128, 0:32, 0:4, 0:32], [1, 3], False, workspace={"partial_reduce": partial_reduce})
+            Tx.sum(B_sbuf[0:128, 0:4], A_sbuf[0:128, 0:32, 0:4, 0:32], [1, 3], False, workspace={"partial_reduce": partial_reduce})  # noqa: E501
 
     # fmt: on
     with target:
@@ -153,10 +152,11 @@ def test_reduction_two_stage():
 
 
 def test_gemm():
-    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024@F, 1@F, 1@F, 1@P)])
-    B_layout = TileLayout(S[(8, 128, 2, 128) : (256@F, 1@P, 128@F, 1@F)])
+    A_layout = TileLayout(S[(4, 128, 8, 128) : (1024 @ F, 1 @ F, 1 @ F, 1 @ P)])
+    B_layout = TileLayout(S[(8, 128, 2, 128) : (256 @ F, 1 @ P, 128 @ F, 1 @ F)])
 
-    C_layout = TileLayout(S[(4, 128, 2, 128) : (256@F, 1@F, 128@F, 1@P)])
+    C_layout = TileLayout(S[(4, 128, 2, 128) : (256 @ F, 1 @ F, 128 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:
@@ -178,13 +178,13 @@ def test_gemm():
         with Tx.kernel():
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
             A_sbuf = Tx.alloc_buffer((512, 1024), scope="trn.sbuf",
-                                    layout=Tx.TileLayout(Tx.S[(4, 128, 8, 128) : (1024@F, 1@F, 1@F, 1@P)]))
+                                    layout=Tx.TileLayout(Tx.S[(4, 128, 8, 128) : (1024@F, 1@F, 1@F, 1@P)]))  # noqa: E501
             B_sbuf = Tx.alloc_buffer((1024, 256), scope="trn.sbuf",
-                                    layout=Tx.TileLayout(Tx.S[(8, 128, 2, 128) : (256@F, 1@P, 128@F, 1@F)]))
+                                    layout=Tx.TileLayout(Tx.S[(8, 128, 2, 128) : (256@F, 1@P, 128@F, 1@F)]))  # noqa: E501
             C_sbuf = Tx.alloc_buffer((512, 256), scope="trn.sbuf",
-                                    layout=Tx.TileLayout(Tx.S[(4, 128, 2, 128) : (256@F, 1@F, 128@F, 1@P)]))
+                                    layout=Tx.TileLayout(Tx.S[(4, 128, 2, 128) : (256@F, 1@F, 128@F, 1@P)]))  # noqa: E501
             for i, k in Tx.grid(2, 2):
-                Tx.gemm(C_sbuf[256 * i:256 * i + 256, 0:256], A_sbuf[256 * i:256 * i + 256, 512 * k:512 * k + 512], B_sbuf[512 * k:512 * k + 512, 0:256], C_sbuf[256 * i:256 * i + 256, 0:256], False, False, Tx.float32(1.0), Tx.float32(0.0), workspace={"acc_psum": acc_psum})
+                Tx.gemm(C_sbuf[256 * i:256 * i + 256, 0:256], A_sbuf[256 * i:256 * i + 256, 512 * k:512 * k + 512], B_sbuf[512 * k:512 * k + 512, 0:256], C_sbuf[256 * i:256 * i + 256, 0:256], False, False, Tx.float32(1.0), Tx.float32(0.0), workspace={"acc_psum": acc_psum})  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -194,18 +194,19 @@ def test_gemm():
 
 def test_binary_reduce_two_stage():
     src1_shape = [512, 1024, 4]
-    src1_layout = TileLayout(S[(128, 4096, 4) : (1@P, 1@F, 4096@F)])
+    src1_layout = TileLayout(S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)])
     dst1_shape = src1_shape
     dst1_layout = src1_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TileLayout(S[(128, 4) : (1@P, 1@F)])
+    reduce_dst_layout = TileLayout(S[(128, 4) : (1 @ P, 1 @ F)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def tensor_scalar_reduce() -> None:
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
             B_sbuf = Tx.alloc_buffer(dst1_shape, "float32", scope="trn.sbuf", layout=dst1_layout)
-            C_sbuf = Tx.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)
+            C_sbuf = Tx.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)  # noqa: E501
             Tx.binary_reduce(B_sbuf, C_sbuf, A_sbuf, 1.0, "add", "sum", reduce_axes=(1, 2))
 
     @Tx.prim_func(tirx=True)
@@ -214,12 +215,12 @@ def test_binary_reduce_two_stage():
         with Tx.kernel():
             partial_reduce = Tx.alloc_buffer((128, 4), scope="trn.sbuf")
             A_sbuf = Tx.alloc_buffer((512, 1024, 4), scope="trn.sbuf",
-                                    layout=Tx.TileLayout(Tx.S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)]))
+                                    layout=Tx.TileLayout(Tx.S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)]))  # noqa: E501
             B_sbuf = Tx.alloc_buffer((512, 1024, 4), scope="trn.sbuf",
-                                    layout=Tx.TileLayout(Tx.S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)]))
+                                    layout=Tx.TileLayout(Tx.S[(128, 4096, 4) : (1 @ P, 1 @ F, 4096 @ F)]))  # noqa: E501
             C_sbuf = Tx.alloc_buffer((512,), scope="trn.sbuf",
                                     layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ P, 1 @ F)]))
-            Tx.binary_reduce(B_sbuf[0:512, 0:1024, 0:4], C_sbuf[0:512], A_sbuf[0:512, 0:1024, 0:4], Tx.float32(1.0), "add", "sum", [1, 2], workspace={"partial_reduce": partial_reduce})
+            Tx.binary_reduce(B_sbuf[0:512, 0:1024, 0:4], C_sbuf[0:512], A_sbuf[0:512, 0:1024, 0:4], Tx.float32(1.0), "add", "sum", [1, 2], workspace={"partial_reduce": partial_reduce})  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
@@ -229,11 +230,12 @@ def test_binary_reduce_two_stage():
 
 def test_activation_reduce_two_stage():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(S[(16 * 1024, 128) : (1@F, 1@P)])
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)])
+    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024 @ F, 2048 @ F, 1 @ F, 1 @ P)])
     C_shape = (1, 128)
-    C_layout = TileLayout(S[(1, 128) : (1@F, 1@P)])
+    C_layout = TileLayout(S[(1, 128) : (1 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -257,11 +259,11 @@ def test_activation_reduce_two_stage():
             A = Tx.alloc_buffer((32, 512, 128), scope="trn.sbuf",
                                layout=Tx.TileLayout(Tx.S[(16 * 1024, 128) : (1@F, 1@P)]))
             B = Tx.alloc_buffer((16, 512, 128), scope="trn.sbuf",
-                               layout=Tx.TileLayout(Tx.S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)]))
+                               layout=Tx.TileLayout(Tx.S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)]))  # noqa: E501
             C = Tx.alloc_buffer((1, 128), scope="trn.sbuf",
                                layout=Tx.TileLayout(Tx.S[(1, 128) : (1@F, 1@P)]))
             for i in range(2):
-                Tx.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})
+                Tx.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -271,11 +273,12 @@ def test_activation_reduce_two_stage():
 
 def test_partial_workspace_specify():
     A_shape = (32, 512, 128)
-    A_layout = TileLayout(S[(16 * 1024, 128) : (1@F, 1@P)])
+    A_layout = TileLayout(S[(16 * 1024, 128) : (1 @ F, 1 @ P)])
     B_shape = (16, 512, 128)
-    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)])
+    B_layout = TileLayout(S[(2, 4, 1024, 128) : (1024 @ F, 2048 @ F, 1 @ F, 1 @ P)])
     C_shape = (1, 128)
-    C_layout = TileLayout(S[(1, 128) : (1@F, 1@P)])
+    C_layout = TileLayout(S[(1, 128) : (1 @ F, 1 @ P)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def activation_reduce():
@@ -285,7 +288,7 @@ def test_partial_workspace_specify():
             B = Tx.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = Tx.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             for i in range(2):
-                Tx.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=(0,1), workspace={"partial_reduce": partial_reduce})
+                Tx.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=(0,1), workspace={"partial_reduce": partial_reduce})  # noqa: E501
 
     @Tx.prim_func(tirx=True)
     def expected():
@@ -300,11 +303,11 @@ def test_partial_workspace_specify():
             A = Tx.alloc_buffer((32, 512, 128), scope="trn.sbuf",
                                layout=Tx.TileLayout(Tx.S[(16 * 1024, 128) : (1@F, 1@P)]))
             B = Tx.alloc_buffer((16, 512, 128), scope="trn.sbuf",
-                               layout=Tx.TileLayout(Tx.S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)]))
+                               layout=Tx.TileLayout(Tx.S[(2, 4, 1024, 128) : (1024@F, 2048@F, 1@F, 1@P)]))  # noqa: E501
             C = Tx.alloc_buffer((1, 128), scope="trn.sbuf",
                                layout=Tx.TileLayout(Tx.S[(1, 128) : (1@F, 1@P)]))
             for i in range(2):
-                Tx.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})
+                Tx.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})  # noqa: E501
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -314,10 +317,11 @@ def test_partial_workspace_specify():
 
 def test_workspace_reuse():
     src_shape = [512, 1024]
-    src_layout = TileLayout(S[(128, 4096) : (1@P, 1@F)])
+    src_layout = TileLayout(S[(128, 4096) : (1 @ P, 1 @ F)])
     dst_shape = src_shape
     dst_layout = src_layout
     scale = Tx.float32(2.0)
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def unary() -> None:
@@ -340,8 +344,8 @@ def test_workspace_reuse():
                                     layout=Tx.TileLayout(Tx.S[(128, 4096) : (1 @ P, 1 @ F)]))
             C_sbuf = Tx.alloc_buffer((512, 1024), scope="trn.sbuf",
                                     layout=Tx.TileLayout(Tx.S[(128, 4096) : (1 @ P, 1 @ F)]))
-            Tx.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], Tx.float32(0.0), Tx.float32(2.0), workspace={"const_bias": const_bias}, max_inst_size=1024)
-            Tx.exp(C_sbuf[0:512, 0:1024], C_sbuf[0:512, 0:1024], None, None, workspace={"const_bias": const_bias})
+            Tx.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], Tx.float32(0.0), Tx.float32(2.0), workspace={"const_bias": const_bias}, max_inst_size=1024)  # noqa: E501
+            Tx.exp(C_sbuf[0:512, 0:1024], C_sbuf[0:512, 0:1024], None, None, workspace={"const_bias": const_bias})  # noqa: E501
 
     # fmt: on
 
@@ -377,6 +381,7 @@ def test_no_rewrite_with_psum_output():
     B_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)])
 
     C_layout = TileLayout(S[(128, 128) : (1 @ P, 1 @ F)])
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def gemm() -> None:

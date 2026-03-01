@@ -15,19 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional
 
 import pytest
 import torch
 import torch.nn.functional as F
-
-import math
-import tvm
-from tvm.script import tirx as Tx
 from triton.testing import do_bench
 
+import tvm
 from tvm.ir import PointerType, PrimType
-from tvm.tirx.bench.utils import bench, ProtonContext
+from tvm.script import tirx as Tx
 
 F16_BYTES = 2
 F32_BYTES = 4
@@ -79,7 +75,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def tir_qk_norm(q_ptr: Tx.handle, k_ptr: Tx.handle, q_weight_ptr: Tx.handle, k_weight_ptr: Tx.handle, eps_ptr: Tx.handle, weight_bias_ptr: Tx.handle, bound_m_ptr: Tx.handle):
+    def tir_qk_norm(q_ptr: Tx.handle, k_ptr: Tx.handle, q_weight_ptr: Tx.handle, k_weight_ptr: Tx.handle, eps_ptr: Tx.handle, weight_bias_ptr: Tx.handle, bound_m_ptr: Tx.handle):  # noqa: E501
         num_tokens = Tx.int32()
         qo_heads = Tx.int32()
         kv_heads = Tx.int32()
@@ -129,9 +125,9 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
                 if row_idx[0] < total_jobs[0]:
                         # Determine Q or K
                         is_q = Tx.meta_var(row_idx[0] < q_job_cnt[0])
-                        qk_ptr: Tx.let[Tx.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q.data, k.data)
-                        weight_ptr: Tx.let[Tx.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q_weight.data, k_weight.data)
-                        batch_size = Tx.meta_var(Tx.if_then_else(is_q, num_tokens * qo_heads, num_tokens * kv_heads))
+                        qk_ptr: Tx.let[Tx.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q.data, k.data)  # noqa: E501
+                        weight_ptr: Tx.let[Tx.Var(name="weight_ptr", dtype=PointerType(PrimType(dtype)))] = Tx.if_then_else(is_q, q_weight.data, k_weight.data)  # noqa: E501
+                        batch_size = Tx.meta_var(Tx.if_then_else(is_q, num_tokens * qo_heads, num_tokens * kv_heads))  # noqa: E501
 
                         if is_q:
                             actual_row[0] = row_idx[0]
@@ -156,7 +152,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
                         for kr in Tx.unroll(shuffle_steps):
                             mask = Tx.meta_var(threads_per_row >> (kr + 1))
                             if mask > 0:
-                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], mask, 32, 32)
+                                sum_sq[0] = sum_sq[0] + Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], mask, 32, 32)  # noqa: E501
 
                         # Compute RMS inverse
                         rms_inv[0] = Tx.rsqrt(sum_sq[0] / head_dim + eps[0])
@@ -187,8 +183,8 @@ def qk_norm(
     q_weight: torch.Tensor,
     k_weight: torch.Tensor,
     eps: float,
-    weight_bias: Optional[float] = None,
-    bound_m: Optional[int] = None,
+    weight_bias: float | None = None,
+    bound_m: int | None = None,
 ) -> None:
     head_dim = q.shape[-1]
     q_shape = q.shape
@@ -239,8 +235,8 @@ def test_qk_norm(
     num_qo_heads: int,
     num_kv_heads: int,
     num_tokens: int,
-    bound_tokens: Optional[int],
-    weight_bias: Optional[float],
+    bound_tokens: int | None,
+    weight_bias: float | None,
 ) -> None:
     """Test QK norm kernel with bound_m parameter to process partial tokens."""
 
@@ -357,7 +353,10 @@ def bench_qk_norm_my():
     bound_m = torch.tensor([num_tokens], dtype=torch.int32, device=torch.device("cuda"))
 
     mod = get_qk_norm_kernel(head_dim)
-    func = lambda: mod(q, k, q_weight, k_weight, eps, weight_bias, bound_m)
+
+    def func():
+        return mod(q, k, q_weight, k_weight, eps, weight_bias, bound_m)
+
     for i in range(10):
         func()
 
@@ -372,7 +371,6 @@ def benchmark_qk_norm() -> None:
     head_dim = 128
     num_qo_heads = 16
     num_kv_heads = 1
-    eps = 1e-6
     dtype = torch.bfloat16
 
     def bench_qk_norm(m: int) -> None:
@@ -411,7 +409,7 @@ def benchmark_qk_norm() -> None:
         time = do_bench(qk_norm_fn, warmup=10, rep=100)
 
         print(
-            f"QK norm: M={m:6d} time={time * 1e3:.2f}us, bw={(num_bytes / 2**30) / (time * 1e-3):.2f}GB/s"
+            f"QK norm: M={m:6d} time={time * 1e3:.2f}us, bw={(num_bytes / 2**30) / (time * 1e-3):.2f}GB/s"  # noqa: E501
         )
 
     for m in [1, 4, 8, 32, 128, 1024, 12 * 1024, 16 * 1024, 32 * 1024]:

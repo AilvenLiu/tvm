@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """CUDA C++ miscellaneous operations."""
+
 import tvm
 from tvm import DataType
 from tvm.tir.op import cuda_func_call
@@ -140,17 +141,6 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
 }}
 """
     return cuda_func_call(func_name, dst, src, source_code=source_code)
-
-
-@register_codegen("cuda_bfloat162float")
-def codegen_cuda_bfloat162float(src):
-    func_name = "tvm_builtin_cuda_bfloat162float"
-    source_code = f"""
-__forceinline__ __device__ float {func_name}(nv_bfloat16 src) {{
-    return __bfloat162float(src);
-}}
-"""
-    return cuda_func_call(func_name, src, source_code=source_code, return_type="float32")
 
 
 @register_codegen("cuda_trap_when_assert_failed")

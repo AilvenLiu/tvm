@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
 """Hedgehog attention kernel with SM100 warp specialization.
 
 Warp-specialized rewrite using tcgen05 MMA, TMEM, and producer/consumer
@@ -46,30 +47,29 @@ Architecture:
 12 phases = even -> phase_c2m does NOT flip between chunks.
 """
 
-import math
-import pytest
 import numpy as np
+import pytest
 import torch
 
 import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # Constants
 CHUNK = 64
-ATTN_D = 128   # Q/K/V/O dimension
-HALF = 64      # half of ATTN_D for TMA/MMA splitting
-HALF_F = 64    # projection output dim (pos or neg half)
-ATTN_F = 128   # featurized dim = 2 * HALF_F
+ATTN_D = 128  # Q/K/V/O dimension
+HALF = 64  # half of ATTN_D for TMA/MMA splitting
+HALF_F = 64  # projection output dim (pos or neg half)
+ATTN_F = 128  # featurized dim = 2 * HALF_F
 SM_COUNT = 148
 
 # Warp-specialized layout
-WG_NUMBER = 2        # WG0=consumer, WG1=producer+MMA
-WARP_NUMBER = 4      # per warpgroup
+WG_NUMBER = 2  # WG0=consumer, WG1=producer+MMA
+WARP_NUMBER = 4  # per warpgroup
 NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER  # 256
 
 # MMA dimensions
@@ -93,7 +93,7 @@ TMEM_LD_SIZE = 64
 TEMP = 0.08838834764  # 1/sqrt(128)
 
 # Memory element counts (used in TMA byte calculations and aliases)
-HALF_SINGLE = CHUNK * HALF             # 4096 f16 elems = 8KB
+HALF_SINGLE = CHUNK * HALF  # 4096 f16 elems = 8KB
 
 
 def prepare_data(B, H, N):
@@ -143,7 +143,7 @@ def naive_hedgehog(q, k, v, qmap, kmap, alphas, betas):
     a_lin = a_lin * lin_mask * alphas.reshape(1, -1, 1, 1)
     a_exp = a_exp + exp_mask
     a_exp = a_exp - a_exp.amax(dim=-1, keepdim=True)
-    a_exp = torch.exp(a_exp / (ATTN_D ** 0.5)) * betas.reshape(1, -1, 1, 1)
+    a_exp = torch.exp(a_exp / (ATTN_D**0.5)) * betas.reshape(1, -1, 1, 1)
 
     a = a_exp + a_lin
     a = a / (a.sum(dim=-1, keepdim=True) + 1e-6)
@@ -175,7 +175,7 @@ kvs_f16_layout = Tx.ComposeLayout(
 
 
 def get_hedgehog_kernel():
-    a_type = tvm.DataType("float16")
+    a_type = tvm.DataType("float16")  # noqa: F841
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -201,7 +201,7 @@ def get_hedgehog_kernel():
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")
+            wg_id = Tx.warpgroup_id([WG_NUMBER], parent="cta")  # noqa: F841
             warp_id = Tx.warp_id([WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
 
@@ -241,7 +241,7 @@ def get_hedgehog_kernel():
                 D_out_lo = Tx.decl_buffer((CHUNK, HALF), "float16", pool.ptr,
                                           layout=half_layout, byte_offset=kvs_f16_byte_off)
                 D_out_hi = Tx.decl_buffer((CHUNK, HALF), "float16", pool.ptr,
-                                          layout=half_layout, byte_offset=kvs_f16_byte_off + HALF_SINGLE * F16_BYTES)
+                                          layout=half_layout, byte_offset=kvs_f16_byte_off + HALF_SINGLE * F16_BYTES)  # noqa: E501
 
                 # Non-swizzled buffers
                 kv_state = pool.alloc((ATTN_F, ATTN_D), "float32")
@@ -266,12 +266,12 @@ def get_hedgehog_kernel():
                 consumer2mma_bar.init(128)  # full consumer WG
                 workitem_sync_bar.init(1)
 
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))  # noqa: E501
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
+                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)  # noqa: E501
                     Tx.cuda.warp_sync()
 
                 Tx.ptx.fence.proxy_async("shared::cta")
@@ -319,17 +319,17 @@ def get_hedgehog_kernel():
                                     with Tx.thread()[Tx.ptx.elect_sync()]:
                                         tic = Tx.meta_var(cid_tma % PIPE_DEPTH)
                                         q_row = Tx.meta_var(cid_tma * CHUNK)
-                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                        tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})  # noqa: E501
                                         # Wait for MMA to release this SMEM slot
                                         if cid_tma >= PIPE_DEPTH:
                                             mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V halves (6 TMA loads per chunk)
-                                        Tx.copy_async(Q_lo[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(Q_hi[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)
-                                        Tx.copy_async(K_lo[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(K_hi[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)
-                                        Tx.copy_async(V_lo[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
-                                        Tx.copy_async(V_hi[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)
+                                        Tx.copy_async(Q_lo[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(Q_hi[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_lo[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(K_hi[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_lo[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)  # noqa: E501
+                                        Tx.copy_async(V_hi[tic, :, :], v_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)  # noqa: E501
                                         # Signal that load is done
                                         tma2mma_bar.arrive(tic, 6 * CHUNK * HALF * F16_BYTES)
                                     if cid_tma % PIPE_DEPTH == PIPE_DEPTH - 1:
@@ -341,16 +341,16 @@ def get_hedgehog_kernel():
                             # ---- MMA warp ----
                             # Instruction descriptor: transB=False for phases 1-2
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_nn), "float32", "float16", "float16",
+                                Tx.address_of(descI_nn), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, False, CTA_GROUP)
                             # Instruction descriptor: transB=True for phases 3-8, 6-7
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_nt), "float32", "float16", "float16",
+                                Tx.address_of(descI_nt), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
                             # Instruction descriptor: transA=True, transB=True for phases 9-12
                             descI_tt: Tx.uint32
                             Tx.ptx.tcgen05.encode_instr_descriptor(
-                                Tx.address_of(descI_tt), "float32", "float16", "float16",
+                                Tx.address_of(descI_tt), "float32", "float16", "float16",  # noqa: F821
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, True, True, CTA_GROUP)
 
                             phase[0] = 0
@@ -374,24 +374,24 @@ def get_hedgehog_kernel():
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
                                         for ki in Tx.unroll(HALF // MMA_K):  # 4 iterations
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_lo.ptr_to([prev_tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_lo.ptr_to([prev_tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nn, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nn, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):  # 4 iterations
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_hi.ptr_to([prev_tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_hi.ptr_to([prev_tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nn, False, CTA_GROUP, True)
+                                                descA, descB, descI_nn, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
@@ -402,78 +402,78 @@ def get_hedgehog_kernel():
                                         # Q_lo[tic]@K_lo[tic] + Q_hi[tic]@K_hi[tic]
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nn, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nn, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), K_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descB), K_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nn, False, CTA_GROUP, True)
+                                                descA, descB, descI_nn, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 3: work_a@V_prev_lo + work_b@V_curr_lo (transB=True) ==
+                                        # == Phase 3: work_a@V_prev_lo + work_b@V_curr_lo (transB=True) ==  # noqa: E501
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_lo.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_lo.ptr_to([prev_tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_lo.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 3
                                         consumer2mma_bar.wait(0, phase_c2m)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 4: work_a@V_prev_hi + work_b@V_curr_hi (transB=True) ==
+                                        # == Phase 4: work_a@V_prev_hi + work_b@V_curr_hi (transB=True) ==  # noqa: E501
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_hi.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_hi.ptr_to([prev_tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(CHUNK // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),
+                                                Tx.address_of(descB), V_hi.ptr_to([tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 4
@@ -483,110 +483,110 @@ def get_hedgehog_kernel():
                                         # == Phase 5: Q_lo@qmap_lo + Q_hi@qmap_hi (transB=True) ==
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_lo.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), qmap_lo.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), qmap_lo.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), Q_hi.ptr_to([tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), qmap_hi.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), qmap_hi.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 5 (featurize, stage operands)
+                                        # Wait consumer done with Phase 5 (featurize, stage operands)  # noqa: E501
                                         consumer2mma_bar.wait(0, phase_c2m)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 6: feat_q_pos@kv[0:64,0:64] + feat_q_neg@kv[64:128,0:64] -> o_lo_add ==
+                                        # == Phase 6: feat_q_pos@kv[0:64,0:64] + feat_q_neg@kv[64:128,0:64] -> o_lo_add ==  # noqa: E501
                                         # A=work_a[64,64] (feat_q_pos), B=kv_state_f16[0:64,0:64]
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         # A=work_b[64,64] (feat_q_neg), B=kv_state_f16[64:128,0:64]
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 6 (add to o_lo, stage kv hi cols)
+                                        # Wait consumer done with Phase 6 (add to o_lo, stage kv hi cols)  # noqa: E501
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 7: feat_q_pos@kv[0:64,64:128] + feat_q_neg@kv[64:128,64:128] -> o_hi_add ==
+                                        # == Phase 7: feat_q_pos@kv[0:64,64:128] + feat_q_neg@kv[64:128,64:128] -> o_hi_add ==  # noqa: E501
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 7 (add to o_hi, output, prepare)
+                                        # Wait consumer done with Phase 7 (add to o_hi, output, prepare)  # noqa: E501
                                         consumer2mma_bar.wait(0, phase_c2m)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 8: K_prev_lo@kmap_lo + K_prev_hi@kmap_hi (transB=True) ==
+                                        # == Phase 8: K_prev_lo@kmap_lo + K_prev_hi@kmap_hi (transB=True) ==  # noqa: E501
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), K_lo.ptr_to([prev_tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), K_lo.ptr_to([prev_tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kmap_lo.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kmap_lo.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)  # noqa: F821
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descA), K_hi.ptr_to([prev_tic, 0, ki * MMA_K]),
+                                                Tx.address_of(descA), K_hi.ptr_to([prev_tic, 0, ki * MMA_K]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                Tx.address_of(descB), kmap_hi.ptr_to([ki * MMA_K, 0]),
+                                                Tx.address_of(descB), kmap_hi.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                 MMA_LDO, MMA_SDO, SWIZZLE)
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)  # noqa: F821
                                         mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 8 (featurize K, write feat_k to work_a/b)
+                                        # Wait consumer done with Phase 8 (featurize K, write feat_k to work_a/b)  # noqa: E501
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
@@ -596,37 +596,37 @@ def get_hedgehog_kernel():
                                         # Phase 9:  work_a^T @ V_lo -> update kv_state[0:64, 0:64]
                                         # Phase 10: work_a^T @ V_hi -> update kv_state[0:64, 64:128]
                                         # Phase 11: work_b^T @ V_lo -> update kv_state[64:128, 0:64]
-                                        # Phase 12: work_b^T @ V_hi -> update kv_state[64:128, 64:128]
+                                        # Phase 12: work_b^T @ V_hi -> update kv_state[64:128, 64:128]  # noqa: E501
                                         for state_phase in Tx.unroll(4):
                                             for ki in Tx.unroll(CHUNK // MMA_K):  # 4 K-iterations
-                                                # Select A operand: work_a (phases 0,1) or work_b (phases 2,3)
+                                                # Select A operand: work_a (phases 0,1) or work_b (phases 2,3)  # noqa: E501
                                                 if state_phase < 2:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descA), work_a.ptr_to([ki * MMA_K, 0]),
+                                                        Tx.address_of(descA), work_a.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 else:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descA), work_b.ptr_to([ki * MMA_K, 0]),
+                                                        Tx.address_of(descA), work_b.ptr_to([ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
-                                                # Select B operand: V_lo (phases 0,2) or V_hi (phases 1,3)
+                                                # Select B operand: V_lo (phases 0,2) or V_hi (phases 1,3)  # noqa: E501
                                                 if state_phase % 2 == 0:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descB), V_lo.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                        Tx.address_of(descB), V_lo.ptr_to([prev_tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 else:
                                                     Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                                        Tx.address_of(descB), V_hi.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                        Tx.address_of(descB), V_hi.ptr_to([prev_tic, ki * MMA_K, 0]),  # noqa: E501, F821
                                                         MMA_LDO, MMA_SDO, SWIZZLE)
                                                 Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                     Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
-                                                    descA, descB, descI_tt, False, CTA_GROUP, ki > 0)
+                                                    descA, descB, descI_tt, False, CTA_GROUP, ki > 0)  # noqa: E501, F821
                                             mma2consumer_bar.arrive(0, CTA_GROUP, 1)
                                             # Wait consumer done with this state update phase
                                             consumer2mma_bar.wait(0, phase_c2m ^ (state_phase % 2))
                                             Tx.ptx.tcgen05.fence.after_thread_sync()
 
                                         # Release prev_tic SMEM slot after ALL phases that read it.
-                                        # Skip chunk 0 since prev_tic=1 holds chunk 1's fresh TMA data.
+                                        # Skip chunk 0 since prev_tic=1 holds chunk 1's fresh TMA data.  # noqa: E501
                                         if cid_mma > 0:
                                             Tx.ptx.mbarrier.arrive(mma2tma_bar.ptr_to([prev_tic]))
                                         # 12 phases = even -> do NOT flip phase_c2m
@@ -680,8 +680,8 @@ def get_hedgehog_kernel():
                                     betas_s[0] = betas_g[bx_head_con]
 
                             # Load qmap, kmap into swizzled SMEM
-                            # qmap_g[head, 0:64, 0:64] -> qmap_lo, qmap_g[head, 64:128, 0:64] -> qmap_hi
-                            # kmap_g[head, 0:64, 0:64] -> kmap_lo, kmap_g[head, 64:128, 0:64] -> kmap_hi
+                            # qmap_g[head, 0:64, 0:64] -> qmap_lo, qmap_g[head, 64:128, 0:64] -> qmap_hi  # noqa: E501
+                            # kmap_g[head, 0:64, 0:64] -> kmap_lo, kmap_g[head, 64:128, 0:64] -> kmap_hi  # noqa: E501
                             with Tx.thread():
                                 tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
                                 # 4096 elements per buffer, 128 threads -> 32 elements per thread
@@ -710,7 +710,7 @@ def get_hedgehog_kernel():
                             cid_con = 0
                             while cid_con < nc_con:
                                 tic_c = Tx.meta_var(cid_con % PIPE_DEPTH)
-                                prev_tic_c = Tx.meta_var(1 - tic_c)
+                                prev_tic_c = Tx.meta_var(1 - tic_c)  # noqa: F841
 
                                 # ======== Phase 1: Read att_prev from TMEM ========
                                 mma2consumer_bar.wait(0, phase_m2c)
@@ -734,7 +734,7 @@ def get_hedgehog_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 2: Read att_curr from TMEM, softmax, write work ========
+                                # ======== Phase 2: Read att_curr from TMEM, softmax, write work ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -765,7 +765,7 @@ def get_hedgehog_kernel():
                                         # Exp and sum
                                         sc[1] = 0.0  # exp_sum
                                         for j in Tx.serial(HALF):
-                                            att_prev_reg[j] = Tx.exp(att_prev_reg[j] - sc[0]) * betas_s[0]
+                                            att_prev_reg[j] = Tx.exp(att_prev_reg[j] - sc[0]) * betas_s[0]  # noqa: E501
                                             sc[1] = sc[1] + att_prev_reg[j]
                                             reg[j] = Tx.exp(reg[j] - sc[0]) * betas_s[0]
                                             sc[1] = sc[1] + reg[j]
@@ -816,7 +816,7 @@ def get_hedgehog_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 5: Read Q@qmap from TMEM -> featurize -> stage operands ========
+                                # ======== Phase 5: Read Q@qmap from TMEM -> featurize -> stage operands ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -861,14 +861,14 @@ def get_hedgehog_kernel():
                                             # l_norm = feat_q . k_cumsum
                                             for f_idx in Tx.serial(HALF):
                                                 sc[2] = sc[2] + feat_q_pos[f_idx] * k_cumsum[f_idx]
-                                                sc[2] = sc[2] + feat_q_neg[f_idx] * k_cumsum[HALF + f_idx]
+                                                sc[2] = sc[2] + feat_q_neg[f_idx] * k_cumsum[HALF + f_idx]  # noqa: E501
 
-                                            # Write feat_q to work_a (pos) / work_b (neg) for MMA phases 6-7
+                                            # Write feat_q to work_a (pos) / work_b (neg) for MMA phases 6-7  # noqa: E501
                                             for j in Tx.serial(HALF):
-                                                work_a[out_row, j] = Tx.cast(feat_q_pos[j], "float16")
-                                                work_b[out_row, j] = Tx.cast(feat_q_neg[j], "float16")
+                                                work_a[out_row, j] = Tx.cast(feat_q_pos[j], "float16")  # noqa: E501
+                                                work_b[out_row, j] = Tx.cast(feat_q_neg[j], "float16")  # noqa: E501
 
-                                # Stage kv_state[0:128, 0:64] as f16 for Phase 6 MMA (all threads cooperate)
+                                # Stage kv_state[0:128, 0:64] as f16 for Phase 6 MMA (all threads cooperate)  # noqa: E501
                                 # 128*64=8192 elements / 128 threads = 64 per thread
                                 with Tx.thread():
                                     tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
@@ -877,13 +877,13 @@ def get_hedgehog_kernel():
                                             idx = Tx.meta_var(tid_flat * 64 + ki)
                                             row = Tx.meta_var(idx // HALF)
                                             col = Tx.meta_var(idx % HALF)
-                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, col], "float16")
+                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, col], "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 6: Read feat_q@kv_lo from TMEM -> add to o_lo ========
+                                # ======== Phase 6: Read feat_q@kv_lo from TMEM -> add to o_lo ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -905,13 +905,13 @@ def get_hedgehog_kernel():
                                             idx = Tx.meta_var(tid_flat * 64 + ki)
                                             row = Tx.meta_var(idx // HALF)
                                             col = Tx.meta_var(idx % HALF)
-                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, HALF + col], "float16")
+                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, HALF + col], "float16")  # noqa: E501
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 7: Read feat_q@kv_hi from TMEM -> add to o_hi -> normalize -> output ========
+                                # ======== Phase 7: Read feat_q@kv_hi from TMEM -> add to o_hi -> normalize -> output ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -930,19 +930,19 @@ def get_hedgehog_kernel():
                                         if sc[7] < 0.000001:
                                             sc[7] = 0.000001
                                         for j in Tx.serial(HALF):
-                                            D_out_lo[out_row, j] = Tx.cast(o_lo_reg[j] / sc[7], "float16")
+                                            D_out_lo[out_row, j] = Tx.cast(o_lo_reg[j] / sc[7], "float16")  # noqa: E501
                                         for j in Tx.serial(HALF):
-                                            D_out_hi[out_row, j] = Tx.cast(o_hi_reg[j] / sc[7], "float16")
+                                            D_out_hi[out_row, j] = Tx.cast(o_hi_reg[j] / sc[7], "float16")  # noqa: E501
 
                                 # TMA store output (two halves)
                                 Tx.ptx.fence.proxy_async("shared::cta")
                                 Tx.cuda.warpgroup_sync(10)
                                 with Tx.thread()[lane_id == 0 and warp_id == 0]:
                                     q_row_out = Tx.meta_var(cid_con * CHUNK)
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : HALF],
-                                                  D_out_lo[:, :], dispatch="tma", cache_hint="evict_last")
-                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, HALF : ATTN_D],
-                                                  D_out_hi[:, :], dispatch="tma", cache_hint="evict_last")
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, 0 : HALF],  # noqa: E501
+                                                  D_out_lo[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
+                                    Tx.copy_async(o_g[wid_con, q_row_out : q_row_out + CHUNK, HALF : ATTN_D],  # noqa: E501
+                                                  D_out_hi[:, :], dispatch="tma", cache_hint="evict_last")  # noqa: E501
                                     Tx.ptx.cp_async.bulk.commit_group()
                                     Tx.ptx.cp_async.bulk.wait_group(0)
                                 Tx.cuda.warpgroup_sync(10)
@@ -951,7 +951,7 @@ def get_hedgehog_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 8: Read K_prev@kmap from TMEM -> featurize -> write feat_k ========
+                                # ======== Phase 8: Read K_prev@kmap from TMEM -> featurize -> write feat_k ========  # noqa: E501
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -993,8 +993,8 @@ def get_hedgehog_kernel():
 
                                             # Write feat_k to work_a (pos) / work_b (neg) — swizzled
                                             for j in Tx.serial(HALF):
-                                                work_a[out_row, j] = Tx.cast(feat_q_pos[j], "float16")
-                                                work_b[out_row, j] = Tx.cast(feat_q_neg[j], "float16")
+                                                work_a[out_row, j] = Tx.cast(feat_q_pos[j], "float16")  # noqa: E501
+                                                work_b[out_row, j] = Tx.cast(feat_q_neg[j], "float16")  # noqa: E501
 
                                 Tx.cuda.warpgroup_sync(10)
 
@@ -1008,17 +1008,17 @@ def get_hedgehog_kernel():
                                                 sc[0] = 0.0
                                                 if f_col < HALF:
                                                     for pos in Tx.serial(CHUNK):
-                                                        sc[0] = sc[0] + Tx.cast(work_a[pos, f_col], "float32")
+                                                        sc[0] = sc[0] + Tx.cast(work_a[pos, f_col], "float32")  # noqa: E501
                                                 else:
                                                     for pos in Tx.serial(CHUNK):
-                                                        sc[0] = sc[0] + Tx.cast(work_b[pos, f_col - HALF], "float32")
+                                                        sc[0] = sc[0] + Tx.cast(work_b[pos, f_col - HALF], "float32")  # noqa: E501
                                                 k_cumsum[f_col] = k_cumsum[f_col] + sc[0]
 
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phases 9-12: Read feat_k^T@V from TMEM -> update kv_state ========
+                                # ======== Phases 9-12: Read feat_k^T@V from TMEM -> update kv_state ========  # noqa: E501
                                 # Phase 9:  kv_state[0:64, 0:64] += TMEM
                                 # Phase 10: kv_state[0:64, 64:128] += TMEM
                                 # Phase 11: kv_state[64:128, 0:64] += TMEM
@@ -1042,7 +1042,7 @@ def get_hedgehog_kernel():
                                                 row_base = Tx.meta_var((state_phase // 2) * HALF)
                                                 col_base = Tx.meta_var((state_phase % 2) * HALF)
                                                 for j in Tx.serial(HALF):
-                                                    kv_state[row_base + out_row, col_base + j] = kv_state[row_base + out_row, col_base + j] + reg[j]
+                                                    kv_state[row_base + out_row, col_base + j] = kv_state[row_base + out_row, col_base + j] + reg[j]  # noqa: E501
 
                                     Tx.ptx.tcgen05.fence.before_thread_sync()
                                     consumer2mma_bar.arrive(0)
@@ -1077,7 +1077,9 @@ def get_hedgehog_kernel():
     return hedgehog
 
 
-@pytest.mark.parametrize("B,H,N", [(1, 2, 128), (2, 2, 256), (2, 2, 512), (1, 4, 1024), (10, 16, 128)])
+@pytest.mark.parametrize(
+    "B,H,N", [(1, 2, 128), (2, 2, 256), (2, 2, 512), (1, 4, 1024), (10, 16, 128)]
+)
 def test_hedgehog(B, H, N):
     q, k, v, qmap, kmap, alphas, betas = prepare_data(B, H, N)
     o_ref, kv_ref, k_ref = naive_hedgehog(q, k, v, qmap, kmap, alphas, betas)
@@ -1095,9 +1097,15 @@ def test_hedgehog(B, H, N):
     kv_np = np.zeros((BH, ATTN_F, ATTN_D), dtype=np.float32)
     k_np = np.zeros((BH, ATTN_F), dtype=np.float32)
 
-    q_tvm = tvm.runtime.tensor(q.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
-    k_tvm = tvm.runtime.tensor(k.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
-    v_tvm = tvm.runtime.tensor(v.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
+    q_tvm = tvm.runtime.tensor(
+        q.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+    )
+    k_tvm = tvm.runtime.tensor(
+        k.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+    )
+    v_tvm = tvm.runtime.tensor(
+        v.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+    )
     qmap_tvm = tvm.runtime.tensor(qmap.to(torch.float16).cpu().numpy(), DEV)
     kmap_tvm = tvm.runtime.tensor(kmap.to(torch.float16).cpu().numpy(), DEV)
     alphas_tvm = tvm.runtime.tensor(alphas.cpu().numpy(), DEV)
@@ -1145,9 +1153,9 @@ def bench_hedgehog():
         linear_flops = (128 * 128 * 2 + 128 * 128 * 2 + 128 * 4 * 2 + 128 * 4 * 2) * BH * N
         return (map_flops + sliding_flops + linear_flops) / (ms * 1e-3)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Hedgehog Attention Benchmark (B={batch}, H={heads})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     with ProtonContext("hedgehog"):
         for N in [1024, 2048, 4096, 8192]:
@@ -1163,9 +1171,15 @@ def bench_hedgehog():
             kv_np = np.zeros((BH, ATTN_F, ATTN_D), dtype=np.float32)
             k_np = np.zeros((BH, ATTN_F), dtype=np.float32)
 
-            q_tvm = tvm.runtime.tensor(q.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
-            k_tvm = tvm.runtime.tensor(k.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
-            v_tvm = tvm.runtime.tensor(v.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV)
+            q_tvm = tvm.runtime.tensor(
+                q.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+            )
+            k_tvm = tvm.runtime.tensor(
+                k.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+            )
+            v_tvm = tvm.runtime.tensor(
+                v.to(torch.float16).reshape(BH, N, ATTN_D).contiguous().cpu().numpy(), DEV
+            )
             qmap_tvm = tvm.runtime.tensor(qmap.to(torch.float16).cpu().numpy(), DEV)
             kmap_tvm = tvm.runtime.tensor(kmap.to(torch.float16).cpu().numpy(), DEV)
             alphas_tvm = tvm.runtime.tensor(alphas.cpu().numpy(), DEV)
@@ -1174,8 +1188,18 @@ def bench_hedgehog():
             kv_tvm = tvm.runtime.tensor(kv_np, DEV)
             k_tvm_out = tvm.runtime.tensor(k_np, DEV)
 
-            func = lambda: mod(q_tvm, k_tvm, v_tvm, qmap_tvm, kmap_tvm,
-                               alphas_tvm, betas_tvm, o_tvm, kv_tvm, k_tvm_out)
+            func = lambda: mod(  # noqa: E731
+                q_tvm,
+                k_tvm,
+                v_tvm,
+                qmap_tvm,
+                kmap_tvm,
+                alphas_tvm,
+                betas_tvm,
+                o_tvm,
+                kv_tvm,
+                k_tvm_out,
+            )
             ms = bench(func, warmup=100, repeat=300, proton_name=f"hedgehog_N{N}")
             tflops = flops(ms, N) / 1e12
             print(f"  N={N:>5d}: {tflops:.2f} TFLOPS, {ms:.3f} ms")

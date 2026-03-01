@@ -15,16 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 """Statement functor utilities for IR transformations"""
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+
+from typing import TypeVar
 
 import tvm
-from tvm import ir
 from tvm.ir import PrimExpr, Range
-from tvm.runtime import Object
-from tvm.tir import Buffer, DataProducer, IterVar, SizeVar, Var
 
 from . import _ffi_api
-from .expr_functor import ExprFunctor, ExprMutator, ExprVisitor, _visit_array
+from .expr_functor import ExprMutator, ExprVisitor, _visit_array
 from .function import PrimFunc
 
 T = TypeVar("T")

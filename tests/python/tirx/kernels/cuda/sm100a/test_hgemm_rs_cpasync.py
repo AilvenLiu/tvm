@@ -28,10 +28,9 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.script.ir_builder import IRBuilder
-from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
+from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.bench.utils import CudaProfiler
 from tvm.tirx.tile_scheduler import RankAwareGroupMajorTileScheduler
-from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 
 
 class ProfileEventType(Enum):
@@ -96,10 +95,10 @@ PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = SM_COUNT * NUM_GROUPS
 
 
-atomic_add_system_uint64 = f"""
-__forceinline__ __device__ uint64_t atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
+atomic_add_system_uint64 = """
+__forceinline__ __device__ uint64_t atomic_add_system_uint64(uint64_t* addr, uint64_t value) {
     return atomicAdd(reinterpret_cast<unsigned long long*>(addr), value);
-}}
+}
 """
 
 
@@ -208,7 +207,6 @@ class Pipeline:
 
 
 class TMA2MMAPipeline(Pipeline):
-
     @Tx.inline
     def consumer_release(self, pipeline_idx):
         for cbx in Tx.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
@@ -233,7 +231,6 @@ class MMA2LDpipeline(Pipeline):
 
 
 class ReducePipe(Pipeline):
-
     @Tx.inline
     def consumer_release(self, pipeline_idx: int):
         Tx.ptx.mbarrier.arrive(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]))
@@ -261,11 +258,23 @@ __forceinline__ __device__ void float8tohalf8(void* src_addr, void* dst_addr) {
 
 A_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-    Tx.TileLayout(Tx.S[(PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64) : (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1)]),
+    Tx.TileLayout(
+        Tx.S[
+            (PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64) : (
+                BLK_M * 64 * NUM_CONSUMER,
+                BLK_M * 64,
+                64,
+                BLK_M * 64,
+                1,
+            )
+        ]
+    ),
 )
 B_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-    Tx.TileLayout(Tx.S[(PIPE_DEPTH, BLK_N // 2, 1, 64) : (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1)]),
+    Tx.TileLayout(
+        Tx.S[(PIPE_DEPTH, BLK_N // 2, 1, 64) : (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1)]
+    ),
 )
 D_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -277,15 +286,15 @@ D_layout = Tx.ComposeLayout(
 @I.ir_module(tirx=True)
 class ReduceScatter:
     @Tx.prim_func(tirx=True)
-    def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M, N), d_type),
+    def test_mma_ss_tma_2sm_persistent(A: Tx.Buffer((M, K), a_type), B: Tx.Buffer((N, K), b_type), gemm_out: Tx.Buffer((M, N), d_type),  # noqa: E501
                                     semaphore: Tx.Buffer((WORLD_SIZE, ), "uint64"),
-                                    out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+                                    out: Tx.Buffer((LOCAL_M, N), d_type), profiler_buffer: Tx.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):  # noqa: E501
         A_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         C_tensor_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, "float16", 2, A.data, K, M, K * 2, BLK_K, BLK_M, 1, 1, 0, 3, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, "float16", 2, B.data, K, N, K * 2, BLK_K, BLK_N // 2, 1, 1, 0, 3, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_tensor_map, "float16", 2, gemm_out.data, N, M, N * 2, EPI_TILE, BLK_M, 1, 1, 0, 3, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, "float16", 2, A.data, K, M, K * 2, BLK_K, BLK_M, 1, 1, 0, 3, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, "float16", 2, B.data, K, N, K * 2, BLK_K, BLK_N // 2, 1, 1, 0, 3, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_tensor_map, "float16", 2, gemm_out.data, N, M, N * 2, EPI_TILE, BLK_M, 1, 1, 0, 3, 0, 0)  # noqa: E501
         with Tx.kernel():
             cbx, cby = Tx.cta_id([CLUSTER_M, CLUSTER_N], parent="cluster")
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -293,7 +302,7 @@ class ReduceScatter:
             warp_id = Tx.warp_id([4], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
             tid = Tx.thread_id([NUM_THREADS], parent="cta")
-            rank = Tx.nvshmem.my_pe()
+            Tx.nvshmem.my_pe()
             sem = Semaphore(cnt=WORLD_SIZE, buffer=semaphore)
             with Tx.cta():
                 buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
@@ -305,32 +314,32 @@ class ReduceScatter:
                 profiler.init(0)
                 with Tx.cta()[0:GEMM_SMS]:
                     profiler.start(ProfileEventType.GEMM, lane_id == 0)
-                    tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
-                    A_smem = Tx.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
-                    B_smem = Tx.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
-                    C_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
+                    tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)  # noqa: E501
+                    A_smem = Tx.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)  # noqa: E501
+                    B_smem = Tx.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)  # noqa: E501
+                    C_smem = Tx.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)  # noqa: E501
                     reg = Tx.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))
+                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@tid_in_wg, 1)]))  # noqa: E501
                     reg_fp16 = Tx.alloc_buffer((BLK_N,), d_type, scope="local")
                     descA: Tx.uint64
                     descB: Tx.uint64
                     descI: Tx.uint32
                     base_desc_A: Tx.uint64
                     base_desc_B: Tx.uint64
-                    tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
-                    mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
+                    tma2mma_pipe = Tx.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))  # noqa: E501
+                    mma2ld_pipe = Tx.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))  # noqa: E501
                     mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                     tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
-                    ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
+                    ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))  # noqa: E501
                     tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                     m_clusters = Tx.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
                     n_clusters = Tx.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE)
+                    gemm_tile_scheduler = RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE)  # noqa: E501
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
                     with Tx.warp()[0:1]:
-                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                    Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
+                    Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)  # noqa: E501, F821
                     Tx.cuda.cta_sync()
                     Tx.cuda.trap_when_assert_failed(tmem_addr == 0)
                     tmem = Tx.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
@@ -342,18 +351,18 @@ class ReduceScatter:
                             Tx.ptx.setmaxnreg(False, 56)
                             if warp_id == 3:
                                 while gemm_tile_scheduler.valid():
-                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id  # noqa: E501
                                     n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
                                     for ko in range(K // BLK_K):
                                         # GMEM -> SMEM
                                         if lane_id == 0:
                                             tma2mma_pipe.producer_wait(0)
-                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)
-                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)
-                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)  # noqa: E501
+                                            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)  # noqa: E501
                                             if cbx == 0:
                                                 # notify the mma stage that tma load is finished
-                                                Tx.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)
+                                                Tx.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)  # noqa: E501
                                             tma2mma_pipe.advance()
                                     gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
                                 for i in range(PIPE_DEPTH):
@@ -363,7 +372,7 @@ class ReduceScatter:
                                         tma2mma_pipe.advance()
                             elif warp_id < NUM_CONSUMER:
                                 while gemm_tile_scheduler.valid():
-                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                    m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id  # noqa: E501
                                     n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
                                     with Tx.thread():
                                         # MMA
@@ -373,24 +382,24 @@ class ReduceScatter:
                                             for ko in Tx.serial(0, K // BLK_K):
                                                 # wait for tma load to finish
                                                 tma2mma_pipe.consumer_wait(0)
-                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501, F821
+                                                Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501, F821
                                                 for ki in range(BLK_K // MMA_K):
-                                                    descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)
-                                                    descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)
+                                                    descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)  # noqa: F821
+                                                    descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)  # noqa: F821
                                                     if ki == 0 and ko == 0:
-                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
+                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)  # noqa: E501, F821
                                                     else:
-                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
+                                                        Tx.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)  # noqa: E501, F821
                                                 tma2mma_pipe.consumer_release(0)
                                                 tma2mma_pipe.advance()
-                                            Tx.ptx.tcgen05.commit(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]), cta_group=2, cta_mask=3)
+                                            Tx.ptx.tcgen05.commit(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]), cta_group=2, cta_mask=3)  # noqa: E501
                                             mma2ld_pipe.advance()
                                     gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
                         with Tx.warpgroup()[0:NUM_CONSUMER]:
                             Tx.ptx.setmaxnreg(True, 224)
                             while gemm_tile_scheduler.valid():
-                                m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id
+                                m_idx = Tx.meta_var(gemm_tile_scheduler.m_idx) # represent cluster task id  # noqa: E501
                                 n_idx = Tx.meta_var(gemm_tile_scheduler.n_idx)
                                 # wait for the completion of all the mma of the same tile
                                 mma2ld_pipe.consumer_wait(0)
@@ -399,17 +408,17 @@ class ReduceScatter:
                                     col_st = Tx.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
                                     Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     with Tx.thread():
-                                        Tx.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
+                                        Tx.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])  # noqa: E501
                                 # the tmem can be overwritten by the next tile
                                 mma2ld_pipe.consumer_release(wg_id)
                                 # RF -> GMEM
                                 for i in range(BLK_N // EPI_TILE):
                                     with Tx.thread():
-                                        Tx.copy(C_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
+                                        Tx.copy(C_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])  # noqa: E501
                                     Tx.cuda.warpgroup_sync(wg_id+1)
                                     Tx.ptx.fence.proxy_async("shared::cta")
                                     if lane_id == 0 and warp_id == 0:
-                                        Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
+                                        Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)  # noqa: E501
                                         Tx.ptx.cp_async.bulk.commit_group()
                                         Tx.ptx.cp_async.bulk.wait_group(0)
                                     Tx.cuda.warpgroup_sync(wg_id+1)
@@ -498,7 +507,7 @@ class ReduceScatter:
                 )
                 reg_fp16 = Tx.alloc_buffer((8, ), "float16", scope="local")
                 reg_fp32_tmp = Tx.alloc_buffer((8), "float32", scope="local")
-                reg_fp32 = Tx.alloc_buffer((BLK_M_RS * BLK_N_RS // 8 // 128, 8), "float32", scope="local")
+                reg_fp32 = Tx.alloc_buffer((BLK_M_RS * BLK_N_RS // 8 // 128, 8), "float32", scope="local")  # noqa: E501
                 iter: Tx.int32
                 iter = 0
                 load_pipe.init(c2p_thread_count=128)
@@ -583,7 +592,7 @@ def test_hgemm_rs():
     sess.sync_worker_0()
 
     # prepare test data
-    print(f"begin preparing test data ...")
+    print("begin preparing test data ...")
     np.random.seed(42)
     DEV = tvm.cuda(0)
     # A_np = np.random.rand(WORLD_SIZE, M, K).astype(a_type)
@@ -646,7 +655,7 @@ def test_hgemm_rs():
     sess.scatter_from_worker0(A_array_all, args_dict["A_array"])
     sess.scatter_from_worker0(B_array_all, args_dict["B_array"])
     sess.sync_worker_0()
-    print(f"Data prepared successfully")
+    print("Data prepared successfully")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         target = tvm.target.Target("cuda")
@@ -728,14 +737,14 @@ def test_hgemm_rs():
         B_torch = torch.tensor(B_np[i], dtype=torch.float16, device="cuda")
         gemm_out_torch[i] = torch.matmul(A_torch, B_torch.T)
         # gemm_out_res = res_dict["gemm_out_host"].numpy()[i]
-        # np.testing.assert_allclose(gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3)
+        # np.testing.assert_allclose(gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3)  # noqa: E501
 
-    # staging_buffer_torch = gemm_out_torch.reshape(WORLD_SIZE, WORLD_SIZE, LOCAL_M, N).transpose(0, 1)
-    # np.testing.assert_allclose(staging_buffer_torch.cpu().numpy(), res_dict["staging_buffer_host"].numpy(), atol=1e-3, rtol=1e-3)
+    # staging_buffer_torch = gemm_out_torch.reshape(WORLD_SIZE, WORLD_SIZE, LOCAL_M, N).transpose(0, 1)  # noqa: E501
+    # np.testing.assert_allclose(staging_buffer_torch.cpu().numpy(), res_dict["staging_buffer_host"].numpy(), atol=1e-3, rtol=1e-3)  # noqa: E501
 
     gemm_out_torch_sum = torch.sum(gemm_out_torch, dim=0)
     out_res = res_dict["out_host"].numpy().reshape(-1, N)
-    out_std = gemm_out_torch_sum.cpu().numpy()
+    gemm_out_torch_sum.cpu().numpy()
 
     np.testing.assert_allclose(out_res, gemm_out_torch_sum.cpu().numpy(), atol=6e-2, rtol=6e-2)
 

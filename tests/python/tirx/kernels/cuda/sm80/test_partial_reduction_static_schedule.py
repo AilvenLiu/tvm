@@ -15,15 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 import enum
-import functools
-from typing import Tuple
 
 import numpy as np
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.script.ir_builder import IRBuilder
 
 
 def extract_values(filename):
@@ -31,7 +28,7 @@ def extract_values(filename):
     extracted_values = []
 
     # Open and read the file
-    with open(filename, "r") as file:
+    with open(filename) as file:
         for line in file:
             # Use string manipulation to extract values
             parts = line.strip().split(", ")
@@ -60,7 +57,6 @@ def extract_values(filename):
 
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
-
     M = 1024
     N = 1024
 
@@ -116,13 +112,13 @@ def test_partial_reduction():
         def __init__(self, cnt, buffer):
             self.cnt = cnt
             self.sem = buffer
-            self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
+            self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")  # noqa: E501
 
         @Tx.inline
         def semaphore_wait(self, *coord):
             with Tx.thread():
                 while 1:
-                    Tx.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)))
+                    Tx.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)))  # noqa: E501
                     if Tx.cuda.syncthreads_and(self.state[0] == self.cnt):
                         break
                     Tx.cuda.nano_sleep(40)
@@ -132,7 +128,7 @@ def test_partial_reduction():
             with Tx.thread():
                 Tx.cuda.cta_sync()
                 with Tx.thread()[0:1]:
-                    Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)
+                    Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)  # noqa: E501
                 Tx.cuda.thread_fence()
 
 
@@ -144,12 +140,12 @@ def test_partial_reduction():
 
         with Tx.kernel():
             bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
+            Tx.thread_id([1024], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])
+                Tx.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])  # noqa: E501
                 Tx.sum(B_smem, A_smem)
                 Tx.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
 
@@ -161,7 +157,7 @@ def test_partial_reduction():
 
         with Tx.kernel():
             bx = Tx.cta_id([NUM_BLOCK_M], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
+            Tx.thread_id([1024], parent="cta")
             with Tx.cta():
                 B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
@@ -170,34 +166,32 @@ def test_partial_reduction():
                 Tx.copy(C_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, 0], C_smem)
 
     TOTAL_SM_CNT = 132
-    CAPACITY = 1024
-    TASK_IDX_LEN = 2
 
     @Tx.prim_func(tirx=True)
-    def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore: Tx.handle, task_types: Tx.handle, task_indices: Tx.handle, tasks_indptr: Tx.handle):
+    def partial_reduction_fused(A: Tx.handle, B: Tx.handle, C: Tx.handle, semaphore: Tx.handle, task_types: Tx.handle, task_indices: Tx.handle, tasks_indptr: Tx.handle):  # noqa: E501
         A_ptr = Tx.match_buffer(A, (M, N), "float32")
         B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
         C_ptr = Tx.match_buffer(C, (M, 1), "float32")
         sem_ptr = Tx.match_buffer(semaphore, (NUM_BLOCK_M, ), "int32")
-        task_types_ptr = Tx.match_buffer(task_types, (NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M, ), "int32")
-        task_indices_ptr = Tx.match_buffer(task_indices, (NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M, 2), "int32")
+        task_types_ptr = Tx.match_buffer(task_types, (NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M, ), "int32")  # noqa: E501
+        task_indices_ptr = Tx.match_buffer(task_indices, (NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M, 2), "int32")  # noqa: E501
         tasks_indptr_ptr = Tx.match_buffer(tasks_indptr, (TOTAL_SM_CNT + 1, ), "int32")
         with Tx.kernel():
             bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
-            tx = Tx.thread_id([1024], parent="cta")
+            Tx.thread_id([1024], parent="cta")
             sem = Semaphore(NUM_BLOCK_N, sem_ptr)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem_1 = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 B_smem_2 = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                tile_scheduler = StaticTileScheduler(tasks_indptr_ptr, task_types_ptr, task_indices_ptr)
+                tile_scheduler = StaticTileScheduler(tasks_indptr_ptr, task_types_ptr, task_indices_ptr)  # noqa: E501
                 tile_scheduler.init(bx)
                 while tile_scheduler.valid():
                     if tile_scheduler.task_type[0] == TaskType.PARTIAL.value:
                         m_idx = Tx.meta_var(tile_scheduler.task_idx[0])
                         n_idx = Tx.meta_var(tile_scheduler.task_idx[1])
-                        Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
+                        Tx.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])  # noqa: E501
                         Tx.sum(B_smem_1, A_smem)
                         Tx.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem_1)
                         sem.semaphore_notify(m_idx)
@@ -239,7 +233,6 @@ def test_partial_reduction():
     task_indptr_tvm = tvm.runtime.tensor(np.array(indptr, dtype=np.int32), device=DEV)
 
     with target:
-
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
         ref_mod_stage_1 = tvm.compile(ref_mod_stage_1, target=target, tir_pipeline="tirx")
         ref_mod_stage_1(A_tvm, B_tvm)

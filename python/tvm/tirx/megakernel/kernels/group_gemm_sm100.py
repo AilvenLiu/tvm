@@ -16,15 +16,16 @@
 # under the License.
 
 from typing import Literal
+
 from tvm.script import tirx as Tx
-
-from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tir.layout import S, TileLayout
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
-
 from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES, F32_BYTES
-from .gemm import GemmTile
+from tvm.tirx.megakernel.utils.config import F32_BYTES, KernelConfig
+
 from .gate_up_silu import GateUpSiluTile
+from .gemm import GemmTile
 
 red_f16 = """
 __forceinline__ __device__ void red_f16_v4(half* address, half* reg) {
@@ -271,7 +272,7 @@ class GroupGEMMTile(GemmTile):
             else self.M_pad_size
         )
         with Tx.cta():
-            tid = Tx.thread_id([256], parent="cta")
+            Tx.thread_id([256], parent="cta")
             if num_tokens_in_block <= 32:
                 self.set_BLK_M(32)
                 GemmTile._run(self, m_idx, n_idx, k_idx, A, B, output, profiler)

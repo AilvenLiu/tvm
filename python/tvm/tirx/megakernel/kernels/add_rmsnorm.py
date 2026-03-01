@@ -16,10 +16,9 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager
+from tvm.tirx.megakernel.utils.base import SmemManager, Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES, F32_BYTES
 
 
 class AddRMSNormTile(Tile):
@@ -89,33 +88,33 @@ class AddRMSNormTile(Tile):
                 for kl in Tx.unroll(self.loop_inner):
                     self.sum_sq[kl, 0] = 0.0
                 self.rms_norm[0] = 0.0
-                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):
+                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
                             self.input_vec[kl, kv] = 0.0
                             self.residual_vec[kl, kv] = 0.0
                             self.x_vec[kl, kv] = 0.0
 
-                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
+                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)  # noqa: E501
 
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(self.input_vec[kl, :], input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
-                            Tx.copy(self.residual_vec[kl, :], residual[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tx.copy(self.input_vec[kl, :], input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
+                            Tx.copy(self.residual_vec[kl, :], residual[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
 
                     for kl in Tx.unroll(self.loop_inner):
                         Tx.cast(self.input_vec_f32[kl, :], self.input_vec[kl, :])
                         Tx.cast(self.residual_vec_f32[kl, :], self.residual_vec[kl, :])
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
-                            self.x_tmp[kl, 0] = self.input_vec_f32[kl, kv] + self.residual_vec_f32[kl, kv]
+                            self.x_tmp[kl, 0] = self.input_vec_f32[kl, kv] + self.residual_vec_f32[kl, kv]  # noqa: E501
                             self.sum_sq[kl, 0] += self.x_tmp[kl, 0] * self.x_tmp[kl, 0]
                             self.residual_vec[kl, kv] = Tx.cast(self.x_tmp[kl, 0], "float16")
                             self.x_vec[kl, kv] = self.x_tmp[kl, 0]
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(out_residual_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.residual_vec[kl, :])
-                            Tx.copy(self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.x_vec[kl, :])
+                            Tx.copy(out_residual_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.residual_vec[kl, :])  # noqa: E501
+                            Tx.copy(self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.x_vec[kl, :])  # noqa: E501
 
                 # warp reduce sum
                 for kl in Tx.unroll(self.loop_inner):
@@ -149,27 +148,27 @@ class AddRMSNormTile(Tile):
                 self.rms_norm[0] = rsqrt(self.rms_norm[0] / self.hidden_size + self.EPS)
 
                 # handle the weight
-                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):
+                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
                             self.input_vec[kl, kv] = 0.0
                             self.weight_vec_f32[kl, kv] = 0.0
                             self.x_vec[kl, kv] = 0.0
-                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
+                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(self.weight_vec[kl, :], weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
-                            Tx.copy(self.x_vec[kl, :], self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tx.copy(self.weight_vec[kl, :], weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
+                            Tx.copy(self.x_vec[kl, :], self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         Tx.cast(self.weight_vec_f32[kl, :], self.weight_vec[kl, :])
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
-                            self.input_vec_f32[kl, kv] = self.x_vec[kl, kv] * self.rms_norm[0] * self.weight_vec_f32[kl, kv]
+                            self.input_vec_f32[kl, kv] = self.x_vec[kl, kv] * self.rms_norm[0] * self.weight_vec_f32[kl, kv]  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         Tx.cast(self.input_vec[kl, :], self.input_vec_f32[kl, :])
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
+                            Tx.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])  # noqa: E501
 
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()
@@ -229,20 +228,20 @@ class RMSNormTile(Tile):
                 for kl in Tx.unroll(self.loop_inner):
                     self.sum_sq[kl, 0] = 0.0
                 self.rms_norm[0] = 0.0
-                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):
+                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
                             self.input_vec_f32[kl, kv] = 0.0
-                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
+                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(self.input_vec_f32[kl, :], input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tx.copy(self.input_vec_f32[kl, :], input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
-                            self.sum_sq[kl, 0] += self.input_vec_f32[kl, kv] * self.input_vec_f32[kl, kv]
+                            self.sum_sq[kl, 0] += self.input_vec_f32[kl, kv] * self.input_vec_f32[kl, kv]  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec_f32[kl, :])
+                            Tx.copy(self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec_f32[kl, :])  # noqa: E501
 
                 # warp reduce sum
                 for kl in Tx.unroll(self.loop_inner):
@@ -276,26 +275,26 @@ class RMSNormTile(Tile):
                 self.rms_norm[0] = rsqrt(self.rms_norm[0] / self.hidden_size + self.EPS)
 
                 # handle the weight
-                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):
+                for ki in Tx.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
                             self.input_vec_f32[kl, kv] = 0.0
 
-                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
+                    st = Tx.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(self.weight_vec[kl, :], weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
-                            Tx.copy(self.input_vec_f32[kl, :], self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tx.copy(self.weight_vec[kl, :], weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
+                            Tx.copy(self.input_vec_f32[kl, :], self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         Tx.cast(self.weight_vec_f32[kl, :], self.weight_vec[kl, :])
                     for kl in Tx.unroll(self.loop_inner):
                         for kv in Tx.unroll(self.vec_size):
-                            self.input_vec_f32[kl, kv] = self.input_vec_f32[kl, kv] * self.rms_norm[0] * self.weight_vec_f32[kl, kv]
+                            self.input_vec_f32[kl, kv] = self.input_vec_f32[kl, kv] * self.rms_norm[0] * self.weight_vec_f32[kl, kv]  # noqa: E501
                     for kl in Tx.unroll(self.loop_inner):
                         Tx.cast(self.input_vec[kl, :], self.input_vec_f32[kl, :])
                     for kl in Tx.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tx.copy(output[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
+                            Tx.copy(output[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])  # noqa: E501
 
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()

@@ -22,14 +22,16 @@ deterministic failure reporting via exceptions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import traceback
-from typing import Callable, Dict, List, Optional, Tuple, Any
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from tvm.ir import Op
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.operator import get_tirx_op
+
 from .schedule_context import ScheduleContext
 
 
@@ -48,15 +50,15 @@ class Predicate:
 
     name: str
     fn: Callable[[OpCall, ScheduleContext], Any]
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
 
-    def evaluate(self, op_call: OpCall, sctx: ScheduleContext) -> Tuple[bool, Optional[str]]:
+    def evaluate(self, op_call: OpCall, sctx: ScheduleContext) -> tuple[bool, str | None]:
         try:
             out = self.fn(op_call, sctx, **self.kwargs)
             if isinstance(out, tuple):
                 ok, reason = out
                 return bool(ok), (str(reason) if not ok and reason is not None else None)
-            return bool(out), None if out else None
+            return bool(out), None
         except DispatchFail as e:  # surface explicit failure reasons
             return False, str(e)
         except Exception as e:  # unexpected predicate exception
@@ -79,13 +81,13 @@ def fail(reason: str) -> None:
 class DispatchCase:
     variant: str
     priority: int
-    preds: List[Predicate]
+    preds: list[Predicate]
     # Impl must either return a PrimFunc or raise DispatchFail
     impl: Callable[[OpCall, ScheduleContext], PrimFunc]
 
 
 # Keyed by (Op, target_kind)
-_DISPATCH_TABLE: Dict[Tuple[Op, str], List[DispatchCase]] = {}
+_DISPATCH_TABLE: dict[tuple[Op, str], list[DispatchCase]] = {}
 
 
 def register_dispatch(
@@ -94,7 +96,7 @@ def register_dispatch(
     *,
     variant: str,
     priority: int = 0,
-    when: Optional[List[Predicate]] = None,
+    when: list[Predicate] | None = None,
 ):
     """Decorator to add a dispatch case for an op/target pair.
 
@@ -125,10 +127,10 @@ def register_dispatch(
     return decorator
 
 
-def list_registered_schedules() -> Dict[str, Dict[str, List[str]]]:
+def list_registered_schedules() -> dict[str, dict[str, list[str]]]:
     """Return a mapping: op_name -> target_kind -> [variant names]."""
 
-    out: Dict[str, Dict[str, List[str]]] = {}
+    out: dict[str, dict[str, list[str]]] = {}
     for (op, tgt), cases in _DISPATCH_TABLE.items():
         name = op.name
         out.setdefault(name, {}).setdefault(tgt, [])
@@ -173,7 +175,7 @@ def _format_opcall(op_call: OpCall) -> str:
 
 def _format_failure_table(
     header: str,
-    rows: List[Tuple[str, List[str]]],
+    rows: list[tuple[str, list[str]]],
 ) -> str:
     """Format failures into a readable ASCII table.
 
@@ -206,7 +208,7 @@ def _format_failure_table(
     def hline(sep: str = "+") -> str:
         return f"{sep}{'-' * (variant_col_w + 2)}{sep}{'-' * (error_col_w + 2)}{sep}"
 
-    lines: List[str] = [header]
+    lines: list[str] = [header]
     if not rows:
         # No rows; keep the header only
         return "\n".join(lines)
@@ -228,7 +230,7 @@ def _format_failure_table(
     return "\n".join(lines)
 
 
-def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Run structured dispatch.
 
     Returns a PrimFunc on success. Otherwise, raises RuntimeError with
@@ -246,8 +248,8 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
     # Collect structured failure rows: (variant_label, error_lines)
     # error_lines: [summary, traceback lines...]
-    failure_rows: List[Tuple[str, List[str]]] = []
-    last_exception: Optional[BaseException] = None
+    failure_rows: list[tuple[str, list[str]]] = []
+    last_exception: BaseException | None = None
 
     # If explicit dispatch is set, filter to that variant only
     forced_variant = getattr(op_call, "dispatch", None)
@@ -264,7 +266,7 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     for case in sorted(cases, key=lambda c: (-c.priority, c.variant)):
         # evaluate predicates
         pred_ok = True
-        pred_msgs: List[str] = []
+        pred_msgs: list[str] = []
         for pred in case.preds:
             ok, reason = pred.evaluate(op_call, sctx)
             if not ok:
@@ -298,7 +300,7 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
             failure_rows.append(
                 (
                     f"{case.variant} (prio={case.priority})",
-                    [f"declined — {str(e)}", "opcall:", *op_lines],
+                    [f"declined — {e!s}", "opcall:", *op_lines],
                 )
             )
         except Exception as e:  # keep searching other variants

@@ -59,8 +59,8 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: Tx.handle, output_ptr: Tx.handle):
         batch_size = Tx.int32()
 
-        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
-        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
+        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")  # noqa: E501
+        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -79,7 +79,7 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
                     for kv in Tx.vectorized(VEC_SIZE):
                         vec1[kv] = input_cat_global[batch_idx, intermediate_idx + kv]
                     for kv in Tx.vectorized(VEC_SIZE):
-                        vec2[kv] = input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv]
+                        vec2[kv] = input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv]  # noqa: E501
                     for kv in Tx.serial(VEC_SIZE):
                         vec1[kv] = vec1[kv] * Tx.sigmoid(vec1[kv]) * vec2[kv]
                     for kv in Tx.vectorized(VEC_SIZE):
@@ -103,8 +103,8 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: Tx.handle, output_ptr: Tx.handle):
         batch_size = Tx.int32()
 
-        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
-        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
+        input_cat_global = Tx.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")  # noqa: E501
+        output_global = Tx.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -112,7 +112,7 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
 
             with Tx.thread():
                 idx = Tx.alloc_local([1], "int32")
-                shared_buf = Tx.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
+                shared_buf = Tx.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")  # noqa: E501
                 vec1 = Tx.alloc_local([VEC_SIZE], "float16")
                 vec2 = Tx.alloc_local([VEC_SIZE], "float16")
                 idx[0] = 0
@@ -122,8 +122,8 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                     intermediate_idx = Tx.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx = Tx.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tx.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], **non_bulk_copy)
-                        Tx.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], **non_bulk_copy)
+                        Tx.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], **non_bulk_copy)  # noqa: E501
+                        Tx.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], **non_bulk_copy)  # noqa: E501
                     Tx.ptx.cp_async.commit_group()
                     idx[0] += 1
 
@@ -132,12 +132,12 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                     intermediate_idx = Tx.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx = Tx.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
                     idx_to_prefetch = Tx.meta_var(idx[0] + PIPE_DEPTH - 1)
-                    real_idx_to_prefetch = Tx.meta_var(idx_to_prefetch * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
-                    intermediate_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)
-                    batch_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)
+                    real_idx_to_prefetch = Tx.meta_var(idx_to_prefetch * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)  # noqa: E501
+                    intermediate_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)  # noqa: E501
+                    batch_idx_to_prefetch = Tx.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)  # noqa: E501
                     if real_idx_to_prefetch * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
-                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
+                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)  # noqa: E501
+                        Tx.copy_async(shared_buf[Tx.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)  # noqa: E501
                     Tx.ptx.cp_async.commit_group()
                     Tx.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
                     for kv in Tx.vectorized(VEC_SIZE):
@@ -158,20 +158,20 @@ def get_fused_split1_silu1_multiply1_kernel(out_dim):
 
     # fmt: off
     @Tx.prim_func
-    def fused_split1_silu1_multiply1(p_fastertransformer_gemm_fp16_int514: Tx.handle, p_output0: Tx.handle):
+    def fused_split1_silu1_multiply1(p_fastertransformer_gemm_fp16_int514: Tx.handle, p_output0: Tx.handle):  # noqa: E501
         Tx.func_attr({"tir.is_scheduled": True, "tir.noalias": True})
         seq_len = Tx.int64()
-        fastertransformer_gemm_fp16_int514 = Tx.match_buffer(p_fastertransformer_gemm_fp16_int514, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE * 2)), "float16")
-        T_multiply_intermediate_1 = Tx.match_buffer(p_output0, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE)), "float16")
+        fastertransformer_gemm_fp16_int514 = Tx.match_buffer(p_fastertransformer_gemm_fp16_int514, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE * 2)), "float16")  # noqa: E501
+        T_multiply_intermediate_1 = Tx.match_buffer(p_output0, (Tx.int64(1), seq_len, Tx.int64(INTERMEDIATE_SIZE)), "float16")  # noqa: E501
         # with Tx.sblock("root"):
-        for ax0_ax1_fused_0 in Tx.thread_binding(seq_len * Tx.int64(INTERMEDIATE_SIZE // 1024), thread="blockIdx.x"):
+        for ax0_ax1_fused_0 in Tx.thread_binding(seq_len * Tx.int64(INTERMEDIATE_SIZE // 1024), thread="blockIdx.x"):  # noqa: E501
             for ax0_ax1_fused_1 in Tx.thread_binding(Tx.int64(1024), thread="threadIdx.x"):
                 with Tx.sblock("T_multiply_1"):
-                    v0 = Tx.axis.spatial(seq_len, (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) // Tx.int64(INTERMEDIATE_SIZE))
-                    v1 = Tx.axis.spatial(Tx.int64(INTERMEDIATE_SIZE), (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) % Tx.int64(INTERMEDIATE_SIZE))
-                    Tx.reads(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1:v1 + Tx.int64(INTERMEDIATE_SIZE + 1)])
+                    v0 = Tx.axis.spatial(seq_len, (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) // Tx.int64(INTERMEDIATE_SIZE))  # noqa: E501
+                    v1 = Tx.axis.spatial(Tx.int64(INTERMEDIATE_SIZE), (ax0_ax1_fused_0 * Tx.int64(1024) + ax0_ax1_fused_1) % Tx.int64(INTERMEDIATE_SIZE))  # noqa: E501
+                    Tx.reads(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1:v1 + Tx.int64(INTERMEDIATE_SIZE + 1)])  # noqa: E501
                     Tx.writes(T_multiply_intermediate_1[Tx.int64(0), v0, v1])
-                    T_multiply_intermediate_1[Tx.int64(0), v0, v1] = fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1] * Tx.sigmoid(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1]) * fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1 + Tx.int64(INTERMEDIATE_SIZE)]
+                    T_multiply_intermediate_1[Tx.int64(0), v0, v1] = fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1] * Tx.sigmoid(fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1]) * fastertransformer_gemm_fp16_int514[Tx.int64(0), v0, v1 + Tx.int64(INTERMEDIATE_SIZE)]  # noqa: E501
 
     # fmt: on
     return fused_split1_silu1_multiply1
@@ -205,7 +205,10 @@ def test(batch_size):
         with target:
             mod = tvm.IRModule({"main": get_fused_split_silu_multiply_kernel_cp_async(out_dim)})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-            func = lambda: mod(input_cat_tvm, output_tvm)
+
+            def func():
+                return mod(input_cat_tvm, output_tvm)
+
             ms = bench(func, warmup=0, repeat=30, proton_name="tir_cp_async")
             print(f"TIR time: {ms:.3f} ms")
 
@@ -219,7 +222,10 @@ def test(batch_size):
         with target:
             mod = tvm.IRModule({"main": get_fused_split_silu_multiply_kernel_cp_sync(out_dim)})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-            func = lambda: mod(input_cat_tvm, output_tvm)
+
+            def func():
+                return mod(input_cat_tvm, output_tvm)
+
             ms = bench(func, warmup=0, repeat=30, proton_name="tir_cp_sync")
             print(f"TIR time: {ms:.3f} ms")
         return output_tvm.numpy()
@@ -234,7 +240,10 @@ def test(batch_size):
         with target:
             mod = tvm.IRModule({"main": get_fused_split1_silu1_multiply1_kernel(out_dim)})
             mod = tvm.compile(mod, target=target)
-            func = lambda: mod(input_cat_tvm, output_tvm)
+
+            def func():
+                return mod(input_cat_tvm, output_tvm)
+
             ms = bench(func, warmup=0, repeat=30, proton_name="tir_old")
             print(f"TIR time: {ms:.3f} ms")
 
@@ -246,7 +255,10 @@ def test(batch_size):
 
         input_cat_flashinfer = input_cat.clone().to("cuda")
         out = torch.empty((batch_size, out_dim), dtype=torch.float16, device="cuda")
-        func = lambda: flashinfer.activation.silu_and_mul(input_cat_flashinfer, out)
+
+        def func():
+            return flashinfer.activation.silu_and_mul(input_cat_flashinfer, out)
+
         ms = bench(func, warmup=0, repeat=30, proton_name="flashinfer")
         print(f"FlashInfer time: {ms:.3f} ms")
         return out.cpu().numpy()

@@ -15,13 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import numpy as np
 import ml_dtypes
+import numpy as np
 
 import tvm
-from tvm.script import tirx as Tx
 import tvm.testing
-from tvm.script.ir_builder import IRBuilder
+from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
@@ -44,7 +43,6 @@ def test_fp8_gemm_hopper_no_ws():
     STAGES_TMA = 4
     STAGES_WGMMA = 2
     STAGES_EPI = 2
-    WG_SIZE = 128
     TMA_BYTES = BLK_M * BLK_K * f8_bytes + BLK_K * BLK_N * f8_bytes
 
     m_blocks = (M + BLK_M - 1) // BLK_M
@@ -52,27 +50,27 @@ def test_fp8_gemm_hopper_no_ws():
 
     # fmt: off
     @Tx.inline
-    def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
+    def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):  # noqa: E501
         with Tx.thread()[tid == 0]:
             stage = Tx.meta_var(k_tile % STAGES_TMA)
             Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)
+            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)  # noqa: E501
+            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)  # noqa: E501
 
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
 
     @Tx.inline
-    def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):
+    def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):  # noqa: E501
         stage = Tx.meta_var(k_tile % STAGES_TMA)
         parity = Tx.meta_var((k_tile // STAGES_TMA) % 2)
         Tx.ptx.mbarrier.try_wait(bars.ptr_to([stage]), parity)
         for inner_k in Tx.serial(BLK_K // WGMMA_K):
             A_offset = Tx.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = Tx.meta_var(inner_k * WGMMA_K)
-            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([stage, A_offset]), 1, 64, swizzle=3)
-            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([stage, B_offset]), 1, 64, swizzle=3)
-            Tx.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True, descA, descB, *get_accum_list(accum, 128))
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([stage, A_offset]), 1, 64, swizzle=3)  # noqa: E501
+            Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([stage, B_offset]), 1, 64, swizzle=3)  # noqa: E501
+            Tx.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True, descA, descB, *get_accum_list(accum, 128))  # noqa: E501
         Tx.ptx.wgmma.commit_group()
 
     @Tx.inline
@@ -84,19 +82,19 @@ def test_fp8_gemm_hopper_no_ws():
             col_noswizzle = Tx.meta_var(st_tile * 2 + lane_id // 16)
             col = Tx.meta_var((lane_id % 8) ^ col_noswizzle)
             row = Tx.meta_var(warp_id * 16 + lane_id % 16)
-            Tx.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))
+            Tx.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))  # noqa: E501
 
     @Tx.inline
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
-            Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
+            Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)  # noqa: E501
             Tx.ptx.cp_async.bulk.commit_group()
             Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @Tx.inline
-    def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):
+    def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):  # noqa: E501
         Tx.cuda.cta_sync()
         for n_tile in Tx.serial(BLK_N // 64):
             if n_tile != 0:
@@ -110,17 +108,17 @@ def test_fp8_gemm_hopper_no_ws():
 
     @Tx.prim_func(tirx=True)
     def manual(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[M, K]))
-        B = Tx.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))
-        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))
+        A = Tx.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[M, K]))  # noqa: E501
+        B = Tx.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=Tx.TileLayout(Tx.S[N, K]))  # noqa: E501
+        C = Tx.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=Tx.TileLayout(Tx.S[M, N]))  # noqa: E501
 
         A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         B_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
         C_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
 
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float8_e4m3fn", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float8_e4m3fn", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
-        Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float8_e4m3fn", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float8_e4m3fn", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)  # noqa: E501
 
         with Tx.kernel():
             bx = Tx.cta_id([SM_COUNT], parent="kernel")
@@ -131,9 +129,9 @@ def test_fp8_gemm_hopper_no_ws():
 
             with Tx.cta():
                 # tensor stroage
-                A_smem = Tx.alloc_buffer([STAGES_TMA, BLK_M * BLK_K], "float8_e4m3fn", scope="shared.dyn", align=128)
-                B_smem = Tx.alloc_buffer([STAGES_TMA, BLK_K * BLK_N], "float8_e4m3fn", scope="shared.dyn", align=128)
-                C_smem = Tx.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
+                A_smem = Tx.alloc_buffer([STAGES_TMA, BLK_M * BLK_K], "float8_e4m3fn", scope="shared.dyn", align=128)  # noqa: E501
+                B_smem = Tx.alloc_buffer([STAGES_TMA, BLK_K * BLK_N], "float8_e4m3fn", scope="shared.dyn", align=128)  # noqa: E501
+                C_smem = Tx.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)  # noqa: E501
                 # barriers
                 bars = Tx.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
                 desc_A: Tx.uint64
@@ -176,17 +174,17 @@ def test_fp8_gemm_hopper_no_ws():
                         n_idx = Tx.meta_var(tile_scheduler.n_idx)
                         # prelogue
                         for _ in range(STAGES_TMA):
-                            tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                            tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)  # noqa: E501
                             tma_index = tma_index + 1
                         for _ in range(STAGES_WGMMA - 1):
-                            mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                            mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)  # noqa: E501, F821
                             mma_index = mma_index + 1
 
                         # mainloop
                         k_tile_count = Tx.meta_var((K + BLK_K - 1) // BLK_K)
                         for _ in range(k_tile_count):
                             if mma_index < k_tile_count:
-                                mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                                mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)  # noqa: E501, F821
                                 mma_index = mma_index + 1
                             # wait for oldest one stage to finish
                             if _ == k_tile_count - 1:
@@ -196,11 +194,11 @@ def test_fp8_gemm_hopper_no_ws():
                             Tx.cuda.cta_sync()
                             # load the next tile
                             if tma_index < k_tile_count:
-                                tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                                tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)  # noqa: E501
                                 tma_index = tma_index + 1
 
                         # epilogue
-                        write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem, C_map, accum, accum_half)
+                        write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem, C_map, accum, accum_half)  # noqa: E501
 
                         # move to the next tile
                         tile_scheduler.next_tile()
@@ -222,7 +220,10 @@ def test_fp8_gemm_hopper_no_ws():
         C_tvm = tvm.runtime.tensor(C_np, device=DEV)
         workspace = tvm.runtime.empty((32 * 1024 * 1024,), dtype="uint8", device=DEV)
         scale = tvm.runtime.tensor(np.array([1.0], dtype="float32"), device=DEV)
-        func = lambda: gemm_func(A_tvm, B_tvm, workspace, scale, C_tvm)
+
+        def func():
+            return gemm_func(A_tvm, B_tvm, workspace, scale, C_tvm)
+
         ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
         print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
         return C_tvm
@@ -234,7 +235,10 @@ def test_fp8_gemm_hopper_no_ws():
         with target:
             mod = tvm.IRModule({"main": manual})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+
+            def func():
+                return mod(A_tvm, B_tvm, C_tvm)
+
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 

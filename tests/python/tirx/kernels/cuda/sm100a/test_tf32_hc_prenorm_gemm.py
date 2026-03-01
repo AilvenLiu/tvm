@@ -22,26 +22,26 @@ D[M,N] = A[M,K] (bf16) @ B[N,K]^T (f32) -> f32
 sqr_sum[M] = sum(A^2, dim=1) (for RMSNorm)
 
 Architecture: 256 threads = 2 warpgroups
-  WG0 (128 threads): Cast warps - load bf16 A from SMEM, cast to f32, store to TMEM, accumulate sqr_sum
+  WG0 (128 threads): Cast warps - load bf16 A from SMEM, cast to f32,
+                     store to TMEM, accumulate sqr_sum
   WG1 (128 threads): TMA + MMA + Epilogue
     warp 3: TMA load (A bf16, B f32 into SMEM)
     warp 1: MMA issue (TS mode - A from TMEM, B from SMEM)
     all warps: Epilogue after K-loop (TMEM -> SMEM -> TMA store)
 """
 
-import numpy as np
+import deep_gemm
 import ml_dtypes
+import numpy as np
+import torch
 
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import bench, ProtonContext
-from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
-from tvm.tir.layout import TileLayout, TLane, TCol, S
+from tvm.tir.layout import S, TCol, TileLayout, TLane
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
-
-import torch
-import deep_gemm
+from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TCGen05Bar, TMABar
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -78,7 +78,9 @@ N_COLS = 256  # next power of 2 >= 128+32=160
 NUM_K_ITERS = K // BLOCK_K  # total K blocks
 NUM_K_ITERS_PER_SPLIT = NUM_K_ITERS // kNumSplits
 NUM_MMA_K_ITERS = BLOCK_K // UMMA_K  # 8
-assert NUM_K_ITERS % kNumSplits == 0, f"K blocks ({NUM_K_ITERS}) must be evenly divisible by kNumSplits ({kNumSplits})"
+assert NUM_K_ITERS % kNumSplits == 0, (
+    f"K blocks ({NUM_K_ITERS}) must be evenly divisible by kNumSplits ({kNumSplits})"
+)
 
 # Swizzle modes (per_element = log2(bank_group_elements), swizzle_len=3, atom_len=3)
 # A (bf16): 128B swizzle, 16B/2B=8 elements/bg -> SwizzleLayout(3,3,3)
@@ -99,9 +101,9 @@ assert BLOCK_K * F16_BYTES == 128, "A swizzle requires BLOCK_K*sizeof(bf16)==128
 assert BLOCK_N * F32_BYTES == 128, "D swizzle requires BLOCK_N*sizeof(f32)==128"
 
 # SMEM sizes
-SMEM_A_SIZE_PER_STAGE = BLOCK_M * BLOCK_K * F16_BYTES   # 8192
-SMEM_B_SIZE_PER_STAGE = BLOCK_N * BLOCK_K * F32_BYTES   # 8192
-SMEM_D_SIZE = BLOCK_M * BLOCK_N * F32_BYTES             # 8192
+SMEM_A_SIZE_PER_STAGE = BLOCK_M * BLOCK_K * F16_BYTES  # 8192
+SMEM_B_SIZE_PER_STAGE = BLOCK_N * BLOCK_K * F32_BYTES  # 8192
+SMEM_D_SIZE = BLOCK_M * BLOCK_N * F32_BYTES  # 8192
 
 BLOCK_M_PER_WARP = BLOCK_M // 4  # 16 rows per sub-warp in cast warp
 
@@ -120,7 +122,6 @@ def get_source(func):
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
     return src, mod
-
 
 
 def calc_diff(x, y):
@@ -144,6 +145,7 @@ def skip():
 # SmemDescriptor helper (from flash_attention4)
 # ---------------------------------------------------------------------------
 
+
 @Tx.meta_class
 class SmemDescriptor:
     def __init__(self, prefix):
@@ -165,8 +167,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc) {{
 }}
 """
         return Tx.cuda.func_call(
-            func_name, Tx.address_of(self.desc),
-            source_code=source_code, return_type="void"
+            func_name, Tx.address_of(self.desc), source_code=source_code, return_type="void"
         )
 
     def add_16B_offset(self, offset):
@@ -180,8 +181,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 }}
 """
         return Tx.cuda.func_call(
-            func_name, self.desc, offset,
-            source_code=source_code, return_type="uint64"
+            func_name, self.desc, offset, source_code=source_code, return_type="uint64"
         )
 
 
@@ -195,8 +195,16 @@ A_layout = Tx.ComposeLayout(
 )
 B_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(2, 3, 3, swizzle_inner=True),
-    Tx.TileLayout(S[(kNumStages, NUM_B_TMA_ATOMS, BLOCK_N, BLOCK_K_ATOM_B) :
-                    (NUM_B_TMA_ATOMS * BLOCK_N * BLOCK_K_ATOM_B, BLOCK_N * BLOCK_K_ATOM_B, BLOCK_K_ATOM_B, 1)]),
+    Tx.TileLayout(
+        S[
+            (kNumStages, NUM_B_TMA_ATOMS, BLOCK_N, BLOCK_K_ATOM_B) : (
+                NUM_B_TMA_ATOMS * BLOCK_N * BLOCK_K_ATOM_B,
+                BLOCK_N * BLOCK_K_ATOM_B,
+                BLOCK_K_ATOM_B,
+                1,
+            )
+        ]
+    ),
 )
 D_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(2, 3, 3, swizzle_inner=True),
@@ -276,7 +284,8 @@ __forceinline__ __device__ void cast_bf16_store_tmem(
     for (uint32_t i = 0; i < kNumLoads; ++i) {
         #pragma unroll
         for (uint32_t u = 0; u < 2; ++u) {
-            fp32x2_values[u][i] = __bfloat1622float2(*reinterpret_cast<nv_bfloat162*>(&uint32_values[u][i]));
+            fp32x2_values[u][i] = __bfloat1622float2(
+                *reinterpret_cast<nv_bfloat162*>(&uint32_values[u][i]));
             if (u == 0) {
                 s0x = __fmaf_rn(fp32x2_values[u][i].x, fp32x2_values[u][i].x, s0x);
                 s0y = __fmaf_rn(fp32x2_values[u][i].y, fp32x2_values[u][i].y, s0y);
@@ -382,7 +391,7 @@ def tf32_hc_prenorm_gemm(
             pool.move_base_to(1024)
             D_smem = pool.alloc((BLOCK_M, BLOCK_N), d_type, layout=D_layout)
             A_smem = pool.alloc((kNumStages, BLOCK_M, BLOCK_K), a_type, layout=A_layout)
-            B_smem = pool.alloc((kNumStages, NUM_B_TMA_ATOMS, BLOCK_N, BLOCK_K_ATOM_B), b_type, layout=B_layout)
+            B_smem = pool.alloc((kNumStages, NUM_B_TMA_ATOMS, BLOCK_N, BLOCK_K_ATOM_B), b_type, layout=B_layout)  # noqa: E501
             pool.commit()
 
             # ---------------------------------------------------------------
@@ -392,9 +401,7 @@ def tf32_hc_prenorm_gemm(
             reg_wg = reg.view(128, TMEM_LD_SIZE,
                               layout=TileLayout(S[(128, TMEM_LD_SIZE) : (1@axis_tid_in_wg, 1)]))
 
-            descB: Tx.uint64
             descI: Tx.uint32
-            phase: Tx.int32
 
             # Initialize barriers
             full_barriers.init(1)
@@ -444,9 +451,9 @@ def tf32_hc_prenorm_gemm(
                                 m_idx: Tx.let = m_block_idx * BLOCK_M
                                 k_idx: Tx.let = k_offset + s * BLOCK_K
 
-                                tma_copy_cfg = Tx.meta_var({"dispatch": "tma", "mbar": full_barriers.ptr_to([stage_idx]), "cta_group": CTA_GROUP})
+                                tma_copy_cfg = Tx.meta_var({"dispatch": "tma", "mbar": full_barriers.ptr_to([stage_idx]), "cta_group": CTA_GROUP})  # noqa: E501
                                 # A: bf16, BLOCK_K*bf16=128B fits in one TMA atom
-                                Tx.copy_async(A_smem[stage_idx, :, :], A[m_idx: m_idx + BLOCK_M, k_idx: k_idx + BLOCK_K], **tma_copy_cfg)
+                                Tx.copy_async(A_smem[stage_idx, :, :], A[m_idx: m_idx + BLOCK_M, k_idx: k_idx + BLOCK_K], **tma_copy_cfg)  # noqa: E501
                                 # B: f32, BLOCK_K*f32=256B > 128B, split into 2 explicit TMA atoms
                                 for bi in Tx.unroll(NUM_B_TMA_ATOMS):
                                     Tx.ptx.cp_async.bulk.tensor.g2c(
@@ -459,14 +466,14 @@ def tf32_hc_prenorm_gemm(
                                         cta_group=CTA_GROUP,
                                     )
 
-                                AB_bytes = Tx.meta_var(SMEM_A_SIZE_PER_STAGE + SMEM_B_SIZE_PER_STAGE)
+                                AB_bytes = Tx.meta_var(SMEM_A_SIZE_PER_STAGE + SMEM_B_SIZE_PER_STAGE)  # noqa: E501
                                 full_barriers.arrive(stage_idx, AB_bytes)
 
                     # MMA warp (warp 1 of WG1) — TS mode TF32
                     # Descriptor init must be warp-wide (shfl_sync needs all threads)
                     if warp_id == 1:
                         Tx.ptx.tcgen05.encode_instr_descriptor(
-                            Tx.address_of(descI),
+                            Tx.address_of(descI),  # noqa: F821
                             "float32", "tf32", "tf32",
                             BLOCK_M, BLOCK_N, UMMA_K,
                             False, False, CTA_GROUP,
@@ -494,12 +501,12 @@ def tf32_hc_prenorm_gemm(
                                 for k in Tx.unroll(NUM_MMA_K_ITERS):
                                     a_tmem_col = Tx.meta_var(cast_stage_idx * BLOCK_K + k * UMMA_K)
 
-                                    b_stage_16B = Tx.meta_var(stage_idx * SMEM_B_SIZE_PER_STAGE // F128_BYTES)
+                                    b_stage_16B = Tx.meta_var(stage_idx * SMEM_B_SIZE_PER_STAGE // F128_BYTES)  # noqa: E501
                                     atom_idx = Tx.meta_var((k * UMMA_K) // BLOCK_SWIZZLED_BK_B)
                                     in_atom_idx = Tx.meta_var((k * UMMA_K) % BLOCK_SWIZZLED_BK_B)
                                     b_k_offset = Tx.meta_var(
                                         b_stage_16B
-                                        + atom_idx * BLOCK_N * BLOCK_SWIZZLED_BK_B * F32_BYTES // F128_BYTES
+                                        + atom_idx * BLOCK_N * BLOCK_SWIZZLED_BK_B * F32_BYTES // F128_BYTES  # noqa: E501
                                         + in_atom_idx * F32_BYTES // F128_BYTES
                                     )
 
@@ -508,7 +515,7 @@ def tf32_hc_prenorm_gemm(
                                         Tx.cuda.get_tmem_addr(0, 0, D_TMEM_START_COL),
                                         Tx.cuda.get_tmem_addr(0, 0, a_tmem_col),
                                         descB_obj.add_16B_offset(b_k_offset),
-                                        descI,
+                                        descI,  # noqa: F821
                                         use_a_tmem=True,
                                         cta_group=CTA_GROUP,
                                         enable_input_d=first_mma_done,
@@ -534,7 +541,7 @@ def tf32_hc_prenorm_gemm(
                         with Tx.thread():
                             st = Tx.meta_var(ki * TMEM_LD_SIZE)
                             if lane_id < BLOCK_M // WARP_NUMBER:
-                                Tx.copy(D_smem[warp_id * (BLOCK_M // WARP_NUMBER) + lane_id, st : st + TMEM_LD_SIZE], reg[:])
+                                Tx.copy(D_smem[warp_id * (BLOCK_M // WARP_NUMBER) + lane_id, st : st + TMEM_LD_SIZE], reg[:])  # noqa: E501
                         Tx.cuda.warp_sync()
 
                     Tx.ptx.fence.proxy_async("shared::cta")
@@ -578,9 +585,10 @@ def tf32_hc_prenorm_gemm(
                         cast_stage_idx: Tx.let = s % kNumCastStages
 
                         full_barriers.wait(stage_idx, (s // kNumStages) & 1)
-                        # empty_cast_barriers.wait moved inside inline fn (after LDSM, before TMEM store)
+                        # empty_cast_barriers.wait moved inside inline fn
+                        # (after LDSM, before TMEM store)
 
-                        a_smem_byte_off = Tx.meta_var(A_SMEM_BYTE_BASE + stage_idx * SMEM_A_SIZE_PER_STAGE)
+                        a_smem_byte_off = Tx.meta_var(A_SMEM_BYTE_BASE + stage_idx * SMEM_A_SIZE_PER_STAGE)  # noqa: E501
                         Tx.cuda.func_call(
                             "cast_bf16_store_tmem",
                             pool.ptr,
@@ -624,12 +632,12 @@ def tf32_hc_prenorm_gemm(
                             return_type="float32",
                         )
 
-                        m_idx0: Tx.let = m_block_idx * BLOCK_M + warp_id * BLOCK_M_PER_WARP + lane_id // 4
+                        m_idx0: Tx.let = m_block_idx * BLOCK_M + warp_id * BLOCK_M_PER_WARP + lane_id // 4  # noqa: E501
                         if lane_id % 4 == 0:
                             if m_idx0 < M:
                                 sqr_sum_out[m_offset + m_idx0] = reduced0_buf[0]
 
-                        m_idx1: Tx.let = m_block_idx * BLOCK_M + warp_id * BLOCK_M_PER_WARP + lane_id // 4 + 8
+                        m_idx1: Tx.let = m_block_idx * BLOCK_M + warp_id * BLOCK_M_PER_WARP + lane_id // 4 + 8  # noqa: E501
                         if lane_id % 4 == 0:
                             if m_idx1 < M:
                                 sqr_sum_out[m_offset + m_idx1] = reduced1_buf[0]
@@ -678,7 +686,7 @@ def test_tf32_hc_prenorm_gemm():
     B_torch = torch.randn(N, K, dtype=torch.float32, device="cuda")
 
     # Reference computation
-    D_ref = (A_torch.float() @ B_torch.T)  # (M, N) f32
+    D_ref = A_torch.float() @ B_torch.T  # (M, N) f32
     sqr_sum_ref = (A_torch.float() ** 2).sum(dim=1)  # (M,) f32
 
     # Convert to TVM tensors
@@ -735,10 +743,6 @@ def bench_tf32_hc_prenorm_gemm():
 
     A_torch = torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
     B_torch = torch.randn(N, K, dtype=torch.float32, device="cuda")
-
-    # Reference
-    D_ref = (A_torch.float() @ B_torch.T)
-    sqr_sum_ref = (A_torch.float() ** 2).sum(dim=1)
 
     # TVM tensors
     A_tvm = bf16_to_tvm(A_torch, DEV)

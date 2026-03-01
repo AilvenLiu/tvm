@@ -16,15 +16,13 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
 from tvm.tirx.megakernel.utils.base import Tile
+from tvm.tirx.megakernel.utils.config import F16_BYTES, KernelConfig
 from tvm.tirx.megakernel.utils.utils import ceildiv, find_power_of_two, rsqrt
-from tvm.tirx.megakernel.utils.config import KernelConfig, F16_BYTES
 
 
 # TODO: pipeline
 class SplitKReduceRMSnormRopeAppendKTile(Tile):
-
     # weight_tvm: [num_heads]
     # qk_tvm: [batch_size, num_heads, head_dim]
 

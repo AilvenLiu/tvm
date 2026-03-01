@@ -17,30 +17,25 @@
 
 """Implementation of copy operator schedules."""
 
-from typing import Optional
-import operator
-from functools import reduce
-
-from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
-    predicate,
     fail,
+    predicate,
+    register_dispatch,
 )
 
 from .common import (
+    InstructionGenerator,
+    check_workspace_buffer,
     get_ewise_dim_map,
     init_analyzer,
-    max_psum_banks,
-    check_workspace_buffer,
     largest_psum_per_bank,
-    target_trn,
+    max_psum_banks,
     nki_dim,
-    InstructionGenerator,
+    target_trn,
 )
 
 
@@ -48,7 +43,7 @@ def transpose_schedule(
     op: OpCall,
     inst_gen: InstructionGenerator,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     dst_region, src_region = op.args
     assert src_region.buffer.scope() != "trn.psum", "Transpose on psum buffer is not supported"
 
@@ -98,9 +93,9 @@ def transpose_schedule(
     b_extent = inst_gen.fill_in_block_dim(dst_region, b_var)
 
     if "identity" not in op.workspace:
-        assert (
-            sctx.alloc_only
-        ), "Identity tensor must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
+        assert sctx.alloc_only, (
+            "Identity tensor must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."  # noqa: E501
+        )
         identity_tensor = Tx.buffer(
             (p_size, rhs_f_size),
             src_region.buffer.dtype,
@@ -149,8 +144,8 @@ def transpose_schedule(
                                 if src_guard and dst_guard:
                                     Tx.evaluate(
                                         Tx.nki.matmul(
-                                            dst_buffer[*dst_indices],
-                                            src_buffer[*src_indices],
+                                            dst_buffer[tuple(dst_indices)],
+                                            src_buffer[tuple(src_indices)],
                                             identity_tensor[p_loop, rhs_f_loop],
                                         )
                                     )
@@ -158,9 +153,9 @@ def transpose_schedule(
         return transpose_psum_output
 
     if "acc_psum" not in op.workspace:
-        assert (
-            sctx.alloc_only
-        ), "Accumulation psum buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
+        assert sctx.alloc_only, (
+            "Accumulation psum buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."  # noqa: E501
+        )
         acc_psum = Tx.buffer(
             (max_psum_banks, p_size, largest_psum_per_bank),
             "float32",
@@ -183,26 +178,26 @@ def transpose_schedule(
                 with Tx.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                         for lhs_f_loop in Tx.serial(0, lhs_f_size, annotations={nki_dim: "lhs_F"}):
-                            for rhs_f_loop in Tx.serial(0, rhs_f_size, annotations={nki_dim: "rhs_F"}):
-                                inst_gen.set_bind_map(src_region, {b_var: b_loop, lhs_f: lhs_f_loop, lhs_p: p_loop, extend_b: extend_b_loop})
+                            for rhs_f_loop in Tx.serial(0, rhs_f_size, annotations={nki_dim: "rhs_F"}):  # noqa: E501
+                                inst_gen.set_bind_map(src_region, {b_var: b_loop, lhs_f: lhs_f_loop, lhs_p: p_loop, extend_b: extend_b_loop})  # noqa: E501
                                 src_indices = Tx.meta_var(inst_gen.generate_indices(src_region))
                                 src_guard = Tx.meta_var(inst_gen.make_guard(src_region))
                                 if src_guard:
-                                    Tx.evaluate(Tx.nki.matmul(acc_psum[b_loop % max_psum_slots, lhs_f_loop,extend_b_loop * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                                    Tx.evaluate(Tx.nki.matmul(acc_psum[b_loop % max_psum_slots, lhs_f_loop,extend_b_loop * rhs_f_size + rhs_f_loop], src_buffer[tuple(src_indices)], identity_tensor[p_loop, rhs_f_loop]))  # noqa: E501
             with Tx.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in Tx.serial(0, p_size, annotations={nki_dim: "P"}):
                     for f_loop in Tx.serial(0, rhs_f_size * extend_len, annotations={nki_dim: "F"}):
-                        inst_gen.set_bind_map(dst_region, {b_var: b_loop, lhs_f: p_loop, dst_f: f_loop % rhs_f_size, extend_b: f_loop // rhs_f_size})
+                        inst_gen.set_bind_map(dst_region, {b_var: b_loop, lhs_f: p_loop, dst_f: f_loop % rhs_f_size, extend_b: f_loop // rhs_f_size})  # noqa: E501
                         dst_guard = Tx.meta_var(inst_gen.make_guard(dst_region))
                         dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_region))
                         if dst_guard:
-                            Tx.evaluate(Tx.nki.tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop % max_psum_slots, p_loop, f_loop]))
+                            Tx.evaluate(Tx.nki.tensor_copy(dst_buffer[tuple(dst_indices)], acc_psum[b_loop % max_psum_slots, p_loop, f_loop]))  # noqa: E501
     # fmt: on
     return transpose_sbuf_output
 
 
 @target_trn
-def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if sctx.exec_scope.name != "kernel":
@@ -269,21 +264,20 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         inst_size_limit = op.config.get("max_inst_size", 512)
         inst.bound_inst_size(inst_size_limit, analyzer)
     else:
-        assert (
-            "max_inst_size" not in op.config
-        ), "max_inst_size is not supported for load/store"
+        assert "max_inst_size" not in op.config, "max_inst_size is not supported for load/store"
 
     p_var = Tx.Var("P", "int32")
     f_var = Tx.Var("F", "int32")
     b_var = Tx.Var("B", "int32")
     if src_to_dst:
-        from_region, to_region = src_region, dst_region
+        from_region, _to_region = src_region, dst_region
     else:
-        from_region, to_region = dst_region, src_region
+        from_region, _to_region = dst_region, src_region
     p_size = from_region.buffer.layout.size("P")
     inst_gen.bind_inst_iter(from_region, p_var, p_size, 1, is_free_dim=False)
     inst_gen.bind_inst_iter(from_region, f_var, inst.size, inst.stride, is_free_dim=True)
     b_extent = inst_gen.fill_in_block_dim(from_region, b_var)
+
     # fmt: off
     @Tx.prim_func(tirx=True)
     def impl():
@@ -296,7 +290,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                         if inst_gen.make_guard(dst_region):
                             src_indices = Tx.meta_var(inst_gen.generate_indices(src_region))
                             dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_region))
-                            func(dst[*dst_indices], src[*src_indices])
+                            func(dst[tuple(dst_indices)], src[tuple(src_indices)])
     # fmt: on
     return impl
 

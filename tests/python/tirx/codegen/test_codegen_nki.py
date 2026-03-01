@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import math
 
-import numpy as np
-import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import ir as I
 from tvm.script import tirx as Tx
+
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
@@ -89,7 +86,7 @@ def func_kernel(A_ptr, B_ptr: nt.mutable_tensor, ):
   j_2 = nl.arange(512)
   nl.store(B_ptr_buffer[((i_2[:, None, ] * 512) + j_2[None, :, ])], B_sbuf_ptr[i_2[:, None, ], j_2[None, :, ]])
   return B_ptr
-  """
+  """  # noqa: E501
     assert compare_strings_ignore_whitespace(src, expected)
 
 
@@ -145,7 +142,7 @@ def func_kernel(A_ptr, B_ptr: nt.mutable_tensor, ):
     i_2 = nl.arange(128)
     j_2 = nl.arange(512)
     nl.store(B_ptr_buffer[(((i_2[:, None, ] * 2048) + (k * 512)) + j_2[None, :, ])], B_sbuf_ptr[i_2[:, None, ], j_2[None, :, ]])
-  return B_ptr"""
+  return B_ptr"""  # noqa: E501
     assert compare_strings_ignore_whitespace(src, expected)
 
 
@@ -331,7 +328,7 @@ def func_kernel(lhsT_ptr, rhs_ptr, result_ptr: nt.mutable_tensor, ):
         i_6 = nl.arange(128)
         j_6 = nl.arange(512)
         nl.store(result_ptr_buffer[(((((m_1 * 4194304) + (bm_1 * 262144)) + (i_6[:, None, ] * 2048)) + (n * 512)) + j_6[None, :, ])], result_packed_ptr[i_6[:, None, ], j_6[None, :, ]])
-  return result_ptr"""
+  return result_ptr"""  # noqa: E501
     assert compare_strings_ignore_whitespace(src, expected)
 
 

@@ -22,7 +22,6 @@ from .binary import binary_cuda_impl
 from .common import target_cuda
 from .unary import unary_cuda_impl
 
-
 for op_name_, op_type_ in {
     "zero": MapOpType.ZERO,
     "fill": MapOpType.FILL,

@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict, List
 
 from tvm.ir import Range
 from tvm.target import Target
@@ -67,9 +66,9 @@ class PrivateAllocCollector(StmtVisitor):
 class PrivateAllocMutator(StmtMutator):
     def __init__(
         self,
-        alloc_buffers: List[Buffer],
-        init_stmts: List[Stmt],
-        added_workspace: Dict[OpCall, Dict[str, Buffer]],
+        alloc_buffers: list[Buffer],
+        init_stmts: list[Stmt],
+        added_workspace: dict[OpCall, dict[str, Buffer]],
     ):
         super().__init__()
         self.alloc_buffers = alloc_buffers
@@ -95,7 +94,9 @@ class PrivateAllocMutator(StmtMutator):
             return op
         new_workspace = dict(op.workspace)
         new_workspace.update(self.added_workspace[op])
-        op = OpCall(*op.args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch)
+        op = OpCall(
+            *op.args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch
+        )
         return op
 
 

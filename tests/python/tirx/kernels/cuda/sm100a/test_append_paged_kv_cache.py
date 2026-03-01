@@ -45,32 +45,30 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
     HEAD_DIM = head_dim
 
     # Paged kv-cache config
-    KV_LAYOUT = "HND"
 
     # HW config
     SM_COUNT = 148
-    SMEM_SIZE = 232448
 
     # Other
     F16_BYTE = 2
-    F32_BYTE = 4
 
     # Kernel config
     VEC_SIZE = max(16 // F16_BYTE, HEAD_DIM // 32)
     THREAD_NUM = 256
     BDX = HEAD_DIM // VEC_SIZE
     BDY = THREAD_NUM // BDX
+
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def append_paged_kv_cache(cache_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, pos_map_ptr: Tx.handle):
+    def append_paged_kv_cache(cache_ptr: Tx.handle, k_ptr: Tx.handle, v_ptr: Tx.handle, pos_map_ptr: Tx.handle):  # noqa: E501
         batch_size = Tx.int32()
         max_page_num = Tx.int32()
         page_size = Tx.int32()
 
-        cache_global = Tx.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global")
-        k_global = Tx.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
-        v_global = Tx.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
-        pos_map_global = Tx.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", offset_factor=1)
+        cache_global = Tx.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global")  # noqa: E501
+        k_global = Tx.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")  # noqa: E501
+        v_global = Tx.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")  # noqa: E501
+        pos_map_global = Tx.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", offset_factor=1)  # noqa: E501
 
         with Tx.kernel():
             tx, ty = Tx.thread_id([BDX, BDY], parent="cta")
@@ -80,7 +78,7 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
 
             with Tx.thread():
                 idx = Tx.alloc_local([1], "int32")
-                real_idx = Tx.alloc_local([1], "int32")
+                Tx.alloc_local([1], "int32")
                 batch_id = Tx.alloc_local([1], "int32")
                 token_id = Tx.alloc_local([1], "int32")
                 head_id = Tx.alloc_local([1], "int32")
@@ -96,10 +94,10 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
                     batch_id[0] = (idx[0] // (2 * NUM_HEADS * NUM_TOKENS))
                     pos[0] = pos_map_global[batch_id[0], token_id[0]]
                     if kv_id[0] == 0:
-                        Tx.copy(vec[:], k_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])
+                        Tx.copy(vec[:], k_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])  # noqa: E501
                     else:
-                        Tx.copy(vec[:], v_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])
-                    Tx.copy(cache_global[pos[0] // page_size, kv_id[0], head_id[0], pos[0] % page_size, stx:stx + VEC_SIZE], vec[:])
+                        Tx.copy(vec[:], v_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])  # noqa: E501
+                    Tx.copy(cache_global[pos[0] // page_size, kv_id[0], head_id[0], pos[0] % page_size, stx:stx + VEC_SIZE], vec[:])  # noqa: E501
                     idx[0] += SM_COUNT * BDY
 
     return append_paged_kv_cache
@@ -154,7 +152,10 @@ def test(batch_size):
                 {"main": get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim)}
             )
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-            func = lambda: mod(cache_tvm, k_tvm, v_tvm, pos_map_tvm)
+
+            def func():
+                return mod(cache_tvm, k_tvm, v_tvm, pos_map_tvm)
+
             # func()
             ms = bench(func, warmup=0, repeat=30, proton_name="tir")
             print(f"TIR time: {ms:.3f} ms")

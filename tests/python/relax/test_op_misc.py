@@ -164,7 +164,16 @@ def test_call_tir_device():
     e0 = rx.Var("e0", R.Tensor([54, 96], "int64"))
     e1 = rx.Var("e1", R.Tensor([54], "int64"))
     v0 = rx.Var("v0", R.Tensor([54, 96], "float32"))
-    x1 = rx.op.call_tir_device(identity_tir, [v0], R.Tensor((54, 96), "float32"), (54, 96), [e0], [e1], in_deps=[lambda i, j: (i, j)], out_deps=[lambda i, j: i])
+    x1 = rx.op.call_tir_device(
+        identity_tir,
+        [v0],
+        R.Tensor((54, 96), "float32"),
+        (54, 96),
+        [e0],
+        [e1],
+        in_deps=[lambda i, j: (i, j)],
+        out_deps=[lambda i, j: i],
+    )
     assert x1.attrs.in_deps[0].is_equivalent_to(IndexMap.from_func(lambda i, j: (i, j)))
     assert x1.attrs.out_deps[0].is_equivalent_to(IndexMap.from_func(lambda i, j: i))
     assert x1.attrs.inplace_indices[0] == -1

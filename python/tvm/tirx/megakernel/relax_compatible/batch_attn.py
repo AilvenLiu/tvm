@@ -16,11 +16,10 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.utils import ceildiv
 from tvm.tirx.megakernel.kernels import BatchAttnTile
+from tvm.tirx.megakernel.utils.base import SmemManager
+from tvm.tirx.megakernel.utils.config import KernelConfig
+from tvm.tirx.megakernel.utils.utils import ceildiv
 
 
 class FuseBatchAttnTile(BatchAttnTile):

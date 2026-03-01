@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """CUDA Timer operations."""
+
 from tvm.tir.op import cuda_func_call
 
 from .registry import register_codegen
@@ -25,7 +26,6 @@ from .registry import register_codegen
 def codegen_timer_init_cuda(
     profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id
 ):
-
     func_name = "tvm_builtin_timer_init_cuda"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int num_groups, int group_id) {{
@@ -41,7 +41,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t*
     profiler_write_offset[0] = 1 + BLOCK_GROUP_IDX;
     profiler_tag[0] = (uint64_t)BLOCK_GROUP_IDX << 12;
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(
         func_name,
         profiler_buffer,
@@ -72,7 +72,7 @@ __forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_b
     }}
     __threadfence_block();
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(
         func_name,
         event_type,
@@ -104,7 +104,7 @@ __forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_b
         profiler_write_offset[0] += profiler_write_stride;
     }}
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(
         func_name,
         event_type,
@@ -131,7 +131,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t*
         profiler_write_offset[0] += profiler_write_stride;
     }}
 }}
-"""
+"""  # noqa: E501
     return cuda_func_call(
         func_name,
         profiler_buffer,

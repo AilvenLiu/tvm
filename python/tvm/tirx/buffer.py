@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Abstraction for array data structures."""
+
 import functools
 from numbers import Integral
 
@@ -100,7 +101,12 @@ class Buffer(Object, Scriptable):
         offset = convert(offset)
         extent = convert(extent)
         return _ffi_api.BufferAccessPtr(
-            self, access_mask, ptr_type, content_lanes, offset, extent  # type: ignore
+            self,
+            access_mask,
+            ptr_type,
+            content_lanes,
+            offset,
+            extent,  # type: ignore
         )
 
     def vload(self, begin, dtype=None, predicate=None):
@@ -124,7 +130,7 @@ class Buffer(Object, Scriptable):
         load : Expr
             The corresponding load expression.
         """
-        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
+        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin  # noqa: UP038
         dtype = dtype if dtype else self.dtype
         return _ffi_api.BufferVLoad(self, begin, dtype, predicate)  # type: ignore
 
@@ -149,7 +155,7 @@ class Buffer(Object, Scriptable):
         store : Stmt
             The corresponding store stmt.
         """
-        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
+        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin  # noqa: UP038
         return _ffi_api.BufferVStore(self, begin, value, predicate)  # type: ignore
 
     def scope(self):
@@ -266,11 +272,11 @@ class Buffer(Object, Scriptable):
         """Get the pointer to the buffer at the given indices (logical indices).
 
         Note that the bufferload inside requires LowerTIPp pass to apply the layout to get the physical indices.
-        """
-        assert len(indices) == len(
-            self.shape
-        ), f"The number of indices {indices} does not match the shape of the buffer {self.shape}"
-        return tvm.tirx.address_of(self[*indices])
+        """  # noqa: E501
+        assert len(indices) == len(self.shape), (
+            f"The number of indices {indices} does not match the shape of the buffer {self.shape}"
+        )
+        return tvm.tirx.address_of(self[tuple(indices)])
 
     def view(self, *args, **kwargs) -> "Buffer":
         """Creates a new view of the buffer. (used by parser)
@@ -283,7 +289,7 @@ class Buffer(Object, Scriptable):
         -------
         view : DeclBufferFrame
             The corresponding view buffer.
-        """
+        """  # noqa: E501
 
         def _infer_shape(shape):
             shape = list(shape)
@@ -303,7 +309,7 @@ class Buffer(Object, Scriptable):
                 )
             return shape
 
-        if len(args) == 1 and isinstance(args[0], (str, tvm.DataType)) and not kwargs:
+        if len(args) == 1 and isinstance(args[0], (str, tvm.DataType)) and not kwargs:  # noqa: UP038
             cast_dtype = tvm.DataType(args[0])
             cur_dtype = tvm.DataType(self.dtype)
             if cast_dtype.bits > cur_dtype.bits:
@@ -336,7 +342,7 @@ class Buffer(Object, Scriptable):
             )
         else:
             # --- Signature 1: view(*shape, **opts) ---
-            # Check if all positional args are integers/PrimExprs with dtype int32 or int64 (the shape)
+            # Check if all positional args are integers/PrimExprs with dtype int32 or int64 (the shape)  # noqa: E501
             shape = args
             assert all(
                 isinstance(arg, int)
@@ -346,9 +352,9 @@ class Buffer(Object, Scriptable):
             # Safely get optional keyword arguments
             layout = kwargs.get("layout", None)
             # Assert there are no other kwargs
-            assert set(kwargs.keys()).issubset(
-                {"layout"}
-            ), f"Unsupported kwargs for view: {set(kwargs.keys()) - {'layout'}}"
+            assert set(kwargs.keys()).issubset({"layout"}), (
+                f"Unsupported kwargs for view: {set(kwargs.keys()) - {'layout'}}"
+            )
 
             if layout is None:
                 shape = _infer_shape(shape)
@@ -500,7 +506,7 @@ class Buffer(Object, Scriptable):
         orig_strides = []
         for i in range(len(self.shape)):
             stride = functools.reduce(
-                lambda x, y: x * y, self.shape[i + 1 :], tvm.tir.const(1, "int32")
+                lambda x, y: x * y, self.shape[i + 1 :], tvm.tirx.const(1, "int32")
             )
             orig_strides.append(stride)
 
@@ -532,7 +538,7 @@ class Buffer(Object, Scriptable):
         )
         from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
 
-        if not isinstance(indices, (tuple, list)):
+        if not isinstance(indices, (tuple, list)):  # noqa: UP038
             indices = [indices]
         has_slice = any(isinstance(i, slice) for i in indices)
         has_step = any(
@@ -595,7 +601,7 @@ def decl_buffer(
     # pylint: disable=import-outside-toplevel
     from .expr import Var
 
-    shape = (shape,) if isinstance(shape, (PrimExpr, Integral)) else shape
+    shape = (shape,) if isinstance(shape, (PrimExpr, Integral)) else shape  # noqa: UP038
     dtype = "float32" if dtype is None else dtype
     strides = () if strides is None else strides
 

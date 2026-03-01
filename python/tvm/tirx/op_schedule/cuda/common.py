@@ -19,9 +19,9 @@
 
 import functools
 import operator
+from collections.abc import Callable
 from enum import Enum
 from functools import wraps
-from typing import Callable, List, Optional
 
 from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
@@ -50,16 +50,16 @@ def get_indices(nth, start, extent):
     return [r + s for r, s in zip(reversed(relative), start)]
 
 
-def target_cuda(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
+def target_cuda(fn: Callable[[OpCall, ScheduleContext], PrimFunc | None]):
     """Decorator that ensures the function is only executed for CUDA targets."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
         sctx = kwargs.get("sctx", None)
         if sctx is None:
-            assert len(args) == 2 and isinstance(
-                args[1], ScheduleContext
-            ), "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            assert len(args) == 2 and isinstance(args[1], ScheduleContext), (
+                "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            )
             sctx = args[1]
         if not sctx.is_cuda():
             return None
@@ -109,9 +109,9 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
     thread_selector : a macro or a prim_func
         The inner implementation wrapped by a thread selector in the given exec scope.
     """
-    assert not isinstance(
-        inner_impl, PrimFunc
-    ), "inner_impl should be a macro rather than a PrimFunc"
+    assert not isinstance(inner_impl, PrimFunc), (
+        "inner_impl should be a macro rather than a PrimFunc"
+    )
 
     exec_scope = sctx.exec_scope
     tx = sctx.launch_params["threadIdx.x"]
@@ -135,7 +135,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
 
             @Tx.inline()
             def impl():
-                with Tx.warp()[*warp_selector]:
+                with Tx.warp()[tuple(warp_selector)]:
                     with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                         inner_impl()
 
@@ -155,7 +155,7 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
 
             @Tx.inline()
             def impl():
-                with Tx.warpgroup()[*warpgroup_selector]:
+                with Tx.warpgroup()[tuple(warpgroup_selector)]:
                     with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
                         with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
                             inner_impl()
@@ -216,9 +216,9 @@ def validate_gemm_op(op_call: OpCall, sctx: ScheduleContext) -> bool:
     C_extent_ = [r.extent for r in C_region if r.extent != 1]
     A_extent_ = [r.extent for r in A_region if r.extent != 1]
     B_extent_ = [r.extent for r in B_region if r.extent != 1]
-    assert (
-        len(C_extent_) == len(A_extent_) == len(B_extent_) == 2
-    ), "Only 2D C, A, B are supported for gemm"
+    assert len(C_extent_) == len(A_extent_) == len(B_extent_) == 2, (
+        "Only 2D C, A, B are supported for gemm"
+    )
     if transA:
         A_extent_ = [A_extent_[1], A_extent_[0]]
     if transB:
@@ -274,9 +274,9 @@ def validate_copy_op(
 def get_vec_len(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
-    vec_candidates: List[int],
+    vec_candidates: list[int],
     thread_cnt=1,
-) -> Optional[int]:
+) -> int | None:
     """Get the vector length for the copy operation."""
 
     dst: Buffer = dst_buffer_region.buffer
@@ -290,7 +290,7 @@ def get_vec_len(
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
 
     # Thread and vectorization setup
-    elem_size = DataType(src.dtype).bits  # in bits
+    DataType(src.dtype).bits  # in bits
     n_elements = functools.reduce(operator.mul, src_extent, 1)
     if n_elements % thread_cnt != 0:
         return None
@@ -318,7 +318,7 @@ def copy_vec_load_impl(
     op_call: OpCall,
     sctx: ScheduleContext,
     inst_type: CopyInstType,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule copy operation between global and local/shared memory on CUDA across a CTA/thread.
     The implementation tries to vectorize the copy operation and parallelize over
     threads in a CTA/using a single thread.
@@ -379,12 +379,12 @@ def copy_vec_load_impl(
                             fused = Tx.meta_var((s * tx + tid_x) * vec_len + vec)
                             dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
                             src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
-                            dst[*dst_indices] = src[*src_indices]
+                            dst[tuple(dst_indices)] = src[tuple(src_indices)]
                     elif inst_type == CopyInstType.CP_ASYNC:
                         fused = Tx.meta_var((s * tx + tid_x) * vec_len)
                         dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
                         src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
-                        Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
+                        Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to(dst_indices), src.ptr_to(src_indices), cp_size))  # noqa: E501
             if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
                 Tx.tvm_storage_sync("shared")
         # fmt: on
@@ -398,12 +398,12 @@ def copy_vec_load_impl(
                         fused = Tx.meta_var(s * vec_len + vec)
                         dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
                         src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
-                        dst[*dst_indices] = src[*src_indices]
+                        dst[tuple(dst_indices)] = src[tuple(src_indices)]
                 elif inst_type == CopyInstType.CP_ASYNC:
                     fused = Tx.meta_var(s * vec_len)
                     dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
                     src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
-                    Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
+                    Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to(dst_indices), src.ptr_to(src_indices), cp_size))  # noqa: E501
         # fmt: on
     else:
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")

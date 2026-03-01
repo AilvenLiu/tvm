@@ -16,21 +16,20 @@
 # under the License.
 # pylint: disable=super-init-not-called
 """Definition of layout."""
+
 import functools
 import operator
 import re
+from collections.abc import Sequence
 from typing import (
-    Dict,
-    List,
     Optional,
-    Sequence,
-    Tuple,
     Union,
 )
 
-import tvm
 import tvm_ffi
-from tvm.runtime import Object, ShapeTuple
+
+import tvm
+from tvm.runtime import Object
 from tvm.tirx.expr import PrimExpr
 
 from . import _ffi_api
@@ -52,29 +51,31 @@ class TLayout(Object):
         """
         return _ffi_api.TLayoutVerifyWellFormed(self)  # pylint: disable=no-member
 
-    def size(self, axis_name: Optional[str] = None):
+    def size(self, axis_name: str | None = None):
         """Get the size of the layout.
 
         Parameters
         ----------
         axis_name : Optional[str]
             The name of the axis to get the size of. If not provided, the default input size will be returned.
-        """
+        """  # noqa: E501
         return _ffi_api.TLayoutGetSize(self, axis_name)  # pylint: disable=no-member
 
-    def span(self, axis_name: Optional[str] = None):
+    def span(self, axis_name: str | None = None):
         """Get the span of the layout.
 
         Parameters
         ----------
         axis_name : Optional[str]
             The name of the axis to get the span of. If not provided, the default span will be returned.
-        """
+        """  # noqa: E501
         return _ffi_api.TLayoutGetSpan(self, axis_name)  # pylint: disable=no-member
 
     # Note: no backward-compat alias; `cosize` is removed.
 
-    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> Dict[str, PrimExpr]:
+    def apply(
+        self, *coord: list[PrimExpr], shape: list[PrimExpr] | None = None
+    ) -> dict[str, PrimExpr]:
         """Apply the layout on the input coordinate and get the mapped output.
 
         Input cases:
@@ -108,8 +109,8 @@ class TLayout(Object):
     def tile(
         self,
         outer: "TileLayout",
-        outer_shape: List[PrimExpr],
-        inner_shape: List[PrimExpr],
+        outer_shape: list[PrimExpr],
+        inner_shape: list[PrimExpr],
     ) -> Union["TileLayout", "ComposeLayout"]:
         """Tile the current layout with an outer layout.
 
@@ -134,8 +135,8 @@ class TLayout(Object):
     def direct_sum(
         self,
         left: "TileLayout",
-        left_shape: List[PrimExpr],
-        right_shape: List[PrimExpr],
+        left_shape: list[PrimExpr],
+        right_shape: list[PrimExpr],
     ) -> Union["TileLayout", "ComposeLayout"]:
         """Direct-sum on the tiling domain (unscaled composition): A + B.
 
@@ -151,8 +152,8 @@ class TLayout(Object):
     def is_tile_inner(
         self,
         tile_layout: Union["TileLayout", "ComposeLayout"],
-        tiled_shape: List[PrimExpr],
-        inner_shape: List[PrimExpr],
+        tiled_shape: list[PrimExpr],
+        inner_shape: list[PrimExpr],
     ) -> Optional["TileLayout"]:
         """Check if a layout is the inner layout of a tiled layout.
 
@@ -177,8 +178,8 @@ class TLayout(Object):
     def is_tile_outer(
         self,
         tile_layout: Union["TileLayout", "ComposeLayout"],
-        tiled_shape: List[PrimExpr],
-        outer_shape: List[PrimExpr],
+        tiled_shape: list[PrimExpr],
+        outer_shape: list[PrimExpr],
     ) -> Optional["TLayout"]:
         """Check if a layout is the outer layout of a tiled layout.
 
@@ -203,8 +204,8 @@ class TLayout(Object):
     def is_direct_sum_right(
         self,
         sum_layout: Union["TileLayout", "ComposeLayout"],
-        interleaved_shape: List[PrimExpr],
-        right_shape: List[PrimExpr],
+        interleaved_shape: list[PrimExpr],
+        right_shape: list[PrimExpr],
     ) -> Optional["TileLayout"]:
         """Check if this layout is the right addend B in a direct-sum A + B.
 
@@ -217,8 +218,8 @@ class TLayout(Object):
     def is_direct_sum_left(
         self,
         sum_layout: Union["TileLayout", "ComposeLayout"],
-        interleaved_shape: List[PrimExpr],
-        left_shape: List[PrimExpr],
+        interleaved_shape: list[PrimExpr],
+        left_shape: list[PrimExpr],
     ) -> Optional["TLayout"]:
         """Check if this layout is the left addend A in a direct-sum A + B.
 
@@ -229,7 +230,7 @@ class TLayout(Object):
         )
 
     def slice(
-        self, shape: List[PrimExpr], region: List[Tuple[PrimExpr, PrimExpr]]
+        self, shape: list[PrimExpr], region: list[tuple[PrimExpr, PrimExpr]]
     ) -> Optional["TLayout"]:
         """Slice the layout with a given shape and region.
 
@@ -255,7 +256,7 @@ class TLayout(Object):
                 region_list.append(tvm.ir.Range(range_i[0], range_i[1]))
         return _ffi_api.TLayoutSlice(self, shape, region_list)  # pylint: disable=no-member
 
-    def tile_to(self, to_shape: List[PrimExpr], current_shape: List[PrimExpr]) -> "TLayout":
+    def tile_to(self, to_shape: list[PrimExpr], current_shape: list[PrimExpr]) -> "TLayout":
         """Tile the current layout to the given shape.
 
         Parameters
@@ -274,11 +275,11 @@ class TLayout(Object):
         )
 
     @staticmethod
-    def _get_default_strides(data: List[Union[int, PrimExpr]], stride: int = 1) -> Tuple:
-        assert isinstance(data, (list, tuple)), "data must be a tuple"
+    def _get_default_strides(data: list[int | PrimExpr], stride: int = 1) -> tuple:
+        assert isinstance(data, (list, tuple)), "data must be a tuple"  # noqa: UP038
         res = list()
         for t in reversed(data):
-            assert isinstance(t, (int, PrimExpr)), f"data must be int or PrimExpr, but got {t}"
+            assert isinstance(t, (int, PrimExpr)), f"data must be int or PrimExpr, but got {t}"  # noqa: UP038
             res.append(stride)
             stride *= t
         return list(reversed(res))
@@ -324,7 +325,7 @@ class TLayout(Object):
         -------
         TLayout
             The unpacked layout
-        """
+        """  # noqa: E501
         if isinstance(self, TileLayout):
             shard = [Iter(iter.extent, iter.stride * num, iter.axis) for iter in self.shard]
             shard.append(Iter(num, 1, Axis.get("m")))
@@ -354,7 +355,7 @@ class TLayout(Object):
         -------
         TLayout
             The packed layout
-        """
+        """  # noqa: E501
         if isinstance(self, TileLayout):
             inner_iter = self.shard[-1]
             assert (
@@ -367,9 +368,9 @@ class TLayout(Object):
             return TileLayout.from_iters(shard, self.replica, self.offset)
         elif isinstance(self, SwizzleLayout):
             assert num & (num - 1) == 0, "num must be a power of 2"
-            assert (
-                self.per_element >= num.bit_length() - 1
-            ), "per_element must be greater than or equal to num.bit_length() - 1"
+            assert self.per_element >= num.bit_length() - 1, (
+                "per_element must be greater than or equal to num.bit_length() - 1"
+            )
             return SwizzleLayout(
                 self.per_element - (num.bit_length() - 1),
                 self.swizzle_len,
@@ -387,7 +388,7 @@ class Axis(Object):
     """Layout axis wrapper."""
 
     # ---- forbid direct construction ----
-    def __init__(self, *args, **kwargs):  # noqa: D401
+    def __init__(self, *args, **kwargs):
         raise RuntimeError("Cannot create Axis directly; use Axis.get()")
 
     @staticmethod
@@ -409,11 +410,11 @@ class Axis(Object):
         """Check if the axis is a memory axis."""
         return _ffi_api.AxisIsMemoryAxis(self)  # pylint: disable=no-member
 
-    def get_scope(self) -> Optional[ExecScope]:
+    def get_scope(self) -> ExecScope | None:
         """Get the scope of the axis."""
         return _ffi_api.AxisGetScope(self)  # pylint: disable=no-member
 
-    def get_subscope(self) -> Optional[ExecScope]:
+    def get_subscope(self) -> ExecScope | None:
         """Get the subscope of the axis."""
         return _ffi_api.AxisGetSubscope(self)  # pylint: disable=no-member
 
@@ -428,7 +429,7 @@ class Axis(Object):
 # 2)  Register axis singletons
 # ------------------------------------------------------------------
 # Explicit assignments so both runtime and static analysers (Pyright) can
-# resolve `Axis.laneid` and `from tvm.tir.layout import laneid`.
+# resolve `Axis.laneid` and `from tvm.tirx.layout import laneid`.
 
 # Thread axes
 Axis.pid = pid = Axis._register_axis("pid")
@@ -453,11 +454,25 @@ Axis.TCol = TCol = Axis._register_axis("TCol")
 Axis.TLane = TLane = Axis._register_axis("TLane")
 
 Axis.reg_dict = {
-    "pid": pid, "bx": bx, "by": by, "bz": bz,
-    "cbx": cbx, "cby": cby, "cbz": cbz, "tx": tx,
-    "warpid": warpid, "laneid": laneid, "wgid": wgid,
-    "tid_in_wg": tid_in_wg, "wid_in_wg": wid_in_wg,
-    "m": m, "P": P, "F": F, "Bank": Bank, "TCol": TCol, "TLane": TLane,
+    "pid": pid,
+    "bx": bx,
+    "by": by,
+    "bz": bz,
+    "cbx": cbx,
+    "cby": cby,
+    "cbz": cbz,
+    "tx": tx,
+    "warpid": warpid,
+    "laneid": laneid,
+    "wgid": wgid,
+    "tid_in_wg": tid_in_wg,
+    "wid_in_wg": wid_in_wg,
+    "m": m,
+    "P": P,
+    "F": F,
+    "Bank": Bank,
+    "TCol": TCol,
+    "TLane": TLane,
 }
 
 try:
@@ -465,7 +480,7 @@ try:
 except NameError:  # pragma: no cover
     __all__ = []  # type: ignore[var-annotated]
 __all__ += list(Axis.reg_dict)
-__all__ += ["S", "R"]
+__all__ += ["R", "S"]
 
 
 # ------------------------------------------------------------------
@@ -499,8 +514,8 @@ class _OffsetExpr:
     provided (without axis), it is treated as `Axis.m` by convention.
     """
 
-    def __init__(self, terms: Optional[Dict[Axis, PrimExpr]] = None):
-        self.terms: Dict[Axis, PrimExpr] = dict(terms or {})
+    def __init__(self, terms: dict[Axis, PrimExpr] | None = None):
+        self.terms: dict[Axis, PrimExpr] = dict(terms or {})
 
     def _add_term(self, axis: Axis, value: PrimExpr):
         if axis in self.terms:
@@ -524,7 +539,7 @@ class _OffsetExpr:
         return self.__add__(other)
 
 
-_OffsetExprLike = Union[_OffsetExpr, _OnAxis, PrimExpr, int]
+_OffsetExprLike = _OffsetExpr | _OnAxis | PrimExpr | int
 
 
 # ------------------------------------------------------------------
@@ -537,7 +552,7 @@ class _LayoutSpec:
     combined with ``+``.  Pass the result directly to :class:`TileLayout`.
     """
 
-    __slots__ = ("shard", "replica", "offset")
+    __slots__ = ("offset", "replica", "shard")
 
     def __init__(self, shard=None, replica=None, offset=None):
         self.shard = shard  # (shape_tuple, stride_tuple) or (shape_tuple, None)
@@ -551,17 +566,13 @@ class _LayoutSpec:
                 replica=other.replica if other.replica else self.replica,
                 offset=self.offset or other.offset,
             )
-        if isinstance(other, (_OnAxis, _OffsetExpr, int)):
-            return _LayoutSpec(
-                shard=self.shard, replica=self.replica, offset=other
-            )
+        if isinstance(other, (_OnAxis, _OffsetExpr, int)):  # noqa: UP038
+            return _LayoutSpec(shard=self.shard, replica=self.replica, offset=other)
         return NotImplemented
 
     def __radd__(self, other):
-        if isinstance(other, (_OnAxis, _OffsetExpr, int)):
-            return _LayoutSpec(
-                shard=self.shard, replica=self.replica, offset=other
-            )
+        if isinstance(other, (_OnAxis, _OffsetExpr, int)):  # noqa: UP038
+            return _LayoutSpec(shard=self.shard, replica=self.replica, offset=other)
         return NotImplemented
 
 
@@ -589,7 +600,7 @@ class _SpecBuilder:
     def __getitem__(self, key):
         if isinstance(key, slice):
             pair = (self._to_tuple(key.start), self._to_tuple(key.stop))
-        elif isinstance(key, (tuple, list)):
+        elif isinstance(key, (tuple, list)):  # noqa: UP038
             pair = (tuple(key), None)  # extents only
         else:
             pair = ((key,), None)  # single extent
@@ -620,11 +631,14 @@ class Iter(Object):
     stride: PrimExpr
     axis: Axis
 
-    def __init__(self, extent: PrimExpr, stride: PrimExpr, axis: Union[Axis, str]):
+    def __init__(self, extent: PrimExpr, stride: PrimExpr, axis: Axis | str):
         if isinstance(axis, str):
             axis = Axis.get(axis)
         self.__init_handle_by_constructor__(
-            _ffi_api.Iter, extent, stride, axis  # pylint: disable=no-member
+            _ffi_api.Iter,
+            extent,
+            stride,
+            axis,  # pylint: disable=no-member
         )
 
 
@@ -648,14 +662,13 @@ def _spec_to_iters(pair) -> list:
     return result
 
 
-
 @tvm_ffi.register_object("tir.TileLayout")
 class TileLayout(TLayout):
     """A memory layout that tiles data across devices."""
 
-    shard: List[Iter]
-    replicate: List[Iter]
-    exclude: List[Tuple[Axis, PrimExpr]]
+    shard: list[Iter]
+    replicate: list[Iter]
+    exclude: list[tuple[Axis, PrimExpr]]
 
     def __init__(self, spec: "_LayoutSpec"):
         shard_iters = _spec_to_iters(spec.shard)
@@ -675,7 +688,7 @@ class TileLayout(TLayout):
     def from_iters(
         shard: "Sequence[Iter]" = (),
         replica: "Sequence[Iter]" = (),
-        offset: Optional[Dict[Union[Axis, str], PrimExpr]] = None,
+        offset: dict[Axis | str, PrimExpr] | None = None,
     ) -> "TileLayout":
         """Construct a TileLayout from pre-built Iter objects."""
         if offset:
@@ -686,7 +699,7 @@ class TileLayout(TLayout):
         """Check if the layout is trivial."""
         return _ffi_api.TileLayoutIsTrivial(self)  # pylint: disable=no-member
 
-    def group(self, shape: List[PrimExpr]) -> Tuple["TLayout", List[int]]:
+    def group(self, shape: list[PrimExpr]) -> tuple["TLayout", list[int]]:
         """Group the current layout by the given shape.
 
         Parameters
@@ -701,40 +714,40 @@ class TileLayout(TLayout):
         """
         return _ffi_api.TileLayoutGroup(self, shape)  # pylint: disable=no-member
 
-    def get_scope(self) -> Optional[Tuple[ExecScope, ExecScope]]:
+    def get_scope(self) -> tuple[ExecScope, ExecScope] | None:
         """Get the scope pair of the layout."""
         return _ffi_api.TileLayoutGetScope(self)  # pylint: disable=no-member
 
     @classmethod
     def trainium(
-        cls, annotation: str, shape: Tuple[PrimExpr], is_psum: bool = False
+        cls, annotation: str, shape: tuple[PrimExpr], is_psum: bool = False
     ) -> "TileLayout":
         """Create a TileLayout from an annotation string and a shape."""
         analyzer = tvm.arith.Analyzer()
-        assert re.fullmatch(
-            r"[PF]*", annotation
-        ), f"annotation {annotation} must be a string of 'P' and 'F'"
-        assert len(annotation) == len(
-            shape
-        ), f"annotation {annotation} and shape {shape} must have the same length"
+        assert re.fullmatch(r"[PF]*", annotation), (
+            f"annotation {annotation} must be a string of 'P' and 'F'"
+        )
+        assert len(annotation) == len(shape), (
+            f"annotation {annotation} and shape {shape} must have the same length"
+        )
         num_p_dim = annotation.count("P")
         if num_p_dim == 1:
             p_idx = annotation.index("P")
             p_dim = shape[p_idx]
-            assert analyzer.can_prove(
-                p_dim <= 128 or p_dim % 128 == 0
-            ), f"There is only 1 P in the annotation. Partition size {p_dim} must be less than or equal to 128 or a multiple of 128"
+            assert analyzer.can_prove(p_dim <= 128 or p_dim % 128 == 0), (
+                f"There is only 1 P in the annotation. Partition size {p_dim} must be less than or equal to 128 or a multiple of 128"  # noqa: E501
+            )
             if analyzer.can_prove(p_dim > 128):
-                # split out the P dimension and put the higher part on the free dimension with largest stride
+                # split out the P dimension and put the higher part on the free dimension with largest stride  # noqa: E501
                 annotation = "F" + annotation
-                shape = [p_dim // 128] + shape[:p_idx] + [128] + shape[p_idx + 1 :]
+                shape = (p_dim // 128, *shape[:p_idx], 128, *shape[p_idx + 1 :])
         elif num_p_dim > 1:
             p_dim_prod = functools.reduce(
                 operator.mul, [s for s, c in zip(shape, annotation) if c == "P"]
             )
-            assert analyzer.can_prove(
-                p_dim_prod <= 128
-            ), f"There are {num_p_dim} Ps in the annotation. Partition size {p_dim_prod} must be less than or equal to 128"
+            assert analyzer.can_prove(p_dim_prod <= 128), (
+                f"There are {num_p_dim} Ps in the annotation. Partition size {p_dim_prod} must be less than or equal to 128"  # noqa: E501
+            )
 
         f_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "F"]
         p_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "P"]
@@ -756,7 +769,7 @@ class TileLayout(TLayout):
             # put higher part of P to where it belongs
             higher_P = result[0]
             result = result[1:]
-            result = result[:p_idx] + [higher_P] + result[p_idx:]
+            result = [*result[:p_idx], higher_P, *result[p_idx:]]
 
         res = TileLayout.from_iters(result, [], dict())  # pylint: disable=no-member
         if is_psum:
@@ -790,11 +803,11 @@ class TileLayout(TLayout):
                 shard.append(i)
         return TileLayout.from_iters(shard, [], dict())  # pylint: disable=no-member
 
-    def permute_dims(self, perm: List[int]) -> "TileLayout":
+    def permute_dims(self, perm: list[int]) -> "TileLayout":
         """Permute the dimensions of the layout."""
-        assert len(perm) == len(
-            self.shard
-        ), "perm must have the same length as the number of dimensions in the layout"
+        assert len(perm) == len(self.shard), (
+            "perm must have the same length as the number of dimensions in the layout"
+        )
         new_shard = []
         for i in perm:
             new_shard.append(self.shard[i])

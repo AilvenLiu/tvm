@@ -17,12 +17,10 @@
 
 """Implementation of mapping schedules."""
 
-
 from ..common import MapOpType, register_unary_binary_schedule
 from .binary import binary_trn
-from .unary import unary_trn, unary_with_bias_scale_trn
 from .common import target_trn
-
+from .unary import unary_trn, unary_with_bias_scale_trn
 
 for op_name_, op_type_ in {
     "reciprocal": MapOpType.RECIPROCAL,

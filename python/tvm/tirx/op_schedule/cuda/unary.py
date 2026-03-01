@@ -19,14 +19,12 @@
 
 import functools
 import operator
-from typing import Optional, Union
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
 from tvm.tirx.op_schedule import ScheduleContext, fail
-from tvm.tirx.operator.op import UnaryOp, UnaryOpWithBiasScale
 
 from ..common import MapOpType
 from .common import get_indices
@@ -45,7 +43,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """
     Schedule unary map operation on CUDA in shared memory.
     The destination and source regions must be of the same shape.
@@ -102,7 +100,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
                 if fused_idx < num_elements:
                     idx_dst = Tx.meta_var(get_indices(fused_idx, dst_start, dst_extent))
                     idx_src = Tx.meta_var(get_indices(fused_idx, src_start, src_extent))
-                    dst[*idx_dst] = Tx.Cast(dtype, op_func(src[*idx_src]))
+                    dst[tuple(idx_dst)] = Tx.Cast(dtype, op_func(src[tuple(idx_src)]))
         Tx.tvm_storage_sync("shared")
 
     return impl
@@ -112,11 +110,11 @@ def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule unary map operation on CUDA in shared memory with bias and scale."""
     op = OpCall.downcast(op)
-    _bias: Optional[Union[BufferRegion, FloatImm]] = op.bias
-    _scale: Optional[FloatImm] = op.scale
+    _bias: BufferRegion | FloatImm | None = op.bias
+    _scale: FloatImm | None = op.scale
 
     if _bias is not None or _scale is not None:
         fail("bias/scale not supported for shared-memory unary map")
@@ -127,7 +125,7 @@ def unary_map_cuda_warp_logical_view_nd_impl(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """
     Schedule unary map operation on CUDA on warp-level logical tensor.
     The destination and source regions must be of the same layout
@@ -212,11 +210,11 @@ def unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Schedule unary map operation on CUDA on warp-level logical tensor with bias and scale."""
     op = OpCall.downcast(op)
-    _bias: Optional[Union[BufferRegion, FloatImm]] = op.bias
-    _scale: Optional[FloatImm] = op.scale
+    _bias: BufferRegion | FloatImm | None = op.bias
+    _scale: FloatImm | None = op.scale
 
     if _bias is not None or _scale is not None:
         fail("bias/scale not supported for local tensor unary map")
@@ -227,7 +225,7 @@ def unary_cuda_impl(
     op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+) -> PrimFunc | None:
     """Dispatch to shared memory scheduler or logical tensor of local memory scheduler
     based on the storage scope of buffers.
     """

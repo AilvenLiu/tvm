@@ -15,6 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .private_buffer_alloc import PrivateBufferAlloc
-from .naive_allocator import NaiveAllocator
 from .legalize_event_tensor import EventTensorLegalizer
+from .naive_allocator import NaiveAllocator
+from .private_buffer_alloc import PrivateBufferAlloc

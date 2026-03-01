@@ -17,27 +17,28 @@
 
 """Implementation of copy operator schedules."""
 
-from typing import Optional
-import operator
 import functools
+import operator
+
 from tvm.arith.analyzer import Analyzer
+from tvm.ir import assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
-from tvm.ir import assert_structural_equal
+from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import (
     ScheduleContext,
-    register_dispatch,
-    predicate,
     fail,
+    predicate,
+    register_dispatch,
 )
-from tvm.tir.stmt import OpCall
+
 from .common import (
-    normalize_and_group,
     InstructionGenerator,
-    init_analyzer,
     check_workspace_buffer,
-    max_psum_banks,
+    init_analyzer,
     largest_psum_per_bank,
+    max_psum_banks,
+    normalize_and_group,
     target_trn,
 )
 
@@ -70,9 +71,9 @@ def get_pf_dim_from_buffer_region(
     elif operator_kind == OperatorKind.B:
         p_dim, f_dim = non_unit_dims[0], non_unit_dims[1]
     else:
-        assert (
-            not transposed
-        ), "Transposed C is implemented by swapping lhs and rhs. No need to specify by user."
+        assert not transposed, (
+            "Transposed C is implemented by swapping lhs and rhs. No need to specify by user."
+        )
         # For C, determine dimensions based on layout
         has_partition = any(
             layout.shard[i].axis.name == "P"
@@ -96,7 +97,7 @@ def get_pf_dim_from_buffer_region(
     ]
 
     assert functools.reduce(operator.mul, p_exts, 1) == layout.size("P"), (
-        f"Accumulation dimension and output non-streaming dimension must contain whole P dimension. "
+        f"Accumulation dimension and output non-streaming dimension must contain whole P dimension. "  # noqa: E501
         f"However, the {p_dim} dimension of {buffer_region} does not."
     )
 
@@ -104,13 +105,15 @@ def get_pf_dim_from_buffer_region(
     assert all(
         layout.shard[i].axis.name in ["F", "Bank"] or layout.shard[i].extent == 1
         for i in range(seps[f_dim], seps[f_dim + 1])
-    ), f"Spatial dimension must not contain P. However, the {f_dim} dimension of {buffer_region} does."
+    ), (
+        f"Spatial dimension must not contain P. However, the {f_dim} dimension of {buffer_region} does."  # noqa: E501
+    )
 
     return p_dim, f_dim
 
 
 @target_trn
-def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def matmul_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Schedule GEMM operation on Trainium."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
@@ -128,7 +131,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         beta,
     ) = op.args
     analyzer = init_analyzer(sctx)
-    A, B, C, D = (
+    A, B, C, _D = (
         A_buffer_region.buffer,
         B_buffer_region.buffer,
         C_buffer_region.buffer,
@@ -136,9 +139,9 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     )
 
     # Validate alpha, beta
-    assert analyzer.can_prove_equal(alpha, 1) and analyzer.can_prove_equal(
-        beta, 0
-    ), "Only alpha=1 and beta=0 are supported"
+    assert analyzer.can_prove_equal(alpha, 1) and analyzer.can_prove_equal(beta, 0), (
+        "Only alpha=1 and beta=0 are supported"
+    )
 
     # D and C must be the same buffer region
     assert_structural_equal(D_buffer_region, C_buffer_region)
@@ -179,15 +182,21 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Validate dimension compatibility
     assert analyzer.can_prove(
         A_buffer_region.region[lhs_p_dim].extent == B_buffer_region.region[rhs_p_dim].extent
-    ), f"Reduction dimension must match, but the {lhs_p_dim} dimension of {A_buffer_region} != the {rhs_p_dim} dimension of {B_buffer_region}"
+    ), (
+        f"Reduction dimension must match, but the {lhs_p_dim} dimension of {A_buffer_region} != the {rhs_p_dim} dimension of {B_buffer_region}"  # noqa: E501
+    )
 
     assert analyzer.can_prove(
         A_buffer_region.region[lhs_f_dim].extent == C_buffer_region.region[acc_p_dim].extent
-    ), f"Spatial dimension must match, but the {lhs_f_dim} dimension of {A_buffer_region} != the {acc_p_dim} dimension of {C_buffer_region}"
+    ), (
+        f"Spatial dimension must match, but the {lhs_f_dim} dimension of {A_buffer_region} != the {acc_p_dim} dimension of {C_buffer_region}"  # noqa: E501
+    )
 
     assert analyzer.can_prove(
         B_buffer_region.region[rhs_f_dim].extent == C_buffer_region.region[acc_f_dim].extent
-    ), f"Spatial dimension must match, but the {rhs_f_dim} dimension of {B_buffer_region} != the {acc_f_dim} dimension of {C_buffer_region}"
+    ), (
+        f"Spatial dimension must match, but the {rhs_f_dim} dimension of {B_buffer_region} != the {acc_f_dim} dimension of {C_buffer_region}"  # noqa: E501
+    )
 
     inst_gen = InstructionGenerator([A_buffer_region, B_buffer_region, C_buffer_region], analyzer)
     inst_gen.link_buffer_regions(A_buffer_region, B_buffer_region, {lhs_p_dim: rhs_p_dim})
@@ -212,32 +221,32 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     lhs_b_extent = inst_gen.fill_in_block_dim(A_buffer_region, lhs_b, [lhs_f_dim])
     rhs_b_extent = inst_gen.fill_in_block_dim(B_buffer_region, rhs_b, [rhs_f_dim])
 
-    # FIXME: we need to lower the guard to things like matmul(lhs[...][lhs_guard], rhs[...][rhs_guard], mask=p_guard)
+    # FIXME: we need to lower the guard to things like matmul(lhs[...][lhs_guard], rhs[...][rhs_guard], mask=p_guard)  # noqa: E501
     # so we need to separate the guard for lhs_f, rhs_f and p
     # fmt: off
     @Tx.inline
-    def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc, C_as_output, max_psum_slots):
+    def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc, C_as_output, max_psum_slots):  # noqa: E501
         with Tx.attr(0, "tensorized_nki_instruction", 1):
             for p_loop in Tx.serial(0, p_size, annotations={"nki_dim": "P"}):
                 for lhs_f_loop in Tx.serial(0, lhs_f_size, annotations={"nki_dim": "lhs_F"}):
-                    for rhs_f_loop in Tx.serial(0, inst_repr.size, annotations={"nki_dim": "rhs_F"}):
+                    for rhs_f_loop in Tx.serial(0, inst_repr.size, annotations={"nki_dim": "rhs_F"}):  # noqa: E501
                         b_idx = Tx.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
-                        inst_gen.set_bind_map(A_buffer_region, {lhs_b: lhs_b_loop, lhs_f: lhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})
-                        inst_gen.set_bind_map(B_buffer_region, {rhs_b: rhs_b_loop, rhs_f: rhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})
-                        inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})
+                        inst_gen.set_bind_map(A_buffer_region, {lhs_b: lhs_b_loop, lhs_f: lhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})  # noqa: E501
+                        inst_gen.set_bind_map(B_buffer_region, {rhs_b: rhs_b_loop, rhs_f: rhs_f_loop, p: p_loop, reduction_b: reduction_b_loop})  # noqa: E501
+                        inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})  # noqa: E501
                         lhs_indices = Tx.meta_var(inst_gen.generate_indices(A_buffer_region))
                         rhs_indices = Tx.meta_var(inst_gen.generate_indices(B_buffer_region))
                         C_indices = Tx.meta_var(inst_gen.generate_indices(C_buffer_region))
-                        if inst_gen.make_guard(A_buffer_region) and inst_gen.make_guard(B_buffer_region):
+                        if inst_gen.make_guard(A_buffer_region) and inst_gen.make_guard(B_buffer_region):  # noqa: E501
                             if C_as_output:
-                                Tx.evaluate(Tx.nki.matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))
+                                Tx.evaluate(Tx.nki.matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))  # noqa: E501
                             else:
-                                Tx.evaluate(Tx.nki.matmul(acc[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop], A[lhs_indices], B[rhs_indices]))
+                                Tx.evaluate(Tx.nki.matmul(acc[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop], A[lhs_indices], B[rhs_indices]))  # noqa: E501
 
     if C.scope() == "trn.psum":
         @Tx.prim_func(tirx=True)
         def impl_C_psum():
-            for lhs_b_loop, rhs_b_loop, reduction_b_loop in Tx.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent):
+            for lhs_b_loop, rhs_b_loop, reduction_b_loop in Tx.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent):  # noqa: E501
                 matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, C, True, None)
         return impl_C_psum
 
@@ -249,7 +258,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
     acc_psum_shape = (max_psum_banks, p_size, largest_psum_per_bank)
     if "acc_psum" not in op.workspace:
-        assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."
+        assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirx.transform.PrivateBufferAlloc first."  # noqa: E501
         acc_psum = Tx.buffer(
                 acc_psum_shape,
                 "float32",
@@ -268,15 +277,15 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     def impl_C_sbuf():
         for lhs_b_loop, rhs_b_loop in Tx.grid(lhs_b_extent, rhs_b_extent):
             for reduction_b_loop in Tx.serial(0, reduction_b_extent):
-                matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc_psum, False, max_psum_slots)
+                matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, acc_psum, False, max_psum_slots)  # noqa: E501
             with Tx.attr(0, "tensorized_nki_instruction", 1):
                 for lhs_f_loop in Tx.serial(0, lhs_f_size, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in Tx.serial(0, inst_repr.size, annotations={"nki_dim": "F"}):
                         b_idx = Tx.meta_var(lhs_b_loop * rhs_b_extent + rhs_b_loop)
-                        inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})
+                        inst_gen.set_bind_map(C_buffer_region, {lhs_f: lhs_f_loop, rhs_f: rhs_f_loop, lhs_b: lhs_b_loop, rhs_b: rhs_b_loop})  # noqa: E501
                         if inst_gen.make_guard(C_buffer_region):
                             acc_indices = Tx.meta_var(inst_gen.generate_indices(C_buffer_region))
-                            Tx.evaluate(Tx.nki.tensor_copy(C[acc_indices], acc_psum[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop]))
+                            Tx.evaluate(Tx.nki.tensor_copy(C[acc_indices], acc_psum[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop]))  # noqa: E501
     # fmt: on
     return impl_C_sbuf
 

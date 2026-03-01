@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
+
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tir.transform import LowerTIRx
 
 
 def run_test_break_continue(func, shape, expected):
@@ -39,8 +39,8 @@ def test_break_continue1():
         A = Tx.match_buffer(A_ptr, (10,), "int32")
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tid = Tx.thread_id([32], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([32], parent="cta")
 
             with Tx.thread():
                 for i in Tx.serial(10):
@@ -62,8 +62,8 @@ def test_break_continue2():
         A = Tx.match_buffer(A_ptr, (9,), "int32")
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tid = Tx.thread_id([32], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([32], parent="cta")
 
             with Tx.thread():
                 idx = Tx.alloc_buffer((1,), "int32", scope="local")
@@ -90,8 +90,8 @@ def test_break_continue3():
         A = Tx.match_buffer(A_ptr, (10,), "int32")
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tid = Tx.thread_id([32], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([32], parent="cta")
 
             with Tx.thread():
                 i = Tx.alloc_buffer((1,), "int32", scope="local")

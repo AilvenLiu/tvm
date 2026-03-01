@@ -16,17 +16,12 @@
 # under the License.
 import pytest
 
-import tvm
-import tvm.testing
 from tvm.tir.exec_scope import ExecScope
 
 
 def test_exec_scope_create():
     def is_trivial_scope(scope, name):
-        return (
-            isinstance(scope, ExecScope)
-            and scope.name == name
-        )
+        return isinstance(scope, ExecScope) and scope.name == name
 
     thread = ExecScope.create("thread")
     warp = ExecScope.create("warp")

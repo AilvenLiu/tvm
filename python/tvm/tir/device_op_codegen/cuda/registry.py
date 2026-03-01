@@ -15,10 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 """Codegen registry for CUDA HW ops."""
+
 import functools
 
 import tvm_ffi
-
 
 CODEGEN_REGISTRY = {}
 
@@ -36,7 +36,6 @@ def register_codegen(op, backend="cuda"):
     """
 
     def decorator(func):
-
         @functools.wraps(func)
         def wrapper(arg_list):
             res = func(*arg_list)  # pylint: disable=not-callable

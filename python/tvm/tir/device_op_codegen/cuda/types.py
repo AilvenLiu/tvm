@@ -15,10 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 """PTX data types for CUDA codegen."""
+
 import enum
 
 import tvm_ffi
-
 
 from_string_func = tvm_ffi.get_global_func("tir.device_op_codegen.cuda.PTXDTypeFromString")
 to_string_func = tvm_ffi.get_global_func("tir.device_op_codegen.cuda.PTXDTypeToString")

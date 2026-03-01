@@ -19,10 +19,8 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import ir as I
-from tvm.tir.layout import laneid, S
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import S, TileLayout, laneid
 
 
 @pytest.mark.parametrize(
@@ -95,19 +93,19 @@ def test_reduction_op_shared(input, op_type, dtype):
         B = Tx.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([thread_cnt], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(s_shape_a, dtype, scope="shared", layout=s_layout_a)
                 B_smem = Tx.alloc_buffer(s_shape_b, dtype, scope="shared", layout=s_layout_b)
 
-                Tx.copy(A_smem[*copy_slice_a], A[*copy_slice_a])
+                Tx.copy(A_smem[tuple(copy_slice_a)], A[tuple(copy_slice_a)])
                 if op_type == "sum":
-                    Tx.sum(B_smem[*reduce_slice_b], A_smem[*reduce_slice_a])
+                    Tx.sum(B_smem[tuple(reduce_slice_b)], A_smem[tuple(reduce_slice_a)])
                 elif op_type == "max":
-                    Tx.max(B_smem[*reduce_slice_b], A_smem[*reduce_slice_a])
-                Tx.copy(B[*copy_slice_b], B_smem[*copy_slice_b])
+                    Tx.max(B_smem[tuple(reduce_slice_b)], A_smem[tuple(reduce_slice_a)])
+                Tx.copy(B[tuple(copy_slice_b)], B_smem[tuple(copy_slice_b)])
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -125,14 +123,14 @@ def test_reduction_op_shared(input, op_type, dtype):
         # find ref result
         D = len(A.shape) - len(B.shape)
         if op_type == "sum":
-            B_ref = A.numpy()[*reduce_slice_a].sum(axis=tuple(range(-D, 0)))
+            B_ref = A.numpy()[tuple(reduce_slice_a)].sum(axis=tuple(range(-D, 0)))
         elif op_type == "max":
-            B_ref = A.numpy()[*reduce_slice_a].max(axis=tuple(range(-D, 0)))
+            B_ref = A.numpy()[tuple(reduce_slice_a)].max(axis=tuple(range(-D, 0)))
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
 
         atol = 1e-5 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(B_ref, B.numpy()[*reduce_slice_b], atol=atol)
+        tvm.testing.assert_allclose(B_ref, B.numpy()[tuple(reduce_slice_b)], atol=atol)
 
 
 @pytest.mark.parametrize(
@@ -300,8 +298,8 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
         B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
                 A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")
@@ -384,8 +382,8 @@ def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
         B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
-            bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([1], parent="cta")
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
                 A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")

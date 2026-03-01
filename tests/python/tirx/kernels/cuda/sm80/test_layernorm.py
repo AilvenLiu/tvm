@@ -16,6 +16,7 @@
 # under the License.
 import numpy as np
 import pytest
+
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
@@ -54,36 +55,36 @@ def test_layernorm(dtype):
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def layernorm(inp_ptr: Tx.handle, inp_resid_ptr: Tx.handle, norm_weight_ptr: Tx.handle, norm_bias_ptr: Tx.handle,
+    def layernorm(inp_ptr: Tx.handle, inp_resid_ptr: Tx.handle, norm_weight_ptr: Tx.handle, norm_bias_ptr: Tx.handle,  # noqa: E501
                   out_ptr: Tx.handle, out_resid_ptr: Tx.handle) -> None:
-        inp = Tx.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
-        out = Tx.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
-        inp_resid = Tx.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
-        out_resid = Tx.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))
-        norm_weight = Tx.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # gamma
-        norm_bias = Tx.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # beta
+        inp = Tx.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))  # noqa: E501
+        out = Tx.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))  # noqa: E501
+        inp_resid = Tx.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))  # noqa: E501
+        out_resid = Tx.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_B, 1, ATTN_N, ATTN_D]))  # noqa: E501
+        norm_weight = Tx.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # gamma  # noqa: E501
+        norm_bias = Tx.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # beta  # noqa: E501
 
         with Tx.kernel():
             bx, by = Tx.cta_id([Tx.ceildiv(ATTN_N, N_PER_TILE), ATTN_B], parent="kernel")
-            tid = Tx.thread_id([NUM_WORKERS * 32], parent="cta")
-            warp_id = Tx.warp_id([NUM_WORKERS], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            Tx.thread_id([NUM_WORKERS * 32], parent="cta")
+            Tx.warp_id([NUM_WORKERS], parent="cta")
+            Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
-                x_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))
-                resid_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))
-                norm_weight_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))
-                norm_bias_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))
-                mean = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)
-                var = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)
+                x_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))  # noqa: E501
+                resid_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))  # noqa: E501
+                norm_weight_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))  # noqa: E501
+                norm_bias_smem = Tx.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[ATTN_D]))  # noqa: E501
+                mean = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)  # noqa: E501
+                var = Tx.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, 1, 1]), align=8)  # noqa: E501
 
                 Tx.copy(norm_bias_smem[:], norm_bias[:])
                 Tx.copy(norm_weight_smem[:], norm_weight[:])
 
                 # two cp.async
                 non_bulk_copy = Tx.meta_var({"dispatch": "non-bulk-copy"})
-                Tx.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)
-                Tx.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)
+                Tx.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)  # noqa: E501
+                Tx.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)  # noqa: E501
                 Tx.ptx.cp_async.commit_group()
                 Tx.cuda.cta_sync()
 
@@ -95,15 +96,15 @@ def test_layernorm(dtype):
 
                     if k < n_loops - 1:
                         # TODO(@kathy): support pipeline token flip when pipeline is long
-                        Tx.copy_async(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)
-                        Tx.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)
+                        Tx.copy_async(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)  # noqa: E501
+                        Tx.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)  # noqa: E501
                         Tx.ptx.cp_async.commit_group()
                     Tx.ptx.cp_async.wait_group(0)
                     Tx.cuda.cta_sync()
 
                     # store residual
                     Tx.add(resid_smem[:, 0, :], resid_smem[:, 0, :], x_smem[:, 0, :])
-                    Tx.copy(out_resid[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])
+                    Tx.copy(out_resid[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])  # noqa: E501
                     # numerator
                     Tx.sum(mean[:, 0, 0], resid_smem[:, 0, :])
                     Tx.fdiv(mean[:, 0, 0], mean[:, 0, 0], const_func(ATTN_D))
@@ -119,7 +120,7 @@ def test_layernorm(dtype):
                     Tx.mul(resid_smem[:, 0, :], resid_smem[:, 0, :], norm_weight_smem[:])
                     Tx.add(resid_smem[:, 0, :], resid_smem[:, 0, :], norm_bias_smem[:])
                     # store result
-                    Tx.copy(out[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])
+                    Tx.copy(out[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])  # noqa: E501
     # fmt: on
 
     import torch
@@ -144,9 +145,17 @@ def test_layernorm(dtype):
         with target:
             mod = tvm.IRModule({"main": layernorm})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-            func = lambda: mod(
-                inp_tvm, inp_resid_tvm, norm_weight_tvm, norm_bias_tvm, out_tvm, out_resid_tvm
-            )
+
+            def func():
+                return mod(
+                    inp_tvm,
+                    inp_resid_tvm,
+                    norm_weight_tvm,
+                    norm_bias_tvm,
+                    out_tvm,
+                    out_resid_tvm,
+                )
+
             ms = bench(func, warmup=2, repeat=10, proton_name="tir")
             print(f"TIR layernorm time: {ms:.3f} ms")
 
@@ -166,7 +175,9 @@ def test_layernorm(dtype):
         ln_func.weight = nn.Parameter(norm_weight_torch)
         ln_func.bias = nn.Parameter(norm_bias_torch)
 
-        func = lambda: ln_func(inp_torch + inp_resid_torch)
+        def func():
+            return ln_func(inp_torch + inp_resid_torch)
+
         ms = bench(func, warmup=2, repeat=10, proton_name="torch")
         print(f"Torch time: {ms:.3f} ms")
         out_torch = func().detach().cpu()

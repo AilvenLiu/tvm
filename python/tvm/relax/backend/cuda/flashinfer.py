@@ -16,13 +16,13 @@
 # under the License.
 
 """FlashInfer JIT compilation module for CUDA backend"""
+
 import hashlib
 import json
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List
 
 import tvm_ffi
 
@@ -31,8 +31,8 @@ from tvm.target import Target
 
 
 def _compile_flashinfer_kernels(
-    name: str, source_paths: List[Path], target: Target, num_threads: int
-) -> List[Path]:
+    name: str, source_paths: list[Path], target: Target, num_threads: int
+) -> list[Path]:
     from flashinfer.jit.env import (  # pylint: disable=import-outside-toplevel
         CUTLASS_INCLUDE_DIRS,
         FLASHINFER_CSRC_DIR,
@@ -73,7 +73,7 @@ def _compile_flashinfer_kernels(
     # Check if a valid hash exists in the build directory
     hash_file = build_directory / "hash.md5"
     if hash_file.exists():
-        with open(hash_file, "r") as f:
+        with open(hash_file) as f:
             cached_hash = f.read().strip()
         if cached_hash == hash_value:
             # Check that all object files exist
@@ -130,7 +130,8 @@ def _compile_flashinfer_kernels(
         FLASHINFER_INCLUDE_DIR,
         FLASHINFER_CSRC_DIR,
         FLASHINFER_TVM_BINDING_DIR,
-    ] + CUTLASS_INCLUDE_DIRS
+        *CUTLASS_INCLUDE_DIRS,
+    ]
 
     if os.environ.get("TVM_SOURCE_DIR", None) or os.environ.get("TVM_HOME", None):
         # Respect TVM_SOURCE_DIR and TVM_HOME if they are set
@@ -215,7 +216,7 @@ def _compile_flashinfer_kernels(
     return object_files
 
 
-def _load_flashinfer_modules(object_files: List[Path]) -> List[tvm.runtime.Module]:
+def _load_flashinfer_modules(object_files: list[Path]) -> list[tvm.runtime.Module]:
     return [
         tvm.runtime.load_static_library(str(obj_path.absolute()), func_names=[])
         for obj_path in object_files
@@ -231,7 +232,7 @@ def gen_flashinfer_prefill_module(
     target: Target,
     enable_inline_rope: bool = True,
     num_threads: int = 8,
-) -> List[tvm.runtime.Module]:
+) -> list[tvm.runtime.Module]:
     """Generate a FlashInfer module for prefill.
 
     Parameters
@@ -325,7 +326,7 @@ def gen_flashinfer_decode_module(
     v_head_dim: int,
     target: Target,
     num_threads: int = 8,
-) -> List[tvm.runtime.Module]:
+) -> list[tvm.runtime.Module]:
     """Generate a FlashInfer module for decode.
 
     Parameters
@@ -399,7 +400,7 @@ def gen_flashinfer_mla_module(
     head_dim_kpe: int,
     target: Target,
     num_threads: int = 8,
-) -> List[tvm.runtime.Module]:
+) -> list[tvm.runtime.Module]:
     """Generate a FlashInfer module for MLA.
 
     Parameters
@@ -501,7 +502,7 @@ def gen_grouped_gemm_module(
     mma_sm: int,
     target: Target,
     num_threads: int = 8,
-) -> List[tvm.runtime.Module]:
+) -> list[tvm.runtime.Module]:
     """Generate a FlashInfer module for FP8 grouped GEMM.
 
     Parameters

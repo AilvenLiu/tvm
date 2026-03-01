@@ -72,7 +72,7 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
 
     Serpentine Mode (serpentine=True):
     - Uses CUTLASS-style 2D block swizzle with serpentine traversal
-    - Grid is divided into swizzle_size × swizzle_size blocks
+    - Grid is divided into swizzle_size x swizzle_size blocks
     - Within each block, tiles are visited in row-major order
     - Blocks are traversed in serpentine order (even block-rows forward, odd backward)
     - This provides better L2 locality by reusing both A and B tiles
@@ -254,11 +254,7 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
             self._FULL_BLOCK_TILES = self._M_BLOCKS * self._N_BLOCKS * self._BLOCK_SIZE
             # Residual tiles (not covered by full blocks)
             self._RESIDUAL_N = n_tile_cols - self._N_BLOCKS * l2_group_size
-            self._RESIDUAL_M = (
-                self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
-                if is_static_m
-                else self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
-            )
+            self._RESIDUAL_M = self._M_TILE_ROWS - self._M_BLOCKS * l2_group_size
 
     # fmt: off
     @Tx.inline
@@ -315,7 +311,7 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
         """CUTLASS-style 2D block swizzle with serpentine traversal.
 
         Algorithm:
-        1. Divide grid into swizzle_size × swizzle_size blocks
+        1. Divide grid into swizzle_size x swizzle_size blocks
         2. Within each block, visit tiles in row-major order
         3. Blocks are traversed column by column (along N)
         4. Within each column of blocks, use serpentine:
@@ -330,7 +326,7 @@ class ClusterPersistentScheduler2D(BaseTileScheduler):
         BLOCK_SIZE = Tx.meta_var(self._BLOCK_SIZE)  # S * S
         FULL_BLOCK_TILES = Tx.meta_var(self._FULL_BLOCK_TILES)
         M_TILE_ROWS = Tx.meta_var(self._M_TILE_ROWS)
-        N_TILE_COLS = Tx.meta_var(self._N_TILE_COLS)
+        Tx.meta_var(self._N_TILE_COLS)
         RESIDUAL_N = Tx.meta_var(self._RESIDUAL_N)
         RESIDUAL_M = Tx.meta_var(self._RESIDUAL_M)
 
@@ -766,8 +762,8 @@ class FlashAttentionLPTScheduler(BaseTileScheduler):
 
         # Handle residual section (last partial swizzle group)
         num_hb_remainder: Tx.let = Tx.max(NUM_HB % L2_SWIZZLE, 1)
-        m_block_raw: Tx.let = Tx.Select(bidhb < NUM_HB_QUOTIENT, l2_mod // L2_SWIZZLE, l2_mod // num_hb_remainder)
-        bidhb_residual: Tx.let = Tx.Select(bidhb < NUM_HB_QUOTIENT, l2_mod % L2_SWIZZLE, l2_mod % num_hb_remainder)
+        m_block_raw: Tx.let = Tx.Select(bidhb < NUM_HB_QUOTIENT, l2_mod // L2_SWIZZLE, l2_mod // num_hb_remainder)  # noqa: E501
+        bidhb_residual: Tx.let = Tx.Select(bidhb < NUM_HB_QUOTIENT, l2_mod % L2_SWIZZLE, l2_mod % num_hb_remainder)  # noqa: E501
         bidhb_actual: Tx.let = bidhb * L2_SWIZZLE + bidhb_residual
 
         self.batch_idx = bidhb_actual // NUM_HEADS
