@@ -23,6 +23,7 @@ import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.bench.utils import bench, ProtonContext
+from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
 from tvm.tir.layout import TileLayout, TLane, TCol, S
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 
@@ -108,50 +109,6 @@ TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
-@Tx.meta_class
-class Barriers:
-    def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
-        self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
-            (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        )
-        self.init_phase = 0 if is_p2c else 1
-        self.pipe_depth = pipe_depth
-
-    @Tx.inline
-    def init(self, threads_num_wait):
-        with Tx.thread()[0:1]:
-            for i in Tx.serial(self.pipe_depth):
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
-
-    @Tx.inline
-    def wait(self, idx, phase):
-        Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
-
-
-class BarTRANS2MMA(Barriers):
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
-
-
-class BarMMA2LD(Barriers):
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
-
-
-class BarMMA2TMA(Barriers):
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
-
-
-class BarLD2MMA(Barriers):
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
-
-
 @Tx.inline
 def skip():
     pass
@@ -198,6 +155,15 @@ def deepgemm(
             # alloc shared memory
             pool = Tx.meta_var(Tx.PoolAllocator())
             tmem_addr = Tx.decl_scalar("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
+            pool.move_base_to(8)
+
+            # Barriers
+            tma2trans_bar = TMABar(pool, SMEM_PIPE_DEPTH)
+            trans2mma_bar = MBarrier(pool, SMEM_PIPE_DEPTH)
+            mma2tma_bar = TCGen05Bar(pool, SMEM_PIPE_DEPTH)
+            mma2ld_bar = TCGen05Bar(pool, TMEM_PIPE_DEPTH)
+            ld2mma_bar = MBarrier(pool, TMEM_PIPE_DEPTH)
+
             pool.move_base_to(1024)
             A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
             B_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
@@ -220,13 +186,6 @@ def deepgemm(
             descI: Tx.uint32
 
             phase: Tx.int32
-
-            # initialize
-            tma2trans_bar = Barriers(pool.ptr, 6, SMEM_PIPE_DEPTH, True)
-            trans2mma_bar = BarTRANS2MMA(pool.ptr, 6 + SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, True)
-            mma2tma_bar = BarMMA2TMA(pool.ptr, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False)
-            mma2ld_bar = BarMMA2LD(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True)
-            ld2mma_bar = BarLD2MMA(pool.ptr, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False)
             tile_scheduler = ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE)
 
             tma2trans_bar.init(1)
@@ -284,8 +243,8 @@ def deepgemm(
 
                             @Tx.inline
                             def tma_load(ks):
-                                mma2tma_bar.wait(ks, phase)
-                                tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2trans_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
+                                mma2tma_bar.wait(ks, phase ^ 1)
+                                tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2trans_bar.ptr_to([ks]), "cta_group": CTA_GROUP})
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
                                     Tx.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)
                                     Tx.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)
@@ -294,13 +253,13 @@ def deepgemm(
                                         Tx.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)
                                     AB_bytes = Tx.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
                                     SFAB_bytes = Tx.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
-                                    Tx.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), Tx.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
+                                    tma2trans_bar.arrive(ks, Tx.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
 
                             @Tx.inline
                             def tma_load_epilogue(ks):
-                                mma2tma_bar.wait(ks, phase)
+                                mma2tma_bar.wait(ks, phase ^ 1)
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
-                                    Tx.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), 0)
+                                    tma2trans_bar.arrive(ks, 0)
 
                             paritioned_loop(tma_load, skip, tma_load_epilogue)
                             tile_scheduler.next_tile()
@@ -316,7 +275,7 @@ def deepgemm(
                             @Tx.inline
                             def transpose(ks):
                                 # wait for sf has been prepared
-                                Tx.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
+                                tma2trans_bar.wait(ks, phase)
                                 if stage % 4 == 0:
                                     Tx.permute_dims(SFA_smem[ks], [0, 2, 1])
                                     Tx.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
@@ -327,7 +286,7 @@ def deepgemm(
 
                             @Tx.inline
                             def transpose_epilogue(ks):
-                                Tx.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
+                                tma2trans_bar.wait(ks, phase)
                                 trans2mma_bar.arrive(ks)
 
                             paritioned_loop(transpose, skip, transpose_epilogue)
@@ -348,7 +307,7 @@ def deepgemm(
                                     tmem_phase = (tile_scheduler.tile_idx // TMEM_PIPE_DEPTH) & 1
 
                                     # wait for the tmem result to be consumed
-                                    ld2mma_bar.wait(tmem_idx, tmem_phase)
+                                    ld2mma_bar.wait(tmem_idx, tmem_phase ^ 1)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
 
                                     @Tx.inline
@@ -392,16 +351,16 @@ def deepgemm(
                                                                                 SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
                                                                                 SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
                                                                                 descI, False, CTA_GROUP, True)
-                                        mma2tma_bar.arrive(ks)
+                                        mma2tma_bar.arrive(ks, CTA_GROUP, 3)
 
                                     @Tx.inline
                                     def mma_epilogue1():
-                                        mma2ld_bar.arrive(tmem_idx)
+                                        mma2ld_bar.arrive(tmem_idx, CTA_GROUP, 3)
 
                                     @Tx.inline
                                     def mma_epilogue2(ks):
                                         trans2mma_bar.wait(ks, phase)
-                                        mma2tma_bar.arrive(ks)
+                                        mma2tma_bar.arrive(ks, CTA_GROUP, 3)
 
                                     paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
 

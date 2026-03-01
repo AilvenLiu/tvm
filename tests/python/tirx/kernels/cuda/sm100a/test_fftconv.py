@@ -32,10 +32,10 @@ Algorithm (Monarch FFT convolution):
   Phase 2: FI @ X        (4 K-iters)
   -> tw multiply, write work_A/work_B
   Phase 3: WR@FR + (-WI)@FI  (8 K-iters, cross-buffer accumulation)
-  Phase 4: WR@FI + WI@FR     (8 K-iters)
+  Phase 4: WR@FI + (-WI)@(-FR) (8 K-iters, uses neg_F_real, no sign flip)
   -> kf multiply, write work_A/work_B
   Phase 5: WR@FiR + (-WI)@FiI (8 K-iters)
-  Phase 6: WR@FiI + WI@FiR    (8 K-iters)
+  Phase 6: WR@FiI + (-WI)@(-FiR) (8 K-iters, uses neg_Finv_real, no sign flip)
   -> twinv multiply, write work_A/work_B
   Phase 7: FiR@WR + FiI@(-WI) (8 K-iters, only real part needed)
   -> TMA store
@@ -48,10 +48,10 @@ import torch
 
 import tvm
 import tvm.testing
-from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
 
 # Constants
 N1 = 64
@@ -87,17 +87,17 @@ TMEM_LD_SIZE = 64
 #   Finv_real[64,64]*f16=8K + Finv_imag[64,64]*f16=8K (swizzled, MMA operand)
 #   X_smem[64,64]*f16=8K (swizzled, MMA operand, TMA loaded)
 #   work_A[64,64]*f16=8K + work_B[64,64]*f16=8K (swizzled, MMA operand)
+#   neg_F_real[64,64]*f16=8K (swizzled, MMA operand, negated F_real)
+#   neg_Finv_real[64,64]*f16=8K (swizzled, MMA operand, negated Finv_real)
 #   D_out[64,64]*f16=8K (swizzled, TMA store)
-#   tw_real[64,64]*f16=8K + tw_imag[64,64]*f16=8K (not swizzled, elementwise)
-#   twinv_real[64,64]*f16=8K + twinv_imag[64,64]*f16=8K (not swizzled)
-#   kf_real[64,64]*f16=8K + kf_imag[64,64]*f16=8K (not swizzled, per-head)
-#   w_real_s[64,64]*f32=16K + w_imag_s[64,64]*f32=16K (not swizzled, consumer temp)
-#   Total = 1024 + 8*8K + 6*8K + 2*16K = 1024 + 64K + 48K + 32K = ~145K
+#   tw_real[64,64]*f16=8K + tw_imag[64,64]*f16=8K (swizzled, elementwise)
+#   twinv_real[64,64]*f16=8K + twinv_imag[64,64]*f16=8K (swizzled, elementwise)
+#   kf_real[64,64]*f16=8K + kf_imag[64,64]*f16=8K (swizzled, per-head)
+#   Total = 1024 + 16*8K = ~129K
+#   w_real/w_imag kept in registers (64 f32 per thread), no SMEM f32 buffers needed
 SMEM_SIZE = (
     1024  # barriers + alignment
-    + 8 * N1 * N1 * F16_BYTES   # 8 swizzled buffers (F_r/i, Finv_r/i, X, work_A/B, D_out)
-    + 6 * N1 * N1 * F16_BYTES   # 6 non-swizzled f16 (tw_r/i, twinv_r/i, kf_r/i)
-    + 2 * N1 * N1 * F32_BYTES   # 2 non-swizzled f32 (w_real_s, w_imag_s)
+    + 16 * N1 * N1 * F16_BYTES  # 16 swizzled f16 buffers (all 64x64)
 )
 assert SMEM_SIZE <= 232448
 
@@ -155,61 +155,6 @@ def ref_fftconv(u, k):
     return y
 
 
-# ---- Barrier classes (following linear_attention/BASED/mamba2 pattern) ----
-
-@Tx.meta_class
-class Barriers:
-    """Base barrier class for mbarrier-based synchronization."""
-    def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
-        self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
-            (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        )
-        self.init_phase = 0 if is_p2c else 1
-        self.pipe_depth = pipe_depth
-
-    @Tx.inline
-    def init(self, threads_num_wait):
-        with Tx.thread()[0:1]:
-            for i in Tx.serial(self.pipe_depth):
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
-
-    @Tx.inline
-    def wait(self, idx, phase):
-        Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
-
-
-class BarTMA2MMA(Barriers):
-    """TMA load done -> MMA can start reading SMEM."""
-    @Tx.inline
-    def arrive(self, idx, expected_bytes):
-        Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
-
-    @Tx.inline
-    def arrive_only(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
-
-
-class BarMMA2TMA(Barriers):
-    """MMA done with SMEM -> TMA can overwrite."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarMMA2Consumer(Barriers):
-    """MMA done -> consumer can read TMEM."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarConsumer2MMA(Barriers):
-    """Consumer done -> MMA can proceed."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
-
-
 # ---- Layouts ----
 # All MMA operand buffers use SWIZZLE_128B (3) with 64 f16 = 128B inner dimension.
 
@@ -260,70 +205,36 @@ def get_fftconv_kernel():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
-                # ---- Shared memory allocation ----
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                # ---- Shared memory via PoolAllocator ----
+                pool = Tx.meta_var(Tx.PoolAllocator())
+                tmem_addr = Tx.decl_scalar("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
+                pool.move_base_to(8)
 
-                # SMEM layout: swizzled buffers first (1024B aligned), then non-swizzled.
-                # Offsets in f16 elements (divide byte offset by 2):
-                BUF_64x64 = N1 * N1  # 4096 f16 elems = 8192 bytes
+                # Barriers
+                tma2mma_bar = TMABar(pool, PIPE_DEPTH)
+                mma2tma_bar = TCGen05Bar(pool, PIPE_DEPTH)
+                mma2consumer_bar = TCGen05Bar(pool, 1)
+                consumer2mma_bar = MBarrier(pool, 1)
+                workitem_sync_bar = TMABar(pool, 1)
 
-                base_off_f16 = 1024 // F16_BYTES  # 512
-
-                # Swizzled MMA operand buffers
-                f_real_off = base_off_f16  # 512
-                F_real_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                          layout=swizzled_layout, elem_offset=f_real_off)
-                f_imag_off = f_real_off + BUF_64x64  # 4608
-                F_imag_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                          layout=swizzled_layout, elem_offset=f_imag_off)
-                finv_real_off = f_imag_off + BUF_64x64  # 8704
-                Finv_real_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                             layout=swizzled_layout, elem_offset=finv_real_off)
-                finv_imag_off = finv_real_off + BUF_64x64  # 12800
-                Finv_imag_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                             layout=swizzled_layout, elem_offset=finv_imag_off)
-                x_smem_off = finv_imag_off + BUF_64x64  # 16896
-                X_smem = Tx.decl_buffer((PIPE_DEPTH, N1, N1), "float16", buf.data,
-                                        layout=swizzled_pipe_layout, elem_offset=x_smem_off)
-                work_a_off = x_smem_off + PIPE_DEPTH * BUF_64x64  # 20992
-                work_A = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                        layout=swizzled_layout, elem_offset=work_a_off)
-                work_b_off = work_a_off + BUF_64x64  # 25088
-                work_B = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                        layout=swizzled_layout, elem_offset=work_b_off)
-                d_out_off = work_b_off + BUF_64x64  # 29184
-                D_out = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                       layout=swizzled_layout, elem_offset=d_out_off)
-
-                # Non-swizzled buffers (f16) — elementwise only
-                nonswiz_f16_off = d_out_off + BUF_64x64  # 33280
-                tw_real_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                           elem_offset=nonswiz_f16_off)
-                tw_imag_off = nonswiz_f16_off + BUF_64x64  # 37376
-                tw_imag_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                           elem_offset=tw_imag_off)
-                twinv_real_off = tw_imag_off + BUF_64x64  # 41472
-                twinv_real_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                              elem_offset=twinv_real_off)
-                twinv_imag_off = twinv_real_off + BUF_64x64  # 45568
-                twinv_imag_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                              elem_offset=twinv_imag_off)
-                kf_real_off = twinv_imag_off + BUF_64x64  # 49664
-                kf_real_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                           elem_offset=kf_real_off)
-                kf_imag_off = kf_real_off + BUF_64x64  # 53760
-                kf_imag_s = Tx.decl_buffer((N1, N1), "float16", buf.data,
-                                           elem_offset=kf_imag_off)
-
-                # Non-swizzled buffers (f32) — consumer temporaries
-                nonswiz_f32_byte = (kf_imag_off + BUF_64x64) * F16_BYTES  # 115712 bytes
-                w_real_off_f32 = nonswiz_f32_byte // F32_BYTES  # 28928
-                w_real_s = Tx.decl_buffer((N1, N1), "float32", buf.data,
-                                          elem_offset=w_real_off_f32)
-                w_imag_off_f32 = w_real_off_f32 + N1 * N1  # 33024
-                w_imag_s = Tx.decl_buffer((N1, N1), "float32", buf.data,
-                                          elem_offset=w_imag_off_f32)
+                pool.move_base_to(1024)
+                F_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                F_imag_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                Finv_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                Finv_imag_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                X_smem = pool.alloc((PIPE_DEPTH, N1, N1), "float16", layout=swizzled_pipe_layout)
+                work_A = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                work_B = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                neg_F_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                neg_Finv_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                D_out = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                tw_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                tw_imag_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                twinv_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                twinv_imag_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                kf_real_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                kf_imag_s = pool.alloc((N1, N1), "float16", layout=swizzled_layout)
+                pool.commit()
 
                 # ---- Local variables ----
                 descI: Tx.uint32
@@ -331,23 +242,11 @@ def get_fftconv_kernel():
                 descB: Tx.uint64
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
 
-                # ---- Barrier setup ----
-                tma2mma_bar = BarTMA2MMA(buf.data, 4, PIPE_DEPTH, True)
-                mma2tma_bar = BarMMA2TMA(buf.data, 4 + PIPE_DEPTH, PIPE_DEPTH, False)
-                mma2consumer_bar = BarMMA2Consumer(buf.data, 4 + 2 * PIPE_DEPTH, 1, True)
-                consumer2mma_bar = BarConsumer2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 1, 1, True)
                 tma2mma_bar.init(1)
                 mma2tma_bar.init(1)
                 mma2consumer_bar.init(1)
                 consumer2mma_bar.init(128)  # full consumer WG
-                # MMA→TMA direction: MMA arrives after finishing a work item,
-                # TMA waits before starting the next. Uses BarTMA2MMA (is_p2c=True)
-                # so that init_phase=0 and the first wait blocks until an arrive.
-                workitem_sync_bar = BarTMA2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 2, 1, True)
                 workitem_sync_bar.init(1)
-
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
-                tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
                 with Tx.warp()[0:1]:
@@ -369,6 +268,8 @@ def get_fftconv_kernel():
                         F_imag_s[row, col] = f_imag_g[row, col]
                         Finv_real_s[row, col] = finv_real_g[row, col]
                         Finv_imag_s[row, col] = finv_imag_g[row, col]
+                        neg_F_real_s[row, col] = Tx.cast(0.0 - Tx.cast(f_real_g[row, col], "float32"), "float16")
+                        neg_Finv_real_s[row, col] = Tx.cast(0.0 - Tx.cast(finv_real_g[row, col], "float32"), "float16")
                         tw_real_s[row, col] = tw_real_g[row, col]
                         tw_imag_s[row, col] = tw_imag_g[row, col]
                         twinv_real_s[row, col] = twinv_real_g[row, col]
@@ -417,7 +318,7 @@ def get_fftconv_kernel():
                                     tic = Tx.meta_var(0)
                                     head_tma = wid_tma % H
                                     batch_tma = wid_tma // H
-                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})
+                                    tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.ptr_to([tic]), "cta_group": CTA_GROUP})
                                     # Load X for this work item
                                     Tx.copy_async(X_smem[tic, :, :], x_g[batch_tma, head_tma, 0 : N1, 0 : N1], **tma_copy)
                                     tma2mma_bar.arrive(tic, N1 * N1 * F16_BYTES)
@@ -457,7 +358,7 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 1
                                     consumer2mma_bar.wait(0, phase_c2m)
@@ -474,13 +375,13 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 2 (tw multiply, write work_A/B)
                                     consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                     Tx.ptx.tcgen05.fence.after_thread_sync()
                                     # Release X_smem for TMA (no longer needed after phase 2)
-                                    Tx.ptx.mbarrier.arrive(mma2tma_bar.mbar.ptr_to([tic]))
+                                    Tx.ptx.mbarrier.arrive(mma2tma_bar.ptr_to([tic]))
 
                                     # == Phase 3: WR@FR + (-WI)@FI -> new W.real (cross-buffer accum) ==
                                     # work_A has W'.real, work_B has -W'.imag
@@ -508,7 +409,7 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, True)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 3 (save W.real, flip work_B)
                                     consumer2mma_bar.wait(0, phase_c2m)
@@ -527,19 +428,20 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                    # Second half: work_B @ F_real (4 iters, accumulate)
-                                    # work_B = +WI, FR -> WR@FI + WI@FR = new_W.imag
+                                    # Second half: work_B @ neg_F_real (4 iters, accumulate)
+                                    # work_B = -WI, neg_FR = -FR -> (-WI)@(-FR) = WI@FR
+                                    # WR@FI + WI@FR = new_W.imag (no sign flip needed!)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
                                             Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), F_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), neg_F_real_s.ptr_to([ki * MMA_K, 0]),
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, True)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 4 (kf multiply, write work_A/B)
                                     consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -566,7 +468,7 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, True)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 5
                                     consumer2mma_bar.wait(0, phase_c2m)
@@ -583,17 +485,20 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
+                                    # Second half: work_B @ neg_Finv_real (4 iters, accumulate)
+                                    # work_B = -WI, neg_FiR = -FiR -> (-WI)@(-FiR) = WI@FiR
+                                    # WR@FiI + WI@FiR = new_W.imag (no sign flip needed!)
                                     for ki in Tx.unroll(N1 // MMA_K):
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
                                             Tx.address_of(descA), work_B.ptr_to([0, ki * MMA_K]),
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.encode_matrix_descriptor(
-                                            Tx.address_of(descB), Finv_real_s.ptr_to([ki * MMA_K, 0]),
+                                            Tx.address_of(descB), neg_Finv_real_s.ptr_to([ki * MMA_K, 0]),
                                             MMA_LDO, MMA_SDO, SWIZZLE)
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, True)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 6 (twinv multiply, write work_A/B)
                                     consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -624,7 +529,7 @@ def get_fftconv_kernel():
                                         Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                             Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                             descA, descB, descI_tb, False, CTA_GROUP, True)
-                                    mma2consumer_bar.arrive(0)
+                                    mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                     # Wait consumer done with Phase 7 (TMA store)
                                     consumer2mma_bar.wait(0, phase_c2m)
@@ -633,7 +538,7 @@ def get_fftconv_kernel():
                                     phase_c2m = phase_c2m ^ 1
                                 phase[0] = phase[0] ^ 1
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
-                                    workitem_sync_bar.arrive_only(0)
+                                    Tx.ptx.mbarrier.arrive(workitem_sync_bar.ptr_to([0]))
                                 wid_mma = wid_mma + SM_COUNT
 
                     # === Consumer warpgroup (WG0) ===
@@ -644,6 +549,20 @@ def get_fftconv_kernel():
                         phase_m2c = 0
                         phase_c2m_c: Tx.int32
                         phase_c2m_c = 0
+
+                        # Register buffers for w_real/w_imag (replaces SMEM f32 buffers)
+                        # Each active thread (lane_id < 16) owns one row of 64 f32 values
+                        w_real_reg = Tx.alloc_buffer((N1,), "float32", scope="local")
+                        w_imag_reg = Tx.alloc_buffer((N1,), "float32", scope="local")
+
+                        # Reusable f16 register buffers for preloaded twiddle constants
+                        # Preloaded during light phases (1/3/5), consumed in heavy phases (2/4/6)
+                        const_real_reg = Tx.alloc_buffer((N1,), "float16", scope="local")
+                        const_imag_reg = Tx.alloc_buffer((N1,), "float16", scope="local")
+
+                        # Shuffle buffers for write splitting (must be real buffers, not meta_var)
+                        shuf_real_buf = Tx.alloc_buffer((32,), "float32", scope="local")
+                        shuf_imag_buf = Tx.alloc_buffer((32,), "float32", scope="local")
 
                         wid_con = Tx.local_scalar("int32", "wid_con")
                         total_bh_con = Tx.local_scalar("int32", "total_bh_con")
@@ -666,7 +585,8 @@ def get_fftconv_kernel():
                                     kf_imag_s[row, col] = kf_imag_g[head_con, row, col]
                             Tx.cuda.warpgroup_sync(10)
 
-                            # ======== Phase 1: Read W.real from TMEM ========
+                            # ======== Phase 1: Read W.real from TMEM -> registers ========
+                            # Also preload tw constants into registers for Phase 2
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -676,15 +596,19 @@ def get_fftconv_kernel():
                             with Tx.thread():
                                 out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                 if lane_id < 16:
-                                    # Save W.real to w_real_s (f32)
                                     for j in Tx.serial(N1):
-                                        w_real_s[out_row, j] = reg[j]
+                                        w_real_reg[j] = reg[j]
+                                    # Preload tw constants for Phase 2
+                                    for j in Tx.serial(N1):
+                                        const_real_reg[j] = tw_real_s[out_row, j]
+                                        const_imag_reg[j] = tw_imag_s[out_row, j]
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
                             phase_c2m_c = phase_c2m_c ^ 1
 
-                            # ======== Phase 2: Read W.imag from TMEM ========
+                            # ======== Phase 2: Read W.imag from TMEM -> registers ========
+                            # Then apply tw multiply and write work_A/work_B (all in registers, no sync needed)
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -692,34 +616,39 @@ def get_fftconv_kernel():
                             Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
 
                             with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                out_row = Tx.meta_var(warp_id * 16 + (lane_id % 16))
                                 if lane_id < 16:
-                                    # Save W.imag to w_imag_s (f32)
+                                    # Save W.imag to registers, then immediately apply tw multiply
                                     for j in Tx.serial(N1):
-                                        w_imag_s[out_row, j] = reg[j]
-
-                            Tx.cuda.warpgroup_sync(10)
-
-                            # Apply tw multiply: W' = W * tw (complex)
-                            # Then write work_A = W'.real, work_B = -W'.imag
-                            with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
-                                if lane_id < 16:
+                                        w_imag_reg[j] = reg[j]
+                                    # tw multiply: compute new_imag first (uses old w_real), then new_real
                                     for j in Tx.serial(N1):
-                                        wr = Tx.meta_var(w_real_s[out_row, j])
-                                        wi = Tx.meta_var(w_imag_s[out_row, j])
-                                        tr = Tx.meta_var(Tx.cast(tw_real_s[out_row, j], "float32"))
-                                        ti = Tx.meta_var(Tx.cast(tw_imag_s[out_row, j], "float32"))
-                                        new_real = Tx.meta_var(wr * tr - wi * ti)
-                                        new_imag = Tx.meta_var(wr * ti + wi * tr)
-                                        work_A[out_row, j] = Tx.cast(new_real, "float16")
-                                        work_B[out_row, j] = Tx.cast(0.0 - new_imag, "float16")
+                                        tr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
+                                        ti = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
+                                        # new_imag = wr*ti + wi*tr (written first, reads old w_real)
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr
+                                        # new_real = wr*tr - wi*ti (reads old w_real before overwrite)
+                                        w_real_reg[j] = w_real_reg[j] * tr - w_imag_reg[j] * ti
+                                        w_imag_reg[j] = shuf_real_buf[j % 32]
+                                    # Lanes 0-15 write columns 0-31
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, j] = Tx.cast(w_real_reg[j], "float16")
+                                        work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
+                                # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
+                                for j in Tx.serial(32):
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                if lane_id >= 16:
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
                             phase_c2m_c = phase_c2m_c ^ 1
 
-                            # ======== Phase 3: Read new W.real from TMEM ========
+                            # ======== Phase 3: Read new W.real from TMEM -> registers ========
+                            # Also preload kf constants into registers for Phase 4
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -729,18 +658,19 @@ def get_fftconv_kernel():
                             with Tx.thread():
                                 out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                 if lane_id < 16:
-                                    # Save new W.real to w_real_s
                                     for j in Tx.serial(N1):
-                                        w_real_s[out_row, j] = reg[j]
-                                    # Flip work_B from -W'.imag to +W'.imag for Phase 4
+                                        w_real_reg[j] = reg[j]
+                                    # Preload kf constants for Phase 4
                                     for j in Tx.serial(N1):
-                                        work_B[out_row, j] = Tx.cast(0.0 - Tx.cast(work_B[out_row, j], "float32"), "float16")
+                                        const_real_reg[j] = kf_real_s[out_row, j]
+                                        const_imag_reg[j] = kf_imag_s[out_row, j]
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
                             phase_c2m_c = phase_c2m_c ^ 1
 
-                            # ======== Phase 4: Read new W.imag from TMEM ========
+                            # ======== Phase 4: Read new W.imag from TMEM -> registers ========
+                            # Then apply kf multiply and write work_A/work_B (all in registers)
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -748,34 +678,37 @@ def get_fftconv_kernel():
                             Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
 
                             with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                out_row = Tx.meta_var(warp_id * 16 + (lane_id % 16))
                                 if lane_id < 16:
-                                    # Save new W.imag to w_imag_s
+                                    # Save W.imag to registers, then immediately apply kf multiply
                                     for j in Tx.serial(N1):
-                                        w_imag_s[out_row, j] = reg[j]
-
-                            Tx.cuda.warpgroup_sync(10)
-
-                            # Apply kf multiply: W' = W * kf (complex)
-                            # Then write work_A = W'.real, work_B = -W'.imag
-                            with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
-                                if lane_id < 16:
+                                        w_imag_reg[j] = reg[j]
+                                    # kf multiply: compute new_imag first (uses old w_real), then new_real
                                     for j in Tx.serial(N1):
-                                        wr = Tx.meta_var(w_real_s[out_row, j])
-                                        wi = Tx.meta_var(w_imag_s[out_row, j])
-                                        kr = Tx.meta_var(Tx.cast(kf_real_s[out_row, j], "float32"))
-                                        ki_val = Tx.meta_var(Tx.cast(kf_imag_s[out_row, j], "float32"))
-                                        new_real = Tx.meta_var(wr * kr - wi * ki_val)
-                                        new_imag = Tx.meta_var(wr * ki_val + wi * kr)
-                                        work_A[out_row, j] = Tx.cast(new_real, "float16")
-                                        work_B[out_row, j] = Tx.cast(0.0 - new_imag, "float16")
+                                        kr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
+                                        ki_val = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ki_val + w_imag_reg[j] * kr
+                                        w_real_reg[j] = w_real_reg[j] * kr - w_imag_reg[j] * ki_val
+                                        w_imag_reg[j] = shuf_real_buf[j % 32]
+                                    # Lanes 0-15 write columns 0-31
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, j] = Tx.cast(w_real_reg[j], "float16")
+                                        work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
+                                # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
+                                for j in Tx.serial(32):
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                if lane_id >= 16:
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
                             phase_c2m_c = phase_c2m_c ^ 1
 
-                            # ======== Phase 5: Read new W.real from TMEM ========
+                            # ======== Phase 5: Read new W.real from TMEM -> registers ========
+                            # Also preload twinv constants into registers for Phase 6
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -785,18 +718,19 @@ def get_fftconv_kernel():
                             with Tx.thread():
                                 out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                 if lane_id < 16:
-                                    # Save new W.real to w_real_s
                                     for j in Tx.serial(N1):
-                                        w_real_s[out_row, j] = reg[j]
-                                    # Flip work_B from -W'.imag to +W'.imag for Phase 6
+                                        w_real_reg[j] = reg[j]
+                                    # Preload twinv constants for Phase 6
                                     for j in Tx.serial(N1):
-                                        work_B[out_row, j] = Tx.cast(0.0 - Tx.cast(work_B[out_row, j], "float32"), "float16")
+                                        const_real_reg[j] = twinv_real_s[out_row, j]
+                                        const_imag_reg[j] = twinv_imag_s[out_row, j]
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
                             phase_c2m_c = phase_c2m_c ^ 1
 
-                            # ======== Phase 6: Read new W.imag from TMEM ========
+                            # ======== Phase 6: Read new W.imag from TMEM -> registers ========
+                            # Then apply twinv multiply and write work_A/work_B (all in registers)
                             mma2consumer_bar.wait(0, phase_m2c)
                             phase_m2c = phase_m2c ^ 1
                             Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -804,28 +738,30 @@ def get_fftconv_kernel():
                             Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
 
                             with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                out_row = Tx.meta_var(warp_id * 16 + (lane_id % 16))
                                 if lane_id < 16:
-                                    # Save new W.imag (for twinv multiply)
+                                    # Save W.imag to registers, then immediately apply twinv multiply
                                     for j in Tx.serial(N1):
-                                        w_imag_s[out_row, j] = reg[j]
-
-                            Tx.cuda.warpgroup_sync(10)
-
-                            # Apply twinv multiply: W' = W * twinv (complex)
-                            # Then write work_A = W'.real, work_B = -W'.imag
-                            with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
-                                if lane_id < 16:
+                                        w_imag_reg[j] = reg[j]
+                                    # twinv multiply: compute new_imag first (uses old w_real), then new_real
                                     for j in Tx.serial(N1):
-                                        wr = Tx.meta_var(w_real_s[out_row, j])
-                                        wi = Tx.meta_var(w_imag_s[out_row, j])
-                                        tr = Tx.meta_var(Tx.cast(twinv_real_s[out_row, j], "float32"))
-                                        ti = Tx.meta_var(Tx.cast(twinv_imag_s[out_row, j], "float32"))
-                                        new_real = Tx.meta_var(wr * tr - wi * ti)
-                                        new_imag = Tx.meta_var(wr * ti + wi * tr)
-                                        work_A[out_row, j] = Tx.cast(new_real, "float16")
-                                        work_B[out_row, j] = Tx.cast(0.0 - new_imag, "float16")
+                                        tr = Tx.meta_var(Tx.cast(const_real_reg[j], "float32"))
+                                        ti = Tx.meta_var(Tx.cast(const_imag_reg[j], "float32"))
+                                        shuf_real_buf[j % 32] = w_real_reg[j] * ti + w_imag_reg[j] * tr
+                                        w_real_reg[j] = w_real_reg[j] * tr - w_imag_reg[j] * ti
+                                        w_imag_reg[j] = shuf_real_buf[j % 32]
+                                    # Lanes 0-15 write columns 0-31
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, j] = Tx.cast(w_real_reg[j], "float16")
+                                        work_B[out_row, j] = Tx.cast(0.0 - w_imag_reg[j], "float16")
+                                # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
+                                for j in Tx.serial(32):
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_real_reg[32 + j], 16, 32, 32)
+                                    shuf_imag_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, w_imag_reg[32 + j], 16, 32, 32)
+                                if lane_id >= 16:
+                                    for j in Tx.serial(32):
+                                        work_A[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
+                                        work_B[out_row, 32 + j] = Tx.cast(0.0 - shuf_imag_buf[j], "float16")
 
                             Tx.ptx.tcgen05.fence.before_thread_sync()
                             consumer2mma_bar.arrive(0)
@@ -840,10 +776,16 @@ def get_fftconv_kernel():
 
                             # Write to D_out and TMA store
                             with Tx.thread():
-                                out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                out_row = Tx.meta_var(warp_id * 16 + (lane_id % 16))
                                 if lane_id < 16:
-                                    for j in Tx.serial(N1):
+                                    for j in Tx.serial(32):
                                         D_out[out_row, j] = Tx.cast(reg[j], "float16")
+                                # Shuffle columns 32-63 from lanes 0-15 to lanes 16-31
+                                for j in Tx.serial(32):
+                                    shuf_real_buf[j] = Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, reg[32 + j], 16, 32, 32)
+                                if lane_id >= 16:
+                                    for j in Tx.serial(32):
+                                        D_out[out_row, 32 + j] = Tx.cast(shuf_real_buf[j], "float16")
 
                             Tx.ptx.fence.proxy_async("shared::cta")
                             Tx.cuda.warpgroup_sync(10)

@@ -38,6 +38,7 @@ import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
 from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 
 # Kernel constants
@@ -68,26 +69,6 @@ F128_BYTES = 16
 N_COLS = 64  # TMEM columns
 TMEM_LD_SIZE = 64  # read full row at once
 
-# SMEM budget (bytes):
-#   barriers~1K + Q[2,64,64]*f16=16K + K[2,64,64]*f16=16K + V[2,64,64]*f16=16K
-#   + work[64,64]*f16=8K + D_out[64,64]*f16=8K
-#   + A[2,64]*f32=512 + kv_f32[64,64]*f32=16K + acs[64]*f32=256
-#   Total ~82K
-# NOTE: Swizzled buffers (Q,K,V,work,D_out) must be 1024-byte aligned for
-# SwizzleLayout(3,3,3) to work correctly with TMA. Non-swizzled buffers
-# (A, kv_f32, acs) are placed AFTER swizzled buffers to preserve alignment.
-SMEM_SIZE = (
-    1024  # barriers + alignment
-    + PIPE_DEPTH * CHUNK * D_MODEL * F16_BYTES  # Q (swizzled)
-    + PIPE_DEPTH * CHUNK * D_MODEL * F16_BYTES  # K (swizzled)
-    + PIPE_DEPTH * CHUNK * D_MODEL * F16_BYTES  # V (swizzled)
-    + CHUNK * D_MODEL * F16_BYTES  # work_smem (swizzled)
-    + CHUNK * D_MODEL * F16_BYTES  # D_out (swizzled)
-    + PIPE_DEPTH * CHUNK * F32_BYTES  # A
-    + CHUNK * D_MODEL * F32_BYTES  # kv_f32
-    + CHUNK * F32_BYTES  # acs
-)
-assert SMEM_SIZE <= 232448
 
 
 def ceildiv(a, b):
@@ -130,61 +111,6 @@ def naive_mamba2(q, k, v, a):
         kv = kv + torch.matmul(k_dec.transpose(-2, -1), vc)
 
     return o.reshape(BH, L, Dim).half()
-
-
-# ---- Barrier classes (following test_hgemm_1consumer pattern) ----
-
-@Tx.meta_class
-class Barriers:
-    """Base barrier class for mbarrier-based synchronization."""
-    def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
-        self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
-            (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        )
-        self.init_phase = 0 if is_p2c else 1
-        self.pipe_depth = pipe_depth
-
-    @Tx.inline
-    def init(self, threads_num_wait):
-        with Tx.thread()[0:1]:
-            for i in Tx.serial(self.pipe_depth):
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
-
-    @Tx.inline
-    def wait(self, idx, phase):
-        Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
-
-
-class BarTMA2MMA(Barriers):
-    """TMA load done -> MMA can start reading SMEM."""
-    @Tx.inline
-    def arrive(self, idx, expected_bytes):
-        Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
-
-    @Tx.inline
-    def arrive_only(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
-
-
-class BarMMA2TMA(Barriers):
-    """MMA done with SMEM -> TMA can overwrite."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarMMA2Consumer(Barriers):
-    """MMA done -> consumer can read TMEM."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarConsumer2MMA(Barriers):
-    """Consumer done -> MMA can proceed."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
 # ---- Layouts ----
@@ -234,44 +160,30 @@ def get_mamba2_kernel():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
-                # ---- Shared memory allocation ----
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                # ---- Shared memory allocation via PoolAllocator ----
+                pool = Tx.meta_var(Tx.PoolAllocator())
+                tmem_addr = Tx.decl_scalar("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
+                pool.move_base_to(8)
 
-                # SMEM layout: swizzled buffers first (1024B aligned), then non-swizzled.
-                # All swizzled buffers with SwizzleLayout(3,3,3) require 1024-byte
-                # alignment for correct TMA swizzle interpretation.
-                base_off = 1024 // F16_BYTES  # skip barrier region (1024 bytes)
-                Q_smem = Tx.decl_buffer((PIPE_DEPTH, CHUNK, D_MODEL), "float16", buf.data,
-                                        layout=Q_layout, elem_offset=base_off)
-                K_smem = Tx.decl_buffer((PIPE_DEPTH, CHUNK, D_MODEL), "float16", buf.data,
-                                        layout=K_layout,
-                                        elem_offset=base_off + PIPE_DEPTH * CHUNK * D_MODEL)
-                V_smem = Tx.decl_buffer((PIPE_DEPTH, CHUNK, D_MODEL), "float16", buf.data,
-                                        layout=V_layout,
-                                        elem_offset=base_off + 2 * PIPE_DEPTH * CHUNK * D_MODEL)
-                # Work buffer: f16 swizzled (MMA A operand, reused across phases)
-                swizzled_end = 1024 + 3 * PIPE_DEPTH * CHUNK * D_MODEL * F16_BYTES  # 50176
-                work_off = swizzled_end // F16_BYTES  # 25088
-                work_smem = Tx.decl_buffer((CHUNK, D_MODEL), "float16", buf.data,
-                                           layout=work_layout, elem_offset=work_off)
-                # Output staging buffer: f16 swizzled
-                d_out_off = work_off + CHUNK * D_MODEL  # 29184
-                D_out_smem = Tx.decl_buffer((CHUNK, D_MODEL), "float16", buf.data,
-                                            layout=D_out_layout, elem_offset=d_out_off)
-                # --- Non-swizzled buffers (after all swizzled buffers) ---
-                # A is f32, not swizzled (vector, not MMA operand)
-                nonswizzled_byte = (d_out_off + CHUNK * D_MODEL) * F16_BYTES  # 66560
-                A_smem = Tx.decl_buffer((PIPE_DEPTH, CHUNK), "float32", buf.data,
-                                        elem_offset=nonswizzled_byte // F32_BYTES)
-                # KV state: f32, persists across chunks
-                kv_f32_off = nonswizzled_byte // F32_BYTES + PIPE_DEPTH * CHUNK
-                kv_f32 = Tx.decl_buffer((D_MODEL, D_MODEL), "float32", buf.data,
-                                        elem_offset=kv_f32_off)
-                # Cumsum buffer
-                acs_off = kv_f32_off + D_MODEL * D_MODEL
-                acs_smem = Tx.decl_buffer((CHUNK,), "float32", buf.data,
-                                          elem_offset=acs_off)
+                # Barriers
+                tma2mma_bar = TMABar(pool, PIPE_DEPTH)
+                mma2tma_bar = TCGen05Bar(pool, PIPE_DEPTH)
+                mma2consumer_bar = TCGen05Bar(pool, 1)
+                consumer2mma_bar = MBarrier(pool, 1)
+                workitem_sync_bar = TMABar(pool, 1)
+
+                # Swizzled buffers require 1024-byte alignment
+                pool.move_base_to(1024)
+                Q_smem = pool.alloc((PIPE_DEPTH, CHUNK, D_MODEL), "float16", layout=Q_layout)
+                K_smem = pool.alloc((PIPE_DEPTH, CHUNK, D_MODEL), "float16", layout=K_layout)
+                V_smem = pool.alloc((PIPE_DEPTH, CHUNK, D_MODEL), "float16", layout=V_layout)
+                work_smem = pool.alloc((CHUNK, D_MODEL), "float16", layout=work_layout)
+                D_out_smem = pool.alloc((CHUNK, D_MODEL), "float16", layout=D_out_layout)
+                # Non-swizzled buffers
+                A_smem = pool.alloc((PIPE_DEPTH, CHUNK), "float32")
+                kv_f32 = pool.alloc((D_MODEL, D_MODEL), "float32")
+                acs_smem = pool.alloc((CHUNK,), "float32")
+                pool.commit()
 
                 # ---- Local variables ----
                 descI: Tx.uint32
@@ -279,23 +191,14 @@ def get_mamba2_kernel():
                 descB: Tx.uint64
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
 
-                # ---- Barrier setup ----
-                # 4 barrier types: tma2mma, mma2tma, mma2consumer, consumer2mma
-                tma2mma_bar = BarTMA2MMA(buf.data, 4, PIPE_DEPTH, True)
-                mma2tma_bar = BarMMA2TMA(buf.data, 4 + PIPE_DEPTH, PIPE_DEPTH, False)
-                mma2consumer_bar = BarMMA2Consumer(buf.data, 4 + 2 * PIPE_DEPTH, 1, True)
-                consumer2mma_bar = BarConsumer2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 1, 1, True)
+                # ---- Barrier init ----
                 tma2mma_bar.init(1)
                 mma2tma_bar.init(1)
                 mma2consumer_bar.init(1)
                 consumer2mma_bar.init(128)  # full consumer WG
-                # MMA→TMA direction: MMA arrives after finishing a work item,
-                # TMA waits before starting the next. Uses BarTMA2MMA (is_p2c=True)
-                # so that init_phase=0 and the first wait blocks until an arrive.
-                workitem_sync_bar = BarTMA2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 2, 1, True)
                 workitem_sync_bar.init(1)
 
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
@@ -346,7 +249,7 @@ def get_mamba2_kernel():
                                         # Wait for MMA to release this SMEM slot
                                         # Skip wait for first PIPE_DEPTH loads (pipeline priming)
                                         if cid_tma >= PIPE_DEPTH:
-                                            mma2tma_bar.wait(tic, phase[0])
+                                            mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V, A for this chunk
                                         Tx.copy_async(Q_smem[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)
                                         Tx.copy_async(K_smem[tic, :, :], k_g[wid_tma, q_row : q_row + CHUNK, 0 : D_MODEL], **tma_copy)
@@ -407,7 +310,7 @@ def get_mamba2_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI, False, CTA_GROUP, ki > 0)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
                                         consumer2mma_bar.wait(0, phase_c2m)
@@ -426,7 +329,7 @@ def get_mamba2_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -445,7 +348,7 @@ def get_mamba2_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 3
                                         consumer2mma_bar.wait(0, phase_c2m)
@@ -464,8 +367,8 @@ def get_mamba2_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_tb, False, CTA_GROUP, ki > 0)
-                                        mma2tma_bar.arrive(tic)  # release SMEM slot
-                                        mma2consumer_bar.arrive(0)
+                                        mma2tma_bar.arrive(tic, CTA_GROUP, 1)  # release SMEM slot
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 4
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -478,7 +381,7 @@ def get_mamba2_kernel():
                                         phase[0] = phase[0] ^ 1
                                     cid_mma = cid_mma + 1
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
-                                    workitem_sync_bar.arrive_only(0)
+                                    Tx.ptx.mbarrier.arrive(workitem_sync_bar.ptr_to([0]))
                                 wid_mma = wid_mma + SM_COUNT
 
                     # === Consumer warpgroup (WG0) ===
@@ -629,11 +532,6 @@ def get_mamba2_kernel():
                                         for j in Tx.serial(D_MODEL):
                                             work_smem[j, out_row] = Tx.cast(kv_row[j], "float16")
 
-                                        # Decay kv_state: kv_f32 *= exp(acs[-1])
-                                        total_decay = Tx.meta_var(Tx.exp(last_acs))
-                                        for j in Tx.serial(D_MODEL):
-                                            kv_f32[out_row, j] = kv_f32[out_row, j] * total_decay
-
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
@@ -648,6 +546,12 @@ def get_mamba2_kernel():
                                 with Tx.thread():
                                     out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                     if lane_id < 16:
+                                        # Decay kv_state before adding update: kv_f32 *= exp(acs[-1])
+                                        # (moved from Phase 3 to balance consumer work)
+                                        last_acs = Tx.meta_var(acs_smem[CHUNK - 1])
+                                        total_decay = Tx.meta_var(Tx.exp(last_acs))
+                                        for j in Tx.serial(D_MODEL):
+                                            kv_f32[out_row, j] = kv_f32[out_row, j] * total_decay
                                         # kv_f32 += kv_update
                                         for j in Tx.serial(D_MODEL):
                                             kv_f32[out_row, j] = kv_f32[out_row, j] + reg[j]

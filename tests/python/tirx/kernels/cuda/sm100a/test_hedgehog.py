@@ -18,25 +18,32 @@
 """Hedgehog attention kernel with SM100 warp specialization.
 
 Warp-specialized rewrite using tcgen05 MMA, TMEM, and producer/consumer
-warp separation. 6 MMA phases per chunk combining sliding window attention
+warp separation. 12 MMA phases per chunk combining sliding window attention
 (Q@K^T with causal mask + softmax) and linear attention (featurized Q @ kv_state),
-with per-chunk KV state updates.
+with per-chunk KV state updates. Linear attention and state updates are offloaded
+to MMA phases rather than scalar consumer loops.
 
 Architecture:
   cta_group=1 (single CTA, no clustering)
   MMA_M=64, MMA_N=64, MMA_K=16 (f16)
   WG1 (Producer+MMA): warp 3 = TMA, warps 0-1 = MMA
-  WG0 (Consumer): TMEM read, softmax, featurize, linear attention, state update
+  WG0 (Consumer): TMEM read, softmax, featurize, operand staging
 
-6 MMA Phases per chunk:
+12 MMA Phases per chunk:
   Phase 1: Q@K_prev^T (transB=False, cross-buffer lo+hi)
   Phase 2: Q@K_curr^T (transB=False, cross-buffer lo+hi)
   Phase 3: att@V_prev_lo + att@V_curr_lo (transB=True, cross-buffer work_a/work_b)
   Phase 4: att@V_prev_hi + att@V_curr_hi (transB=True, cross-buffer)
   Phase 5: Q@qmap (transB=True, cross-buffer lo+hi)
-  Phase 6: K_prev@kmap (transB=True, cross-buffer lo+hi)
+  Phase 6: feat_q_pos@kv[0:64,0:64] + feat_q_neg@kv[64:128,0:64] -> o_lo_add
+  Phase 7: feat_q_pos@kv[0:64,64:128] + feat_q_neg@kv[64:128,64:128] -> o_hi_add
+  Phase 8: K_prev@kmap (transB=True, cross-buffer lo+hi)
+  Phase 9: feat_k_pos^T@V_prev_lo (transA=True, transB=True) -> kv_state[0:64,0:64] update
+  Phase 10: feat_k_pos^T@V_prev_hi (transA=True, transB=True) -> kv_state[0:64,64:128] update
+  Phase 11: feat_k_neg^T@V_prev_lo (transA=True, transB=True) -> kv_state[64:128,0:64] update
+  Phase 12: feat_k_neg^T@V_prev_hi (transA=True, transB=True) -> kv_state[64:128,64:128] update
 
-6 phases = even -> phase_c2m does NOT flip between chunks.
+12 phases = even -> phase_c2m does NOT flip between chunks.
 """
 
 import math
@@ -50,6 +57,7 @@ from tvm.ir import PointerType, PrimType
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol, S
 from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.pipeline import MBarrier, TMABar, TCGen05Bar
 
 # Constants
 CHUNK = 64
@@ -84,33 +92,8 @@ TMEM_LD_SIZE = 64
 
 TEMP = 0.08838834764  # 1/sqrt(128)
 
-# SMEM budget (bytes):
-#   barriers=1024
-#   Q_lo[2,64,64]*f16=16K + Q_hi[2,64,64]*f16=16K
-#   K_lo[2,64,64]*f16=16K + K_hi[2,64,64]*f16=16K
-#   V_lo[2,64,64]*f16=16K + V_hi[2,64,64]*f16=16K
-#   work_a[64,64]*f16=8K + work_b[64,64]*f16=8K  (reused for feat_k pos/neg)
-#   D_out_lo[64,64]*f16=8K + D_out_hi[64,64]*f16=8K
-#   qmap_lo[64,64]*f16=8K + qmap_hi[64,64]*f16=8K
-#   kmap_lo[64,64]*f16=8K + kmap_hi[64,64]*f16=8K
-#   kv_state[128,128]*f32=64K + k_cumsum[128]*f32=512
-#   alphas_s[1]*f32=4 + betas_s[1]*f32=4
-#   Total ~193K
-HALF_BUF = PIPE_DEPTH * CHUNK * HALF  # 8192 f16 elems = 16KB
+# Memory element counts (used in TMA byte calculations and aliases)
 HALF_SINGLE = CHUNK * HALF             # 4096 f16 elems = 8KB
-SMEM_SIZE = (
-    1024  # barriers + alignment
-    + 2 * PIPE_DEPTH * CHUNK * HALF * F16_BYTES  # Q_lo + Q_hi (32K)
-    + 2 * PIPE_DEPTH * CHUNK * HALF * F16_BYTES  # K_lo + K_hi (32K)
-    + 2 * PIPE_DEPTH * CHUNK * HALF * F16_BYTES  # V_lo + V_hi (32K)
-    + 2 * CHUNK * HALF * F16_BYTES               # work_a + work_b (16K)
-    + 2 * CHUNK * HALF * F16_BYTES               # D_out_lo + D_out_hi (16K)
-    + 4 * CHUNK * HALF * F16_BYTES               # qmap_lo/hi + kmap_lo/hi (32K)
-    + ATTN_F * ATTN_D * F32_BYTES                # kv_state (64K)
-    + ATTN_F * F32_BYTES                         # k_cumsum (512)
-    + 2 * F32_BYTES                              # alphas_s + betas_s
-)
-assert SMEM_SIZE <= 232448, f"SMEM_SIZE={SMEM_SIZE} exceeds 232448"
 
 
 def prepare_data(B, H, N):
@@ -173,61 +156,6 @@ def naive_hedgehog(q, k, v, qmap, kmap, alphas, betas):
     return out, kv_state, k_state
 
 
-# ---- Barrier classes (following linear_attention/mamba2/BASED pattern) ----
-
-@Tx.meta_class
-class Barriers:
-    """Base barrier class for mbarrier-based synchronization."""
-    def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
-        self.mbar: tvm.tir.Buffer = Tx.decl_buffer(
-            (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        )
-        self.init_phase = 0 if is_p2c else 1
-        self.pipe_depth = pipe_depth
-
-    @Tx.inline
-    def init(self, threads_num_wait):
-        with Tx.thread()[0:1]:
-            for i in Tx.serial(self.pipe_depth):
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
-
-    @Tx.inline
-    def wait(self, idx, phase):
-        Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
-
-
-class BarTMA2MMA(Barriers):
-    """TMA load done -> MMA can start reading SMEM."""
-    @Tx.inline
-    def arrive(self, idx, expected_bytes):
-        Tx.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
-
-    @Tx.inline
-    def arrive_only(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
-
-
-class BarMMA2TMA(Barriers):
-    """MMA done with SMEM -> TMA can overwrite."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarMMA2Consumer(Barriers):
-    """MMA done -> consumer can read TMEM."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarConsumer2MMA(Barriers):
-    """Consumer done -> MMA can proceed."""
-    @Tx.inline
-    def arrive(self, idx):
-        Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
-
-
 # ---- Layouts ----
 # All buffers use SWIZZLE_128B (3) with 64 f16 = 128B inner dimension.
 
@@ -238,6 +166,11 @@ half_pipe_layout = Tx.ComposeLayout(
 half_layout = Tx.ComposeLayout(
     Tx.SwizzleLayout(SWIZZLE, SWIZZLE, SWIZZLE, swizzle_inner=True),
     Tx.TileLayout(S[(CHUNK, HALF) : (HALF, 1)]),
+)
+# kv_state_f16: [128, 64] f16 — MMA operand for feat_q @ kv_state
+kvs_f16_layout = Tx.ComposeLayout(
+    Tx.SwizzleLayout(SWIZZLE, SWIZZLE, SWIZZLE, swizzle_inner=True),
+    Tx.TileLayout(S[(ATTN_F, HALF) : (HALF, 1)]),
 )
 
 
@@ -273,69 +206,51 @@ def get_hedgehog_kernel():
             lane_id = Tx.thread_id([32], parent="warp")
 
             with Tx.cta():
-                # ---- Shared memory allocation ----
-                buf = Tx.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                tmem_addr = Tx.decl_scalar("uint32", buf.data, scope="shared.dyn", elem_offset=0)
+                # ---- Shared memory via PoolAllocator ----
+                pool = Tx.meta_var(Tx.PoolAllocator())
+                tmem_addr = Tx.decl_scalar("uint32", pool.ptr, scope="shared.dyn", elem_offset=0)
+                pool.move_base_to(8)
 
-                # SMEM layout: swizzled buffers first, then non-swizzled.
-                # Offsets in f16 elements.
-                q_lo_off = 1024 // F16_BYTES  # 512
-                Q_lo = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=q_lo_off)
-                q_hi_off = q_lo_off + HALF_BUF  # 512 + 8192 = 8704
-                Q_hi = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=q_hi_off)
-                k_lo_off = q_hi_off + HALF_BUF  # 16896
-                K_lo = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=k_lo_off)
-                k_hi_off = k_lo_off + HALF_BUF  # 25088
-                K_hi = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=k_hi_off)
-                v_lo_off = k_hi_off + HALF_BUF  # 33280
-                V_lo = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=v_lo_off)
-                v_hi_off = v_lo_off + HALF_BUF  # 41472
-                V_hi = Tx.decl_buffer((PIPE_DEPTH, CHUNK, HALF), "float16", buf.data,
-                                      layout=half_pipe_layout, elem_offset=v_hi_off)
-                work_a_off = v_hi_off + HALF_BUF  # 49664
-                work_a = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                        layout=half_layout, elem_offset=work_a_off)
-                work_b_off = work_a_off + HALF_SINGLE  # 53760
-                work_b = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                        layout=half_layout, elem_offset=work_b_off)
-                d_out_lo_off = work_b_off + HALF_SINGLE  # 57856
-                D_out_lo = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                          layout=half_layout, elem_offset=d_out_lo_off)
-                d_out_hi_off = d_out_lo_off + HALF_SINGLE  # 61952
-                D_out_hi = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                          layout=half_layout, elem_offset=d_out_hi_off)
-                qmap_lo_off = d_out_hi_off + HALF_SINGLE  # 66048
-                qmap_lo = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                         layout=half_layout, elem_offset=qmap_lo_off)
-                qmap_hi_off = qmap_lo_off + HALF_SINGLE  # 70144
-                qmap_hi = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                         layout=half_layout, elem_offset=qmap_hi_off)
-                kmap_lo_off = qmap_hi_off + HALF_SINGLE  # 74240
-                kmap_lo = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                         layout=half_layout, elem_offset=kmap_lo_off)
-                kmap_hi_off = kmap_lo_off + HALF_SINGLE  # 78336
-                kmap_hi = Tx.decl_buffer((CHUNK, HALF), "float16", buf.data,
-                                         layout=half_layout, elem_offset=kmap_hi_off)
+                # Barriers
+                tma2mma_bar = TMABar(pool, PIPE_DEPTH)
+                mma2tma_bar = TCGen05Bar(pool, PIPE_DEPTH)
+                mma2consumer_bar = TCGen05Bar(pool, 1)
+                consumer2mma_bar = MBarrier(pool, 1)
+                workitem_sync_bar = TMABar(pool, 1)
 
-                # --- Non-swizzled buffers ---
-                # Convert from f16 elem offset to byte offset, then to f32 elem offset
-                nonswizzled_byte = (kmap_hi_off + HALF_SINGLE) * F16_BYTES  # bytes
-                # kv_state: [128, 128] f32 = 65536 bytes
-                kvs_off_f32 = nonswizzled_byte // F32_BYTES
-                kv_state = Tx.decl_buffer((ATTN_F, ATTN_D), "float32", buf.data, elem_offset=kvs_off_f32)
-                # k_cumsum: [128] f32 = 512 bytes
-                k_cumsum_off_f32 = kvs_off_f32 + ATTN_F * ATTN_D
-                k_cumsum = Tx.decl_buffer((ATTN_F,), "float32", buf.data, elem_offset=k_cumsum_off_f32)
-                # alphas_s, betas_s: [1] f32 each = 8 bytes
-                alphas_off_f32 = k_cumsum_off_f32 + ATTN_F
-                alphas_s = Tx.decl_buffer((1,), "float32", buf.data, elem_offset=alphas_off_f32)
-                betas_s = Tx.decl_buffer((1,), "float32", buf.data, elem_offset=alphas_off_f32 + 1)
+                pool.move_base_to(1024)
+
+                # Swizzled data buffers
+                Q_lo = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                Q_hi = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                K_lo = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                K_hi = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                V_lo = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                V_hi = pool.alloc((PIPE_DEPTH, CHUNK, HALF), "float16", layout=half_pipe_layout)
+                work_a = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+                work_b = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+                qmap_lo = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+                qmap_hi = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+                kmap_lo = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+                kmap_hi = pool.alloc((CHUNK, HALF), "float16", layout=half_layout)
+
+                # kv_state_f16: swizzled staging buffer for MMA
+                # Also aliases D_out_lo [0:64,:] and D_out_hi [64:128,:] for TMA store
+                kvs_f16_byte_off = pool.offset
+                kv_state_f16 = pool.alloc((ATTN_F, HALF), "float16", layout=kvs_f16_layout)
+                D_out_lo = Tx.decl_buffer((CHUNK, HALF), "float16", pool.ptr,
+                                          layout=half_layout, byte_offset=kvs_f16_byte_off)
+                D_out_hi = Tx.decl_buffer((CHUNK, HALF), "float16", pool.ptr,
+                                          layout=half_layout, byte_offset=kvs_f16_byte_off + HALF_SINGLE * F16_BYTES)
+
+                # Non-swizzled buffers
+                kv_state = pool.alloc((ATTN_F, ATTN_D), "float32")
+                k_cumsum = pool.alloc((ATTN_F,), "float32")
+                alphas_s = pool.alloc((1,), "float32")
+                betas_s = pool.alloc((1,), "float32")
                 # feat_k reuses work_a (pos half) and work_b (neg half) — swizzled [64,64] f16
+
+                pool.commit()
 
                 # ---- Local variables ----
                 descI_nn: Tx.uint32  # transB=False
@@ -344,22 +259,14 @@ def get_hedgehog_kernel():
                 descB: Tx.uint64
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
 
-                # ---- Barrier setup ----
-                tma2mma_bar = BarTMA2MMA(buf.data, 4, PIPE_DEPTH, True)
-                mma2tma_bar = BarMMA2TMA(buf.data, 4 + PIPE_DEPTH, PIPE_DEPTH, False)
-                mma2consumer_bar = BarMMA2Consumer(buf.data, 4 + 2 * PIPE_DEPTH, 1, True)
-                consumer2mma_bar = BarConsumer2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 1, 1, True)
+                # ---- Barrier init ----
                 tma2mma_bar.init(1)
                 mma2tma_bar.init(1)
                 mma2consumer_bar.init(1)
                 consumer2mma_bar.init(128)  # full consumer WG
-                # MMA→TMA direction: MMA arrives after finishing a work item,
-                # TMA waits before starting the next. Uses BarTMA2MMA (is_p2c=True)
-                # so that init_phase=0 and the first wait blocks until an arrive.
-                workitem_sync_bar = BarTMA2MMA(buf.data, 4 + 2 * PIPE_DEPTH + 2, 1, True)
                 workitem_sync_bar.init(1)
 
-                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
+                ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma2mma_bar.ptr_to([0]), 0))
                 tma_finished = Tx.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # ---- TMEM allocation ----
@@ -415,7 +322,7 @@ def get_hedgehog_kernel():
                                         tma_copy = Tx.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([tic]), "cta_group": CTA_GROUP})
                                         # Wait for MMA to release this SMEM slot
                                         if cid_tma >= PIPE_DEPTH:
-                                            mma2tma_bar.wait(tic, phase[0])
+                                            mma2tma_bar.wait(tic, phase[0] ^ 1)
                                         # Load Q, K, V halves (6 TMA loads per chunk)
                                         Tx.copy_async(Q_lo[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, 0 : HALF], **tma_copy)
                                         Tx.copy_async(Q_hi[tic, :, :], q_g[wid_tma, q_row : q_row + CHUNK, HALF : ATTN_D], **tma_copy)
@@ -436,10 +343,15 @@ def get_hedgehog_kernel():
                             Tx.ptx.tcgen05.encode_instr_descriptor(
                                 Tx.address_of(descI_nn), "float32", "float16", "float16",
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, False, CTA_GROUP)
-                            # Instruction descriptor: transB=True for phases 3-6
+                            # Instruction descriptor: transB=True for phases 3-8, 6-7
                             Tx.ptx.tcgen05.encode_instr_descriptor(
                                 Tx.address_of(descI_nt), "float32", "float16", "float16",
                                 MMA_M * CTA_GROUP, MMA_N, MMA_K, False, True, CTA_GROUP)
+                            # Instruction descriptor: transA=True, transB=True for phases 9-12
+                            descI_tt: Tx.uint32
+                            Tx.ptx.tcgen05.encode_instr_descriptor(
+                                Tx.address_of(descI_tt), "float32", "float16", "float16",
+                                MMA_M * CTA_GROUP, MMA_N, MMA_K, True, True, CTA_GROUP)
 
                             phase[0] = 0
                             wid_mma = Tx.local_scalar("int32", "wid_mma")
@@ -480,7 +392,7 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nn, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 1
                                         consumer2mma_bar.wait(0, phase_c2m)
@@ -508,7 +420,7 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nn, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 2
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -535,7 +447,7 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nt, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 3
                                         consumer2mma_bar.wait(0, phase_c2m)
@@ -562,7 +474,7 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nt, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
                                         # Wait consumer done with Phase 4
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
@@ -589,13 +501,69 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nt, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 5
+                                        # Wait consumer done with Phase 5 (featurize, stage operands)
                                         consumer2mma_bar.wait(0, phase_c2m)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # == Phase 6: K_prev_lo@kmap_lo + K_prev_hi@kmap_hi (transB=True) ==
+                                        # == Phase 6: feat_q_pos@kv[0:64,0:64] + feat_q_neg@kv[64:128,0:64] -> o_lo_add ==
+                                        # A=work_a[64,64] (feat_q_pos), B=kv_state_f16[0:64,0:64]
+                                        for ki in Tx.unroll(HALF // MMA_K):
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.mma("float32", "float16", "float16",
+                                                Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                        # A=work_b[64,64] (feat_q_neg), B=kv_state_f16[64:128,0:64]
+                                        for ki in Tx.unroll(HALF // MMA_K):
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.mma("float32", "float16", "float16",
+                                                Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
+
+                                        # Wait consumer done with Phase 6 (add to o_lo, stage kv hi cols)
+                                        consumer2mma_bar.wait(0, phase_c2m ^ 1)
+                                        Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                        # == Phase 7: feat_q_pos@kv[0:64,64:128] + feat_q_neg@kv[64:128,64:128] -> o_hi_add ==
+                                        for ki in Tx.unroll(HALF // MMA_K):
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descA), work_a.ptr_to([0, ki * MMA_K]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([ki * MMA_K, 0]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.mma("float32", "float16", "float16",
+                                                Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
+                                                descA, descB, descI_nt, False, CTA_GROUP, ki > 0)
+                                        for ki in Tx.unroll(HALF // MMA_K):
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descA), work_b.ptr_to([0, ki * MMA_K]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                Tx.address_of(descB), kv_state_f16.ptr_to([HALF + ki * MMA_K, 0]),
+                                                MMA_LDO, MMA_SDO, SWIZZLE)
+                                            Tx.ptx.tcgen05.mma("float32", "float16", "float16",
+                                                Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
+                                                descA, descB, descI_nt, False, CTA_GROUP, True)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
+
+                                        # Wait consumer done with Phase 7 (add to o_hi, output, prepare)
+                                        consumer2mma_bar.wait(0, phase_c2m)
+                                        Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                        # == Phase 8: K_prev_lo@kmap_lo + K_prev_hi@kmap_hi (transB=True) ==
                                         for ki in Tx.unroll(HALF // MMA_K):
                                             Tx.ptx.tcgen05.encode_matrix_descriptor(
                                                 Tx.address_of(descA), K_lo.ptr_to([prev_tic, 0, ki * MMA_K]),
@@ -616,18 +584,52 @@ def get_hedgehog_kernel():
                                             Tx.ptx.tcgen05.mma("float32", "float16", "float16",
                                                 Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
                                                 descA, descB, descI_nt, False, CTA_GROUP, True)
-                                        mma2consumer_bar.arrive(0)
+                                        mma2consumer_bar.arrive(0, CTA_GROUP, 1)
 
-                                        # Wait consumer done with Phase 6 (state update reads V_prev)
+                                        # Wait consumer done with Phase 8 (featurize K, write feat_k to work_a/b)
                                         consumer2mma_bar.wait(0, phase_c2m ^ 1)
                                         Tx.ptx.tcgen05.fence.after_thread_sync()
-                                        # Release prev_tic SMEM slot. Skip chunk 0 since
-                                        # prev_tic=1 holds chunk 1's fresh TMA fill data.
-                                        # Phase tracking remains correct: TMA cid=2 waits for
-                                        # first completion of mma2tma[0] (from chunk 1's release).
+
+                                        # == Phases 9-12: feat_k^T @ V -> kv_state update ==
+                                        # work_a=feat_k_pos[64,64], work_b=feat_k_neg[64,64]
+                                        # V_lo[prev_tic,64,64], V_hi[prev_tic,64,64]
+                                        # Phase 9:  work_a^T @ V_lo -> update kv_state[0:64, 0:64]
+                                        # Phase 10: work_a^T @ V_hi -> update kv_state[0:64, 64:128]
+                                        # Phase 11: work_b^T @ V_lo -> update kv_state[64:128, 0:64]
+                                        # Phase 12: work_b^T @ V_hi -> update kv_state[64:128, 64:128]
+                                        for state_phase in Tx.unroll(4):
+                                            for ki in Tx.unroll(CHUNK // MMA_K):  # 4 K-iterations
+                                                # Select A operand: work_a (phases 0,1) or work_b (phases 2,3)
+                                                if state_phase < 2:
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                        Tx.address_of(descA), work_a.ptr_to([ki * MMA_K, 0]),
+                                                        MMA_LDO, MMA_SDO, SWIZZLE)
+                                                else:
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                        Tx.address_of(descA), work_b.ptr_to([ki * MMA_K, 0]),
+                                                        MMA_LDO, MMA_SDO, SWIZZLE)
+                                                # Select B operand: V_lo (phases 0,2) or V_hi (phases 1,3)
+                                                if state_phase % 2 == 0:
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                        Tx.address_of(descB), V_lo.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                        MMA_LDO, MMA_SDO, SWIZZLE)
+                                                else:
+                                                    Tx.ptx.tcgen05.encode_matrix_descriptor(
+                                                        Tx.address_of(descB), V_hi.ptr_to([prev_tic, ki * MMA_K, 0]),
+                                                        MMA_LDO, MMA_SDO, SWIZZLE)
+                                                Tx.ptx.tcgen05.mma("float32", "float16", "float16",
+                                                    Tx.cuda.get_tmem_addr(tmem_addr, 0, 0),
+                                                    descA, descB, descI_tt, False, CTA_GROUP, ki > 0)
+                                            mma2consumer_bar.arrive(0, CTA_GROUP, 1)
+                                            # Wait consumer done with this state update phase
+                                            consumer2mma_bar.wait(0, phase_c2m ^ (state_phase % 2))
+                                            Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                        # Release prev_tic SMEM slot after ALL phases that read it.
+                                        # Skip chunk 0 since prev_tic=1 holds chunk 1's fresh TMA data.
                                         if cid_mma > 0:
-                                            Tx.ptx.mbarrier.arrive(mma2tma_bar.mbar.ptr_to([prev_tic]))
-                                        # 6 phases = even -> do NOT flip phase_c2m
+                                            Tx.ptx.mbarrier.arrive(mma2tma_bar.ptr_to([prev_tic]))
+                                        # 12 phases = even -> do NOT flip phase_c2m
 
                                     if cid_mma % PIPE_DEPTH == PIPE_DEPTH - 1:
                                         phase[0] = phase[0] ^ 1
@@ -638,8 +640,8 @@ def get_hedgehog_kernel():
                                 # must be balanced across work items.
                                 with Tx.thread()[Tx.ptx.elect_sync()]:
                                     last_tic = Tx.meta_var((nc_mma - 1) % PIPE_DEPTH)
-                                    Tx.ptx.mbarrier.arrive(mma2tma_bar.mbar.ptr_to([last_tic]))
-                                    workitem_sync_bar.arrive_only(0)
+                                    Tx.ptx.mbarrier.arrive(mma2tma_bar.ptr_to([last_tic]))
+                                    Tx.ptx.mbarrier.arrive(workitem_sync_bar.ptr_to([0]))
                                 wid_mma = wid_mma + SM_COUNT
 
                     # === Consumer warpgroup (WG0) ===
@@ -814,7 +816,7 @@ def get_hedgehog_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 5: Read Q@qmap from TMEM -> featurize -> linear_o -> output ========
+                                # ======== Phase 5: Read Q@qmap from TMEM -> featurize -> stage operands ========
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -846,7 +848,7 @@ def get_hedgehog_kernel():
                                             # Negative softmax featurize
                                             sc[5] = -10000.0  # neg_max
                                             for j in Tx.serial(HALF):
-                                                sc[7] = 0.0 - proj_reg[j]  # reuse sc[7] as temp
+                                                sc[7] = 0.0 - proj_reg[j]
                                                 if sc[7] > sc[5]:
                                                     sc[5] = sc[7]
                                             sc[6] = 0.0  # neg_sum
@@ -856,24 +858,72 @@ def get_hedgehog_kernel():
                                             for j in Tx.serial(HALF):
                                                 feat_q_neg[j] = feat_q_neg[j] / sc[6] * alphas_s[0]
 
-                                            # Thread-level: feat_q @ kv_state -> add to o_lo/hi_reg
-                                            for f_idx in Tx.serial(HALF):
-                                                sc[7] = feat_q_pos[f_idx]  # cache fq value
-                                                for d in Tx.serial(HALF):
-                                                    o_lo_reg[d] = o_lo_reg[d] + sc[7] * kv_state[f_idx, d]
-                                                for d in Tx.serial(HALF):
-                                                    o_hi_reg[d] = o_hi_reg[d] + sc[7] * kv_state[f_idx, HALF + d]
-                                            for f_idx in Tx.serial(HALF):
-                                                sc[7] = feat_q_neg[f_idx]
-                                                for d in Tx.serial(HALF):
-                                                    o_lo_reg[d] = o_lo_reg[d] + sc[7] * kv_state[HALF + f_idx, d]
-                                                for d in Tx.serial(HALF):
-                                                    o_hi_reg[d] = o_hi_reg[d] + sc[7] * kv_state[HALF + f_idx, HALF + d]
-
                                             # l_norm = feat_q . k_cumsum
                                             for f_idx in Tx.serial(HALF):
                                                 sc[2] = sc[2] + feat_q_pos[f_idx] * k_cumsum[f_idx]
                                                 sc[2] = sc[2] + feat_q_neg[f_idx] * k_cumsum[HALF + f_idx]
+
+                                            # Write feat_q to work_a (pos) / work_b (neg) for MMA phases 6-7
+                                            for j in Tx.serial(HALF):
+                                                work_a[out_row, j] = Tx.cast(feat_q_pos[j], "float16")
+                                                work_b[out_row, j] = Tx.cast(feat_q_neg[j], "float16")
+
+                                # Stage kv_state[0:128, 0:64] as f16 for Phase 6 MMA (all threads cooperate)
+                                # 128*64=8192 elements / 128 threads = 64 per thread
+                                with Tx.thread():
+                                    tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
+                                    if cid_con > 0:
+                                        for ki in Tx.serial(64):
+                                            idx = Tx.meta_var(tid_flat * 64 + ki)
+                                            row = Tx.meta_var(idx // HALF)
+                                            col = Tx.meta_var(idx % HALF)
+                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, col], "float16")
+
+                                Tx.ptx.tcgen05.fence.before_thread_sync()
+                                consumer2mma_bar.arrive(0)
+                                phase_c2m_c = phase_c2m_c ^ 1
+
+                                # ======== Phase 6: Read feat_q@kv_lo from TMEM -> add to o_lo ========
+                                mma2consumer_bar.wait(0, phase_m2c)
+                                phase_m2c = phase_m2c ^ 1
+                                Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
+
+                                with Tx.thread():
+                                    out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                    if lane_id < 16:
+                                        if cid_con > 0:
+                                            for j in Tx.serial(HALF):
+                                                o_lo_reg[j] = o_lo_reg[j] + reg[j]
+
+                                # Stage kv_state[0:128, 64:128] as f16 for Phase 7 MMA
+                                with Tx.thread():
+                                    tid_flat = Tx.meta_var(warp_id * 32 + lane_id)
+                                    if cid_con > 0:
+                                        for ki in Tx.serial(64):
+                                            idx = Tx.meta_var(tid_flat * 64 + ki)
+                                            row = Tx.meta_var(idx // HALF)
+                                            col = Tx.meta_var(idx % HALF)
+                                            kv_state_f16[row, col] = Tx.cast(kv_state[row, HALF + col], "float16")
+
+                                Tx.ptx.tcgen05.fence.before_thread_sync()
+                                consumer2mma_bar.arrive(0)
+                                phase_c2m_c = phase_c2m_c ^ 1
+
+                                # ======== Phase 7: Read feat_q@kv_hi from TMEM -> add to o_hi -> normalize -> output ========
+                                mma2consumer_bar.wait(0, phase_m2c)
+                                phase_m2c = phase_m2c ^ 1
+                                Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
+
+                                with Tx.thread():
+                                    out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                    if lane_id < 16:
+                                        if cid_con > 0:
+                                            for j in Tx.serial(HALF):
+                                                o_hi_reg[j] = o_hi_reg[j] + reg[j]
 
                                         # Normalize: o /= max(s_norm + l_norm, 1e-6)
                                         sc[7] = att_prev_reg[0] + sc[2]  # denom = s_norm + l_norm
@@ -901,7 +951,7 @@ def get_hedgehog_kernel():
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
 
-                                # ======== Phase 6: Read K_prev@kmap from TMEM -> featurize -> state update ========
+                                # ======== Phase 8: Read K_prev@kmap from TMEM -> featurize -> write feat_k ========
                                 mma2consumer_bar.wait(0, phase_m2c)
                                 phase_m2c = phase_m2c ^ 1
                                 Tx.ptx.tcgen05.fence.after_thread_sync()
@@ -948,17 +998,14 @@ def get_hedgehog_kernel():
 
                                 Tx.cuda.warpgroup_sync(10)
 
-                                # k_cumsum update and kv_state update
+                                # k_cumsum update (light: column sum of feat_k)
                                 with Tx.thread():
                                     out_row = Tx.meta_var(warp_id * 16 + lane_id)
                                     if lane_id < 16:
                                         if cid_con > 0:
-                                            # k_cumsum update: k_cumsum[f] += colsum(feat_k)
-                                            # feat_k pos stored in work_a[64,64], neg in work_b[64,64]
-                                            # Each thread handles 2 columns of k_cumsum
                                             for col_off in Tx.serial(2):
                                                 f_col = Tx.meta_var(out_row * 2 + col_off)
-                                                sc[0] = 0.0  # col_sum
+                                                sc[0] = 0.0
                                                 if f_col < HALF:
                                                     for pos in Tx.serial(CHUNK):
                                                         sc[0] = sc[0] + Tx.cast(work_a[pos, f_col], "float32")
@@ -967,30 +1014,39 @@ def get_hedgehog_kernel():
                                                         sc[0] = sc[0] + Tx.cast(work_b[pos, f_col - HALF], "float32")
                                                 k_cumsum[f_col] = k_cumsum[f_col] + sc[0]
 
-                                            # kv_state update: kv_state[my_row, d] += sum_pos feat_k[pos, my_row] * V_prev[pos, d]
-                                            # Each thread owns 2 rows of kv_state
-                                            # my_row < 64 -> read from work_a (pos half)
-                                            # my_row >= 64 -> read from work_b (neg half)
-                                            for row_off in Tx.unroll(2):
-                                                my_row = Tx.meta_var(out_row * 2 + row_off)
-                                                if my_row < HALF:
-                                                    for pos in Tx.serial(CHUNK):
-                                                        sc[0] = Tx.cast(work_a[pos, my_row], "float32")
-                                                        for d in Tx.serial(HALF):
-                                                            kv_state[my_row, d] = kv_state[my_row, d] + sc[0] * Tx.cast(V_lo[prev_tic_c, pos, d], "float32")
-                                                        for d in Tx.serial(HALF):
-                                                            kv_state[my_row, HALF + d] = kv_state[my_row, HALF + d] + sc[0] * Tx.cast(V_hi[prev_tic_c, pos, d], "float32")
-                                                else:
-                                                    for pos in Tx.serial(CHUNK):
-                                                        sc[0] = Tx.cast(work_b[pos, my_row - HALF], "float32")
-                                                        for d in Tx.serial(HALF):
-                                                            kv_state[my_row, d] = kv_state[my_row, d] + sc[0] * Tx.cast(V_lo[prev_tic_c, pos, d], "float32")
-                                                        for d in Tx.serial(HALF):
-                                                            kv_state[my_row, HALF + d] = kv_state[my_row, HALF + d] + sc[0] * Tx.cast(V_hi[prev_tic_c, pos, d], "float32")
-
                                 Tx.ptx.tcgen05.fence.before_thread_sync()
                                 consumer2mma_bar.arrive(0)
                                 phase_c2m_c = phase_c2m_c ^ 1
+
+                                # ======== Phases 9-12: Read feat_k^T@V from TMEM -> update kv_state ========
+                                # Phase 9:  kv_state[0:64, 0:64] += TMEM
+                                # Phase 10: kv_state[0:64, 64:128] += TMEM
+                                # Phase 11: kv_state[64:128, 0:64] += TMEM
+                                # Phase 12: kv_state[64:128, 64:128] += TMEM
+                                for state_phase in Tx.serial(4):
+                                    mma2consumer_bar.wait(0, phase_m2c)
+                                    phase_m2c = phase_m2c ^ 1
+                                    Tx.ptx.tcgen05.fence.after_thread_sync()
+
+                                    Tx.copy(reg_wg[:, :], tmem[:, 0:TMEM_LD_SIZE])
+
+                                    with Tx.thread():
+                                        out_row = Tx.meta_var(warp_id * 16 + lane_id)
+                                        if lane_id < 16:
+                                            if cid_con > 0:
+                                                # Compute row/col offsets based on state_phase
+                                                # phase 0: row_base=0, col_base=0
+                                                # phase 1: row_base=0, col_base=64
+                                                # phase 2: row_base=64, col_base=0
+                                                # phase 3: row_base=64, col_base=64
+                                                row_base = Tx.meta_var((state_phase // 2) * HALF)
+                                                col_base = Tx.meta_var((state_phase % 2) * HALF)
+                                                for j in Tx.serial(HALF):
+                                                    kv_state[row_base + out_row, col_base + j] = kv_state[row_base + out_row, col_base + j] + reg[j]
+
+                                    Tx.ptx.tcgen05.fence.before_thread_sync()
+                                    consumer2mma_bar.arrive(0)
+                                    phase_c2m_c = phase_c2m_c ^ 1
 
                                 cid_con = cid_con + 1
 

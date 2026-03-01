@@ -1194,7 +1194,8 @@ def codegen_ptx_tcgen05_cp(
 
     multicast_str = f".{multicast}" if multicast else ""
 
-    func_name = f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}_multicast_{multicast}"
+    multicast_safe = multicast.replace("::", "_")
+    func_name = f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}_multicast_{multicast_safe}"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t dst_addr, int row_offset, int col_offset, uint64_t src_desc) {{
     asm volatile(

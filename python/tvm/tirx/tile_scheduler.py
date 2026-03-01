@@ -462,11 +462,13 @@ class GroupMajor3D(BaseTileScheduler):
         if isinstance(m_tiles, int):
             self._GROUPS = m_tiles // group_rows
             self._FINAL_ROWS = m_tiles - self._GROUPS * group_rows
+            self._SAFE_FINAL_ROWS = max(self._FINAL_ROWS, 1)
             self._GROUP_SIZE = group_rows * n_tiles * k_tiles
             self._TOTAL = m_tiles * n_tiles * k_tiles
         else:
             self._GROUPS = Tx.truncdiv(m_tiles, group_rows)
             self._FINAL_ROWS = m_tiles - self._GROUPS * group_rows
+            self._SAFE_FINAL_ROWS = Tx.max(self._FINAL_ROWS, 1)
             self._GROUP_SIZE = self._G * self._N * self._K
             self._TOTAL = m_tiles * n_tiles * k_tiles
 
@@ -486,10 +488,11 @@ class GroupMajor3D(BaseTileScheduler):
         full_k: Tx.let = Tx.floordiv(Tx.floormod(linear_idx, self._GROUP_SIZE), self._G * self._N)
 
         # tail formulas (relative to FULL_BOUND)
+        # Use _SAFE_FINAL_ROWS (max(FINAL_ROWS, 1)) to avoid divide-by-zero when there is no tail
         rem: Tx.let = linear_idx - self._FULL_BOUND
-        tail_m: Tx.let = self._GROUPS * self._G + Tx.floormod(rem, self._FINAL_ROWS)
-        tail_n: Tx.let = Tx.floordiv(rem, self._FINAL_ROWS) % self._N
-        tail_k: Tx.let = Tx.floordiv(rem, self._FINAL_ROWS * self._N)
+        tail_m: Tx.let = self._GROUPS * self._G + Tx.floormod(rem, self._SAFE_FINAL_ROWS)
+        tail_n: Tx.let = Tx.floordiv(rem, self._SAFE_FINAL_ROWS) % self._N
+        tail_k: Tx.let = Tx.floordiv(rem, self._SAFE_FINAL_ROWS * self._N)
 
         # choose phase
         if self._HAS_FULL & (linear_idx < self._FULL_BOUND):
