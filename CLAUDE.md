@@ -73,7 +73,7 @@ Key files:
 
 Build TVM (from project root):
 ```bash
-make -j$(nproc)
+mkdir -p build && cd build && cmake .. && make -j$(nproc)
 ```
 
 ## Testing
@@ -85,26 +85,27 @@ export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used --format=
 
 Run TIRX tests:
 ```bash
-pytest tests/python/tirx/ -n 16 -x
+pytest tests/python/tirx/ -n 16
 ```
 
 **Kernel performance**: When modifying anything that affects code generation (kernels, op schedules, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 
 ## Code Style
 
-- **Python**: Formatted with `black`, linted with `flake8` and `pylint`
-- **C++**: Formatted with `clang-format-15`, linted with `cpplint`
+All formatting and linting is managed via `pre-commit` (see `.pre-commit-config.yaml`):
 
-Check formatting (against `origin/main`):
+- **Python**: `ruff check --fix` (lint) + `ruff format` (format)
+- **C++**: `clang-format`
+- **Cython**: `cython-lint`
+
+Run on staged files:
 ```bash
-tests/lint/git-black.sh          # Python
-tests/lint/git-clang-format.sh   # C++
+pre-commit run
 ```
 
-Fix in-place:
+Run on all files:
 ```bash
-tests/lint/git-black.sh -i
-tests/lint/git-clang-format.sh -i
+pre-commit run --all-files
 ```
 
 ## Commits and Branches
