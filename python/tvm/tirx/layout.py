@@ -399,7 +399,9 @@ class Axis(Object):
 
     @staticmethod
     def get(name: str) -> "Axis":
-        """Get the axis object by name."""
+        """Get or create an axis by name. Unknown names are auto-registered."""
+        if name not in Axis.reg_dict:
+            Axis.reg_dict[name] = Axis._register_axis(name)
         return Axis.reg_dict[name]
 
     def is_thread(self) -> bool:

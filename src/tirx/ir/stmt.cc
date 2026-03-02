@@ -590,9 +590,6 @@ AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
   if (scope.empty()) {
     scope = "global";
   }
-  if (scope == "tmem") {
-    LOG(FATAL) << "ValueError: AllocBuffer is not allowed for storage scope `tmem`";
-  }
   if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
     TVM_FFI_ICHECK(buffer->allocated_addr.empty())
         << "ValueError: For `" << scope << "` scope, AllocBuffer does not accept `allocated_addr`";

@@ -441,10 +441,6 @@ ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
   if (scope.empty()) {
     scope = "global";
   }
-  if (scope == "tmem") {
-    TVM_FFI_THROW(InternalError)
-        << "ValueError: T.alloc_buffer is not allowed for storage scope `tmem`";
-  }
   if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
     TVM_FFI_ICHECK(allocated_addr.empty())
         << "ValueError: For `" << scope

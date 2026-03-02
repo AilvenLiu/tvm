@@ -94,8 +94,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 // Axis
 Axis Axis::Get(const ffi::String& name) {
   const AxisRegEntry* reg = AxisRegistry::Global()->Get(name);
-  TVM_FFI_ICHECK(reg != nullptr) << "Axis " << name << " is not registered";
-  return reg->axis_;
+  if (reg != nullptr) {
+    return reg->axis_;
+  }
+  // Auto-register unknown axes on the fly
+  return AxisRegEntry::RegisterOrGet(name).axis_;
 }
 
 template <typename ValueType>
