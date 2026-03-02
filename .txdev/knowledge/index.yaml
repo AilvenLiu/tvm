@@ -49,8 +49,10 @@ entries:
       - tma
       - layout
       - copy_async
+      - import
+      - refactor
     title: tma_shared_layout return type varies
-    updated: '2026-02-27'
+    updated: '2026-03-02'
   - created: '2026-02-28'
     id: KB-20260228-0001
     path: entries/KB-20260228-0001.yaml
@@ -166,6 +168,18 @@ entries:
       - testing
     title: Python 3.10 star unpacking not allowed in index expressions
     updated: '2026-03-01'
+  - created: '2026-03-02'
+    id: KB-20260302-015214-9e29ce
+    path: entries/KB-20260302-015214-9e29ce.yaml
+    scope:
+      - repo
+    tags:
+      - tma
+      - import
+      - op-schedule
+      - refactor
+    title: Canonical import paths for TMA utilities in op_schedule/cuda
+    updated: '2026-03-02'
 tags:
   api:
     - KB-20260301-0002
@@ -190,6 +204,9 @@ tags:
   git:
     - KB-20260228-0001
     - KB-20260228-0003
+  import:
+    - KB-20260227-0003
+    - KB-20260302-015214-9e29ce
   ir:
     - KB-20260301-0001
   kernel:
@@ -207,6 +224,7 @@ tags:
     - KB-20260301-0003
   op-schedule:
     - KB-20260301-0002
+    - KB-20260302-015214-9e29ce
   pre-commit:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -222,7 +240,9 @@ tags:
   recovery:
     - KB-20260228-0003
   refactor:
+    - KB-20260227-0003
     - KB-20260228-0004
+    - KB-20260302-015214-9e29ce
   rg:
     - KB-20260228-0004
   ruff:
@@ -248,6 +268,7 @@ tags:
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
+    - KB-20260302-015214-9e29ce
   tvm-ffi:
     - KB-20260228-0004
   tvmscript:

@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: |-
+    The tcgen05 UTCCP copy PR moved tma_shared_layout and SwizzleMode from copy_async.py to common.py but left 3 files still importing from the old path (test_gemm_async.py, test_layout.py, fp8_blockwise_gemm.py). This broke pytest collection for the tirx test suite.
+
+    Prevention checklist for symbol moves:
+    1. Before the move: grep -r 'from.*old_module import.*symbol' to find ALL import sites
+    2. Update every site in the same commit/PR as the move
+    3. Run pytest --collect-only on the full test suite to catch import-time failures
+    4. If copy_async.py still needs the symbol internally, import it from common.py — but do NOT rely on transitive re-exports for external consumers
+  summary: When moving symbols between modules, grep all import sites and update them in the same PR — missed sites cause
+    ImportError at test collection time.
+created: '2026-03-02'
+id: M-20260302-015214-5390a0
+scope:
+  - repo
+tags:
+  - refactor
+  - import
+  - op-schedule
+  - testing
+title: Incomplete import path updates after moving symbols between modules
+updated: '2026-03-02'

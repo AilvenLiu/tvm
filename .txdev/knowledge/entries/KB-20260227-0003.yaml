@@ -16,11 +16,20 @@
 # under the License.
 
 content:
-  details: "tma_shared_layout(dtype, swizzle_len, shape) returns different layout types:\n- ComposeLayout(SwizzleLayout, TileLayout)\
-    \ for shapes where swizzle applies to sub-dimensions\n  e.g., tma_shared_layout(\"float16\", 3, (8, 256)) or (3, 64, 256)\n\
-    - SwizzleLayout alone for shapes that match the swizzle granularity exactly\n  e.g., tma_shared_layout(\"float16\", 3,\
-    \ (128, 64))\n- TileLayout for swizzle_len=0\n  e.g., tma_shared_layout(\"float16\", 0, (8, 256))\n\nThe to_tile_layout()\
-    \ function in copy_async.py handles all three cases.\nWhen building expected IR, mirror this logic exactly.\n"
+  details: |
+    tma_shared_layout(dtype, swizzle_len, shape) returns different layout types:
+    - ComposeLayout(SwizzleLayout, TileLayout) for shapes where swizzle applies to sub-dimensions
+      e.g., tma_shared_layout("float16", 3, (8, 256)) or (3, 64, 256)
+    - SwizzleLayout alone for shapes that match the swizzle granularity exactly
+      e.g., tma_shared_layout("float16", 3, (128, 64))
+    - TileLayout for swizzle_len=0
+      e.g., tma_shared_layout("float16", 0, (8, 256))
+
+    CANONICAL IMPORT PATH (since 2026-03-01 refactor):
+      from tvm.tirx.op_schedule.cuda.common import tma_shared_layout, SwizzleMode
+
+    The function and SwizzleMode were moved from copy_async.py to common.py.
+    Do NOT import from copy_async — it no longer re-exports these symbols.
   summary: tma_shared_layout() returns ComposeLayout, SwizzleLayout, or TileLayout depending on shape and swizzle_len — always
     check isinstance before accessing .tile_layout.
 created: '2026-02-27'
@@ -31,5 +40,7 @@ tags:
   - tma
   - layout
   - copy_async
+  - import
+  - refactor
 title: tma_shared_layout return type varies
-updated: '2026-02-27'
+updated: '2026-03-02'

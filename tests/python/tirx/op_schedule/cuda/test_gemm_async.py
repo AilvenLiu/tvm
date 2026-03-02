@@ -33,7 +33,7 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as Tx
 from tvm.tir.layout import S, TCol, TileLayout, TLane
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout
+from tvm.tirx.op_schedule.cuda.common import tma_shared_layout
 from tvm.tirx.op_schedule.cuda.gemm_async import sf_tmem_layout
 
 # ---------------------------------------------------------------------------

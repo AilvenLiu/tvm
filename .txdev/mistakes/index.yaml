@@ -124,6 +124,18 @@ entries:
       - duplication
     title: Missing duplicate registration across files
     updated: '2026-03-01'
+  - created: '2026-03-02'
+    id: M-20260302-015214-5390a0
+    path: entries/M-20260302-015214-5390a0.yaml
+    scope:
+      - repo
+    tags:
+      - refactor
+      - import
+      - op-schedule
+      - testing
+    title: Incomplete import path updates after moving symbols between modules
+    updated: '2026-03-02'
 tags:
   api:
     - M-20260301-0002
@@ -143,11 +155,14 @@ tags:
   golden:
     - M-20260227-0002
     - M-20260227-0003
+  import:
+    - M-20260302-015214-5390a0
   lint:
     - M-20260228-0002
     - M-20260301-0001
   op-schedule:
     - M-20260301-0003
+    - M-20260302-015214-5390a0
   over-engineering:
     - M-20260301-0002
   pre-commit:
@@ -162,10 +177,12 @@ tags:
     - M-20260228-0001
   quoting:
     - M-20260228-0003
-  rebase:
-    - M-20260228-0002
   readability:
     - M-20260227-0002
+  rebase:
+    - M-20260228-0002
+  refactor:
+    - M-20260302-015214-5390a0
   registration:
     - M-20260301-0003
   requirements:
@@ -180,6 +197,7 @@ tags:
     - M-20260227-0001
     - M-20260227-0002
     - M-20260227-0003
+    - M-20260302-015214-5390a0
   tirx:
     - M-20260301-0002
   user-intent:
