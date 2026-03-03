@@ -342,6 +342,11 @@ class StmtVisitor(StmtFunctor):
                 self.visit_stmt(arg)
             elif isinstance(arg, tvm.tir.BufferRegion):
                 self.visit_buffer_region_(arg)
+        for value in op.config.values():
+            if isinstance(value, PrimExpr):
+                self.visit_expr(value)
+            elif isinstance(value, tvm.tir.Stmt):
+                self.visit_stmt(value)
 
     def visit_buffer_region_(self, op):
         """Visitor implementation for BufferRegion."""
@@ -771,11 +776,25 @@ class StmtMutator(StmtFunctor):
                 args_changed = True
             new_args.append(new_arg)
 
-        if not args_changed:
+        # Also mutate PrimExpr values in the config map
+        new_config = {}
+        config_changed = False
+        for key, value in op.config.items():
+            if isinstance(value, PrimExpr):
+                new_value = self.visit_expr(value)
+            elif isinstance(value, tvm.tir.Stmt):
+                new_value = self.visit_stmt(value)
+            else:
+                new_value = value
+            if new_value is not value:
+                config_changed = True
+            new_config[key] = new_value
+
+        if not args_changed and not config_changed:
             return op
 
         return tvm.tir.OpCall(
-            *new_args, op=op.op, workspace=op.workspace, config=op.config, dispatch=op.dispatch
+            *new_args, op=op.op, workspace=op.workspace, config=new_config, dispatch=op.dispatch
         )
 
     def visit_buffer_region_(self, op):

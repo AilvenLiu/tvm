@@ -1799,5 +1799,83 @@ def test_smem2tmem_async(task):
                 )
 
 
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_copy_tma_dynamic_cta_mask(dtype):
+    """Regression test for B00004: dynamic cta_mask expression in TMA multicast.
+
+    Verifies that a TIR expression (depending on Tx.cta_id) used as cta_mask in
+    copy_async compiles through the full TIRX pipeline without crashing.
+    Previously, lower_tirx_scope_ids replaced scope-ID vars via Substitute,
+    but Substitute didn't visit OpCall.config values, leaving stale var
+    references that caused MakePackedAPI to fail with:
+        "variables [...] are used, but are not passed in as API arguments"
+    """
+    CLUSTER_SIZE = 4
+    CTA_GROUP = 2
+    BLK_M = 64
+    BLK_K = 64
+    thread_cnt = 128
+
+    smem_shape = (BLK_M, BLK_K)
+    shared_layout = Tx.ComposeLayout(
+        Tx.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+        Tx.TileLayout(Tx.S[smem_shape : (BLK_K, 1)]),
+    )
+    smem_bytes = BLK_M * BLK_K * tvm.DataType(dtype).bits // 8
+    copy_bytes = smem_bytes
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def copy_async_dynamic_mask(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, [BLK_M, BLK_K], dtype)
+
+        with Tx.kernel():
+            cbx = Tx.cta_id([CLUSTER_SIZE], parent="cluster")
+            Tx.cta_id([CLUSTER_SIZE], parent="kernel")
+            Tx.thread_id([thread_cnt], parent="cta")
+
+            # Dynamic cta_mask: exact expression from B00004 bug report
+            cta_mask = Tx.meta_var(5 + 5 * cbx)
+
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = Tx.decl_buffer(
+                    smem_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout,
+                )
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+
+                with Tx.thread()[0:1]:
+                    Tx.ptx.mbarrier.init(mbar_ptr, 1)
+                Tx.ptx.fence.proxy_async("shared::cta")
+                Tx.cuda.cta_sync()
+
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(
+                        A_smem[:, :],
+                        A[:, :],
+                        dispatch="tma",
+                        mbar=mbar_ptr,
+                        cta_mask=cta_mask,
+                        cta_group=CTA_GROUP,
+                    )
+                    Tx.ptx.mbarrier.arrive.expect_tx(mbar_ptr, copy_bytes)
+
+                Tx.ptx.mbarrier.try_wait(mbar_ptr, 0)
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": copy_async_dynamic_mask})
+        # This compilation crashed before the B00004 fix with:
+        #   "variables [...] are used, but are not passed in as API arguments"
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+    # Verify multicast instruction was generated
+    src = mod.mod.imports[0].inspect_source()
+    assert "multicast" in src, "Expected multicast TMA instruction in generated code"
+
+
 if __name__ == "__main__":
     tvm.testing.main()

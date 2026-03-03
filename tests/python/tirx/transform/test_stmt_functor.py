@@ -1055,5 +1055,90 @@ def test_inheritance():
     assert str(mutator.log) == expected
 
 
+def test_op_call_config_visited():
+    """Test that OpCall config PrimExpr values are visited by StmtVisitor.
+
+    Regression test for B00004: TIR expressions in OpCall.config (e.g. cta_mask)
+    were not visited by StmtVisitor, causing Substitute to miss variable
+    references and leaving stale scope-ID vars that crash MakePackedAPI.
+    """
+
+    class VarCollector(StmtExprVisitor):
+        """Collects all Var names encountered during traversal."""
+
+        def __init__(self):
+            super().__init__()
+            self.vars = set()
+
+        def visit_var_(self, op):
+            self.vars.add(op.name)
+
+    @Tx.prim_func
+    def op_call_with_config(A: Tx.Buffer((10,), "int32"), B: Tx.Buffer((10,), "int32")):
+        with Tx.kernel():
+            Tx.add(A, B, 1.0)
+
+    op_call_stmt = op_call_with_config.body.body
+    assert isinstance(op_call_stmt, tir.stmt.OpCall)
+
+    # Manually construct an OpCall with a PrimExpr in config
+    config_var = Var("config_val", "int32")
+    new_config = dict(op_call_stmt.config)
+    new_config["cta_mask"] = config_var + tir.IntImm("int32", 5)
+    op_call_with_var = tir.stmt.OpCall(
+        *op_call_stmt.args,
+        op=op_call_stmt.op,
+        config=new_config,
+    )
+
+    collector = VarCollector()
+    collector.visit_stmt(op_call_with_var)
+    assert "config_val" in collector.vars, (
+        "StmtVisitor should visit PrimExpr values in OpCall.config"
+    )
+
+
+def test_op_call_config_mutated():
+    """Test that Substitute updates PrimExpr values inside OpCall.config.
+
+    Regression test for B00004: lower_tirx_scope_ids creates new let-vars for
+    scope IDs and uses Substitute to replace them in the body. Without visiting
+    OpCall.config, the config retains stale var references.
+    """
+    from tvm.tir.stmt_functor import substitute
+
+    @Tx.prim_func
+    def op_call_with_config(A: Tx.Buffer((10,), "int32"), B: Tx.Buffer((10,), "int32")):
+        with Tx.kernel():
+            Tx.add(A, B, 1.0)
+
+    op_call_stmt = op_call_with_config.body.body
+    assert isinstance(op_call_stmt, tir.stmt.OpCall)
+
+    # Create OpCall with a Var in the config
+    old_var = Var("old_scope_id", "int32")
+    new_var = Var("new_let_var", "int32")
+    new_config = dict(op_call_stmt.config)
+    new_config["cta_mask"] = old_var + tir.IntImm("int32", 5)
+    op_call_with_var = tir.stmt.OpCall(
+        *op_call_stmt.args,
+        op=op_call_stmt.op,
+        config=new_config,
+    )
+
+    # Substitute old_var -> new_var
+    result = substitute(op_call_with_var, {old_var: new_var})
+    assert isinstance(result, tir.stmt.OpCall)
+
+    # The config value should now reference new_var, not old_var
+    cta_mask_expr = result.config["cta_mask"]
+    assert isinstance(cta_mask_expr, tir.Add)
+    assert isinstance(cta_mask_expr.a, tir.Var)
+    assert cta_mask_expr.a.name == "new_let_var", (
+        f"Expected 'new_let_var' after substitution, got '{cta_mask_expr.a.name}'. "
+        "Substitute should visit PrimExpr values in OpCall.config."
+    )
+
+
 if __name__ == "__main__":
     tvm.testing.main()

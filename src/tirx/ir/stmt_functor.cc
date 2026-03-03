@@ -171,7 +171,7 @@ void StmtVisitor::VisitStmt_(const ExecScopeStmtNode* op) {
 }
 
 void StmtVisitor::VisitStmt_(const tirx::OpCallNode* op) {
-  VisitArray(op->args, [this](const ffi::Any& e) {
+  auto fvisit = [this](const ffi::Any& e) {
     if (e == nullptr) return;
     if (auto buffer_region = e.as<BufferRegion>()) {
       return;
@@ -180,7 +180,11 @@ void StmtVisitor::VisitStmt_(const tirx::OpCallNode* op) {
     } else if (auto stmt = e.as<Stmt>()) {
       this->VisitStmt(stmt.value());
     }
-  });
+  };
+  VisitArray(op->args, fvisit);
+  for (const auto& [key, value] : op->config) {
+    fvisit(value);
+  }
 }
 
 void StmtVisitor::VisitStmt_(const AllocBufferNode* op) { this->VisitStmt(op->body); }
@@ -705,11 +709,22 @@ Stmt StmtMutator::VisitStmt_(const tirx::OpCallNode* op) {
     return e;
   };
   ffi::Array<ffi::Any> args = Internal::MutateArray(this, op->args, fmutate);
-  if (args.same_as(op->args)) {
+  // Also mutate PrimExpr values in the config map
+  ffi::Map<ffi::String, ffi::Any> config(op->config.begin(), op->config.end());
+  bool config_changed = false;
+  for (const auto& [key, value] : op->config) {
+    ffi::Any new_value = fmutate(value);
+    if (!new_value.same_as(value)) {
+      config.Set(key, new_value);
+      config_changed = true;
+    }
+  }
+  if (args.same_as(op->args) && !config_changed) {
     return ffi::GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->args = std::move(args);
+    if (config_changed) n->config = std::move(config);
     return Stmt(n);
   }
 }
