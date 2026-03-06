@@ -33,6 +33,7 @@ from .common import (
     CopyInstType,
     SwizzleMode,
     copy_vec_load_impl,
+    exec_scope_ok,
     get_st_extent,
     get_swizzle_mode_from_layout,
     get_vec_len,
@@ -153,11 +154,6 @@ def _scope_allowed(
     return True, None
 
 
-def _exec_scope_ok(op_call: OpCall, sctx: ScheduleContext, expected_scopes: list[str]):
-    ok = sctx.exec_scope.name in expected_scopes
-    return (ok, None if ok else f"unsupported exec_scope {sctx.exec_scope.name}")
-
-
 def _is_valid_copy(op_call: OpCall, sctx: ScheduleContext):
     return (validate_copy_op(op_call, sctx), "validate_copy_op failed")
 
@@ -198,7 +194,7 @@ def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
     when=[
         predicate("validate_copy_op", _is_valid_copy),
         predicate("storage_scope", _scope_allowed),
-        predicate("exec_scope", _exec_scope_ok, expected_scopes=["cta", "thread"]),
+        predicate("exec_scope", exec_scope_ok, expected_scopes=["cta", "thread"]),
         predicate("vec_len", _vec_len_possible),
     ],
 )
@@ -214,7 +210,7 @@ def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     priority=0,
     when=[
         predicate("validate_copy_op", _is_valid_copy),
-        predicate("exec_scope", _exec_scope_ok, expected_scopes=["cta", "thread"]),
+        predicate("exec_scope", exec_scope_ok, expected_scopes=["cta", "thread"]),
     ],
 )
 def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
@@ -317,7 +313,7 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     priority=10,
     when=[
         predicate("validate_copy_op", _is_valid_copy),
-        predicate("exec_scope", _exec_scope_ok, expected_scopes=["warpgroup"]),
+        predicate("exec_scope", exec_scope_ok, expected_scopes=["warpgroup"]),
         predicate(
             "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
         ),
@@ -334,7 +330,7 @@ def copy_schedule_tmem_local(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc
     priority=10,
     when=[
         predicate("validate_copy_op", _is_valid_copy),
-        predicate("exec_scope", _exec_scope_ok, expected_scopes=["warpgroup"]),
+        predicate("exec_scope", exec_scope_ok, expected_scopes=["warpgroup"]),
         predicate(
             "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
         ),

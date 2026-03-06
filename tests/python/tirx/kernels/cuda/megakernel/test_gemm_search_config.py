@@ -205,7 +205,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
                         self.task_reduce(partial_global, output_global)
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(False)
-                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
                         self.task_impl_wait_etensor_init_complete(False)
                     else:
                         Tx.cuda.trap_when_assert_failed(False)
@@ -297,7 +297,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             for k_idx in range(mk.split_k):
                 central_queue.append((0, n_idx, k_idx, 0))
         for i in range(KernelConfig.SM_NUMBER):
-            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INITx.value))
+            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
         if mk.split_k > 1 and not mk.use_tma_reduce:
             m_split = min(batch_size, KernelConfig.SM_NUMBER // (mk.n // SplitKReduceTile.N_UNIT))
             m_tile = ceildiv(batch_size, m_split)

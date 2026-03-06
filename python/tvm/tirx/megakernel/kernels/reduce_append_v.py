@@ -75,12 +75,13 @@ class SplitKReduceAppendVTile(Tile):
                         (self.qo_heads + self.kv_heads + head_idx) * self.head_dim
                         + tx * self.VEC_SIZE_16
                     )
-                    for kv in Tx.unroll(self.VEC_SIZE_16):
-                        self.vec_32[kv] = 0.0
+
+                    Tx.fill(self.vec_32[:], 0.0)
                     for kt in Tx.serial(self.split_k_factor):
                         Tx.copy(
                             self.tmp[:],
                             partial[kt, batch_idx, qkv_stx : qkv_stx + self.VEC_SIZE_16],
+                            vec_len=self.VEC_SIZE_16,
                         )
                         for kv in Tx.unroll(self.VEC_SIZE_16):
                             self.vec_32[kv] += self.tmp[kv]
@@ -92,5 +93,6 @@ class SplitKReduceAppendVTile(Tile):
                     Tx.copy(
                         kv_cache[page_id, 1, head_idx, offset, stx : stx + self.VEC_SIZE_16],
                         self.vec_16[:],
+                        vec_len=self.VEC_SIZE_16,
                     )
                     self.idx += self.bdy

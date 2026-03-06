@@ -116,6 +116,109 @@ def _get_layout_thread_local_partition(layout):
     return (thread_groups, local_dim_indices, local_extents)
 
 
+def _get_local_region(orig_layout: TileLayout, buffer_shape, region_st, region_extent):
+    """Compute local storage shape, iteration starts, and extents with validation of region.
+
+    Args:
+        orig_layout: The original (unsliced) TileLayout.
+        buffer_shape: The buffer shape.
+        region_st: Region start in shape space.
+        region_extent: Region extent in shape space.
+
+    Returns:
+        (local_shape, local_st, local_ext) or None if no local dims / invalid region.
+        - local_shape: full storage extents per local dim.
+        - local_st: region start per local dim.
+        - local_ext: region extent per local dim.
+
+    Example:
+        Layout (2, 8, 4, 2):(8@m, 2@laneid, 2@m, 1@m), Shape [16, 8], Region [8:16, :] returns:
+        - local_shape = [2, 8], local_st = [1, 0], local_ext = [1, 8]
+    """
+    grouped, seps = orig_layout.group(list(buffer_shape))
+
+    local_shape = []
+    local_st = []
+    local_ext = []
+    analyzer = Analyzer()
+
+    for d in range(len(buffer_shape)):
+        shard_range = list(range(seps[d], seps[d + 1]))
+        has_local = any(not grouped.shard[s].axis.is_thread() for s in shard_range)
+        if not has_local:
+            continue
+
+        has_thread = any(grouped.shard[s].axis.is_thread() for s in shard_range)
+
+        if not has_thread:
+            # Pure local shape dim: use shape-level values directly.
+            local_shape.append(buffer_shape[d])
+            local_st.append(region_st[d])
+            local_ext.append(region_extent[d])
+        else:
+            # Decompose start element
+            remaining_st = region_st[d]
+            st_coords = []
+            for i, s_idx in enumerate(shard_range):
+                sub_prod = 1
+                for j in range(i + 1, len(shard_range)):
+                    sub_prod = sub_prod * grouped.shard[shard_range[j]].extent
+                st_coords.append(remaining_st // sub_prod)
+                remaining_st = remaining_st % sub_prod
+
+            # Decompose end element
+            remaining_end = region_st[d] + region_extent[d] - 1
+            end_coords = []
+            for i, s_idx in enumerate(shard_range):
+                sub_prod = 1
+                for j in range(i + 1, len(shard_range)):
+                    sub_prod = sub_prod * grouped.shard[shard_range[j]].extent
+                end_coords.append(remaining_end // sub_prod)
+                remaining_end = remaining_end % sub_prod
+
+            # check the rectangularity and contiguity of the sliced region
+            cur_local_shape, cur_local_st, cur_local_end = 1, 0, 0
+            for k in reversed(range(len(st_coords))):
+                if grouped.shard[seps[d] + k].axis.is_thread():
+                    # for thread dims, region must be contiguous and span full extent
+                    if not (
+                        analyzer.can_prove_equal(st_coords[k], 0)
+                        and analyzer.can_prove_equal(
+                            end_coords[k], grouped.shard[seps[d] + k].extent - 1
+                        )
+                    ):
+                        return None
+                else:
+                    if not analyzer.can_prove_equal(end_coords[k] - st_coords[k], 1) and not (
+                        analyzer.can_prove_equal(st_coords[k], 0)
+                        and analyzer.can_prove_equal(
+                            end_coords[k], grouped.shard[seps[d] + k].extent - 1
+                        )
+                    ):
+                        # to ensure contiguity, if the region spans multiple values
+                        # in this dim, it must span the full extent
+                        return None
+                    cur_local_shape *= grouped.shard[seps[d] + k].extent
+                    cur_local_st = cur_local_st * grouped.shard[seps[d] + k].extent + st_coords[k]
+                    cur_local_end = (
+                        cur_local_end * grouped.shard[seps[d] + k].extent + end_coords[k]
+                    )
+
+            # double check the validity of the sliced region
+            assert region_extent[d] == functools.reduce(
+                operator.mul, [end - st + 1 for st, end in zip(st_coords, end_coords)], 1
+            )
+
+            # append the local info without thread dims
+            local_shape.append(cur_local_shape)
+            local_st.append(cur_local_st)
+            local_ext.append(cur_local_end - cur_local_st + 1)
+
+    if not local_shape:
+        return None
+    return local_shape, local_st, local_ext
+
+
 def validate_cast_op(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
@@ -241,6 +344,34 @@ def _sig_equal(analyzer: Analyzer, src_sig, dst_sig) -> bool:
     )
 
 
+_LOCAL_CASE_VIEW_FULL = "view_full"
+_LOCAL_CASE_VIEW_SLICED = "view_sliced"
+_LOCAL_CASE_THREAD_WISE = "thread_wise"
+
+
+def _classify_cast_local_case(
+    dst_region: BufferRegion,
+    src_region: BufferRegion,
+    sctx: ScheduleContext,
+) -> str | None:
+    """Classify local cast implementation path."""
+
+    def _full_region(buf_region: BufferRegion) -> bool:
+        st, ext = get_st_extent(buf_region)
+        analyzer = Analyzer()
+        return all(
+            analyzer.can_prove_equal(e, s) for e, s in zip(ext, buf_region.buffer.shape)
+        ) and all(analyzer.can_prove_equal(s, 0) for s in st)
+
+    if sctx.exec_scope.name == "thread":
+        return _LOCAL_CASE_THREAD_WISE
+    if sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"]:
+        if _full_region(dst_region) and _full_region(src_region):
+            return _LOCAL_CASE_VIEW_FULL
+        return _LOCAL_CASE_VIEW_SLICED
+    return None
+
+
 def validate_cast_local_view(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
@@ -283,20 +414,18 @@ def validate_cast_local_view(
     src_st, src_extent = get_st_extent(src_buffer_region)
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
 
-    for layout, st, ext in [(src.layout, src_st, src_extent), (dst.layout, dst_st, dst_extent)]:
+    for layout, buf, st, ext in [
+        (src.layout, src, src_st, src_extent),
+        (dst.layout, dst, dst_st, dst_extent),
+    ]:
         for it in layout.shard:
             if it.axis.is_thread() and analyzer.can_prove_equal(it.stride, 0):
                 return False
         replica = getattr(layout, "replica", None) or []
         if any(it.axis.is_thread() for it in replica):
             return False
-        for dim_idx, it in enumerate(layout.shard):
-            if it.axis.is_thread():
-                if not (
-                    analyzer.can_prove(st[dim_idx] == 0)
-                    and analyzer.can_prove_equal(ext[dim_idx], it.extent)
-                ):
-                    return False
+        if _get_local_region(layout, list(buf.shape), st, ext) is None:
+            return False
 
     # Slice → Canonicalize
     src_sliced = _get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
@@ -359,72 +488,19 @@ def _resolve_thread_var(axis, sctx):
     return None
 
 
-def cast_local_view_impl(
+def _emit_cast_local_view_full(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
-    sctx: ScheduleContext,
+    dst_local_info,
 ) -> PrimFunc | None:
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
 
-    if sctx.exec_scope.name not in ["warp", "warpgroup", "cta", "cluster"]:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for local-view cast")
+    _, _, dst_local_ext = dst_local_info
+    local_total = functools.reduce(operator.mul, dst_local_ext, 1)
 
-    src_st, src_extent = get_st_extent(src_buffer_region)
-    dst_st, dst_extent = get_st_extent(dst_buffer_region)
-
-    src_layout = _get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
-    dst_layout = _get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
-
-    src_partition = _get_layout_thread_local_partition(src_layout)
-    if not src_partition:
-        fail("src layout is not supported for local-view cast")
-    src_thread_groups, src_local_dims, _ = src_partition
-
-    # Map the axis to the corresponding thread variable.
-    thread_vars = {}
-    for axis in src_thread_groups.keys():
-        var = _resolve_thread_var(axis, sctx)
-        if var is None:
-            fail(
-                f"Cannot find thread var for axis {axis} in launch_params: {list(sctx.launch_params.keys())}"  # noqa: E501
-            )
-        thread_vars[axis] = var
-
-    len(src_extent)
-
-    if len(src_thread_groups) > 1:
-        unique_var_ids = set(id(thread_vars[a]) for a in src_thread_groups)
-        if len(unique_var_ids) == 1:
-            thread_dims_ordered = []
-            for _axis, (dim_indices, extents) in src_thread_groups.items():
-                for i, dim_idx in enumerate(dim_indices):
-                    thread_dims_ordered.append((dim_idx, extents[i]))
-            thread_dims_ordered.sort(key=lambda x: x[0])
-            {
-                "var": next(iter(thread_vars.values())),
-                "extents": [src_layout.shard[dim_idx].extent for dim_idx, _ in thread_dims_ordered],
-                "dim_to_pos": {
-                    dim_idx: pos for pos, (dim_idx, _) in enumerate(thread_dims_ordered)
-                },
-                "ordered_dims": thread_dims_ordered,
-            }
-
-    src_local_region_extents = [src_extent[i] for i in src_local_dims]
-    [dst_extent[i] for i in src_local_dims]
-    local_total = functools.reduce(operator.mul, src_local_region_extents, 1)
-
-    # Decide vec2 availability
-    analyzer = Analyzer()
+    # Decide vec2 availability (offset is 0 for full region, so alignment is guaranteed)
     use_vec2 = (src.dtype, dst.dtype) in vec2_cast_cuda_intrinsic_dict
-
-    # Alignment requirement for vec2: if we can't prove both offsets even, fall back to scalar
-    if use_vec2:
-        src_off = _compute_linear_offset(src_st, src_local_dims, src_layout)
-        dst_off = _compute_linear_offset(dst_st, src_local_dims, dst_layout)
-        if not (analyzer.can_prove(src_off % 2 == 0) and analyzer.can_prove(dst_off % 2 == 0)):
-            use_vec2 = False
-
     local_total_imm = int(local_total.value) if isinstance(local_total, IntImm) else None
 
     # Prepare vec2 intrinsic codegen if needed
@@ -473,6 +549,67 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
     # fmt: on
 
     return impl
+
+
+def _emit_cast_local_view_sliced(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    dst_local_info,
+    src_local_info,
+) -> PrimFunc | None:
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+
+    dst_local_shape, dst_local_st, dst_local_ext = dst_local_info
+    src_local_shape, src_local_st, src_local_ext = src_local_info
+    local_total = functools.reduce(operator.mul, dst_local_ext, 1)
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with Tx.thread():
+            src_local = src.local(*src_local_shape)
+            dst_local = dst.local(*dst_local_shape)
+            for s in Tx.serial(0, local_total):
+                fused = Tx.meta_var(s)
+                dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
+                src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
+                dst_local[tuple(dst_indices)] = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
+    # fmt: on
+
+    return impl
+
+
+def cast_local_view_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    sctx: ScheduleContext,
+) -> PrimFunc | None:
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+
+    if sctx.exec_scope.name not in ["warp", "warpgroup", "cta", "cluster"]:
+        fail(f"unsupported exec_scope {sctx.exec_scope.name} for local-view cast")
+
+    local_case = _classify_cast_local_case(dst_buffer_region, src_buffer_region, sctx)
+
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+    dst_local_info = _get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
+    if not dst_local_info:
+        fail("dst layout is not supported for local-view cast")
+
+    if local_case == _LOCAL_CASE_VIEW_FULL:
+        return _emit_cast_local_view_full(dst_buffer_region, src_buffer_region, dst_local_info)
+
+    # view_sliced
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    src_local_info = _get_local_region(src.layout, list(src.shape), src_st, src_extent)
+    if not src_local_info:
+        fail("src layout is not supported for local-view cast")
+
+    return _emit_cast_local_view_sliced(
+        dst_buffer_region, src_buffer_region, dst_local_info, src_local_info
+    )
 
 
 dtypex2_dict = {

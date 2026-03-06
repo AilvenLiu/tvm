@@ -17,7 +17,7 @@
 
 """Implementation of mapping schedules."""
 
-from ..common import MapOpType, register_unary_binary_schedule
+from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
 from .binary import binary_trn
 from .common import target_trn
 from .unary import unary_trn, unary_with_bias_scale_trn
@@ -26,7 +26,13 @@ for op_name_, op_type_ in {
     "reciprocal": MapOpType.RECIPROCAL,
     "memset": MapOpType.MEMSET,
 }.items():
-    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [unary_trn])
+    register_unary_binary_schedule(
+        op_name_,
+        op_type_,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(unary_trn, "unary", 0, [])],
+    )
 
 
 for op_name_, op_type_ in {
@@ -34,7 +40,11 @@ for op_name_, op_type_ in {
     "exp": MapOpType.EXP,
 }.items():
     register_unary_binary_schedule(
-        op_name_, op_type_, "trn", target_trn, [unary_with_bias_scale_trn]
+        op_name_,
+        op_type_,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(unary_with_bias_scale_trn, "unary_with_bias_scale", 0, [])],
     )
 
 for op_name_, op_type_ in {
@@ -44,4 +54,10 @@ for op_name_, op_type_ in {
     "maximum": MapOpType.MAX,
     "minimum": MapOpType.MIN,
 }.items():
-    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [binary_trn])
+    register_unary_binary_schedule(
+        op_name_,
+        op_type_,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(binary_trn, "binary", 0, [])],
+    )

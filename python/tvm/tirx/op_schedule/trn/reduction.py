@@ -22,7 +22,7 @@ from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
-from ..common import ReduceOpType, register_unary_binary_schedule
+from ..common import ReduceOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
 from .common import (
     InstructionGenerator,
     check_workspace_buffer,
@@ -189,4 +189,10 @@ for op_name_, op_type_ in {
     "max": ReduceOpType.MAX,
     "min": ReduceOpType.MIN,
 }.items():
-    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [reduction_trn])
+    register_unary_binary_schedule(
+        op_name_,
+        op_type_,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(reduction_trn, "reduction", 0, [])],
+    )

@@ -308,6 +308,13 @@ def single_thread(op_call: OpCall, sctx: ScheduleContext) -> bool:
     )
 
 
+def exec_scope_ok(
+    op_call: OpCall, sctx: ScheduleContext, expected_scopes: list[str]
+) -> tuple[bool, str | None]:
+    ok = sctx.exec_scope.name in expected_scopes
+    return (ok, None if ok else f"unsupported exec_scope {sctx.exec_scope.name}")
+
+
 ################################################################################
 # Gemm operations related utilities
 # Reused by sync and async gemm pipelines

@@ -616,7 +616,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                         self.task_impl_moe_group_gemm_down(silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)  # noqa: E501
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
                         self.task_impl_wait_etensor_init_complete(is_dynamic_sch)
                     else:
                         Tx.cuda.trap_when_assert_failed(False)

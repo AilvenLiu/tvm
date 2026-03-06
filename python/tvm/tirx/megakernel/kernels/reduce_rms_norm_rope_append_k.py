@@ -101,12 +101,12 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                     qkv_stx = Tx.meta_var(
                         (self.qo_heads + head_idx) * self.head_dim + tx * self.vec_size
                     )
-                    for kv in Tx.unroll(self.vec_size):
-                        self.k_vec32[kv] = 0.0
+                    Tx.fill(self.k_vec32[:], 0.0)
                     for kt in Tx.serial(self.split_k_factor):
                         Tx.copy(
                             self.k_vec32_other[:],
                             partial[kt, batch_idx, qkv_stx : qkv_stx + self.vec_size],
+                            vec_len=self.vec_size,
                         )
                         for kv in Tx.unroll(self.vec_size):
                             self.k_vec32[kv] += self.k_vec32_other[kv]
@@ -127,16 +127,19 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                         # rms norm
                         self.rms_norm[0] = rsqrt(self.sum_sq[0] / self.head_dim + self.rms_norm_eps)
                         # handle the weight
-                        Tx.copy(self.weight_vec[:], k_weight[st : st + self.vec_size])
+                        Tx.copy(
+                            self.weight_vec[:],
+                            k_weight[st : st + self.vec_size],
+                            vec_len=self.vec_size,
+                        )
                         Tx.cast(self.weight_vec_f32[:], self.weight_vec[:])
-                        for kv in Tx.unroll(self.vec_size):
-                            self.k_vec32[kv] = (
-                                self.k_vec32[kv] * self.rms_norm[0] * self.weight_vec_f32[kv]
-                            )
+                        Tx.mul(self.weight_vec_f32[:], self.weight_vec_f32[:], self.rms_norm[0:1])
+                        Tx.mul(self.k_vec32[:], self.k_vec32[:], self.weight_vec_f32[:])
                     # load cache
                     Tx.copy(
                         self.cos[:],
                         cos_sin_cache[self.rope_pos_reg[0], cache_stx : cache_stx + self.vec_size],
+                        vec_len=self.vec_size,
                     )
                     Tx.copy(
                         self.sin[:],
@@ -144,6 +147,7 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                             self.rope_pos_reg[0],
                             half_dim + cache_stx : half_dim + cache_stx + self.vec_size,
                         ],
+                        vec_len=self.vec_size,
                     )
                     # shuffle q value
                     for kv in Tx.serial(self.vec_size):
@@ -173,5 +177,6 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
                     Tx.copy(
                         kv_cache[page_id, 0, head_idx, offset, st : st + self.vec_size],
                         self.k_vec[:],
+                        vec_len=self.vec_size,
                     )
                     self.idx[0] += self.bdy

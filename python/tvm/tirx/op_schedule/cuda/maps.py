@@ -18,9 +18,9 @@
 """Implementation of mapping schedules on CUDA."""
 
 from ..common import MapOpType, register_unary_binary_schedule
-from .binary import binary_cuda_impl
+from .binary import get_binary_cuda_candidate
 from .common import target_cuda
-from .unary import unary_cuda_impl
+from .unary import get_unary_cuda_candidate
 
 for op_name_, op_type_ in {
     "zero": MapOpType.ZERO,
@@ -35,7 +35,7 @@ for op_name_, op_type_ in {
         op_type_,
         "cuda",
         target_cuda,
-        [unary_cuda_impl],
+        get_unary_cuda_candidate(op_type_),
     )
 
 for op_name_, op_type_ in {
@@ -49,5 +49,5 @@ for op_name_, op_type_ in {
         op_type_,
         "cuda",
         target_cuda,
-        [binary_cuda_impl],
+        get_binary_cuda_candidate(op_type_),
     )

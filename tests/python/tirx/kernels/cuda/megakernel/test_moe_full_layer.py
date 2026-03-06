@@ -669,7 +669,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         )
                     elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
                         self.task_impl_init_etensor(is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INITx.value:
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
                         self.task_impl_wait_etensor_init_complete(is_dynamic_sch)
                     else:
                         break

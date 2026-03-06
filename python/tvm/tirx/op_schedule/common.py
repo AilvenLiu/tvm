@@ -17,6 +17,7 @@
 """TIRx operator schedule common utilities."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 
 from tvm.tir import PrimFunc
@@ -52,37 +53,45 @@ class ReduceOpType(Enum):
     MIN = 2
 
 
+@dataclass
+class UnaryBinaryScheduleCandidate:
+    impl: Callable[[OpCall, Enum, ScheduleContext], PrimFunc | None]
+    variant: str
+    priority: int
+    preds: list[predicate]
+
+
 def register_unary_binary_schedule(
     op_name: str,
     op_type: MapOpType | ReduceOpType,
     target_kind: str,
     target_check: Callable[[ScheduleContext], bool],
-    schedule_candidates: list[Callable[[OpCall, Enum, ScheduleContext], PrimFunc | None]],
+    schedule_candidates: list[UnaryBinaryScheduleCandidate],
 ) -> None:
     """Register a schedule function for a given operation type."""
 
     # Register per-candidate dispatch variants in the dispatcher.
-    # Higher priority for earlier candidates to preserve ordering.
-    for prio, candidate in zip(range(len(schedule_candidates), 0, -1), schedule_candidates):
+    for candidate in schedule_candidates:
 
         @register_dispatch(
             op_name,
             target_kind,
-            variant=candidate.__name__,
-            priority=prio,
+            variant=candidate.variant,
+            priority=candidate.priority,
             when=[
+                *candidate.preds,
                 predicate(
                     "target",
                     lambda op, sctx, tk=target_kind: (
                         str(sctx.target.kind) == tk,
                         f"target mismatch: {sctx.target.kind}",
                     ),
-                )
+                ),
             ],
         )
         def _dispatch_variant(
             op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type
         ) -> PrimFunc:
-            return _cand(op, _ty, sctx)
+            return _cand.impl(op, _ty, sctx)
 
     return None
