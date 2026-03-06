@@ -113,6 +113,19 @@ entries:
       - op-schedule
     title: Dual-kernel pattern for cluster vs non-cluster test variants
     updated: '2026-03-01'
+  - created: '2026-03-06'
+    id: ADR-20260306-195314-450625
+    path: entries/ADR-20260306-195314-450625.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - warnings
+      - testing
+      - third-party
+      - policy
+    title: Use code-level warning remediation and keep third-party warnings visible
+    updated: '2026-03-06'
 tags:
   api:
     - ADR-20260228-0003
@@ -138,11 +151,15 @@ tags:
   op-schedule:
     - ADR-20260301-0002
     - ADR-20260301-0003
+  policy:
+    - ADR-20260306-195314-450625
   parser:
     - ADR-20260228-0002
   pre-commit:
     - ADR-20260228-0001
     - ADR-20260301-0001
+  pytest:
+    - ADR-20260306-195314-450625
   rebase:
     - ADR-20260228-0002
     - ADR-20260301-0001
@@ -156,6 +173,9 @@ tags:
     - ADR-20260301-0001
     - ADR-20260301-0002
     - ADR-20260301-0003
+    - ADR-20260306-195314-450625
+  third-party:
+    - ADR-20260306-195314-450625
   tir:
     - ADR-20260227-0001
   tirx:
@@ -171,3 +191,5 @@ tags:
   upstream-alignment:
     - ADR-20260228-0001
     - ADR-20260301-0001
+  warnings:
+    - ADR-20260306-195314-450625

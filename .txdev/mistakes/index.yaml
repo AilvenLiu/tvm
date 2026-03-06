@@ -136,6 +136,19 @@ entries:
       - testing
     title: Incomplete import path updates after moving symbols between modules
     updated: '2026-03-02'
+  - created: '2026-03-06'
+    id: M-20260306-195314-50a55c
+    path: entries/M-20260306-195314-50a55c.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - warnings
+      - pyproject
+      - scope-control
+      - workflow
+    title: Applying global pytest warning filters before confirming accepted mitigation
+    updated: '2026-03-06'
 tags:
   api:
     - M-20260301-0002
@@ -173,6 +186,10 @@ tags:
     - M-20260228-0003
   python:
     - M-20260228-0002
+  pyproject:
+    - M-20260306-195314-50a55c
+  pytest:
+    - M-20260306-195314-50a55c
   quality:
     - M-20260228-0001
   quoting:
@@ -191,6 +208,7 @@ tags:
     - M-20260228-0002
     - M-20260301-0001
     - M-20260301-0002
+    - M-20260306-195314-50a55c
   shell:
     - M-20260228-0003
   testing:
@@ -202,6 +220,9 @@ tags:
     - M-20260301-0002
   user-intent:
     - M-20260227-0001
+  warnings:
+    - M-20260306-195314-50a55c
   workflow:
     - M-20260228-0002
     - M-20260301-0001
+    - M-20260306-195314-50a55c

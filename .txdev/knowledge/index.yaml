@@ -180,6 +180,19 @@ entries:
       - refactor
     title: Canonical import paths for TMA utilities in op_schedule/cuda
     updated: '2026-03-02'
+  - created: '2026-03-06'
+    id: KB-20260306-195314-a33c27
+    path: entries/KB-20260306-195314-a33c27.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - warnings
+      - triage
+      - tirx
+      - testing
+    title: Pytest warning triage should separate repository-owned and external sources first
+    updated: '2026-03-06'
 tags:
   api:
     - KB-20260301-0002
@@ -235,6 +248,7 @@ tags:
     - KB-20260227-0002
   pytest:
     - KB-20260228-0002
+    - KB-20260306-195314-a33c27
   python:
     - KB-20260301-0005
   recovery:
@@ -258,6 +272,7 @@ tags:
     - KB-20260301-0003
     - KB-20260301-0004
     - KB-20260301-0005
+    - KB-20260306-195314-a33c27
   tir:
     - KB-20260227-0001
   tirx:
@@ -265,6 +280,9 @@ tags:
     - KB-20260301-0003
     - KB-20260301-0004
     - KB-20260301-0005
+    - KB-20260306-195314-a33c27
+  triage:
+    - KB-20260306-195314-a33c27
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
@@ -275,6 +293,8 @@ tags:
     - KB-20260301-0001
   validation:
     - KB-20260228-0004
+  warnings:
+    - KB-20260306-195314-a33c27
   workflow:
     - KB-20260228-0001
     - KB-20260228-0003

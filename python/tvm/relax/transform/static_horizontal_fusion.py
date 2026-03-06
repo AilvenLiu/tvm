@@ -1203,7 +1203,7 @@ class _Rewriter(PyExprMutator):
                 f"expected Var for parameter {para}, but got {type(para)}"
             )
             if isinstance(para.struct_info, TensorStructInfo):
-                tir_var = T.var("handle", name=para.name_hint)
+                tir_var = Var(para.name_hint, "handle")
                 shape = [T.int32(s) for s in para.struct_info.shape.values]
                 tir_buf = T.buffer(
                     shape,

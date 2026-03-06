@@ -2220,8 +2220,13 @@ def generate_random_array(dtype: str, shape: tuple) -> np.ndarray:
     random_ints = np.random.randint(0, 2**bit_length, size=shape, dtype=container)
     # Reinterpret the bit pattern as the desired dtype.
     res = random_ints.view(np_dtype)
-    for idx in zip(*np.where(~np.isfinite(res))):
-        while not np.isfinite(res[idx]):
+    with np.errstate(invalid="ignore"):
+        invalid_indices = np.where(~np.isfinite(res))
+    for idx in zip(*invalid_indices):
+        while True:
+            with np.errstate(invalid="ignore"):
+                if np.isfinite(res[idx]):
+                    break
             # Generate a new random value for this specific position
             new_random_int = np.random.randint(0, 2**bit_length, size=1, dtype=container)
             res[idx] = new_random_int.view(np_dtype)[0]

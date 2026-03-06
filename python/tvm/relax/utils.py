@@ -517,7 +517,7 @@ def trans_callable_to_primfunc(
                 T.buffer_store(buf_list[i], value_list[i], [0])
 
     # prepare the tir input and output
-    tir_input = [T.var(dtype=dtype) for _ in range(input_dim)]
+    tir_input = [tir.Var("", dtype) for _ in range(input_dim)]
     for arg in extra_args:
         if isinstance(arg, Expr):
             tir_input.append(
@@ -528,7 +528,7 @@ def trans_callable_to_primfunc(
                 )
             )
         elif isinstance(arg, PrimExpr):
-            tir_input.append(T.var(dtype=arg.dtype))
+            tir_input.append(tir.Var("", arg.dtype))
         else:  # int
             tir_input.append(arg)
     tir_output = [T.Buffer(shape=[1], dtype=dtype, scope="local") for _ in range(output_dim)]

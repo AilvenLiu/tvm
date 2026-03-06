@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: >-
+    For `pytest tests/python/tirx/ -n 16`, the reliable flow was: run with no global filters,
+    capture warning summary, then group warnings into repository-owned code vs external sources
+    (SWIG runtime, vendored `3rdparty/cutlass`, installed `nvidia_cutlass_dsl`). This made it
+    clear which warnings should be fixed in-repo and which should be documented as out-of-scope.
+    The approach avoided unnecessary edits to third-party code and reduced back-and-forth during
+    review.
+  summary: >-
+    Classifying warnings by ownership before coding prevents wasted fixes and keeps scope aligned.
+created: '2026-03-06'
+id: KB-20260306-195314-a33c27
+scope:
+  - repo
+tags:
+  - pytest
+  - warnings
+  - triage
+  - tirx
+  - testing
+title: Pytest warning triage should separate repository-owned and external sources first
+updated: '2026-03-06'
