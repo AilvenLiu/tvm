@@ -53,7 +53,6 @@ class DeviceFuncToKernel(StmtExprVisitor):
         mutator = DeviceFuncToKernel(tile_num)
         mutator.visit_stmt(func.body)
         assert mutator.exec_scope is not None, "no root scope found"
-        tile_idx = func.params[-len(tile_num) :]
         # TODO: support dynamic tile num
         for n in tile_num:
             if not isinstance(n, T.IntImm):

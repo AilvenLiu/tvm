@@ -79,7 +79,6 @@ from tvm.tirx.expr import (
     SizeVar,
     StringImm,
     Sub,
-    Var,
 )
 from tvm.tirx.generic import cast
 from tvm.tirx.layout import (
@@ -222,7 +221,7 @@ def buffer(
         strides = []
     if allocated_addr is None:
         allocated_addr = []
-    if not isinstance(allocated_addr, (list, tuple)):
+    if not isinstance(allocated_addr, list | tuple):
         allocated_addr = [allocated_addr]
     return _ffi_api.Buffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
@@ -852,7 +851,7 @@ def sblock_alloc_buffer(
         axis_separators = []
     if allocated_addr is None:
         allocated_addr = []
-    if not isinstance(allocated_addr, (list, tuple)):
+    if not isinstance(allocated_addr, list | tuple):
         allocated_addr = [allocated_addr]
     alloc_frame = _ffi_api.SBlockAllocBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
@@ -1342,7 +1341,7 @@ def Let(  # pylint: disable=invalid-name
 ) -> PrimExpr:
     """Create a Let expression binding"""
     assert len(where) == 1, "T.Let only allows `where` to have exactly one element"
-    var, value = list(where.items())[0]  # pylint: disable=redefined-outer-name
+    var, value = next(iter(where.items()))  # pylint: disable=redefined-outer-name
     return tir.Let(var, value, expr)
 
 
@@ -1682,7 +1681,9 @@ else:
             return getattr(self.scalar, name)
 
 
-def alloc_scalar(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
+def alloc_scalar(
+    dtype: str = "float32", scope: str = "global", name: str | None = None
+) -> BufferLoad:
     """Allocate a zero-dimensional buffer (scalar)."""
     buf = alloc_buffer(
         shape=(1,),
@@ -1720,12 +1721,12 @@ def decl_scalar(dtype, data, scope, elem_offset=None, byte_offset=None, name=Non
     return buf[0]
 
 
-def shared_scalar(dtype: str = "float32", name: str = None) -> BufferLoad:
+def shared_scalar(dtype: str = "float32", name: str | None = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer in shared memory."""
     return alloc_scalar(dtype=dtype, scope="shared", name=name)
 
 
-def local_scalar(dtype: str = "float32", name: str = None) -> BufferLoad:
+def local_scalar(dtype: str = "float32", name: str | None = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer in local memory."""
     return alloc_scalar(dtype=dtype, scope="local", name=name)
 
@@ -2352,7 +2353,8 @@ if TYPE_CHECKING:
     T = TypeVar("T")
     C = TypeVar("C")
 
-    # When type checking (and by extension, for linters like Pylint), make meta_var an identity function.
+    # When type checking (and by extension, for linters like Pylint), treat
+    # meta_var as an identity function.
     def meta_var(x: T) -> T:
         return x
 
@@ -2370,8 +2372,9 @@ else:
         return cls
 
     class meta_var:
-        """A meta variable used in TVMScript metaprogramming. It means that the value of the variable
-        does not appear in the final TIR, but only stays in the parser.
+        """A meta variable used in TVMScript metaprogramming.
+
+        The value does not appear in the final TIR and only exists in the parser.
 
         Parameters
         ----------
@@ -2413,7 +2416,7 @@ def _dtype_forward(func):
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         if "dtype" in kwargs:
-            args = (kwargs.pop("dtype"),) + args
+            args = (kwargs.pop("dtype"), *args)
         return func(*args, **kwargs)
 
     # Expose underlying tir op name for printer registration
@@ -2980,7 +2983,8 @@ for base in bases:
         suffix = f"x{lane}" if lane != 1 else ""
         float_types.append(f"{base}{suffix}")
 
-__all__ = float_types + [
+__all__ = [
+    *float_types,
     "int8",
     "int16",
     "int32",
