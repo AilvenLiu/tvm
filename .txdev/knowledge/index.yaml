@@ -193,6 +193,31 @@ entries:
       - testing
     title: Pytest warning triage should separate repository-owned and external sources first
     updated: '2026-03-06'
+  - created: '2026-03-07'
+    id: KB-20260307-231252-48549d
+    path: entries/KB-20260307-231252-48549d.yaml
+    scope:
+      - repo
+    tags:
+      - gpu
+      - shared-memory
+      - testing
+      - flaky-tests
+      - cuda
+    title: GPU shared memory is uninitialized and contains stale data from prior kernels
+    updated: '2026-03-07'
+  - created: '2026-03-07'
+    id: KB-20260307-231252-72bc64
+    path: entries/KB-20260307-231252-72bc64.yaml
+    scope:
+      - repo
+    tags:
+      - op-schedule
+      - import
+      - registration
+      - python
+    title: Side-effect-only imports in op_schedule __init__.py for registration
+    updated: '2026-03-07'
 tags:
   api:
     - KB-20260301-0002
@@ -205,6 +230,8 @@ tags:
     - KB-20260301-0005
   copy:
     - KB-20260301-0002
+  cuda:
+    - KB-20260307-231252-48549d
   copy_async:
     - KB-20260227-0002
     - KB-20260227-0003
@@ -212,14 +239,19 @@ tags:
     - KB-20260227-0001
   debugging:
     - KB-20260301-0001
+  flaky-tests:
+    - KB-20260307-231252-48549d
   dsl:
     - KB-20260301-0004
+  gpu:
+    - KB-20260307-231252-48549d
   git:
     - KB-20260228-0001
     - KB-20260228-0003
   import:
     - KB-20260227-0003
     - KB-20260302-015214-9e29ce
+    - KB-20260307-231252-72bc64
   ir:
     - KB-20260301-0001
   kernel:
@@ -238,6 +270,7 @@ tags:
   op-schedule:
     - KB-20260301-0002
     - KB-20260302-015214-9e29ce
+    - KB-20260307-231252-72bc64
   pre-commit:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -251,12 +284,15 @@ tags:
     - KB-20260306-195314-a33c27
   python:
     - KB-20260301-0005
+    - KB-20260307-231252-72bc64
   recovery:
     - KB-20260228-0003
   refactor:
     - KB-20260227-0003
     - KB-20260228-0004
     - KB-20260302-015214-9e29ce
+  registration:
+    - KB-20260307-231252-72bc64
   rg:
     - KB-20260228-0004
   ruff:
@@ -264,6 +300,8 @@ tags:
     - KB-20260301-0005
   scoping:
     - KB-20260301-0004
+  shared-memory:
+    - KB-20260307-231252-48549d
   skip:
     - KB-20260228-0002
   testing:
@@ -273,6 +311,7 @@ tags:
     - KB-20260301-0004
     - KB-20260301-0005
     - KB-20260306-195314-a33c27
+    - KB-20260307-231252-48549d
   tir:
     - KB-20260227-0001
   tirx:

@@ -1,0 +1,42 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "When allocating shared memory buffers (Tx.alloc_buffer with scope=\"shared\"),\
+    \ the buffer\ncontents are undefined \u2014 they contain residual data from prior kernel\
+    \ or warp executions.\n\nIn cross-dtype (out-of-place) unary tests, B_smem was allocated\
+    \ at full buffer size but\nonly a subregion (map_slice_res) was written by the unary op.\
+    \ The copy-back used the full\nbuffer slice (copy_slice), reading uninitialized smem regions.\
+    \ This passed when running\ntests in isolation (GPU idle, smem likely zeroed) but failed\
+    \ under parallel execution\n(-n 16) because smem was reused across concurrent kernels.\n\
+    \nFix pattern: always copy back only the written subregion, not the full buffer.\nDiagnostic\
+    \ clue: tests pass in isolation but fail in batch \u2192 suspect uninitialized memory.\n"
+  summary: GPU shared memory (smem) is never auto-zeroed; it retains garbage from
+    previous kernel executions, causing flaky test failures when unwritten regions
+    are read back.
+created: '2026-03-07'
+id: KB-20260307-231252-48549d
+scope:
+  - repo
+tags:
+  - gpu
+  - shared-memory
+  - testing
+  - flaky-tests
+  - cuda
+title: GPU shared memory is uninitialized and contains stale data from prior kernels
+updated: '2026-03-07'

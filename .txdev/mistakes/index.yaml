@@ -149,6 +149,19 @@ entries:
       - workflow
     title: Applying global pytest warning filters before confirming accepted mitigation
     updated: '2026-03-06'
+  - created: '2026-03-07'
+    id: M-20260307-231252-423c4d
+    path: entries/M-20260307-231252-423c4d.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - shared-memory
+      - gpu
+      - flaky-tests
+      - correctness
+    title: Copied entire shared memory buffer instead of written subregion in test
+    updated: '2026-03-07'
 tags:
   api:
     - M-20260301-0002
@@ -156,10 +169,15 @@ tags:
     - M-20260301-0003
   correctness:
     - M-20260301-0001
+    - M-20260307-231252-423c4d
   debugging:
     - M-20260227-0003
+  flaky-tests:
+    - M-20260307-231252-423c4d
   duplication:
     - M-20260301-0003
+  gpu:
+    - M-20260307-231252-423c4d
   gh:
     - M-20260228-0003
   git:
@@ -209,6 +227,8 @@ tags:
     - M-20260301-0001
     - M-20260301-0002
     - M-20260306-195314-50a55c
+  shared-memory:
+    - M-20260307-231252-423c4d
   shell:
     - M-20260228-0003
   testing:
@@ -216,6 +236,7 @@ tags:
     - M-20260227-0002
     - M-20260227-0003
     - M-20260302-015214-5390a0
+    - M-20260307-231252-423c4d
   tirx:
     - M-20260301-0002
   user-intent:

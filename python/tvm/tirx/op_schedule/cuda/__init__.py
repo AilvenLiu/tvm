@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from .binary import *
 from .copy import *
-from .maps import *
 from .reduction import *
+from .unary import *

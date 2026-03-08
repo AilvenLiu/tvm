@@ -23,7 +23,7 @@ from tvm.tir import BufferRegion, FloatImm, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
-from ..common import MapOpType
+from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
 from .binary import try_find_inst_nary
 from .common import (
     InstructionGenerator,
@@ -293,4 +293,34 @@ def unary_with_bias_scale_trn(
         op.workspace,
         op.config,
         sctx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registration: bind each unary op name to its TRN schedule candidates.
+# ---------------------------------------------------------------------------
+from .common import target_trn  # noqa: E402
+
+for _op_name, _op_type in {
+    "reciprocal": MapOpType.RECIPROCAL,
+    "memset": MapOpType.MEMSET,
+}.items():
+    register_unary_binary_schedule(
+        _op_name,
+        _op_type,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(unary_trn, "unary", 0, [])],
+    )
+
+for _op_name, _op_type in {
+    "sqrt": MapOpType.SQRT,
+    "exp": MapOpType.EXP,
+}.items():
+    register_unary_binary_schedule(
+        _op_name,
+        _op_type,
+        "trn",
+        target_trn,
+        [UnaryBinaryScheduleCandidate(unary_with_bias_scale_trn, "unary_with_bias_scale", 0, [])],
     )

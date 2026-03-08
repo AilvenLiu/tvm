@@ -1,0 +1,38 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The op_schedule dispatcher uses a registration pattern where schedule candidates\
+    \ are\nregistered at module import time via calls to register_unary_binary_schedule()\
+    \ at the\nbottom of each module (unary.py, binary.py). The __init__.py files import these\
+    \ modules\nsolely to trigger these registrations.\n\nWhen refactoring (e.g., removing\
+    \ a dispatcher layer like maps.py), the key is to ensure\nthe registration calls are moved\
+    \ to the correct module and that __init__.py still imports\nthem. The actual `import *`\
+    \ exports nothing meaningful \u2014 it's purely for side effects.\n"
+  summary: Op schedule __init__.py uses `from .module import *` purely to trigger
+    module-level registration side effects, not to re-export symbols.
+created: '2026-03-07'
+id: KB-20260307-231252-72bc64
+scope:
+  - repo
+tags:
+  - op-schedule
+  - import
+  - registration
+  - python
+title: Side-effect-only imports in op_schedule __init__.py for registration
+updated: '2026-03-07'

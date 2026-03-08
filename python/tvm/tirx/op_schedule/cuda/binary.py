@@ -32,7 +32,7 @@ from tvm.tir.layout import TileLayout, laneid
 from tvm.tirx.op_schedule import ScheduleContext, fail
 from tvm.tirx.op_schedule.dispatcher import predicate
 
-from ..common import MapOpType, UnaryBinaryScheduleCandidate
+from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
 from .cast import (
     _get_local_region,
     _get_sublayout_from_region,
@@ -1152,3 +1152,23 @@ def get_binary_cuda_candidate(binary_op: MapOpType) -> list[UnaryBinaryScheduleC
         ),
     ]
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Registration: bind each binary op name to its CUDA schedule candidates.
+# ---------------------------------------------------------------------------
+from .common import target_cuda  # noqa: E402
+
+for _op_name, _op_type in {
+    "add": MapOpType.ADD,
+    "sub": MapOpType.SUB,
+    "mul": MapOpType.MUL,
+    "fdiv": MapOpType.FDIV,
+}.items():
+    register_unary_binary_schedule(
+        _op_name,
+        _op_type,
+        "cuda",
+        target_cuda,
+        get_binary_cuda_candidate(_op_type),
+    )
