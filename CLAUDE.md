@@ -78,6 +78,12 @@ mkdir -p build && cd build && cmake .. && make -j$(nproc)
 
 ## Testing
 
+**Build first (mandatory)**: Before running any tests, ensure TVM is built and `build/` is up to date (you do not need to recreate the directory each time):
+```bash
+cmake --build build -j$(nproc)
+```
+If `build/` does not exist yet, run the commands in `## Building` first.
+
 **GPU selection**: Before running GPU tests, check if this is a multi-GPU machine (`nvidia-smi --query-gpu=index --format=csv,noheader | wc -l`). If so, select the least busy GPU to avoid conflicts:
 ```bash
 export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
