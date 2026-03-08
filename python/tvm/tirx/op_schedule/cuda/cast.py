@@ -15,7 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of cast operator on CUDA."""
+"""Implementation of cast operator schedule for CUDA targets.
+
+Registered op: cast.
+Two dispatch variants: "local_view" (priority=15) and "thread_wise" (priority=10).
+See the @register_dispatch blocks below for detailed documentation with
+before/after IR examples.
+
+"""
 
 import functools
 import operator
@@ -33,190 +40,13 @@ from tvm.tirx.op_schedule import (
 )
 
 from .common import get_indices, get_st_extent, get_vec_len
-
-
-def _get_sublayout_from_region(layout, buffer_shape, region_st, region_extent):
-    """Get sublayout by slicing the layout with the buffer region.
-
-    Args:
-        layout: The buffer's TileLayout.
-        buffer_shape: The buffer's shape.
-        region_st: Region start indices.
-        region_extent: Region extents.
-
-    Returns:
-        Sublayout if slicing succeeds, otherwise the original layout.
-    """
-    if not layout:
-        return layout
-    region = [(region_st[i], region_st[i] + region_extent[i]) for i in range(len(region_st))]
-    sliced = layout.slice(list(buffer_shape), region)
-    return sliced if sliced is not None else layout
-
-
-def _get_layout_thread_local_partition(layout):
-    """Extract thread and local dimension info from layout.
-
-    Returns:
-        tuple | None: On success, (thread_groups, local_dim_indices, local_extents).
-            - thread_groups: dict {axis: (dim_indices, extents)} for each thread axis
-            - local_dim_indices: list of dimension indices for local (memory) axes
-            - local_extents: list of extents for local dimensions
-            Returns None if layout is not supported.
-
-    Validates:
-        - No stride==0 on thread dims (broadcast/overlap = cross-thread semantics)
-        - Local dims may have arbitrary strides (alignment uses actual layout strides)
-        - No thread axes in replica
-
-    Example:
-        Layout (2, 8, 4, 2):(2@warpid, 4@laneid, 1@laneid, 1@m) returns:
-        - thread_groups = {warpid: ([0], [2]), laneid: ([1, 2], [8, 4])}
-        - local_dim_indices = [3], local_extents = [2]
-    """
-    if not isinstance(layout, TileLayout):
-        return None
-
-    shard = getattr(layout, "shard", None)
-    if not shard:
-        return None
-
-    # Partition dimensions into thread and local (memory) axes
-    thread_dim_indices = [i for i, it in enumerate(shard) if it.axis.is_thread()]
-    local_dim_indices = [i for i, it in enumerate(shard) if not it.axis.is_thread()]
-
-    if not thread_dim_indices or not local_dim_indices:
-        return None
-
-    analyzer = Analyzer()
-    for idx in thread_dim_indices:
-        if analyzer.can_prove_equal(shard[idx].stride, 0):
-            return None
-
-    # Replica must not contain thread axes
-    replica = getattr(layout, "replica", None)
-    if replica and any(it.axis.is_thread() for it in replica):
-        return None
-
-    # Group thread dimensions by axis
-    from collections import defaultdict
-
-    thread_groups_dict = defaultdict(list)
-    for idx in thread_dim_indices:
-        thread_groups_dict[shard[idx].axis].append(idx)
-
-    thread_groups = {}
-
-    for axis, dim_indices in thread_groups_dict.items():
-        dim_indices = sorted(dim_indices)
-        extents = [shard[i].extent for i in dim_indices]
-        thread_groups[axis] = (dim_indices, extents)
-
-    local_extents = [shard[i].extent for i in local_dim_indices]
-    return (thread_groups, local_dim_indices, local_extents)
-
-
-def _get_local_region(orig_layout: TileLayout, buffer_shape, region_st, region_extent):
-    """Compute local storage shape, iteration starts, and extents with validation of region.
-
-    Args:
-        orig_layout: The original (unsliced) TileLayout.
-        buffer_shape: The buffer shape.
-        region_st: Region start in shape space.
-        region_extent: Region extent in shape space.
-
-    Returns:
-        (local_shape, local_st, local_ext) or None if no local dims / invalid region.
-        - local_shape: full storage extents per local dim.
-        - local_st: region start per local dim.
-        - local_ext: region extent per local dim.
-
-    Example:
-        Layout (2, 8, 4, 2):(8@m, 2@laneid, 2@m, 1@m), Shape [16, 8], Region [8:16, :] returns:
-        - local_shape = [2, 8], local_st = [1, 0], local_ext = [1, 8]
-    """
-    grouped, seps = orig_layout.group(list(buffer_shape))
-
-    local_shape = []
-    local_st = []
-    local_ext = []
-    analyzer = Analyzer()
-
-    for d in range(len(buffer_shape)):
-        shard_range = list(range(seps[d], seps[d + 1]))
-        has_local = any(not grouped.shard[s].axis.is_thread() for s in shard_range)
-        if not has_local:
-            continue
-
-        has_thread = any(grouped.shard[s].axis.is_thread() for s in shard_range)
-
-        if not has_thread:
-            # Pure local shape dim: use shape-level values directly.
-            local_shape.append(buffer_shape[d])
-            local_st.append(region_st[d])
-            local_ext.append(region_extent[d])
-        else:
-            # Decompose start element
-            remaining_st = region_st[d]
-            st_coords = []
-            for i, s_idx in enumerate(shard_range):
-                sub_prod = 1
-                for j in range(i + 1, len(shard_range)):
-                    sub_prod = sub_prod * grouped.shard[shard_range[j]].extent
-                st_coords.append(remaining_st // sub_prod)
-                remaining_st = remaining_st % sub_prod
-
-            # Decompose end element
-            remaining_end = region_st[d] + region_extent[d] - 1
-            end_coords = []
-            for i, s_idx in enumerate(shard_range):
-                sub_prod = 1
-                for j in range(i + 1, len(shard_range)):
-                    sub_prod = sub_prod * grouped.shard[shard_range[j]].extent
-                end_coords.append(remaining_end // sub_prod)
-                remaining_end = remaining_end % sub_prod
-
-            # check the rectangularity and contiguity of the sliced region
-            cur_local_shape, cur_local_st, cur_local_end = 1, 0, 0
-            for k in reversed(range(len(st_coords))):
-                if grouped.shard[seps[d] + k].axis.is_thread():
-                    # for thread dims, region must be contiguous and span full extent
-                    if not (
-                        analyzer.can_prove_equal(st_coords[k], 0)
-                        and analyzer.can_prove_equal(
-                            end_coords[k], grouped.shard[seps[d] + k].extent - 1
-                        )
-                    ):
-                        return None
-                else:
-                    if not analyzer.can_prove_equal(end_coords[k] - st_coords[k], 1) and not (
-                        analyzer.can_prove_equal(st_coords[k], 0)
-                        and analyzer.can_prove_equal(
-                            end_coords[k], grouped.shard[seps[d] + k].extent - 1
-                        )
-                    ):
-                        # to ensure contiguity, if the region spans multiple values
-                        # in this dim, it must span the full extent
-                        return None
-                    cur_local_shape *= grouped.shard[seps[d] + k].extent
-                    cur_local_st = cur_local_st * grouped.shard[seps[d] + k].extent + st_coords[k]
-                    cur_local_end = (
-                        cur_local_end * grouped.shard[seps[d] + k].extent + end_coords[k]
-                    )
-
-            # double check the validity of the sliced region
-            assert region_extent[d] == functools.reduce(
-                operator.mul, [end - st + 1 for st, end in zip(st_coords, end_coords)], 1
-            )
-
-            # append the local info without thread dims
-            local_shape.append(cur_local_shape)
-            local_st.append(cur_local_st)
-            local_ext.append(cur_local_end - cur_local_st + 1)
-
-    if not local_shape:
-        return None
-    return local_shape, local_st, local_ext
+from .layout_utils import (
+    get_local_region,
+    get_sublayout_from_region,
+    layout_signature,
+    resolve_thread_var,
+    sig_equal,
+)
 
 
 def validate_cast_op(
@@ -248,100 +78,6 @@ vec2_cast_cuda_intrinsic_dict = {
     ("bfloat16", "float32"): "__bfloat1622float2",
     ("float32", "bfloat16"): "__float22bfloat162_rn",
 }
-
-
-def _cast_layout_supported_for_local(layout) -> bool:
-    """Check that layout is valid for local cast (warp/warpgroup/cta/cluster): filter out cross-thread semantics.
-
-    Args:
-        layout: TileLayout to check.
-
-    Returns:
-        True if layout is valid for local cast, False otherwise.
-    """  # noqa: E501
-    return _get_layout_thread_local_partition(layout) is not None
-
-
-def _compute_linear_offset(region_st, local_dims, layout):
-    """Compute linear offset using layout's actual strides.
-
-    Physical offset = sum(region_st[dim] * layout.shard[dim].stride) for all local dims.
-    """
-    offset = 0
-    for dim_idx in local_dims:
-        offset = offset + region_st[dim_idx] * layout.shard[dim_idx].stride
-    return offset
-
-
-def _axis_key(axis):
-    if hasattr(axis, "name") and axis.name:
-        return str(axis.name)
-    return str(axis)
-
-
-def _layout_signature(layout):
-    """Return semantic signature from canonicalized TileLayout.
-
-    Returns (thread_sig, local_sig, replica_sig).
-    Each sig is a list of (axis_key, extent, stride) in shard/replica order.
-    """
-    if not isinstance(layout, TileLayout):
-        return None
-    shard = getattr(layout, "shard", None)
-    if not shard:
-        return None
-
-    thread_sig = []
-    local_sig = []
-    for it in shard:
-        item = (_axis_key(it.axis), it.extent, it.stride)
-        if it.axis.is_thread():
-            thread_sig.append(item)
-        else:
-            local_sig.append(item)
-
-    replica_sig = []
-    replica = getattr(layout, "replica", None) or []
-    for it in replica:
-        replica_sig.append((_axis_key(it.axis), it.extent, it.stride))
-    return (thread_sig, local_sig, replica_sig)
-
-
-def _sig_equal(analyzer: Analyzer, src_sig, dst_sig) -> bool:
-    """Compare two layout signatures with semantic equality (Analyzer).
-
-    Signatures come from _layout_signature(layout) and are:
-      (thread_sig, local_sig, replica_sig)
-    Each sig element is (axis_key, extent, stride).
-    """
-    if src_sig is None or dst_sig is None:
-        return False
-
-    src_thread_sig, src_local_sig, src_replica_sig = src_sig
-    dst_thread_sig, dst_local_sig, dst_replica_sig = dst_sig
-
-    if len(src_thread_sig) != len(dst_thread_sig):
-        return False
-    if len(src_local_sig) != len(dst_local_sig):
-        return False
-    if len(src_replica_sig) != len(dst_replica_sig):
-        return False
-
-    def _list_equal(a_list, b_list) -> bool:
-        for (a_key, a_ext, a_str), (b_key, b_ext, b_str) in zip(a_list, b_list):
-            if a_key != b_key:
-                return False
-            if not analyzer.can_prove_equal(a_ext, b_ext):
-                return False
-            if not analyzer.can_prove_equal(a_str, b_str):
-                return False
-        return True
-
-    return (
-        _list_equal(src_thread_sig, dst_thread_sig)
-        and _list_equal(src_local_sig, dst_local_sig)
-        and _list_equal(src_replica_sig, dst_replica_sig)
-    )
 
 
 _LOCAL_CASE_VIEW_FULL = "view_full"
@@ -424,21 +160,21 @@ def validate_cast_local_view(
         replica = getattr(layout, "replica", None) or []
         if any(it.axis.is_thread() for it in replica):
             return False
-        if _get_local_region(layout, list(buf.shape), st, ext) is None:
+        if get_local_region(layout, list(buf.shape), st, ext) is None:
             return False
 
     # Slice → Canonicalize
-    src_sliced = _get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
-    dst_sliced = _get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
+    src_sliced = get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
+    dst_sliced = get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
 
     src_can = src_sliced.canonicalize() if hasattr(src_sliced, "canonicalize") else src_sliced
     dst_can = dst_sliced.canonicalize() if hasattr(dst_sliced, "canonicalize") else dst_sliced
 
-    src_sig = _layout_signature(src_can)
-    dst_sig = _layout_signature(dst_can)
+    src_sig = layout_signature(src_can)
+    dst_sig = layout_signature(dst_can)
 
     # Here check the canonicalized layouts are semantically equal.
-    if not _sig_equal(analyzer, src_sig, dst_sig):
+    if not sig_equal(analyzer, src_sig, dst_sig):
         return False
 
     # Resolve thread vars once; reuse for launch count check
@@ -446,7 +182,7 @@ def validate_cast_local_view(
     thr_extents = []
     for it in src_sliced.shard:
         if it.axis.is_thread():
-            var = _resolve_thread_var(it.axis, sctx)
+            var = resolve_thread_var(it.axis, sctx)
             if var is None:
                 return False
             thread_vars_list.append(var)
@@ -461,31 +197,6 @@ def validate_cast_local_view(
                     return False
 
     return True
-
-
-def _resolve_thread_var(axis, sctx):
-    """Map the axis to the corresponding thread variable."""
-    axis_name = getattr(axis, "name", None)
-    if not axis_name:
-        try:
-            axis_name = str(axis)
-        except Exception:
-            axis_name = ""
-
-    for key, itervar in sctx.launch_params.items():
-        if getattr(itervar.var, "name", "") == axis_name:
-            return itervar.var
-
-    if axis_name:
-        axis_name_lower = axis_name.lower()
-        for key in sctx.launch_params:
-            if axis_name_lower in key.lower() or (axis_name == "tx" and "threadIdx.x" in key):
-                return sctx.launch_params[key].var
-
-    if "threadIdx.x" in sctx.launch_params:
-        return sctx.launch_params["threadIdx.x"].var
-
-    return None
 
 
 def _emit_cast_local_view_full(
@@ -594,7 +305,7 @@ def cast_local_view_impl(
     local_case = _classify_cast_local_case(dst_buffer_region, src_buffer_region, sctx)
 
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
-    dst_local_info = _get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
+    dst_local_info = get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
     if not dst_local_info:
         fail("dst layout is not supported for local-view cast")
 
@@ -603,7 +314,7 @@ def cast_local_view_impl(
 
     # view_sliced
     src_st, src_extent = get_st_extent(src_buffer_region)
-    src_local_info = _get_local_region(src.layout, list(src.shape), src_st, src_extent)
+    src_local_info = get_local_region(src.layout, list(src.shape), src_st, src_extent)
     if not src_local_info:
         fail("src layout is not supported for local-view cast")
 
@@ -672,6 +383,36 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
     return impl
 
 
+# === Variant: cast/local_view (priority=15) ===
+#
+# When: both dst and src are local-scope TileLayout buffers with matching
+# canonical layout signatures, at warp/warpgroup/cta/cluster scope.
+# Higher priority than thread_wise — preferred when layout partition is valid.
+#
+# Before (OpCall):
+#     with Tx.warp():
+#         Tx.cast(dst_view[0:16, 0:128], src_view[0:16, 0:128])
+#         # src: local float16, dst: local float32, both WGMMA layout
+#
+# After — view_full path (local_total=64, fp16→fp32 uses vec2 intrinsic):
+#     with Tx.thread():
+#         base_dst = Tx.decl_buffer((64,), "float32", dst.data, scope="local")
+#         base_src = Tx.decl_buffer((64,), "float16", src.data, scope="local")
+#         for s in Tx.serial(64 // 2):
+#             # __half22float2: converts 2 fp16 values to 2 fp32 at once
+#             Tx.cuda.func_call("__half22float2", &base_dst[s*2], &base_src[s*2])
+#         # If dtype pair has no vec2 intrinsic, falls back to:
+#         # base_dst[idx] = Tx.cast(base_src[idx], "float32")
+#
+# After — view_sliced path (partial region, e.g. [4:12, 0:128]):
+#     with Tx.thread():
+#         src_local = src.local(*src_local_shape)
+#         dst_local = dst.local(*dst_local_shape)
+#         for s in Tx.serial(local_total):
+#             dst_indices = get_indices(s, dst_local_st, dst_local_ext)
+#             src_indices = get_indices(s, src_local_st, src_local_ext)
+#             dst_local[dst_indices] = Tx.cast(src_local[src_indices], dst.dtype)
+#
 @register_dispatch(
     "cast",
     "cuda",
@@ -701,6 +442,22 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc
     return cast_local_view_impl(op_call.output, op_call.input, sctx)
 
 
+# === Variant: cast/thread_wise (priority=10) ===
+#
+# When: both dst and src are local-scope TileLayout buffers, at thread scope.
+# Fallback when local_view is not applicable (wrong scope or layout).
+#
+# Before (OpCall):
+#     with Tx.thread():
+#         Tx.cast(dst_local[0:16, 0:16], src_local[0:16, 0:16])
+#         # src: local float16 (16,16), dst: local float32 (16,16)
+#
+# After (n_elems=256, fp16→fp32 uses vec2 intrinsic):
+#     with Tx.thread():
+#         for s in Tx.serial(256 // 2):
+#             Tx.cuda.func_call("__half22float2", &dst[s*2], &src[s*2])
+#         # Without vec2: dst[s] = Tx.cast(src[s], "float32")
+#
 @register_dispatch(
     "cast",
     "cuda",

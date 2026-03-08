@@ -22,12 +22,9 @@ from tvm.tir import Buffer, FloatImm, Stmt
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule.registry import f_op_scheduler
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
-from tvm.tirx.op_schedule.trn.common import (
-    InstructionGenerator,
-    get_ewise_dim_map,
-    init_analyzer,
-    nki_dim,
-)
+from tvm.tirx.op_schedule.trn.common import init_analyzer, nki_dim
+from tvm.tirx.op_schedule.trn.dim_utils import get_ewise_dim_map
+from tvm.tirx.op_schedule.trn.instruction_generator import InstructionGenerator
 from tvm.tirx.operator.op import (
     BinaryReduce,
     Copy,

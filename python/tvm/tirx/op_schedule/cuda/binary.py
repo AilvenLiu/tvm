@@ -15,7 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of binary operator schedules."""
+"""Implementation of binary operator schedules for CUDA targets.
+
+Registered ops: add, sub, mul, fdiv.
+Each op gets two dispatch variants: "shared" and "local" (both priority=10).
+See the registration block at the bottom of this file for detailed dispatch
+documentation with before/after IR examples.
+"""
 
 import functools
 import operator
@@ -32,15 +38,15 @@ from tvm.tir.layout import TileLayout, laneid
 from tvm.tirx.op_schedule import ScheduleContext, fail
 from tvm.tirx.op_schedule.dispatcher import predicate
 
-from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
-from .cast import (
-    _get_local_region,
-    _get_sublayout_from_region,
-    _layout_signature,
-    _resolve_thread_var,
-    _sig_equal,
-)
+from ..common import MapOpType
 from .common import get_indices, get_st_extent, get_vec_len
+from .layout_utils import (
+    get_local_region,
+    get_sublayout_from_region,
+    layout_signature,
+    resolve_thread_var,
+    sig_equal,
+)
 
 binary_op_table = {
     MapOpType.ADD: lambda a, b: a + b,
@@ -476,26 +482,26 @@ def _validate_binary_local_view_case(
         replica = getattr(layout, "replica", None) or []
         if any(it.axis.is_thread() for it in replica):
             return False, "thread-shared dimension with replica is not supported"
-        if _get_local_region(layout, buf.shape, st, ext) is None:
+        if get_local_region(layout, buf.shape, st, ext) is None:
             return False, "invalid region for local-view binary op"
 
     # src1 and dst should represent the same sliced thread/local partition.
-    dst_sliced = _get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
-    src1_sliced = _get_sublayout_from_region(src1.layout, src1.shape, src1_st, src1_extent)
-    dst_sig = _layout_signature(
+    dst_sliced = get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
+    src1_sliced = get_sublayout_from_region(src1.layout, src1.shape, src1_st, src1_extent)
+    dst_sig = layout_signature(
         dst_sliced.canonicalize() if hasattr(dst_sliced, "canonicalize") else dst_sliced
     )
-    src1_sig = _layout_signature(
+    src1_sig = layout_signature(
         src1_sliced.canonicalize() if hasattr(src1_sliced, "canonicalize") else src1_sliced
     )
-    if not _sig_equal(analyzer, src1_sig, dst_sig):
+    if not sig_equal(analyzer, src1_sig, dst_sig):
         return False, "cannot validate src1 and dst layout signatures for local-view binary op"
 
     thread_vars_list = []
     thr_extents = []
     for it in dst_sliced.shard:
         if it.axis.is_thread():
-            var = _resolve_thread_var(it.axis, sctx)
+            var = resolve_thread_var(it.axis, sctx)
             if var is None:
                 return False, "cannot resolve thread variable"
             thread_vars_list.append(var)
@@ -717,12 +723,12 @@ def _emit_binary_local_view(
     src1_st, src1_extent = get_st_extent(_src1)
     src2_st, src2_extent = get_st_extent(_src2) if _src2 is not None else (None, None)
 
-    dst_local_info = _get_local_region(dst.layout, dst.shape, dst_st, dst_extent)
-    src1_local_info = _get_local_region(src1.layout, src1.shape, src1_st, src1_extent)
+    dst_local_info = get_local_region(dst.layout, dst.shape, dst_st, dst_extent)
+    src1_local_info = get_local_region(src1.layout, src1.shape, src1_st, src1_extent)
     if not dst_local_info or not src1_local_info:
         fail("dst/src1 layout is not supported for local-view binary op")
     src2_local_info = (
-        _get_local_region(src2.layout, src2.shape, src2_st, src2_extent)
+        get_local_region(src2.layout, src2.shape, src2_st, src2_extent)
         if src2 is not None
         else None
     )
@@ -1128,36 +1134,78 @@ def binary_local_impl(
     fail(f"unsupported local case {local_case} for local binary map impl")
 
 
-def get_binary_cuda_candidate(binary_op: MapOpType) -> list[UnaryBinaryScheduleCandidate]:
-    candidates = [
-        UnaryBinaryScheduleCandidate(
-            impl=binary_shared_impl,
-            variant="shared",
-            priority=10,
-            preds=[
-                predicate("validate_binary", _validate_binary, op_type=binary_op),
-                predicate("storage_scope", _match_storage_scope, expected_scope=["shared*"]),
-                predicate("shared_valid", validate_binary_shared, op_type=binary_op),
-            ],
-        ),
-        UnaryBinaryScheduleCandidate(
-            impl=binary_local_impl,
-            variant="local",
-            priority=10,
-            preds=[
-                predicate("validate_binary", _validate_binary, op_type=binary_op),
-                predicate("storage_scope", _match_storage_scope, expected_scope=["local"]),
-                predicate("local_valid", validate_binary_local, op_type=binary_op),
-            ],
-        ),
-    ]
-    return candidates
-
-
 # ---------------------------------------------------------------------------
 # Registration: bind each binary op name to its CUDA schedule candidates.
 # ---------------------------------------------------------------------------
-from .common import target_cuda  # noqa: E402
+#
+# === Variant: "shared" (priority=10) ===
+#
+# When: dst, src1, src2 are all shared-memory TileLayout buffers (or one src
+# is a FloatImm constant — but only for commutative ops like add/mul).
+# Non-commutative ops (sub, fdiv) reject constant LHS.
+#
+# Before (OpCall):
+#     with Tx.cta():
+#         A_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
+#         B_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
+#         C_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
+#         Tx.add(C_smem[0:32, 0:32], A_smem[0:32, 0:32], B_smem[0:32, 0:32])
+#
+# After (scheduled PrimFunc, thread_cnt=64, vec_len=8):
+#     for s in Tx.serial(ceildiv(1024, 8 * 64)):
+#         for vec in Tx.vectorized(8):
+#             fused = s * 512 + threadIdx.x * 8 + vec
+#             if fused < 1024:
+#                 idx = [fused // 32, fused % 32]
+#                 C_smem[idx] = A_smem[idx] + B_smem[idx]
+#     Tx.cuda.cta_sync()
+#
+# With constant RHS: Tx.mul(C_smem, A_smem, Tx.float16(2.0))
+#     → C_smem[idx] = A_smem[idx] * float16(2.0)
+#
+# === Variant: "local" (priority=10) ===
+#
+# When: dst, src1, src2 are all local-scope TileLayout buffers with valid
+# thread-partition (shard, no swizzle).
+#
+# Four sub-paths within binary_local_impl:
+#
+# (A) wgmma_row_red_view (warp/warpgroup/cta scope, layout has laneid shard
+#     matching WGMMA accumulator pattern):
+#     Decomposes the logical layout into per-warp iteration with physical
+#     indices computed from layout decomposition. Handles the common pattern
+#     of binary ops on WGMMA output registers.
+#
+# Before:
+#     with Tx.warp():
+#         Tx.add(C_view[0:16, 0:128], A_view[0:16, 0:128], B_view[0:16, 0:128])
+#         # A_view, B_view, C_view: local bufs with WGMMA layout
+#
+# After (per-warp decomposition):
+#     with Tx.thread():
+#         for outer in Tx.serial(N_COLS // 8):
+#             for inner in Tx.unroll(2):
+#                 for vec in Tx.vectorized(2):
+#                     C[inner, outer * 2 + vec] = A[...] + B[...]
+#
+# (B) generic view (warp/warpgroup/cta scope, non-WGMMA layout):
+#     Flat local view like unary view_full.
+#
+# (C) packed_f32x2 (thread scope, SM100+, float32, vec_len=2):
+#
+# Before:
+#     with Tx.thread():
+#         Tx.add(dst_local, a_local, b_local)  # all float32 local bufs
+#
+# After (uses PTX add.f32x2):
+#     with Tx.thread():
+#         for s in Tx.serial(n // 2):
+#             Tx.cuda.func_call("add_f32x2", &dst[s*2], &a[s*2], &b[s*2])
+#
+# (D) trivial_layout (thread scope, generic fallback):
+#     Simple per-element loop: serial(n/vec) x vectorized(vec).
+#
+from tvm.tirx.op_schedule import register_dispatch  # noqa: E402
 
 for _op_name, _op_type in {
     "add": MapOpType.ADD,
@@ -1165,10 +1213,31 @@ for _op_name, _op_type in {
     "mul": MapOpType.MUL,
     "fdiv": MapOpType.FDIV,
 }.items():
-    register_unary_binary_schedule(
+
+    @register_dispatch(
         _op_name,
-        _op_type,
         "cuda",
-        target_cuda,
-        get_binary_cuda_candidate(_op_type),
+        variant="shared",
+        priority=10,
+        when=[
+            predicate("validate_binary", _validate_binary, op_type=_op_type),
+            predicate("storage_scope", _match_storage_scope, expected_scope=["shared*"]),
+            predicate("shared_valid", validate_binary_shared, op_type=_op_type),
+        ],
     )
+    def _shared_dispatch(op: OpCall, sctx: ScheduleContext, _ty=_op_type) -> PrimFunc:
+        return binary_shared_impl(op, _ty, sctx)
+
+    @register_dispatch(
+        _op_name,
+        "cuda",
+        variant="local",
+        priority=10,
+        when=[
+            predicate("validate_binary", _validate_binary, op_type=_op_type),
+            predicate("storage_scope", _match_storage_scope, expected_scope=["local"]),
+            predicate("local_valid", validate_binary_local, op_type=_op_type),
+        ],
+    )
+    def _local_dispatch(op: OpCall, sctx: ScheduleContext, _ty=_op_type) -> PrimFunc:
+        return binary_local_impl(op, _ty, sctx)

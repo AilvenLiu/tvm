@@ -1,0 +1,59 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'When using `from .module import (name_a as _name_a, name_b as _name_b)`,
+
+    ruff''s import sorting rule (I001 / isort compatibility) will split each
+
+    aliased import into its own `from .module import (name as _name,)` block.
+
+    This makes the import section unnecessarily verbose and hard to read.
+
+
+    The fix is to avoid `as` aliases entirely: import with the public name and
+
+    update all call sites. If the original names had underscore prefixes because
+
+    they were private in their original module, removing the prefix is correct
+
+    after extracting them to a dedicated utility module where they become public API.
+
+
+    Encountered during layout_utils.py extraction: cast.py, unary.py, binary.py
+
+    all imported 5 functions with `as _name` aliases, producing 15 separate
+
+    import statements after ruff auto-fix. Removing aliases consolidated to
+
+    one clean import block per file.
+
+    '
+  summary: Ruff's import sorter (I001) splits `from X import (a as _a, b as _b)` into
+    separate `from X import (a as _a,)` statements; avoid `as` aliases to keep imports
+    grouped.
+created: '2026-03-08'
+id: KB-20260308-232603-205e85
+scope:
+  - repo
+tags:
+  - ruff
+  - import
+  - python
+  - lint
+title: Ruff import sorter splits aliased imports into separate statements
+updated: '2026-03-08'

@@ -29,12 +29,9 @@ from tvm.tirx.operator.op import BinaryChain, BinaryReduce, ReduceNegate, UnaryR
 
 from ..common import ReduceOpType
 from .binary import InstType, try_find_inst_nary
-from .common import (
-    InstructionGenerator,
-    get_reduction_dim_map,
-    init_analyzer,
-    nki_dim,
-)
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_reduction_dim_map
+from .instruction_generator import InstructionGenerator
 from .reduction import generate_intermediate_buffer, reduction_trn
 from .unary import get_const_bias_tensor, try_find_inst_unary
 

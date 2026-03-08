@@ -15,6 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Implementation of gemm_async operator schedule for CUDA targets.
+
+Registered op: gemm_async (1 variant: "tcgen05").
+See the @register_dispatch block below for detailed documentation with
+before/after IR examples.
+"""
+
 import functools
 import operator
 
@@ -28,13 +35,9 @@ from tvm.tir.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
 from tvm.tirx.op_schedule import ScheduleContext, predicate, register_dispatch
 from tvm.tirx.operator.op import KernelReplacePoint
 
-from .common import (
-    SwizzleMode,
-    get_st_extent,
-    single_thread,
-    tma_atom_layout,
-    tma_atom_shape,
-)
+from .common import get_st_extent
+from .exec_scope_utils import single_thread
+from .tma_utils import SwizzleMode, tma_atom_layout, tma_atom_shape
 
 
 def sf_tmem_layout(rows, sf_mma_k, K, dtype="float8_e8m0fnu"):
@@ -524,6 +527,34 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
     return impl
 
 
+# === Variant: gemm_async/tcgen05 (priority=10) ===
+#
+# When: gemm_async op at single-thread exec scope on Blackwell (SM100+).
+# Requires A and B in smem (with TMA-compatible swizzle layout), accum in tmem.
+#
+# Before (OpCall — regular MMA):
+#     Tx.gemm_async(C_tmem[0:64, 0:256], A_smem[0:64, 0:64], B_smem[0:256, 0:64])
+#     # A: shared float16, B: shared float16, C: tmem float32
+#
+# After (encodes instruction descriptor + calls tcgen05.mma):
+#     descI_local: uint32
+#     Tx.ptx.tcgen05.encode_instr_descriptor(
+#         &descI_local, C_type="f32", A_type="f16", B_type="f16",
+#         M=64, N=256, MMA_K=64, transA=False, transB=True, cta_group=1)
+#     Tx.ptx.tcgen05.mma(descA_buf[0], descB_buf[0], descI_local)
+#
+# Before (OpCall — block-scaled fp8 MMA):
+#     Tx.gemm_async(C_tmem, A_smem, B_smem,
+#                   scale_A=SFA_tmem, scale_B=SFB_tmem)
+#     # A/B: shared float8_e4m3, SFA/SFB: tmem float8_e8m0fnu
+#
+# After (adds scale factor descriptors):
+#     Tx.ptx.tcgen05.mma(descA, descB, descI,
+#                        scale_A=sfA_desc, scale_B=sfB_desc)
+#
+# Scale factor layout (sf_tmem_layout) must match tcgen05 hardware requirements:
+# rows = M or N, sf_mma_k = ceil(MMA_K / sf_block_size), specific TileLayout
+# structure with direct_sum atom tiling.
 @register_dispatch(
     "gemm_async",
     "cuda",

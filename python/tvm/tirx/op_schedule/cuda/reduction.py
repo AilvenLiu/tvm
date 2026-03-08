@@ -15,7 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of reduce operator schedules."""
+"""Implementation of reduction operator schedules for CUDA targets.
+
+Registered ops: sum, max, min.
+Each op gets two dispatch variants: optimized (priority=10) and default (priority=0).
+See the registration block at the bottom of this file for detailed dispatch
+documentation with before/after IR examples.
+"""
 
 import functools
 import operator
@@ -685,6 +691,69 @@ _optimized_local_reduction_predicates = [
 # ---------------------------------------------------------------------------
 # Register reduction schedules (sum, max, min)
 # ---------------------------------------------------------------------------
+#
+# === Variant: {sum→"packed_add_sum", max/min→"3input_maxmin"} (priority=10) ===
+#
+# When: thread scope, all local buffers, float32, 1D src with len >= 8,
+# SM100+ (uses packed PTX instructions not available on older GPUs).
+#
+# Before (OpCall — sum example):
+#     with Tx.thread():
+#         Tx.sum(dst_local[0:1], src_local[0:32])   # float32, reduce 32 → 1
+#
+# After — packed_add_sum (uses add.f32x2 to reduce pairs):
+#     with Tx.thread():
+#         # Iteratively reduce: 32 → 16 → 8 → 4 → 2 → 1
+#         # Each step: add.f32x2 combines adjacent pairs
+#         for i in Tx.serial(16):
+#             Tx.cuda.func_call("add_f32x2", &buf[i*2], &buf[i*2], &buf[i*2+2])
+#         # ... repeat halving until scalar result
+#         dst_local[0] = buf[0]
+#
+# After — 3input_maxmin (uses 3-input PTX max/min):
+#     with Tx.thread():
+#         # Tree reduction with 3-input instructions:
+#         # max(a, b, c) in one PTX instruction
+#         for i in Tx.serial(n // 3):
+#             Tx.cuda.func_call("max3_f32", &buf[i*3], &buf[i*3+1], &buf[i*3+2])
+#
+# === Variant: "default" (priority=0) ===
+#
+# When: any valid reduction (universal fallback).
+#
+# Three sub-paths selected by scope:
+#
+# (A) shared + warp/warpgroup/cta scope — warp-tree reduction:
+#
+# Before:
+#     with Tx.cta():
+#         Tx.sum(dst_smem[0:64], src_smem[0:64, 0:64])  # reduce cols
+#
+# After (each warp reduces its share via __shfl_xor_sync):
+#     with Tx.thread():
+#         partial = src_smem[warp_id * chunk + lane_offset]
+#         for step in [16, 8, 4, 2, 1]:
+#             partial += Tx.cuda.shfl_xor_sync(partial, step)
+#         if lane_id == 0:
+#             dst_smem[warp_id * chunk_out + ...] = partial
+#
+# (B) local + thread scope — sequential per-element reduction:
+#
+# Before:
+#     with Tx.thread():
+#         Tx.sum(dst_local[0:1], src_local[0:32])
+#
+# After:
+#     with Tx.thread():
+#         accum = src_local[0]
+#         for i in Tx.serial(1, 32):
+#             accum = accum + src_local[i]
+#         dst_local[0] = accum
+#
+# (C) local + warp scope — layout-driven warp reduction with __shfl_xor_sync:
+#     Requires WGMMA layout (16xN → 16x4). Decomposes the layout to
+#     identify which lanes hold which elements, then uses shuffle instructions.
+#
 
 # Optimized implementations for sm_100a+ (packed_add_sum for SUM, 3-input for MAX/MIN)
 _optimized_impl_table = {

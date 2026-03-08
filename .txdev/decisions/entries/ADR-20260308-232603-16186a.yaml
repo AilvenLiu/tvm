@@ -1,0 +1,46 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "cuda/common.py (573 lines) contained four unrelated concerns mixed together:\n\
+    TMA layout math, execution scope helpers, GEMM validation, and basic copy utilities.\n\
+    Split into tma_utils.py, exec_scope_utils.py, gemm_utils.py, with common.py retaining\n\
+    only the small universally-used functions (next_power_of_2, get_st_extent, etc.).\n\
+    \ntrn/common.py (1032 lines) contained dimension mapping, instruction generation,\n\
+    workspace validation, and tiny shared constants. Split into dim_utils.py (RangeInfo,\n\
+    DimensionMapper, dim map functions), instruction_generator.py (InstructionGenerator\n\
+    and all supporting classes), workspace_utils.py (psum constants and buffer checks),\n\
+    with common.py retaining only nki_dim and init_analyzer (~45 lines).\n\nKey design\
+    \ choices:\n- DimensionMapper stays in dim_utils.py even though InstructionGenerator\
+    \ uses it,\n  because DimensionMapper is also used independently by op schedule\
+    \ files.\n- MapOpType/ReduceOpType enums stay in op_schedule/common.py (not cuda/common.py)\n\
+    \  because both CUDA and TRN backends import them.\n- target_cuda/target_trn decorators\
+    \ were removed entirely (not moved) since\n  @register_dispatch already keys by\
+    \ target_kind, making them redundant.\n"
+  summary: Large common.py files (573 lines CUDA, 1032 lines TRN) were split by functional
+    domain into focused utility modules rather than arbitrary size-based splitting.
+created: '2026-03-08'
+id: ADR-20260308-232603-16186a
+scope:
+  - repo
+tags:
+  - op-schedule
+  - refactor
+  - architecture
+  - module-split
+title: Split cuda/common.py and trn/common.py by functional domain, not by size
+updated: '2026-03-08'

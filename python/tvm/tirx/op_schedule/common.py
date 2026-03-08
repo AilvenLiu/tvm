@@ -16,15 +16,7 @@
 # under the License.
 """TIRx operator schedule common utilities."""
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from enum import Enum
-
-from tvm.tir import PrimFunc
-from tvm.tir.stmt import OpCall
-from tvm.tirx.op_schedule import ScheduleContext, register_dispatch
-
-from .dispatcher import predicate
 
 
 class MapOpType(Enum):
@@ -37,12 +29,11 @@ class MapOpType(Enum):
     ZERO = 4
     SQRT = 5
     RECIPROCAL = 6
-    MEMSET = 7
+    FILL = 7
     MAX = 8
     MIN = 9
     EXP = 10
-    FILL = 11  # FIXME: FILL and MEMSET are the same. merge them.
-    EXP2 = 12
+    EXP2 = 11
 
 
 class ReduceOpType(Enum):
@@ -51,47 +42,3 @@ class ReduceOpType(Enum):
     SUM = 0
     MAX = 1
     MIN = 2
-
-
-@dataclass
-class UnaryBinaryScheduleCandidate:
-    impl: Callable[[OpCall, Enum, ScheduleContext], PrimFunc | None]
-    variant: str
-    priority: int
-    preds: list[predicate]
-
-
-def register_unary_binary_schedule(
-    op_name: str,
-    op_type: MapOpType | ReduceOpType,
-    target_kind: str,
-    target_check: Callable[[ScheduleContext], bool],
-    schedule_candidates: list[UnaryBinaryScheduleCandidate],
-) -> None:
-    """Register a schedule function for a given operation type."""
-
-    # Register per-candidate dispatch variants in the dispatcher.
-    for candidate in schedule_candidates:
-
-        @register_dispatch(
-            op_name,
-            target_kind,
-            variant=candidate.variant,
-            priority=candidate.priority,
-            when=[
-                *candidate.preds,
-                predicate(
-                    "target",
-                    lambda op, sctx, tk=target_kind: (
-                        str(sctx.target.kind) == tk,
-                        f"target mismatch: {sctx.target.kind}",
-                    ),
-                ),
-            ],
-        )
-        def _dispatch_variant(
-            op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type
-        ) -> PrimFunc:
-            return _cand.impl(op, _ty, sctx)
-
-    return None

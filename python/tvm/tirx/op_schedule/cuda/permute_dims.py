@@ -14,6 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
+"""Implementation of permute_dims operator schedule for CUDA targets.
+
+Registered op: permute_dims (1 variant: "vectorized_permute_dims_last_2d").
+See the @register_dispatch block below for detailed documentation with
+before/after IR examples.
+"""
+
 import math
 
 from tvm.script import tirx as Tx
@@ -112,6 +120,31 @@ def vectorized_permute_dims_last_2d_impl(
     return impl
 
 
+# === Variant: permute_dims/vectorized_permute_dims_last_2d (priority=20) ===
+#
+# When: shared-memory buffer with TileLayout, permutation swaps only the last
+# 2 dimensions (e.g. [0,1,3,2] for 4D), at warp scope. In-place transpose.
+#
+# Before (OpCall):
+#     with Tx.warp():
+#         Tx.permute_dims(A_smem[0:64, 0:64], order=[1, 0])
+#         # A_smem: shared float16 (64, 64), in-place transpose
+#
+# After (warp-level register-buffered transpose, vec_len=4):
+#     lane_id = threadIdx.x % 32
+#     reg_trans = Tx.alloc_buffer((2, 16, 4), "float16", scope="local")
+#     # Phase 1: read rows into registers (each lane reads a column stripe)
+#     for wi in Tx.unroll(2):                          # N // warp_size
+#         for vi in Tx.unroll(16):                     # M // vec_len
+#             for vec in Tx.unroll(4):
+#                 reg_trans[wi, vi, vec] = A_smem[(vi*4+vec)*64 + wi*32+lane_id]
+#     Tx.cuda.warp_sync()
+#     # Phase 2: write back transposed (column index becomes row)
+#     for wi in Tx.unroll(2):
+#         for vi in Tx.unroll(16):
+#             for vec in Tx.vectorized(4):
+#                 A_smem[(wi*32+lane_id)*64 + vi*4+vec] = reg_trans[wi, vi, vec]
+#     Tx.cuda.warp_sync()
 @register_dispatch(
     "permute_dims",
     "cuda",

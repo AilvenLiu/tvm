@@ -32,15 +32,10 @@ from tvm.tirx.op_schedule import (
     register_dispatch,
 )
 
-from .common import (
-    InstructionGenerator,
-    check_workspace_buffer,
-    init_analyzer,
-    largest_psum_per_bank,
-    max_psum_banks,
-    normalize_and_group,
-    target_trn,
-)
+from .common import init_analyzer
+from .dim_utils import normalize_and_group
+from .instruction_generator import InstructionGenerator
+from .workspace_utils import check_workspace_buffer, largest_psum_per_bank, max_psum_banks
 
 
 class OperatorKind:
@@ -112,7 +107,6 @@ def get_pf_dim_from_buffer_region(
     return p_dim, f_dim
 
 
-@target_trn
 def matmul_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Schedule GEMM operation on Trainium."""
     # Basic validation checks

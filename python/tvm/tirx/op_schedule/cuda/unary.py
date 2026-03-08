@@ -15,7 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of unary operator schedules."""
+"""Implementation of unary operator schedules for CUDA targets.
+
+Registered ops: zero, fill, reciprocal, exp, exp2, sqrt.
+Each op gets two dispatch variants: "shared" and "local" (both priority=10).
+See the registration block at the bottom of this file for detailed dispatch
+documentation with before/after IR examples.
+"""
 
 import functools
 import operator
@@ -31,15 +37,15 @@ from tvm.tir.layout import TileLayout
 from tvm.tirx.op_schedule import ScheduleContext, fail
 from tvm.tirx.op_schedule.dispatcher import predicate
 
-from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
-from .cast import (
-    _get_local_region,
-    _get_sublayout_from_region,
-    _layout_signature,
-    _resolve_thread_var,
-    _sig_equal,
-)
+from ..common import MapOpType
 from .common import get_indices, get_st_extent, get_vec_len
+from .layout_utils import (
+    get_local_region,
+    get_sublayout_from_region,
+    layout_signature,
+    resolve_thread_var,
+    sig_equal,
+)
 
 unary_op_table = {
     MapOpType.ZERO: lambda x, s, b: 0.0,
@@ -120,12 +126,12 @@ def _unary_args(
     return _dst, _src, _bias, _scale
 
 
-def _slice_and_layout_signature(buf_region: BufferRegion):
+def _slice_andlayout_signature(buf_region: BufferRegion):
     """Slice a layout by region and return (start, extent, sliced_layout, canonical_signature)."""
     st, ext = get_st_extent(buf_region)
-    sliced = _get_sublayout_from_region(buf_region.buffer.layout, buf_region.buffer.shape, st, ext)
+    sliced = get_sublayout_from_region(buf_region.buffer.layout, buf_region.buffer.shape, st, ext)
     canonical = sliced.canonicalize() if hasattr(sliced, "canonicalize") else sliced
-    return st, ext, sliced, _layout_signature(canonical)
+    return st, ext, sliced, layout_signature(canonical)
 
 
 def _basic_shape_layout_dtype_checks(
@@ -260,14 +266,14 @@ def validate_unary_shared(
         if not _basic_shape_layout_dtype_checks(_bias, _dst, analyzer, disallow_swizzle=False):
             return False, "shape or layout mismatch between bias and dst for shared unary op"
 
-    dst_sig = _slice_and_layout_signature(_dst)[3]
-    src_sig = _slice_and_layout_signature(_src)[3] if isinstance(_src, BufferRegion) else None
-    bias_sig = _slice_and_layout_signature(_bias)[3] if isinstance(_bias, BufferRegion) else None
+    dst_sig = _slice_andlayout_signature(_dst)[3]
+    src_sig = _slice_andlayout_signature(_src)[3] if isinstance(_src, BufferRegion) else None
+    bias_sig = _slice_andlayout_signature(_bias)[3] if isinstance(_bias, BufferRegion) else None
 
     # Here check the canonicalized layouts are semantically equal.
-    if src_sig and not _sig_equal(analyzer, src_sig, dst_sig):
+    if src_sig and not sig_equal(analyzer, src_sig, dst_sig):
         return False, "cannot validate src and dst layout signatures for shared unary op"
-    if bias_sig and not _sig_equal(analyzer, bias_sig, dst_sig):
+    if bias_sig and not sig_equal(analyzer, bias_sig, dst_sig):
         return False, "cannot validate bias and dst layout signatures for shared unary op"
 
     return True, None
@@ -428,7 +434,7 @@ def validate_unary_local(
         if not _basic_shape_layout_dtype_checks(_bias, _dst, analyzer, disallow_swizzle=True):
             return False, "shape or layout mismatch between bias and dst for local unary op"
 
-    dst_st, dst_extent, dst_sliced, dst_sig = _slice_and_layout_signature(_dst)
+    dst_st, dst_extent, dst_sliced, dst_sig = _slice_andlayout_signature(_dst)
     src_st, src_extent = get_st_extent(_src) if isinstance(_src, BufferRegion) else (None, None)
     bias_st, bias_extent = get_st_extent(_bias) if isinstance(_bias, BufferRegion) else (None, None)
 
@@ -448,16 +454,16 @@ def validate_unary_local(
         replica = getattr(layout, "replica", None) or []
         if any(it.axis.is_thread() for it in replica):
             return False, "thread-shared dimension with replica is not supported for local unary op"
-        if _get_local_region(layout, buf.shape, st, ext) is None:
+        if get_local_region(layout, buf.shape, st, ext) is None:
             return False, "invalid region for local-view unary op"
 
-    src_sig = _slice_and_layout_signature(_src)[3] if isinstance(_src, BufferRegion) else None
-    bias_sig = _slice_and_layout_signature(_bias)[3] if isinstance(_bias, BufferRegion) else None
+    src_sig = _slice_andlayout_signature(_src)[3] if isinstance(_src, BufferRegion) else None
+    bias_sig = _slice_andlayout_signature(_bias)[3] if isinstance(_bias, BufferRegion) else None
 
     # Here check the canonicalized layouts are semantically equal.
-    if src_sig and not _sig_equal(analyzer, src_sig, dst_sig):
+    if src_sig and not sig_equal(analyzer, src_sig, dst_sig):
         return False, "cannot validate src and dst layout signatures for local unary op"
-    if bias_sig and not _sig_equal(analyzer, bias_sig, dst_sig):
+    if bias_sig and not sig_equal(analyzer, bias_sig, dst_sig):
         return False, "cannot validate bias and dst layout signatures for local unary op"
 
     # Validate launch-thread consistency against dst layout thread partition.
@@ -465,7 +471,7 @@ def validate_unary_local(
     thr_extents = []
     for it in dst_sliced.shard:
         if it.axis.is_thread():
-            var = _resolve_thread_var(it.axis, sctx)
+            var = resolve_thread_var(it.axis, sctx)
             if var is None:
                 return False, "cannot resolve thread variable"
             thread_vars_list.append(var)
@@ -607,7 +613,7 @@ def _emit_unary_local_view_sliced(
     elif isinstance(_src, BufferRegion):
         src = _src.buffer
         src_st, src_extent = get_st_extent(_src)
-        src_local_info = _get_local_region(src.layout, src.shape, src_st, src_extent)
+        src_local_info = get_local_region(src.layout, src.shape, src_st, src_extent)
         if not src_local_info:
             fail("src layout is not supported for local-view cast")
         src_local_shape, src_local_st, src_local_ext = src_local_info
@@ -640,7 +646,7 @@ def _emit_unary_local_view_sliced(
         elif isinstance(_bias, BufferRegion):
             bias = _bias.buffer
             bias_st, bias_extent = get_st_extent(_bias)
-            bias_local_info = _get_local_region(bias.layout, bias.shape, bias_st, bias_extent)
+            bias_local_info = get_local_region(bias.layout, bias.shape, bias_st, bias_extent)
             if not bias_local_info:
                 fail("bias layout is not supported for local-view cast")
             bias_local_shape, bias_local_st, bias_local_ext = bias_local_info
@@ -767,7 +773,7 @@ def unary_local_impl(
 
     if local_case in (_LOCAL_CASE_VIEW_FULL, _LOCAL_CASE_VIEW_SLICED):
         dst_st, dst_extent = get_st_extent(_dst)
-        dst_local_info = _get_local_region(
+        dst_local_info = get_local_region(
             _dst.buffer.layout, list(_dst.buffer.shape), dst_st, dst_extent
         )
         if not dst_local_info:
@@ -785,39 +791,69 @@ def unary_local_impl(
     fail(f"unsupported local case {local_case} for unary map impl")
 
 
-def get_unary_cuda_candidate(unary_op: MapOpType) -> list[UnaryBinaryScheduleCandidate]:
-    """Get the appropriate unary schedule candidates for CUDA."""
-    candidates = [
-        UnaryBinaryScheduleCandidate(
-            impl=unary_shared_impl,
-            variant="shared",
-            priority=10,
-            preds=[
-                predicate(
-                    "storage_scope",
-                    _match_storage_scope,
-                    expected_scope=["shared*"],
-                ),
-                predicate("shared_valid", validate_unary_shared),
-            ],
-        ),
-        UnaryBinaryScheduleCandidate(
-            impl=unary_local_impl,
-            variant="local",
-            priority=10,
-            preds=[
-                predicate("storage_scope", _match_storage_scope, expected_scope=["local"]),
-                predicate("local_valid", validate_unary_local),
-            ],
-        ),
-    ]
-    return candidates
-
-
 # ---------------------------------------------------------------------------
 # Registration: bind each unary op name to its CUDA schedule candidates.
 # ---------------------------------------------------------------------------
-from .common import target_cuda  # noqa: E402
+#
+# === Variant: "shared" (priority=10) ===
+#
+# When: dst and src are both shared-memory TileLayout buffers with the same
+# canonical layout signature (i.e. same axis structure after canonicalize()).
+#
+# Before (OpCall):
+#     with Tx.cta():
+#         A_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
+#         B_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
+#         Tx.sqrt(A_smem[0:32, 0:32], B_smem[0:32, 0:32])
+#
+# After (scheduled PrimFunc, thread_cnt=64, vec_len=8):
+#     for s in Tx.serial(ceildiv(1024, 8 * 64)):          # outer serial loop
+#         for vec in Tx.vectorized(8):                     # inner vectorized
+#             fused = s * 512 + threadIdx.x * 8 + vec
+#             if fused < 1024:
+#                 idx = [fused // 32, fused % 32]
+#                 A_smem[idx] = Tx.sqrt(B_smem[idx])
+#     Tx.cuda.cta_sync()                                  # scope-level barrier
+#
+# With bias+scale (Tx.exp(dst, src, bias=B, scale=1.5)):
+#     dst[idx] = Tx.cast(Tx.exp(src[idx] * 1.5 + B[idx]), dst.dtype)
+#
+# === Variant: "local" (priority=10) ===
+#
+# When: dst and src are both local-scope TileLayout buffers with a valid
+# thread-partition (shard, no swizzle, no zero-stride thread dims).
+#
+# Sub-path A — view_full (warp/warpgroup/cta scope, full region):
+#
+# Before:
+#     with Tx.warp():
+#         Tx.exp(res_view[0:16, 0:128], acc_view[0:16, 0:128])
+#         # res_view, acc_view: local bufs with WGMMA layout
+#
+# After (flattened local view, local_total=64, vec_len=8):
+#     with Tx.thread():
+#         base_dst = Tx.decl_buffer((64,), "float16", res.data, scope="local")
+#         base_src = Tx.decl_buffer((64,), "float16", acc.data, scope="local")
+#         for s in Tx.serial(64 // 8):
+#             for vec in Tx.vectorized(8):
+#                 base_dst[s * 8 + vec] = Tx.exp(base_src[s * 8 + vec])
+#
+# Sub-path B — view_sliced (warp/warpgroup/cta scope, partial region):
+#     Like view_full but uses buf.local(*shape) + index decomposition per element.
+#
+# Sub-path C — thread_wise (thread scope):
+#
+# Before:
+#     with Tx.thread():
+#         Tx.zero(a_local[0:32], a_local[0:32])     # a_local: local (32,) float16
+#
+# After (vec_len=8):
+#     with Tx.thread():
+#         for s in Tx.serial(32 // 8):
+#             for vec in Tx.vectorized(8):
+#                 a_local[s * 8 + vec] = 0.0
+#
+from tvm.tirx.op_schedule import register_dispatch  # noqa: E402
 
 for _op_name, _op_type in {
     "zero": MapOpType.ZERO,
@@ -827,10 +863,29 @@ for _op_name, _op_type in {
     "exp2": MapOpType.EXP2,
     "sqrt": MapOpType.SQRT,
 }.items():
-    register_unary_binary_schedule(
+
+    @register_dispatch(
         _op_name,
-        _op_type,
         "cuda",
-        target_cuda,
-        get_unary_cuda_candidate(_op_type),
+        variant="shared",
+        priority=10,
+        when=[
+            predicate("storage_scope", _match_storage_scope, expected_scope=["shared*"]),
+            predicate("shared_valid", validate_unary_shared),
+        ],
     )
+    def _shared_dispatch(op: OpCall, sctx: ScheduleContext, _ty=_op_type) -> PrimFunc:
+        return unary_shared_impl(op, _ty, sctx)
+
+    @register_dispatch(
+        _op_name,
+        "cuda",
+        variant="local",
+        priority=10,
+        when=[
+            predicate("storage_scope", _match_storage_scope, expected_scope=["local"]),
+            predicate("local_valid", validate_unary_local),
+        ],
+    )
+    def _local_dispatch(op: OpCall, sctx: ScheduleContext, _ty=_op_type) -> PrimFunc:
+        return unary_local_impl(op, _ty, sctx)

@@ -23,12 +23,8 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TCol, TileLayout, TLane, tid_in_wg
-from tvm.tirx.op_schedule.cuda.common import (
-    SwizzleMode,
-    next_power_of_2,
-    tma_atom_shape,
-    tma_shared_layout,
-)
+from tvm.tirx.op_schedule.cuda.common import next_power_of_2
+from tvm.tirx.op_schedule.cuda.tma_utils import SwizzleMode, tma_atom_shape, tma_shared_layout
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,

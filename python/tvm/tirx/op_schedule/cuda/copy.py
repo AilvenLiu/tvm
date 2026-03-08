@@ -15,7 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of copy operator schedules."""
+"""Implementation of copy (sync) operator schedules for CUDA targets.
+
+Registered ops: copy (4 variants).
+See the @register_dispatch blocks below for detailed documentation with
+before/after IR examples.
+
+Also provides impl functions (copy_tmem_local_impl, copy_smem_tmem_impl) used
+by copy_async.py for the async variants of tmem/smem copy.
+"""
 
 from collections.abc import Iterable
 
@@ -31,14 +39,13 @@ from tvm.tirx.op_schedule.registry import ScheduleContext
 
 from .common import (
     CopyInstType,
-    SwizzleMode,
     copy_vec_load_impl,
-    exec_scope_ok,
     get_st_extent,
-    get_swizzle_mode_from_layout,
     get_vec_len,
     validate_copy_op,
 )
+from .exec_scope_utils import exec_scope_ok
+from .tma_utils import SwizzleMode, get_swizzle_mode_from_layout
 
 
 def copy_default_impl(
@@ -186,6 +193,22 @@ def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
     return True, None
 
 
+# === Variant: copy/vec_load (priority=10) ===
+#
+# When: copy between global↔shared, global↔local, or shared↔local, and the
+# layout allows vectorized access (vec_len > 1 for the element type).
+#
+# Before (OpCall):
+#     with Tx.cta():
+#         Tx.copy(A_smem[0:64, 0:64], A[0:64, 0:64])
+#         # A: global float16, A_smem: shared float16
+#
+# After (thread_cnt=128, vec_len=8):
+#     for s in Tx.serial(ceildiv(4096, 8 * 128)):
+#         for vec in Tx.vectorized(8):
+#             fused = s * 1024 + threadIdx.x * 8 + vec
+#             if fused < 4096:
+#                 A_smem[fused // 64, fused % 64] = A[fused // 64, fused % 64]
 @register_dispatch(
     "copy",
     "cuda",
@@ -203,6 +226,15 @@ def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_vec_load_impl(op_call, sctx, CopyInstType.NORMAL)
 
 
+# === Variant: copy/default (priority=0) ===
+#
+# When: any valid copy op where vec_load predicates fail (e.g. non-power-of-2
+# extent, or unsupported scope pair for vectorization). Scalar element loop.
+#
+# After: nested for-loops over each dimension, one element at a time:
+#     for i in Tx.serial(ext0):
+#         for j in Tx.serial(ext1):
+#             dst[dst_st0+i, dst_st1+j] = src[src_st0+i, src_st1+j]
 @register_dispatch(
     "copy",
     "cuda",
@@ -306,6 +338,17 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
     return impl
 
 
+# === Variant: copy/tmem<->local (priority=10) ===
+#
+# When: one buffer is in tmem (tensor memory, Blackwell SM100+) and the other
+# is in local scope, at warpgroup exec scope.
+#
+# Before (OpCall):
+#     with Tx.warpgroup():
+#         Tx.copy(acc_local[0:16, 0:128], acc_tmem[0:16, 0:128])
+#
+# After (tmem→local uses tcgen05.ld):
+#     Tx.ptx.tcgen05.ld(num_regs, tmem_addr, ...)
 @register_dispatch(
     "copy",
     "cuda",
@@ -321,23 +364,6 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False)
 )
 def copy_schedule_tmem_local(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     return copy_tmem_local_impl(op_call, sctx)
-
-
-@register_dispatch(
-    "copy_async",
-    "cuda",
-    variant="tmem<->local",
-    priority=10,
-    when=[
-        predicate("validate_copy_op", _is_valid_copy),
-        predicate("exec_scope", exec_scope_ok, expected_scopes=["warpgroup"]),
-        predicate(
-            "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
-        ),
-    ],
-)
-def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
-    return copy_tmem_local_impl(op_call, sctx, async_op=True)
 
 
 def copy_smem_tmem_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False) -> PrimFunc | None:
@@ -575,6 +601,16 @@ def _single_thread_exec(op_call: OpCall, sctx: ScheduleContext):
     return ok, None if ok else f"expected thread exec_scope, got {exec_scope}"
 
 
+# === Variant: copy/smem->tmem (priority=10) ===
+#
+# When: src is shared memory, dst is tensor memory (Blackwell SM100+),
+# at single-thread exec scope.
+#
+# Before (OpCall):
+#     Tx.copy(acc_tmem[0:16, 0:128], A_smem[0:16, 0:128])
+#
+# After (tcgen05.cp with descriptor encoding):
+#     Tx.ptx.tcgen05.cp(num_regs, tmem_addr, smem_desc, ...)
 @register_dispatch(
     "copy",
     "cuda",
@@ -587,17 +623,3 @@ def _single_thread_exec(op_call: OpCall, sctx: ScheduleContext):
 )
 def copy_schedule_smem_tmem(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     return copy_smem_tmem_impl(op_call, sctx, async_op=False)
-
-
-@register_dispatch(
-    "copy_async",
-    "cuda",
-    variant="smem->tmem",
-    priority=10,
-    when=[
-        predicate("validate_smem_tmem_copy", _is_valid_smem_tmem_copy),
-        predicate("exec_scope", _single_thread_exec),
-    ],
-)
-def copy_async_schedule_smem_tmem(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
-    return copy_smem_tmem_impl(op_call, sctx, async_op=True)

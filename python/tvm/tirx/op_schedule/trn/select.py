@@ -27,12 +27,9 @@ from tvm.tirx.op_schedule import (
 )
 from tvm.tirx.operator.op import Select
 
-from .common import (
-    InstructionGenerator,
-    get_ewise_dim_map,
-    init_analyzer,
-    nki_dim,
-)
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_ewise_dim_map
+from .instruction_generator import InstructionGenerator
 
 
 def select_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:

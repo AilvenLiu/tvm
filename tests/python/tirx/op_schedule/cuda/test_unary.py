@@ -21,7 +21,9 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tir.layout import S, TileLayout, laneid, tid_in_wg, tx, warpid
-from tvm.tirx.op_schedule.cuda.cast import _cast_layout_supported_for_local
+from tvm.tirx.op_schedule.cuda.layout_utils import (
+    cast_layout_supported_for_local as _cast_layout_supported_for_local,
+)
 
 
 @pytest.mark.parametrize(
@@ -1009,7 +1011,9 @@ def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
 def test_cast_layout_partition_and_validation():
     """Partition table (simplified): partition structure and _cast_layout_supported_for_local."""
     from tvm.tir.layout import Axis, Iter
-    from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
+    from tvm.tirx.op_schedule.cuda.layout_utils import (
+        get_layout_thread_local_partition as _get_layout_thread_local_partition,
+    )
 
     m_axis = Axis.get("m")
 
@@ -1120,7 +1124,9 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
 
 def test_cast_joint_decomposition_extents_order():
     """Test joint decomposition uses thread dims in layout order with correct extents."""
-    from tvm.tirx.op_schedule.cuda.cast import _get_layout_thread_local_partition
+    from tvm.tirx.op_schedule.cuda.layout_utils import (
+        get_layout_thread_local_partition as _get_layout_thread_local_partition,
+    )
 
     layout = TileLayout(S[(2, 32, 4) : (2 @ warpid, 32 @ laneid, 1)])
     part = _get_layout_thread_local_partition(layout)

@@ -15,6 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Implementation of copy_async operator schedules for CUDA targets.
+
+Registered op: copy_async (2 variants here; 2 more in copy.py).
+See the @register_dispatch blocks below for detailed documentation with
+before/after IR examples.
+"""
+
 import functools
 from typing import Optional
 
@@ -33,13 +40,11 @@ from tvm.tirx.op_schedule import (
 
 from .common import (
     CopyInstType,
-    SwizzleMode,
     copy_vec_load_impl,
-    get_swizzle_mode_from_layout,
-    single_thread,
-    tma_atom_shape,
     validate_copy_op,
 )
+from .exec_scope_utils import single_thread
+from .tma_utils import SwizzleMode, get_swizzle_mode_from_layout, tma_atom_shape
 
 
 def find_contiguous_region(layout: TileLayout) -> tuple:
@@ -884,6 +889,23 @@ def copy_tma_impl(
     return impl
 
 
+# === Variant: copy_async/non-bulk-copy (priority=20) ===
+#
+# When: any valid async copy. Highest priority — tried first before TMA.
+# Succeeds for global↔shared copies where vectorization works; fails back
+# to TMA for single-thread scope or when cp.async doesn't apply.
+#
+# Before (OpCall):
+#     with Tx.cta():
+#         Tx.copy_async(A_smem[0:64, 0:64], A[0:64, 0:64])
+#
+# After (uses cp.async PTX instead of regular load/store):
+#     for s in Tx.serial(ceildiv(4096, 8 * 128)):
+#         for vec in Tx.vectorized(8):
+#             fused = s * 1024 + threadIdx.x * 8 + vec
+#             if fused < 4096:
+#                 # emitted as cp.async.bulk.shared.global [smem_addr], [gmem_addr], 16
+#                 A_smem[idx] = A[idx]
 @register_dispatch(
     "copy_async",
     "cuda",
@@ -900,6 +922,37 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
 
 
+# === Variant: copy_async/tma (priority=10) ===
+#
+# When: valid async copy at single-thread exec scope. Applies to global↔shared
+# copies on Hopper+ (SM90+) where TMA hardware is available.
+# Falls back (DispatchFail) for scope pairs TMA can't handle.
+#
+# Before (OpCall):
+#     Tx.copy_async(A_smem[0:128, 0:64], A[row:row+128, 0:64])
+#     # A: global float16, A_smem: shared float16 with 128B swizzle layout
+#
+# After (generates host-side tensormap + device-side TMA instruction):
+#   Host init:
+#     tensor_map = Tx.cuda.tma_create_tensormap(
+#         tensor_rank=2, gmem_ptr=A.data,
+#         global_shape=[M, 64], global_strides=[64, 1],
+#         box_dim=[128, 64], element_strides=[1, 1],
+#         swizzle_mode="SWIZZLE_128B", ...)
+#   Device:
+#     Tx.ptx.cp_async.bulk.tensor.g2c(
+#         rank=2, smem_ptr=A_smem.ptr_to(0),
+#         mbar=barrier, tensor_map=tensor_map,
+#         coord0=0, coord1=row)
+#
+# Key internal algorithm (copy_tma_impl):
+#   1. Infer swizzle mode from smem layout (none/32B/64B/128B)
+#   2. Group layout axes, find contiguous regions
+#   3. Compute box_dim — the tile size per TMA instruction
+#   4. Sort global strides to determine TMA addressing order
+#   5. Build iteration space if tensor > one TMA box
+#   6. Create tensormap descriptor on host
+#   7. Emit cp_async.bulk.tensor.g2c (load) or s2g (store)
 @register_dispatch(
     "copy_async",
     "cuda",
@@ -921,3 +974,56 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
 )
 def copy_async_dispatch_tma(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_tma_impl(op, sctx)
+
+
+# ---------------------------------------------------------------------------
+# Blackwell tmem/smem async variants (moved from copy.py for colocation).
+# The impl functions remain in copy.py; only dispatch registration lives here.
+# ---------------------------------------------------------------------------
+from .copy import (  # noqa: E402
+    _is_valid_copy,
+    _is_valid_smem_tmem_copy,
+    _scope_allowed,
+    _single_thread_exec,
+    copy_smem_tmem_impl,
+    copy_tmem_local_impl,
+)
+from .exec_scope_utils import exec_scope_ok  # noqa: E402
+
+
+# === Variant: copy_async/tmem<->local (priority=10) ===
+#
+# Same as copy/tmem<->local but async (async_op=True).
+# After: Tx.ptx.tcgen05.ld/st with async completion signaling.
+@register_dispatch(
+    "copy_async",
+    "cuda",
+    variant="tmem<->local",
+    priority=10,
+    when=[
+        predicate("validate_copy_op", _is_valid_copy),
+        predicate("exec_scope", exec_scope_ok, expected_scopes=["warpgroup"]),
+        predicate(
+            "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
+        ),
+    ],
+)
+def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
+    return copy_tmem_local_impl(op_call, sctx, async_op=True)
+
+
+# === Variant: copy_async/smem->tmem (priority=10) ===
+#
+# Same as copy/smem->tmem but async (async_op=True).
+@register_dispatch(
+    "copy_async",
+    "cuda",
+    variant="smem->tmem",
+    priority=10,
+    when=[
+        predicate("validate_smem_tmem_copy", _is_valid_smem_tmem_copy),
+        predicate("exec_scope", _single_thread_exec),
+    ],
+)
+def copy_async_schedule_smem_tmem(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
+    return copy_smem_tmem_impl(op_call, sctx, async_op=True)

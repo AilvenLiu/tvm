@@ -25,13 +25,10 @@ from tvm.tir import BufferRegion, FloatImm, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
-from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
-from .common import (
-    InstructionGenerator,
-    get_ewise_dim_map,
-    init_analyzer,
-    nki_dim,
-)
+from ..common import MapOpType
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_ewise_dim_map
+from .instruction_generator import InstructionGenerator
 
 binary_map_ops = {
     MapOpType.ADD: "add",
@@ -316,7 +313,7 @@ def binary_trn(
 # ---------------------------------------------------------------------------
 # Registration: bind each binary op name to its TRN schedule candidates.
 # ---------------------------------------------------------------------------
-from .common import target_trn  # noqa: E402
+from tvm.tirx.op_schedule import register_dispatch  # noqa: E402
 
 for _op_name, _op_type in {
     "add": MapOpType.ADD,
@@ -325,10 +322,7 @@ for _op_name, _op_type in {
     "maximum": MapOpType.MAX,
     "minimum": MapOpType.MIN,
 }.items():
-    register_unary_binary_schedule(
-        _op_name,
-        _op_type,
-        "trn",
-        target_trn,
-        [UnaryBinaryScheduleCandidate(binary_trn, "binary", 0, [])],
-    )
+
+    @register_dispatch(_op_name, "trn", variant="binary", priority=0)
+    def _binary_dispatch(op, sctx, _ty=_op_type):
+        return binary_trn(op, _ty, sctx)

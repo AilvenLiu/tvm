@@ -23,18 +23,15 @@ from tvm.tir import BufferRegion, FloatImm, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
-from ..common import MapOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
+from ..common import MapOpType
 from .binary import try_find_inst_nary
-from .common import (
-    InstructionGenerator,
-    check_workspace_buffer,
-    get_ewise_dim_map,
-    init_analyzer,
-    nki_dim,
-)
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_ewise_dim_map
+from .instruction_generator import InstructionGenerator
+from .workspace_utils import check_workspace_buffer
 
 # Operation type classifications
-non_activation_unary_map_ops = [MapOpType.RECIPROCAL, MapOpType.MEMSET]
+non_activation_unary_map_ops = [MapOpType.RECIPROCAL, MapOpType.FILL]
 activation_map_ops = [MapOpType.SQRT, MapOpType.EXP]
 
 # Operation code table for instructions
@@ -44,7 +41,7 @@ opcode_table = {
 }
 
 # Operations that take constants as input
-const_input_ops = [MapOpType.MEMSET]
+const_input_ops = [MapOpType.FILL]
 
 
 def try_find_inst_unary(
@@ -182,7 +179,7 @@ def generate_unary_func(
                         inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, b_var: b_loop})
                         dst_indices = Tx.meta_var(inst_gen.generate_indices(dst_buffer_region))
                         if inst_gen.make_guard(dst_buffer_region):
-                            if unary_op == MapOpType.MEMSET:
+                            if unary_op == MapOpType.FILL:
                                 Tx.evaluate(Tx.nki.memset(dst[tuple(dst_indices)], _src))
                             else:
                                 src_indices = Tx.meta_var(inst_gen.generate_indices(_src))
@@ -299,28 +296,23 @@ def unary_with_bias_scale_trn(
 # ---------------------------------------------------------------------------
 # Registration: bind each unary op name to its TRN schedule candidates.
 # ---------------------------------------------------------------------------
-from .common import target_trn  # noqa: E402
+from tvm.tirx.op_schedule import register_dispatch  # noqa: E402
 
 for _op_name, _op_type in {
     "reciprocal": MapOpType.RECIPROCAL,
-    "memset": MapOpType.MEMSET,
+    "memset": MapOpType.FILL,
 }.items():
-    register_unary_binary_schedule(
-        _op_name,
-        _op_type,
-        "trn",
-        target_trn,
-        [UnaryBinaryScheduleCandidate(unary_trn, "unary", 0, [])],
-    )
+
+    @register_dispatch(_op_name, "trn", variant="unary", priority=0)
+    def _unary_dispatch(op, sctx, _ty=_op_type):
+        return unary_trn(op, _ty, sctx)
+
 
 for _op_name, _op_type in {
     "sqrt": MapOpType.SQRT,
     "exp": MapOpType.EXP,
 }.items():
-    register_unary_binary_schedule(
-        _op_name,
-        _op_type,
-        "trn",
-        target_trn,
-        [UnaryBinaryScheduleCandidate(unary_with_bias_scale_trn, "unary_with_bias_scale", 0, [])],
-    )
+
+    @register_dispatch(_op_name, "trn", variant="unary_with_bias_scale", priority=0)
+    def _unary_bs_dispatch(op, sctx, _ty=_op_type):
+        return unary_with_bias_scale_trn(op, _ty, sctx)

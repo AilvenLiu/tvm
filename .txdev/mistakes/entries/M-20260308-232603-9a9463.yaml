@@ -1,0 +1,58 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The user asked to run "tirx standard tests" and the CLAUDE.md clearly
+    states:
+
+    `pytest tests/python/tirx/ -n 16` as the standard command. Instead, only
+
+    `tests/python/tirx/op_schedule/ -n 16` was run (930 tests), missing 584 additional
+
+    tests in the full suite (1514 total).
+
+
+    The user''s feedback was blunt: "Do you understand what ''tirx standard test''
+    means?"
+
+
+    For a refactor touching imports across cuda/ and trn/ subdirectories, the full
+    test
+
+    suite is essential because changes to shared utilities could break lowering passes,
+
+    codegen, or kernel tests that depend on them transitively.
+
+
+    Lesson: Always follow the exact test command specified in CLAUDE.md. When in doubt,
+
+    run the broader scope, not the narrower one.
+
+    '
+  summary: CLAUDE.md specifies `pytest tests/python/tirx/ -n 16` as the standard TIRX
+    test command, but initially ran only `tests/python/tirx/op_schedule/` — a strict
+    subset that misses lowering, codegen, kernel, and transform tests.
+created: '2026-03-08'
+id: M-20260308-232603-9a9463
+scope:
+  - repo
+tags:
+  - testing
+  - tirx
+  - scope-control
+title: Ran op_schedule/ subtree tests instead of full tirx/ test suite
+updated: '2026-03-08'

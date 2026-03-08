@@ -30,9 +30,9 @@ from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tir.stmt import DeclBuffer, OpCall
 from tvm.tir.stmt_functor import StmtExprVisitor
-from tvm.tirx.op_schedule.cuda.common import (
+from tvm.tirx.op_schedule.cuda.common import next_power_of_2
+from tvm.tirx.op_schedule.cuda.tma_utils import (
     SwizzleMode,
-    next_power_of_2,
     tma_atom_layout,
     tma_atom_shape,
     tma_shared_layout,

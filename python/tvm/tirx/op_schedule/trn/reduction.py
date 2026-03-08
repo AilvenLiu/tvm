@@ -22,15 +22,11 @@ from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext, fail
 
-from ..common import ReduceOpType, UnaryBinaryScheduleCandidate, register_unary_binary_schedule
-from .common import (
-    InstructionGenerator,
-    check_workspace_buffer,
-    get_reduction_dim_map,
-    init_analyzer,
-    nki_dim,
-    target_trn,
-)
+from ..common import ReduceOpType
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_reduction_dim_map
+from .instruction_generator import InstructionGenerator
+from .workspace_utils import check_workspace_buffer
 
 reduce_ops = {
     ReduceOpType.SUM: "add",
@@ -183,16 +179,14 @@ def reduction_trn(
     # fmt: on
 
 
-# Register schedules for supported reduction operations
-for op_name_, op_type_ in {
+from tvm.tirx.op_schedule import register_dispatch  # noqa: E402
+
+for _op_name, _op_type in {
     "sum": ReduceOpType.SUM,
     "max": ReduceOpType.MAX,
     "min": ReduceOpType.MIN,
 }.items():
-    register_unary_binary_schedule(
-        op_name_,
-        op_type_,
-        "trn",
-        target_trn,
-        [UnaryBinaryScheduleCandidate(reduction_trn, "reduction", 0, [])],
-    )
+
+    @register_dispatch(_op_name, "trn", variant="reduction", priority=0)
+    def _reduction_dispatch(op, sctx, _ty=_op_type):
+        return reduction_trn(op, _ty, sctx)

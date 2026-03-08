@@ -27,16 +27,10 @@ from tvm.tirx.op_schedule import (
     register_dispatch,
 )
 
-from .common import (
-    InstructionGenerator,
-    check_workspace_buffer,
-    get_ewise_dim_map,
-    init_analyzer,
-    largest_psum_per_bank,
-    max_psum_banks,
-    nki_dim,
-    target_trn,
-)
+from .common import init_analyzer, nki_dim
+from .dim_utils import get_ewise_dim_map
+from .instruction_generator import InstructionGenerator
+from .workspace_utils import check_workspace_buffer, largest_psum_per_bank, max_psum_banks
 
 
 def transpose_schedule(
@@ -196,7 +190,6 @@ def transpose_schedule(
     return transpose_sbuf_output
 
 
-@target_trn
 def copy_trn(op: OpCall, sctx: ScheduleContext) -> PrimFunc | None:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
