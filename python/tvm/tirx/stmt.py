@@ -1100,7 +1100,7 @@ class OpCall(Stmt):
         raise NotImplementedError("Subclass must implement this method")
 
     def get_private_buffers(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
     ) -> dict[str, Any]:
         """
         Create private (intermediate) buffers needed in this operator.
@@ -1134,12 +1134,12 @@ class OpCall(Stmt):
             raise ValueError(f"Unsupported target: {sctx.target.kind.name}")
 
     def get_private_buffers_trn(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
     ) -> dict[str, Any]:
         return {}
 
     def get_private_buffers_cuda(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: ScheduleContext
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
     ) -> dict[str, Any]:
         return {}
 
