@@ -440,8 +440,8 @@ ElseFrame Else();
  */
 DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
                            ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
-                           ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
-                           int offset_factor, ffi::String buffer_type,
+                           ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
+                           int align, int offset_factor, ffi::String buffer_type,
                            ffi::Optional<ffi::Array<IntImm>> axis_separators,
                            ffi::Optional<TLayout> layout = std::nullopt,
                            ffi::Optional<PrimExpr> allocated_addr = std::nullopt);
