@@ -88,7 +88,7 @@ def test_existing_alloc():
         Tx.func_attr({"global_symbol": "copy"})
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[4*512*4+1])  # noqa: E501
-            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = Tx.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[1])  # noqa: E501
             Tx.copy(B_sbuf[0:256, :], A_sbuf)
     # fmt: on
 

@@ -322,16 +322,9 @@ void TIRVisitorWithPath::VisitStmt_(const tirx::OpCallNode* op, AccessPath path)
     } else if (auto stmt = op->args[i].as<Stmt>()) {
       Visit(stmt.value(), path->Attr("args")->ArrayItem(i));
     } else if (auto buf = op->args[i].as<Buffer>()) {
-      Visit(buf.value(), path->Attr("args")->ArrayItem(i));
-    } else if (auto buf_region = op->args[i].as<BufferRegion>()) {
-      Visit(buf_region.value(), path->Attr("args")->ArrayItem(i));
+      VisitBufferUse(buf.value(), path->Attr("args")->ArrayItem(i));
     }
   }
-}
-
-void TIRVisitorWithPath::VisitStmt_(const AllocBufferNode* op, AccessPath path) {
-  auto context = WithDef(op->buffer, path->Attr("buffer"));
-  Visit(op->body, path->Attr("body"));
 }
 
 void TIRVisitorWithPath::VisitStmt_(const ExecScopeStmtNode* op, AccessPath path) {

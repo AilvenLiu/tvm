@@ -15,16 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 """IRBuilder for TIR"""
-from typing import TYPE_CHECKING, Any, TypeVar
 
 import contextlib
 import functools
-from functools import partial
 import inspect
 import threading
 from collections.abc import Callable
+from functools import partial
 from numbers import Integral
-from typing import Any, Dict, List, Optional, ParamSpec, Tuple, TypeVar, Union
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, Union
 
 # isort: off
 from typing import Literal
@@ -33,23 +32,16 @@ from typing import Literal
 
 from tvm import DataType, ir, tir
 from tvm.ir import Type
+from tvm.ir import register_op_attr as _register_op_attr
 from tvm.ir.base import deprecated
 from tvm.runtime import String, convert
 from tvm.target import Target
 
 # pylint: disable=unused-import
 from tvm.target.codegen import llvm_lookup_intrinsic_id
-from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
+from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr, type_annotation
 from tvm.tirx import op as _tir_op
-from tvm.ir import register_op_attr as _register_op_attr
-from tvm.tirx import type_annotation
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, Var
-from tvm.tirx.layout import (
-    TLayout,
-    TileLayout,
-    SwizzleLayout,
-    ComposeLayout,
-)
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
 from tvm.tirx.expr import (
@@ -90,7 +82,15 @@ from tvm.tirx.expr import (
     Var,
 )
 from tvm.tirx.generic import cast
-from tvm.tirx.layout import ComposeLayout, Iter, SwizzleLayout, TileLayout, TLayout, S, R
+from tvm.tirx.layout import (
+    ComposeLayout,
+    Iter,
+    R,
+    S,
+    SwizzleLayout,
+    TileLayout,
+    TLayout,
+)
 
 from .. import IRBuilder
 from . import _ffi_api, frame, utils
@@ -99,9 +99,7 @@ from .external_kernel import call_kernel
 # pylint: enable=unused-import
 
 
-def _get_layout(
-    layout: Optional[Union[str, TLayout]], shape: List[PrimExpr], scope: str
-) -> Optional[TLayout]:
+def _get_layout(layout: str | TLayout | None, shape: list[PrimExpr], scope: str) -> TLayout | None:
     if layout is None:
         return None
     if isinstance(layout, TLayout):
@@ -120,9 +118,9 @@ def _get_layout(
 
 
 def _get_elem_offset(elem_offset, byte_offset, dtype: str):
-    assert (
-        elem_offset is None or byte_offset is None
-    ), "elem_offset and byte_offset cannot be set at the same time"
+    assert elem_offset is None or byte_offset is None, (
+        "elem_offset and byte_offset cannot be set at the same time"
+    )
     if elem_offset is not None:
         return elem_offset
     if byte_offset is None:
@@ -478,7 +476,7 @@ def world() -> frame.ExecScopeFrame:
 
 
 def kernel(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "world",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for kernel scope.
@@ -500,7 +498,7 @@ def kernel(
 
 
 def cluster(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "world",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for cluster scope.
@@ -514,7 +512,7 @@ def cluster(
 
 
 def cta(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "kernel",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for CTA scope.
@@ -528,7 +526,7 @@ def cta(
 
 
 def warpgroup(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "cta",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for warpgroup scope.
@@ -542,7 +540,7 @@ def warpgroup(
 
 
 def warp(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "cta",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for warp scope.
@@ -556,7 +554,7 @@ def warp(
 
 
 def thread(
-    extents: Optional[List[PrimExpr]] = None,
+    extents: list[PrimExpr] | None = None,
     parent: str = "cta",
 ) -> frame.ExecScopeFrame:
     """The execution scope declaration for thread scope.
@@ -570,52 +568,52 @@ def thread(
 
 
 def scope_id(
-    extents: List[Union[PrimExpr, int]],
+    extents: list[PrimExpr | int],
     parent: str,
     cur: str,
-) -> List[Var]:
+) -> list[Var]:
     ret = _ffi_api.ScopeId(extents, parent, "T.scope_id", cur)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def kernel_id(extents: List[Union[PrimExpr, int]], parent: str = "world") -> List[Var]:
+def kernel_id(extents: list[PrimExpr | int], parent: str = "world") -> list[Var]:
     ret = _ffi_api.KernelId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cluster_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+def cluster_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
     ret = _ffi_api.ClusterId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cta_id(extents: List[Union[PrimExpr, int]], parent: str, preferred=None) -> List[Var]:
+def cta_id(extents: list[PrimExpr | int], parent: str, preferred=None) -> list[Var]:
     ret = _ffi_api.CtaId(extents, parent, preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warpgroup_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+def warpgroup_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
     ret = _ffi_api.WarpgroupId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warp_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+def warp_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
     ret = _ffi_api.WarpId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def thread_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+def thread_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
     ret = _ffi_api.ThreadId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
@@ -705,7 +703,18 @@ def sblock_attr(attrs: dict[str, Any]) -> None:
 def alloc_buffer(
     shape: list[PrimExpr] | tuple[PrimExpr] | PrimExpr | Integral,
     dtype: str = "float32",
+    data: Var | None = None,
+    strides: list[PrimExpr] | None = None,
+    elem_offset: PrimExpr | None = None,
+    byte_offset: PrimExpr | None = None,
     scope: str = "global",
+    align: int = -1,
+    offset_factor: int = 0,
+    buffer_type: str = "default",
+    axis_separators: list[int] | None = None,
+    layout: str | TLayout | None = "default",
+    allocated_addr: int | tuple[int, ...] | None = None,
+    name: str | None = None,
     annotations: dict[str, Any] | None = None,
 ) -> Buffer:
     """Statement-level buffer allocation (creates an AllocBuffer IR node).
@@ -725,6 +734,28 @@ def alloc_buffer(
         The data type of the buffer elements.
     scope : str
         The storage scope of the buffer (e.g., "global", "shared").
+    data : Optional[Var]
+        Optional explicit data pointer.
+    strides : Optional[List[PrimExpr]]
+        Optional strides.
+    elem_offset : Optional[PrimExpr]
+        Optional element offset.
+    byte_offset : Optional[PrimExpr]
+        Optional byte offset.
+    align : int
+        Alignment requirement in bytes.
+    offset_factor : int
+        Offset factor.
+    buffer_type : str
+        Buffer type.
+    axis_separators : Optional[List[int]]
+        Optional axis separators.
+    layout : Optional[Union[str, TLayout]]
+        Optional layout.
+    allocated_addr : Optional[Union[int, Tuple[int, ...]]]
+        Optional pre-allocated address metadata.
+    name : Optional[str]
+        Optional explicit buffer name.
     annotations : Optional[Dict[str, Any]]
         Optional annotations for the allocation.
 
@@ -734,12 +765,24 @@ def alloc_buffer(
         The allocated buffer.
     """
     shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
-    return _ffi_api.AllocBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
-        shape,
-        dtype,
-        scope,
-        annotations,
+    buf = buffer(
+        shape=shape,
+        dtype=dtype,
+        data=data,
+        strides=strides,
+        elem_offset=elem_offset,
+        byte_offset=byte_offset,
+        scope=scope,
+        align=align,
+        offset_factor=offset_factor,
+        buffer_type=buffer_type,
+        axis_separators=axis_separators,
+        layout=layout,
+        allocated_addr=allocated_addr,
+        buffer_name=name or "",
     )
+    _ffi_api.AddToParent(tir.AllocBuffer(buf, annotations or {}))  # type: ignore[attr-defined] # pylint: disable=no-member
+    return buf
 
 
 def sblock_alloc_buffer(
@@ -833,6 +876,7 @@ def sblock_alloc_buffer(
     if name is not None:
         IRBuilder.name(name, buf)
     return buf
+
 
 def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
     """The range constructor.
@@ -1201,7 +1245,7 @@ def thread_binding(
     )
 
 
-def grid(*extents: Tuple[Union[PrimExpr, Tuple[PrimExpr, PrimExpr]]]) -> frame.ForFrame:
+def grid(*extents: tuple[PrimExpr | tuple[PrimExpr, PrimExpr]]) -> frame.ForFrame:
     """The grid For statement.
 
     Parameters
@@ -1303,6 +1347,8 @@ def Let(  # pylint: disable=invalid-name
 
 
 bind = Bind
+
+
 class LetAnnotation:
     """Marker for explicit LetStmt. Created by T.let or T.let[type].
     Usage in TVMScript:
@@ -1374,8 +1420,8 @@ def allocate(
 
 def attr(
     node_or_dict: Any,
-    attr_key: Optional[str] = None,
-    value: Optional[Union[PrimExpr, str]] = None,
+    attr_key: str | None = None,
+    value: PrimExpr | str | None = None,
 ) -> Union[frame.AttrFrame, "utils._FrameScope"]:
     """Create an attribute node, or multiple attribute nodes from a dict.
 
@@ -1642,15 +1688,11 @@ def alloc_scalar(dtype: str = "float32", scope: str = "global", name: str = None
         shape=(1,),
         dtype=dtype,
         scope=scope,
-        strides=None,
-        align=-1,
-        buffer_type="default",
-        axis_separators=None,
         layout=TileLayout(S[1]),
-        allocated_addr=None,
-        name=name,
     )
     assert isinstance(buf, Buffer)
+    if name is not None:
+        IRBuilder.name(name, buf)
     if name is None:
         return scalar_wrapper(buf[0])
     return buf[0]
@@ -1838,178 +1880,178 @@ def add_to_parent(stmt: tir.Stmt) -> None:
 
 
 # pylint: disable=invalid-name
-int8 = func_gen(("Int8"))
-int16 = func_gen(("Int16"))
-int32 = func_gen(("Int32"))
-int64 = func_gen(("Int64"))
-int8x2 = func_gen(("Int8x2"))
-int16x2 = func_gen(("Int16x2"))
-int32x2 = func_gen(("Int32x2"))
-int64x2 = func_gen(("Int64x2"))
-int8x4 = func_gen(("Int8x4"))
-int16x4 = func_gen(("Int16x4"))
-int32x4 = func_gen(("Int32x4"))
-int64x4 = func_gen(("Int64x4"))
-int8x8 = func_gen(("Int8x8"))
-int16x8 = func_gen(("Int16x8"))
-int32x8 = func_gen(("Int32x8"))
-int64x8 = func_gen(("Int64x8"))
-int8x16 = func_gen(("Int8x16"))
-int16x16 = func_gen(("Int16x16"))
-int32x16 = func_gen(("Int32x16"))
-int64x16 = func_gen(("Int64x16"))
-int8x32 = func_gen(("Int8x32"))
-int16x32 = func_gen(("Int16x32"))
-int32x32 = func_gen(("Int32x32"))
-int64x32 = func_gen(("Int64x32"))
-int8x64 = func_gen(("Int8x64"))
-int16x64 = func_gen(("Int16x64"))
-int32x64 = func_gen(("Int32x64"))
-int64x64 = func_gen(("Int64x64"))
+int8 = func_gen("Int8")
+int16 = func_gen("Int16")
+int32 = func_gen("Int32")
+int64 = func_gen("Int64")
+int8x2 = func_gen("Int8x2")
+int16x2 = func_gen("Int16x2")
+int32x2 = func_gen("Int32x2")
+int64x2 = func_gen("Int64x2")
+int8x4 = func_gen("Int8x4")
+int16x4 = func_gen("Int16x4")
+int32x4 = func_gen("Int32x4")
+int64x4 = func_gen("Int64x4")
+int8x8 = func_gen("Int8x8")
+int16x8 = func_gen("Int16x8")
+int32x8 = func_gen("Int32x8")
+int64x8 = func_gen("Int64x8")
+int8x16 = func_gen("Int8x16")
+int16x16 = func_gen("Int16x16")
+int32x16 = func_gen("Int32x16")
+int64x16 = func_gen("Int64x16")
+int8x32 = func_gen("Int8x32")
+int16x32 = func_gen("Int16x32")
+int32x32 = func_gen("Int32x32")
+int64x32 = func_gen("Int64x32")
+int8x64 = func_gen("Int8x64")
+int16x64 = func_gen("Int16x64")
+int32x64 = func_gen("Int32x64")
+int64x64 = func_gen("Int64x64")
 
-uint8 = func_gen(("UInt8"))
-uint16 = func_gen(("UInt16"))
-uint32 = func_gen(("UInt32"))
-uint64 = func_gen(("UInt64"))
-uint8x2 = func_gen(("UInt8x2"))
-uint16x2 = func_gen(("UInt16x2"))
-uint32x2 = func_gen(("UInt32x2"))
-uint64x2 = func_gen(("UInt64x2"))
-uint8x4 = func_gen(("UInt8x4"))
-uint16x4 = func_gen(("UInt16x4"))
-uint32x4 = func_gen(("UInt32x4"))
-uint64x4 = func_gen(("UInt64x4"))
-uint8x8 = func_gen(("UInt8x8"))
-uint16x8 = func_gen(("UInt16x8"))
-uint32x8 = func_gen(("UInt32x8"))
-uint64x8 = func_gen(("UInt64x8"))
-uint8x16 = func_gen(("UInt8x16"))
-uint16x16 = func_gen(("UInt16x16"))
-uint32x16 = func_gen(("UInt32x16"))
-uint64x16 = func_gen(("UInt64x16"))
-uint8x32 = func_gen(("UInt8x32"))
-uint16x32 = func_gen(("UInt16x32"))
-uint32x32 = func_gen(("UInt32x32"))
-uint64x32 = func_gen(("UInt64x32"))
-uint8x64 = func_gen(("UInt8x64"))
-uint16x64 = func_gen(("UInt16x64"))
-uint32x64 = func_gen(("UInt32x64"))
-uint64x64 = func_gen(("UInt64x64"))
+uint8 = func_gen("UInt8")
+uint16 = func_gen("UInt16")
+uint32 = func_gen("UInt32")
+uint64 = func_gen("UInt64")
+uint8x2 = func_gen("UInt8x2")
+uint16x2 = func_gen("UInt16x2")
+uint32x2 = func_gen("UInt32x2")
+uint64x2 = func_gen("UInt64x2")
+uint8x4 = func_gen("UInt8x4")
+uint16x4 = func_gen("UInt16x4")
+uint32x4 = func_gen("UInt32x4")
+uint64x4 = func_gen("UInt64x4")
+uint8x8 = func_gen("UInt8x8")
+uint16x8 = func_gen("UInt16x8")
+uint32x8 = func_gen("UInt32x8")
+uint64x8 = func_gen("UInt64x8")
+uint8x16 = func_gen("UInt8x16")
+uint16x16 = func_gen("UInt16x16")
+uint32x16 = func_gen("UInt32x16")
+uint64x16 = func_gen("UInt64x16")
+uint8x32 = func_gen("UInt8x32")
+uint16x32 = func_gen("UInt16x32")
+uint32x32 = func_gen("UInt32x32")
+uint64x32 = func_gen("UInt64x32")
+uint8x64 = func_gen("UInt8x64")
+uint16x64 = func_gen("UInt16x64")
+uint32x64 = func_gen("UInt32x64")
+uint64x64 = func_gen("UInt64x64")
 
-float16 = func_gen(("Float16"))
-float32 = func_gen(("Float32"))
-float64 = func_gen(("Float64"))
-float16x2 = func_gen(("Float16x2"))
-float32x2 = func_gen(("Float32x2"))
-float64x2 = func_gen(("Float64x2"))
-float16x4 = func_gen(("Float16x4"))
-float32x4 = func_gen(("Float32x4"))
-float64x4 = func_gen(("Float64x4"))
-float16x8 = func_gen(("Float16x8"))
-float32x8 = func_gen(("Float32x8"))
-float64x8 = func_gen(("Float64x8"))
-float16x16 = func_gen(("Float16x16"))
-float32x16 = func_gen(("Float32x16"))
-float64x16 = func_gen(("Float64x16"))
-float16x32 = func_gen(("Float16x32"))
-float32x32 = func_gen(("Float32x32"))
-float64x32 = func_gen(("Float64x32"))
-float16x64 = func_gen(("Float16x64"))
-float32x64 = func_gen(("Float32x64"))
-float64x64 = func_gen(("Float64x64"))
+float16 = func_gen("Float16")
+float32 = func_gen("Float32")
+float64 = func_gen("Float64")
+float16x2 = func_gen("Float16x2")
+float32x2 = func_gen("Float32x2")
+float64x2 = func_gen("Float64x2")
+float16x4 = func_gen("Float16x4")
+float32x4 = func_gen("Float32x4")
+float64x4 = func_gen("Float64x4")
+float16x8 = func_gen("Float16x8")
+float32x8 = func_gen("Float32x8")
+float64x8 = func_gen("Float64x8")
+float16x16 = func_gen("Float16x16")
+float32x16 = func_gen("Float32x16")
+float64x16 = func_gen("Float64x16")
+float16x32 = func_gen("Float16x32")
+float32x32 = func_gen("Float32x32")
+float64x32 = func_gen("Float64x32")
+float16x64 = func_gen("Float16x64")
+float32x64 = func_gen("Float32x64")
+float64x64 = func_gen("Float64x64")
 
 # Float8 variants
-float8_e3m4 = func_gen(("Float8E3M4"))
-float8_e3m4x2 = func_gen(("Float8E3M4x2"))
-float8_e3m4x4 = func_gen(("Float8E3M4x4"))
-float8_e3m4x8 = func_gen(("Float8E3M4x8"))
-float8_e3m4x16 = func_gen(("Float8E3M4x16"))
-float8_e3m4x32 = func_gen(("Float8E3M4x32"))
-float8_e3m4x64 = func_gen(("Float8E3M4x64"))
+float8_e3m4 = func_gen("Float8E3M4")
+float8_e3m4x2 = func_gen("Float8E3M4x2")
+float8_e3m4x4 = func_gen("Float8E3M4x4")
+float8_e3m4x8 = func_gen("Float8E3M4x8")
+float8_e3m4x16 = func_gen("Float8E3M4x16")
+float8_e3m4x32 = func_gen("Float8E3M4x32")
+float8_e3m4x64 = func_gen("Float8E3M4x64")
 
-float8_e4m3 = func_gen(("Float8E4M3"))
-float8_e4m3x2 = func_gen(("Float8E4M3x2"))
-float8_e4m3x4 = func_gen(("Float8E4M3x4"))
-float8_e4m3x8 = func_gen(("Float8E4M3x8"))
-float8_e4m3x16 = func_gen(("Float8E4M3x16"))
-float8_e4m3x32 = func_gen(("Float8E4M3x32"))
-float8_e4m3x64 = func_gen(("Float8E4M3x64"))
+float8_e4m3 = func_gen("Float8E4M3")
+float8_e4m3x2 = func_gen("Float8E4M3x2")
+float8_e4m3x4 = func_gen("Float8E4M3x4")
+float8_e4m3x8 = func_gen("Float8E4M3x8")
+float8_e4m3x16 = func_gen("Float8E4M3x16")
+float8_e4m3x32 = func_gen("Float8E4M3x32")
+float8_e4m3x64 = func_gen("Float8E4M3x64")
 
-float8_e4m3b11fnuz = func_gen(("Float8E4M3B11FNUZ"))
-float8_e4m3b11fnuzx2 = func_gen(("Float8E4M3B11FNUZx2"))
-float8_e4m3b11fnuzx4 = func_gen(("Float8E4M3B11FNUZx4"))
-float8_e4m3b11fnuzx8 = func_gen(("Float8E4M3B11FNUZx8"))
-float8_e4m3b11fnuzx16 = func_gen(("Float8E4M3B11FNUZx16"))
-float8_e4m3b11fnuzx32 = func_gen(("Float8E4M3B11FNUZx32"))
-float8_e4m3b11fnuzx64 = func_gen(("Float8E4M3B11FNUZx64"))
+float8_e4m3b11fnuz = func_gen("Float8E4M3B11FNUZ")
+float8_e4m3b11fnuzx2 = func_gen("Float8E4M3B11FNUZx2")
+float8_e4m3b11fnuzx4 = func_gen("Float8E4M3B11FNUZx4")
+float8_e4m3b11fnuzx8 = func_gen("Float8E4M3B11FNUZx8")
+float8_e4m3b11fnuzx16 = func_gen("Float8E4M3B11FNUZx16")
+float8_e4m3b11fnuzx32 = func_gen("Float8E4M3B11FNUZx32")
+float8_e4m3b11fnuzx64 = func_gen("Float8E4M3B11FNUZx64")
 
-float8_e4m3fn = func_gen(("Float8E4M3FN"))
-float8_e4m3fnx2 = func_gen(("Float8E4M3FNx2"))
-float8_e4m3fnx4 = func_gen(("Float8E4M3FNx4"))
-float8_e4m3fnx8 = func_gen(("Float8E4M3FNx8"))
-float8_e4m3fnx16 = func_gen(("Float8E4M3FNx16"))
-float8_e4m3fnx32 = func_gen(("Float8E4M3FNx32"))
-float8_e4m3fnx64 = func_gen(("Float8E4M3FNx64"))
+float8_e4m3fn = func_gen("Float8E4M3FN")
+float8_e4m3fnx2 = func_gen("Float8E4M3FNx2")
+float8_e4m3fnx4 = func_gen("Float8E4M3FNx4")
+float8_e4m3fnx8 = func_gen("Float8E4M3FNx8")
+float8_e4m3fnx16 = func_gen("Float8E4M3FNx16")
+float8_e4m3fnx32 = func_gen("Float8E4M3FNx32")
+float8_e4m3fnx64 = func_gen("Float8E4M3FNx64")
 
-float8_e4m3fnuz = func_gen(("Float8E4M3FNUZ"))
-float8_e4m3fnuzx2 = func_gen(("Float8E4M3FNUZx2"))
-float8_e4m3fnuzx4 = func_gen(("Float8E4M3FNUZx4"))
-float8_e4m3fnuzx8 = func_gen(("Float8E4M3FNUZx8"))
-float8_e4m3fnuzx16 = func_gen(("Float8E4M3FNUZx16"))
-float8_e4m3fnuzx32 = func_gen(("Float8E4M3FNUZx32"))
-float8_e4m3fnuzx64 = func_gen(("Float8E4M3FNUZx64"))
+float8_e4m3fnuz = func_gen("Float8E4M3FNUZ")
+float8_e4m3fnuzx2 = func_gen("Float8E4M3FNUZx2")
+float8_e4m3fnuzx4 = func_gen("Float8E4M3FNUZx4")
+float8_e4m3fnuzx8 = func_gen("Float8E4M3FNUZx8")
+float8_e4m3fnuzx16 = func_gen("Float8E4M3FNUZx16")
+float8_e4m3fnuzx32 = func_gen("Float8E4M3FNUZx32")
+float8_e4m3fnuzx64 = func_gen("Float8E4M3FNUZx64")
 
-float8_e5m2 = func_gen(("Float8E5M2"))
-float8_e5m2x2 = func_gen(("Float8E5M2x2"))
-float8_e5m2x4 = func_gen(("Float8E5M2x4"))
-float8_e5m2x8 = func_gen(("Float8E5M2x8"))
-float8_e5m2x16 = func_gen(("Float8E5M2x16"))
-float8_e5m2x32 = func_gen(("Float8E5M2x32"))
-float8_e5m2x64 = func_gen(("Float8E5M2x64"))
+float8_e5m2 = func_gen("Float8E5M2")
+float8_e5m2x2 = func_gen("Float8E5M2x2")
+float8_e5m2x4 = func_gen("Float8E5M2x4")
+float8_e5m2x8 = func_gen("Float8E5M2x8")
+float8_e5m2x16 = func_gen("Float8E5M2x16")
+float8_e5m2x32 = func_gen("Float8E5M2x32")
+float8_e5m2x64 = func_gen("Float8E5M2x64")
 
-float8_e5m2fnuz = func_gen(("Float8E5M2FNUZ"))
-float8_e5m2fnuzx2 = func_gen(("Float8E5M2FNUZx2"))
-float8_e5m2fnuzx4 = func_gen(("Float8E5M2FNUZx4"))
-float8_e5m2fnuzx8 = func_gen(("Float8E5M2FNUZx8"))
-float8_e5m2fnuzx16 = func_gen(("Float8E5M2FNUZx16"))
-float8_e5m2fnuzx32 = func_gen(("Float8E5M2FNUZx32"))
-float8_e5m2fnuzx64 = func_gen(("Float8E5M2FNUZx64"))
+float8_e5m2fnuz = func_gen("Float8E5M2FNUZ")
+float8_e5m2fnuzx2 = func_gen("Float8E5M2FNUZx2")
+float8_e5m2fnuzx4 = func_gen("Float8E5M2FNUZx4")
+float8_e5m2fnuzx8 = func_gen("Float8E5M2FNUZx8")
+float8_e5m2fnuzx16 = func_gen("Float8E5M2FNUZx16")
+float8_e5m2fnuzx32 = func_gen("Float8E5M2FNUZx32")
+float8_e5m2fnuzx64 = func_gen("Float8E5M2FNUZx64")
 
-float8_e8m0fnu = func_gen(("Float8E8M0FNU"))
-float8_e8m0fnux2 = func_gen(("Float8E8M0FNUx2"))
-float8_e8m0fnux4 = func_gen(("Float8E8M0FNUx4"))
-float8_e8m0fnux8 = func_gen(("Float8E8M0FNUx8"))
-float8_e8m0fnux16 = func_gen(("Float8E8M0FNUx16"))
-float8_e8m0fnux32 = func_gen(("Float8E8M0FNUx32"))
-float8_e8m0fnux64 = func_gen(("Float8E8M0FNUx64"))
+float8_e8m0fnu = func_gen("Float8E8M0FNU")
+float8_e8m0fnux2 = func_gen("Float8E8M0FNUx2")
+float8_e8m0fnux4 = func_gen("Float8E8M0FNUx4")
+float8_e8m0fnux8 = func_gen("Float8E8M0FNUx8")
+float8_e8m0fnux16 = func_gen("Float8E8M0FNUx16")
+float8_e8m0fnux32 = func_gen("Float8E8M0FNUx32")
+float8_e8m0fnux64 = func_gen("Float8E8M0FNUx64")
 
 # Float6 variants
-float6_e2m3fn = func_gen(("Float6E2M3FN"))
-float6_e2m3fnx2 = func_gen(("Float6E2M3FNx2"))
-float6_e2m3fnx4 = func_gen(("Float6E2M3FNx4"))
-float6_e2m3fnx8 = func_gen(("Float6E2M3FNx8"))
-float6_e2m3fnx16 = func_gen(("Float6E2M3FNx16"))
-float6_e2m3fnx32 = func_gen(("Float6E2M3FNx32"))
-float6_e2m3fnx64 = func_gen(("Float6E2M3FNx64"))
+float6_e2m3fn = func_gen("Float6E2M3FN")
+float6_e2m3fnx2 = func_gen("Float6E2M3FNx2")
+float6_e2m3fnx4 = func_gen("Float6E2M3FNx4")
+float6_e2m3fnx8 = func_gen("Float6E2M3FNx8")
+float6_e2m3fnx16 = func_gen("Float6E2M3FNx16")
+float6_e2m3fnx32 = func_gen("Float6E2M3FNx32")
+float6_e2m3fnx64 = func_gen("Float6E2M3FNx64")
 
-float6_e3m2fn = func_gen(("Float6E3M2FN"))
-float6_e3m2fnx2 = func_gen(("Float6E3M2FNx2"))
-float6_e3m2fnx4 = func_gen(("Float6E3M2FNx4"))
-float6_e3m2fnx8 = func_gen(("Float6E3M2FNx8"))
-float6_e3m2fnx16 = func_gen(("Float6E3M2FNx16"))
-float6_e3m2fnx32 = func_gen(("Float6E3M2FNx32"))
-float6_e3m2fnx64 = func_gen(("Float6E3M2FNx64"))
+float6_e3m2fn = func_gen("Float6E3M2FN")
+float6_e3m2fnx2 = func_gen("Float6E3M2FNx2")
+float6_e3m2fnx4 = func_gen("Float6E3M2FNx4")
+float6_e3m2fnx8 = func_gen("Float6E3M2FNx8")
+float6_e3m2fnx16 = func_gen("Float6E3M2FNx16")
+float6_e3m2fnx32 = func_gen("Float6E3M2FNx32")
+float6_e3m2fnx64 = func_gen("Float6E3M2FNx64")
 
 # Float4 variants
-float4_e2m1fn = func_gen(("Float4E2M1FN"))
-float4_e2m1fnx2 = func_gen(("Float4E2M1FNx2"))
-float4_e2m1fnx4 = func_gen(("Float4E2M1FNx4"))
-float4_e2m1fnx8 = func_gen(("Float4E2M1FNx8"))
-float4_e2m1fnx16 = func_gen(("Float4E2M1FNx16"))
-float4_e2m1fnx32 = func_gen(("Float4E2M1FNx32"))
-float4_e2m1fnx64 = func_gen(("Float4E2M1FNx64"))
+float4_e2m1fn = func_gen("Float4E2M1FN")
+float4_e2m1fnx2 = func_gen("Float4E2M1FNx2")
+float4_e2m1fnx4 = func_gen("Float4E2M1FNx4")
+float4_e2m1fnx8 = func_gen("Float4E2M1FNx8")
+float4_e2m1fnx16 = func_gen("Float4E2M1FNx16")
+float4_e2m1fnx32 = func_gen("Float4E2M1FNx32")
+float4_e2m1fnx64 = func_gen("Float4E2M1FNx64")
 
-bfloat16 = func_gen(("BFloat16"))
+bfloat16 = func_gen("BFloat16")
 # pylint: enable=invalid-name
 
 
@@ -2436,6 +2478,7 @@ class CpAsyncNamespace:
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async)(*args, **kwds)
+
     # __call__ corresponds to ptx_cp_async
     __tir_call_op_name__ = "ptx_cp_async"
 
@@ -2450,6 +2493,7 @@ class CpAsyncBulkNamespace:
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async_bulk)(*args, **kwds)
+
     # __call__ corresponds to ptx_cp_async_bulk
     __tir_call_op_name__ = "ptx_cp_async_bulk"
 
@@ -2508,6 +2552,7 @@ class MbarrierArriveNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_mbarrier_arrive)(*args, **kwds)
+
     # __call__ corresponds to ptx_mbarrier_arrive
     __tir_call_op_name__ = "ptx_mbarrier_arrive"
 
@@ -2551,6 +2596,7 @@ class Tcgen05MmaNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_tcgen05_mma)(*args, **kwds)
+
     # __call__ corresponds to ptx_tcgen05_mma
     __tir_call_op_name__ = "ptx_tcgen05_mma"
 
@@ -2563,6 +2609,7 @@ class Tcgen05MmaSpNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_tcgen05_mma_sp)(*args, **kwds)
+
     # __call__ corresponds to ptx_tcgen05_mma_sp
     __tir_call_op_name__ = "ptx_tcgen05_mma_sp"
 
@@ -2664,6 +2711,7 @@ class NVSHMEMGetMemNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_getmem_nbi)(*args, **kwds)
+
     # __call__ corresponds to nvshmem_getmem_nbi
     __tir_call_op_name__ = "nvshmem_getmem_nbi"
 
@@ -2677,6 +2725,7 @@ class NVSHMEMPutMemNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_putmem_nbi)(*args, **kwds)
+
     # __call__ corresponds to nvshmem_putmem_nbi
     __tir_call_op_name__ = "nvshmem_putmem_nbi"
 
@@ -2690,6 +2739,7 @@ class NVSHMEMPutMemSignalNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_putmem_signal_nbi)(*args, **kwds)
+
     # __call__ corresponds to nvshmem_putmem_signal_nbi
     __tir_call_op_name__ = "nvshmem_putmem_signal_nbi"
 
@@ -2732,9 +2782,7 @@ def _register_tir_namespace_printer_names():
         # If the namespace object itself maps to an op via __call__
         call_op = getattr(ns_obj, "__tir_call_op_name__", None)
         if call_op:
-            _register_op_attr(
-                f"tir.{call_op}", "TScriptPrinterName", dotted_prefix, level=20
-            )
+            _register_op_attr(f"tir.{call_op}", "TScriptPrinterName", dotted_prefix, level=20)
         # Walk attributes to find wrapped ops and sub-namespaces
         for name in dir(ns_obj):
             if name.startswith("_"):
@@ -3264,41 +3312,41 @@ __all__ = float_types + [
 ]
 
 __all__ += [
-    "ptx",
-    "cuda",
-    "nvshmem",
-    "nki",
-    "world",
-    "kernel",
-    "cluster",
-    "cta",
-    "warp",
-    "warpgroup",
-    "thread",
-    "kernel_id",
-    "cluster_id",
-    "cta_id",
-    "warpgroup_id",
-    "warp_id",
-    "thread_id",
-    "scope_id",
-    "ExecScope",
-    "ScopeIdDef",
-    "Var",
-    "TLayout",
-    "Iter",
-    "TileLayout",
-    "SwizzleLayout",
     "ComposeLayout",
-    "S",
+    "ExecScope",
+    "Iter",
     "R",
-    "static_assert",
-    "alloc_shared",
-    "alloc_local",
-    "scalar_wrapper",
-    "alloc_scalar",
-    "decl_scalar",
-    "shared_scalar",
-    "local_scalar",
+    "S",
+    "ScopeIdDef",
+    "SwizzleLayout",
+    "TLayout",
+    "TileLayout",
+    "Var",
     "add_to_parent",
+    "alloc_local",
+    "alloc_scalar",
+    "alloc_shared",
+    "cluster",
+    "cluster_id",
+    "cta",
+    "cta_id",
+    "cuda",
+    "decl_scalar",
+    "kernel",
+    "kernel_id",
+    "local_scalar",
+    "nki",
+    "nvshmem",
+    "ptx",
+    "scalar_wrapper",
+    "scope_id",
+    "shared_scalar",
+    "static_assert",
+    "thread",
+    "thread_id",
+    "warp",
+    "warp_id",
+    "warpgroup",
+    "warpgroup_id",
+    "world",
 ]

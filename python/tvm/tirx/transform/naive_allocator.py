@@ -87,7 +87,7 @@ class AllocMutator(BufferReplacer):
 
         op = super().visit_alloc_buffer_(op)
         if changed:
-            return AllocBuffer(new_buffer, op.body, op.span)
+            return AllocBuffer(new_buffer, op.annotations, op.span)
         return op
 
 

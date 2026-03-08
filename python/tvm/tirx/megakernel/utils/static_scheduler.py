@@ -209,9 +209,12 @@ class StaticTileScheduler(TileSchedulerBase):
                 )
             if scope_id == -1 or idx[0] == scope_id:
                 sync(scope, scope_id)
-                notify_num = Tx.meta_var(func_notify(idx[1])[0])
-                rank = Tx.meta_var(func_notify(idx[1])[1])
-                coord = Tx.meta_var(func_notify(idx[1])[2:])
+                # `func_notify` can emit side effects while constructing dependency exprs.
+                # Evaluate it once and then unpack to avoid duplicated rewrites.
+                notify_info = Tx.meta_var(func_notify(idx[1]))
+                notify_num = Tx.meta_var(notify_info[0])
+                rank = Tx.meta_var(notify_info[1])
+                coord = Tx.meta_var(notify_info[2:])
                 if self.debug:
                     Tx.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
                 if idx[1] < notify_num:

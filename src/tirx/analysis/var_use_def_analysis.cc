@@ -108,7 +108,11 @@ void VarUseDefAnalyzer::VisitBufferDef(const Buffer& buffer, bool alloc_data) {
     }
   } else {
     // DeclBuffer: data references an existing variable — use it.
-    HandleUse(buffer->data);
+    // TMEM DeclBuffer data vars are internal lowering symbols and should
+    // not become external free vars in host packed-api generation.
+    if (buffer.scope() != "tmem") {
+      HandleUse(buffer->data);
+    }
   }
   HandleDef(buffer);
   // Visit shape/strides/elem_offset as uses of vars from the enclosing scope.

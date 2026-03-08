@@ -53,7 +53,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   SBlockNode::RegisterReflection();
   SBlockRealizeNode::RegisterReflection();
   ExecScopeStmtNode::RegisterReflection();
-  AllocBufferNode::RegisterReflection();
 }
 
 // Bind
@@ -583,31 +582,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   });
 }
 
-// AllocBuffer
-AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
-  // Enforce storage scope rules for AllocBuffer
-  std::string scope = static_cast<std::string>(buffer.scope());
-  if (scope.empty()) {
-    scope = "global";
-  }
-  if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
-    TVM_FFI_ICHECK(buffer->allocated_addr.empty())
-        << "ValueError: For `" << scope << "` scope, AllocBuffer does not accept `allocated_addr`";
-  }
-  ObjectPtr<AllocBufferNode> node = ffi::make_object<AllocBufferNode>();
-  node->buffer = std::move(buffer);
-  node->body = std::move(body);
-  node->span = std::move(span);
-  data_ = std::move(node);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
-    return AllocBuffer(buffer, body, span);
-  });
-}
-
 // Block
 SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
@@ -707,5 +681,5 @@ TVM_TIRX_REGISTER_OP("type_annotation")
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

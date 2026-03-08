@@ -1240,7 +1240,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     if (is_string) {
       // String printing logic
       std::string print_arg = var_node ? GetVarID(var_node) : PrintExpr(arg);
-      std::string buffer_name = GetVarID(var_node);
+      std::string buffer_name = var_node ? GetVarID(var_node) : "string_literal";
       os << "// print_buffer starts (string)\n"
          << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
          << "  printf(\"" << buffer_name << ": %s\\n\\n\", (char*)" << print_arg << ");\n"
@@ -1410,60 +1410,70 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
   CodeGenC::VisitStmt_(op);
 }
 
-void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
-  TVM_FFI_ICHECK(!is_zero(op->condition));
-  std::string vid = AllocVarID(op->buffer_var.get());
+void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
+  TVM_FFI_ICHECK(op->buffer.defined());
+  std::string vid = AllocVarID(op->buffer->data.get());
 
   this->PrintIndent();
-  std::string scope = GetPtrStorageScope(op->buffer_var);
-  const VarNode* buffer = op->buffer_var.as<VarNode>();
+  std::string scope = GetPtrStorageScope(op->buffer->data);
+  const VarNode* buffer = op->buffer->data.as<VarNode>();
+  DataType dtype = op->buffer->dtype;
   if (scope.find("wmma.") == 0) {
     if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
-      TVM_FFI_ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Int(8) ||
-                     op->dtype == DataType::UInt(8) || op->dtype == DataType::Int(4) ||
-                     op->dtype == DataType::UInt(4) || op->dtype == DataType::Int(1) ||
-                     op->dtype == DataType::BFloat(16))
+      TVM_FFI_ICHECK(dtype == DataType::Float(16) || dtype == DataType::Int(8) ||
+                     dtype == DataType::UInt(8) || dtype == DataType::Int(4) ||
+                     dtype == DataType::UInt(4) || dtype == DataType::Int(1) ||
+                     dtype == DataType::BFloat(16))
           << "Matrix_a and matrix_b only support half or char or unsigned char "
           << "or uint4 or int4 or int1 type for now";
     } else {
-      TVM_FFI_ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Float(32) ||
-                     op->dtype == DataType::Int(32))
+      TVM_FFI_ICHECK(dtype == DataType::Float(16) || dtype == DataType::Float(32) ||
+                     dtype == DataType::Int(32))
           << "Accumulator only support half, float and int type for now";
     }
-    PrintWmmaScope(scope, op->dtype, buffer, stream);
+    PrintWmmaScope(scope, dtype, buffer, stream);
   } else {
     PrintStorageScope(scope, stream);
     if (scope != "shared.dyn") {
-      auto it = op->annotations.find(tvm::tir::attr::buffer_data_alignment);
+      int align = op->buffer->data_alignment;
+      auto it = op->annotations.find(tir::attr::buffer_data_alignment);
       if (it != op->annotations.end()) {
-        int align = Downcast<IntImm>((*it).second)->value;
-        if (align > 0) {
-          stream << "alignas(" << align << ") ";
+        if (const auto* n = (*it).second.as<IntImmNode>()) {
+          align = n->value;
         }
       }
+      if (align > 0) {
+        stream << "alignas(" << align << ") ";
+      }
     }
-    PrintType(op->dtype, stream);
+    PrintType(dtype, stream);
   }
 
   if (scope == "shared.dyn") {
     stream << ' ' << vid << "[];\n";
   } else {
-    size_t constant_size = op->ConstantAllocationSize();
+    size_t constant_size = 1;
+    for (const auto& dim : op->buffer->shape) {
+      const IntImmNode* dim_imm = dim.as<IntImmNode>();
+      TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation for now";
+      constant_size *= dim_imm->value;
+    }
     TVM_FFI_ICHECK_GT(constant_size, 0) << "Can only handle constant size stack allocation for now";
 
     if (scope.find("wmma.") == 0) {
       constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
     }
-    if ((op->dtype == DataType::Int(4) || op->dtype == DataType::UInt(4) ||
-         op->dtype == DataType::Int(1)) &&
+    if ((dtype == DataType::Int(4) || dtype == DataType::UInt(4) || dtype == DataType::Int(1)) &&
         scope == "shared") {
-      constant_size = constant_size / (32 / op->dtype.bits());
+      constant_size = constant_size / (32 / dtype.bits());
     }
     stream << ' ' << vid << '[' << constant_size << "];\n";
   }
 
-  RegisterHandleType(op->buffer_var.get(), op->dtype);
-  this->PrintStmt(op->body);
+  RegisterHandleType(op->buffer->data.get(), dtype);
+  if (op->annotations.count(tir::attr::kVolatile)) {
+    MarkVolatile(op->buffer->data.get());
+  }
 }
 
 void CodeGenCUDA::VisitStmt_(const EvaluateNode* op) {
@@ -1485,15 +1495,36 @@ void CodeGenCUDA::VisitStmt_(const EvaluateNode* op) {
 
 void CodeGenCUDA::VisitExpr_(const RampNode* op, std::ostream& os) {
   int lanes = op->dtype.lanes();
-  TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
-  PrintVecConstructor(op->dtype, os);
-  os << "(";
-  for (int i = 0; i < lanes; i++) {
-    os << "(" << PrintExpr(op->base) << ")"
-       << "+(" << PrintExpr(op->stride) << "*" << i << ")";
-    if (i != lanes - 1) os << ", ";
+  if (lanes <= 4) {
+    PrintVecConstructor(op->dtype, os);
+    os << "(";
+    for (int i = 0; i < lanes; i++) {
+      os << "(" << PrintExpr(op->base) << ")"
+         << "+(" << PrintExpr(op->stride) << "*" << i << ")";
+      if (i != lanes - 1) os << ", ";
+    }
+    os << ")";
+    return;
   }
-  os << ")";
+
+  // Use lane-wise stores for wide vectors (e.g. fp16x8/int32x8), where CUDA
+  // constructor argument layout does not match TIR vector lane layout.
+  std::string sret = name_supply_->FreshName("_");
+  this->PrintIndent();
+  this->PrintType(op->dtype, stream);
+  stream << ' ' << sret << ";\n";
+  int ssa_scope = BeginScope();
+  {
+    std::string vbase = SSAGetID(PrintExpr(op->base), op->base.dtype());
+    std::string vstride = SSAGetID(PrintExpr(op->stride), op->stride.dtype());
+    for (int i = 0; i < lanes; ++i) {
+      std::ostringstream value_temp;
+      value_temp << "(" << vbase << ")+(" << vstride << "*" << i << ")";
+      PrintVecElemStore(sret, op->dtype, i, value_temp.str());
+    }
+  }
+  EndScope(ssa_scope);
+  os << sret;
 }
 
 void CodeGenCUDA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NOLINT(*)

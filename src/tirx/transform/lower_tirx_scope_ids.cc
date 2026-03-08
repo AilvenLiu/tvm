@@ -40,7 +40,12 @@ namespace tirx {
 
 class ScopeIdDefGather : public StmtExprVisitor {
  public:
-  static std::vector<ScopeIdDef> Gather(const Stmt& stmt) {
+  struct DefWithSourceScope {
+    ScopeIdDef def;
+    ffi::String source_scope;
+  };
+
+  static std::vector<DefWithSourceScope> Gather(const Stmt& stmt) {
     ScopeIdDefGather gather;
     gather(stmt);
     return gather.scope_id_def;
@@ -49,11 +54,11 @@ class ScopeIdDefGather : public StmtExprVisitor {
   void VisitStmt_(const ExecScopeStmtNode* op) override {
     StmtExprVisitor::VisitStmt_(op);
     for (const auto& def : op->exec_scope->scope_id_def) {
-      scope_id_def.push_back(def);
+      scope_id_def.push_back({def, op->exec_scope->name});
     }
   }
 
-  std::vector<ScopeIdDef> scope_id_def;
+  std::vector<DefWithSourceScope> scope_id_def;
 };
 
 class ScopeIdDefRemover : public StmtExprMutator {
@@ -87,7 +92,49 @@ class ScopeIdDefResolver : public StmtExprMutator {
   }
 
  private:
+  class ImplicitScopeIdEvalInjector : public StmtExprMutator {
+   public:
+    static Stmt Inject(const Stmt& stmt,
+                       const std::vector<std::pair<Var, ffi::String>>& eval_specs) {
+      ImplicitScopeIdEvalInjector injector(eval_specs);
+      return injector(stmt);
+    }
+
+   private:
+    explicit ImplicitScopeIdEvalInjector(
+        const std::vector<std::pair<Var, ffi::String>>& eval_specs) {
+      for (const auto& [var, scope] : eval_specs) {
+        eval_map_[scope.operator std::string()].push_back(var);
+      }
+    }
+
+    Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
+      Stmt body = VisitStmt(op->body);
+      auto it = eval_map_.find(op->exec_scope->name.operator std::string());
+      if (it != eval_map_.end() && !it->second.empty()) {
+        ffi::Array<Stmt> evals;
+        evals.reserve(it->second.size());
+        for (const Var& var : it->second) {
+          evals.push_back(Evaluate(var));
+        }
+        body = SeqStmt::Flatten(evals, body);
+        eval_map_.erase(it);
+      }
+      if (body.same_as(op->body)) {
+        return ffi::GetRef<Stmt>(op);
+      }
+      return ExecScopeStmt(op->exec_scope, body);
+    }
+
+    std::unordered_map<std::string, std::vector<Var>> eval_map_;
+  };
+
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
+
+  static bool IsImplicitScopeId(const Var& var) {
+    // Parser records unnamed scope-id defs as empty-name Vars.
+    return var->name_hint.empty();
+  }
 
   Stmt VisitStmt_(const ExecScopeStmtNode* op) override {
     const auto& scope = op->exec_scope;
@@ -105,7 +152,13 @@ class ScopeIdDefResolver : public StmtExprMutator {
         << "TIRx Error: nested kernel scopes are not supported";
 
     // Step 0: Gather the scope id defs from all nested scopes
-    Array<ScopeIdDef> scope_id_def = std::move(ScopeIdDefGather::Gather(ffi::GetRef<Stmt>(op)));
+    std::vector<ScopeIdDefGather::DefWithSourceScope> gathered_scope_id_def =
+        ScopeIdDefGather::Gather(ffi::GetRef<Stmt>(op));
+    Array<ScopeIdDef> scope_id_def;
+    scope_id_def.reserve(gathered_scope_id_def.size());
+    for (const auto& item : gathered_scope_id_def) {
+      scope_id_def.push_back(item.def);
+    }
 
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
@@ -116,19 +169,21 @@ class ScopeIdDefResolver : public StmtExprMutator {
     ExtractKernelLaunchParams(verifier.id_set, target_, &launch_params);
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
-    std::vector<std::pair<Var, PrimExpr>> scope_lets;
+    std::vector<std::pair<Var, PrimExpr>> scope_binds;
+    std::vector<std::pair<Var, ffi::String>> implicit_scope_id_evals;
 
     if (launch_params.count("threadIdx.x") > 0) {
       PrimExpr shuffled = ScopeIdResolveTable::ComputeWarpIdInCta(launch_params);
       Var warp_id_in_cta_var("warp_id_in_cta", shuffled.dtype());
-      scope_lets.push_back({warp_id_in_cta_var, shuffled});
+      scope_binds.push_back({warp_id_in_cta_var, shuffled});
       IterVar warp_iv(Range::FromMinExtent(0, 1), warp_id_in_cta_var, kThreadIndex,
                       "warp_id_in_cta");
       launch_params.insert({"warp_id_in_cta", warp_iv});
     }
     kernel_launch_params_ = launch_params;
 
-    for (const auto& def : scope_id_def) {
+    for (const auto& def_with_scope : gathered_scope_id_def) {
+      const ScopeIdDef& def = def_with_scope.def;
       auto resolved =
           ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
                                        target_->kind->name, kernel_launch_params_.value());
@@ -139,7 +194,10 @@ class ScopeIdDefResolver : public StmtExprMutator {
         PrimExpr value = resolved[i];
         Var let_var(def->def_ids[i]->name_hint, value.dtype());
         id_map[def->def_ids[i]] = let_var;
-        scope_lets.push_back({let_var, value});
+        scope_binds.push_back({let_var, value});
+        if (IsImplicitScopeId(def->def_ids[i])) {
+          implicit_scope_id_evals.push_back({let_var, def_with_scope.source_scope});
+        }
       }
     }
 
@@ -151,16 +209,20 @@ class ScopeIdDefResolver : public StmtExprMutator {
     // Step 4: Remove the scope_id_def inside the scope
     ret = ScopeIdDefRemover::Remove(ret);
 
-    // Step 5: Wrap with LetStmts for all scope id values
-    for (auto it = scope_lets.rbegin(); it != scope_lets.rend(); ++it) {
-      ret = LetStmt(it->first, it->second, ret);
+    // Step 5: Emit Bind statements for all scope id values.
+    ffi::Array<Stmt> bind_stmts;
+    bind_stmts.reserve(scope_binds.size());
+    for (const auto& [var, value] : scope_binds) {
+      bind_stmts.push_back(Bind(var, value));
     }
+    ret = SeqStmt::Flatten(bind_stmts, ret);
 
     // Step 6: Wrap with thread_extent attributes
     for (const auto& [tag, iv] : kernel_launch_params_.value()) {
       if (tag == "warp_id_in_cta") continue;
       ret = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, ret);
     }
+    ret = ImplicitScopeIdEvalInjector::Inject(ret, implicit_scope_id_evals);
     kernel_launch_params_ = std::nullopt;
     return ret;
   }

@@ -54,7 +54,11 @@ class BufferReplacer(StmtExprMutator):
     def mutate_buffer(self, buffer: Buffer):
         if buffer in self.buffer_map:
             return self.buffer_map[buffer]
-        self.buffer_attr_var_mutated = True
+
+        # Track mutations for this specific buffer only.  Without this reset,
+        # unrelated buffers can be spuriously cloned and introduce alias buffers.
+        prev_mutated = self.buffer_attr_var_mutated
+        self.buffer_attr_var_mutated = False
         new_data = self.visit_expr(buffer.data)
         new_shape = [self.visit_expr(expr) for expr in buffer.shape]
         if isinstance(buffer.layout, TileLayout):
@@ -75,7 +79,9 @@ class BufferReplacer(StmtExprMutator):
             )
         else:
             new_layout = buffer.layout
-        if not self.buffer_attr_var_mutated:
+        buffer_attr_mutated = self.buffer_attr_var_mutated
+        self.buffer_attr_var_mutated = prev_mutated or buffer_attr_mutated
+        if not buffer_attr_mutated:
             return None
         new_buffer = decl_buffer(
             new_shape,
@@ -124,7 +130,7 @@ class BufferReplacer(StmtExprMutator):
         new_buffer = self.mutate_buffer(op.buffer)
         op = super().visit_decl_buffer_(op)
         if new_buffer is not None:
-            return DeclBuffer(new_buffer, op.body)
+            return DeclBuffer(new_buffer, op.span)
         return op
 
     def visit_array_prim_expr_(self, op: list[PrimExpr]):
@@ -133,7 +139,7 @@ class BufferReplacer(StmtExprMutator):
     def visit_alloc_buffer_(self, op: AllocBuffer):
         op = super().visit_alloc_buffer_(op)
         if op.buffer in self.buffer_map:
-            return AllocBuffer(self.buffer_map[op.buffer], op.body)
+            return AllocBuffer(self.buffer_map[op.buffer], op.annotations, op.span)
         return op
 
     def visit_op_call_(self, op):

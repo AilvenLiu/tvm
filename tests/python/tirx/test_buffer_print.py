@@ -153,7 +153,7 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
     )
 
 
-def verify_cuda_code_string(func, expected_var_name):
+def verify_cuda_code_string(func, expected_var_name, expected_string_literal):
     generated_code = func.mod.imports[0].inspect_source()
 
     all_print_blocks = re.findall(
@@ -162,17 +162,22 @@ def verify_cuda_code_string(func, expected_var_name):
     if not all_print_blocks:
         raise AssertionError("No print_buffer sections found in generated code")
 
-    string_printf_pattern = re.compile(
+    var_printf_pattern = re.compile(
         r'printf\s*\(\s*".*?%s.*?",\s*\(char\*\)' + re.escape(expected_var_name) + r"\s*\)"
+    )
+    literal_printf_pattern = re.compile(
+        r'printf\s*\(\s*".*?%s.*?",\s*\(char\*\)\s*"'
+        + re.escape(expected_string_literal)
+        + r'"\s*\)'
     )
 
     for block in all_print_blocks:
-        if string_printf_pattern.search(block):
+        if var_printf_pattern.search(block) or literal_printf_pattern.search(block):
             return
 
     raise AssertionError(
-        f'Could not find a string printf with variable "{expected_var_name}" '
-        f'in the format `printf("...%s...", (char*){expected_var_name})` in any print_buffer block.'
+        f'Could not find a string printf using variable "{expected_var_name}" or '
+        f'string literal "{expected_string_literal}" in any print_buffer block.'
     )
 
 
@@ -373,7 +378,7 @@ def test_print():
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
-        verify_cuda_code_string(func, "string_var")
+        verify_cuda_code_string(func, "string_var", test_string)
 
     test_vector_add_1D(np.float32, "float32")
     test_vector_add_2D(np.int32, "int32")

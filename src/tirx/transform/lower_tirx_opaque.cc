@@ -26,6 +26,7 @@
  */
 
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/s_tir/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
@@ -44,42 +45,59 @@ class TIRxOpaqueLower : public StmtExprMutator {
  public:
   static Stmt Rewrite(Stmt body) {
     TIRxOpaqueLower lower;
+    lower.pool_sizes_ = CollectPoolSizes(body);
     return lower(std::move(body));
   }
 
  private:
+  static std::unordered_map<Var, int64_t, ObjectPtrHash, ObjectPtrEqual> CollectPoolSizes(
+      const Stmt& body) {
+    class Collector : public StmtVisitor {
+     public:
+      void VisitStmt_(const AttrStmtNode* op) final {
+        if (op->attr_key == "tirx.pool_max_bytes") {
+          if (auto var = op->node.try_cast<Var>()) {
+            const auto* n = op->value.as<IntImmNode>();
+            TVM_FFI_ICHECK(n) << "TIRxError: tirx.pool_max_bytes must be IntImm";
+            pool_sizes_[var.value()] = n->value;
+          }
+        }
+        StmtVisitor::VisitStmt_(op);
+      }
+
+      std::unordered_map<Var, int64_t, ObjectPtrHash, ObjectPtrEqual> pool_sizes_;
+    };
+
+    Collector collector;
+    collector(body);
+    return std::move(collector.pool_sizes_);
+  }
+
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     if (op->attr_key == "tirx.pool_max_bytes") {
-      // Record the pool size annotation and strip the AttrStmt.
-      Var var = Downcast<Var>(op->node);
-      pool_sizes_[var] = op->value.as<IntImmNode>()->value;
+      // Strip the pool size AttrStmt after pre-collection in Rewrite().
       return VisitStmt(op->body);
     }
     return StmtExprMutator::VisitStmt_(op);
   }
 
   Stmt VisitStmt_(const AllocBufferNode* op) final {
-    const Buffer& buffer = op->buffer;
-    // Visit body first so that any "tirx.pool_max_bytes" AttrStmt inside
-    // is consumed and recorded in pool_sizes_ before we read the shape.
-    Stmt body = DeclBuffer(buffer, VisitStmt(op->body));
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    op = stmt.as<AllocBufferNode>();
+    TVM_FFI_ICHECK(op);
 
-    // If the pool annotated a size for this buffer, patch the shape.
-    Buffer alloc_buf = buffer;
-    auto it = pool_sizes_.find(buffer->data);
+    Buffer alloc_buf = op->buffer;
+    auto it = pool_sizes_.find(op->buffer->data);
     if (it != pool_sizes_.end()) {
       auto* n = alloc_buf.CopyOnWrite();
       n->shape = {IntImm(DataType::Int(64), it->second)};
     }
-
-    ffi::Array<PrimExpr> allocation_shape = GetBufferAllocationShape(alloc_buf);
-    ffi::Map<ffi::String, ffi::Any> allocate_annotations;
-    allocate_annotations.Set(tirx::attr::buffer_data_alignment,
-                             IntImm(DataType::Int(32), alloc_buf->data_alignment));
-    allocate_annotations.Set(tirx::attr::buffer_allocated_addr, alloc_buf->allocated_addr);
-    body = Allocate(alloc_buf->data, alloc_buf->dtype, allocation_shape, const_true(),
-                    std::move(body), allocate_annotations);
-    return body;
+    if (alloc_buf.same_as(op->buffer)) {
+      return stmt;
+    }
+    auto n = CopyOnWrite(op);
+    n->buffer = std::move(alloc_buf);
+    return Stmt(n);
   }
 
   Stmt VisitStmt_(const ForNode* op) final {
@@ -142,7 +160,7 @@ class TIRxOpaqueLower : public StmtExprMutator {
                      /*thread_tag=*/thread_tag);
     ffi::String attr_key = (thread_tag == "vthread" || thread_tag == "vthread.x" ||
                             thread_tag == "vthread.y" || thread_tag == "vthread.z")
-                               ? tirx::attr::virtual_thread
+                               ? s_tirx::attr::virtual_thread
                                : tirx::attr::thread_extent;
     return AttrStmt(/*node=*/std::move(iter_var),
                     /*attr_key=*/std::move(attr_key),
@@ -194,7 +212,7 @@ class TIRxOpaqueLower : public StmtExprMutator {
   /*! \brief Record the loop_var and loop start value of unit loops, whose extent is one. */
   std::unordered_map<Var, PrimExpr> unit_loop_vars_;
   /*! \brief Pool size annotations: buffer data var → size in bytes. */
-  std::unordered_map<Var, int64_t> pool_sizes_;
+  std::unordered_map<Var, int64_t, ObjectPtrHash, ObjectPtrEqual> pool_sizes_;
 };
 
 namespace transform {
@@ -214,5 +232,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

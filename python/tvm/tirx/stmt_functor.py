@@ -33,6 +33,7 @@ class StmtFunctor:
 
     def __init__(self):
         self._dispatch_map = {
+            "tir.Bind": self.visit_bind_,
             "tir.LetStmt": self.visit_let_stmt_,
             "tir.AttrStmt": self.visit_attr_,
             "tir.IfThenElse": self.visit_if_then_else_,
@@ -83,6 +84,13 @@ class StmtFunctor:
             key = key[:-4]  # Remove the "Node" suffix
 
         key = "tir." + key
+        # Legacy LetStmt compatibility: represent LetStmt as either:
+        # 1) Bind + python-side body
+        # 2) SeqStmt([Bind, body]) tagged by tvm.tir.LetStmt helper
+        if key == "tir.Bind" and hasattr(stmt, "body"):
+            key = "tir.LetStmt"
+        if key == "tir.SeqStmt" and hasattr(stmt, "_legacy_let"):
+            key = "tir.LetStmt"
         if key in self._dispatch_map:
             return self._dispatch_map[key](stmt)
 
@@ -93,7 +101,11 @@ class StmtFunctor:
         raise NotImplementedError(f"Do not have a default for {op.__class__.__name__}")
 
     def visit_let_stmt_(self, op):
-        """Visitor for LetStmt nodes."""
+        """Compatibility visitor for LetStmt nodes."""
+        return self.visit_bind_(op)
+
+    def visit_bind_(self, op):
+        """Visitor for Bind nodes."""
         return self.visit_stmt_default_(op)
 
     def visit_attr_(self, op):
@@ -224,10 +236,17 @@ class StmtVisitor(StmtFunctor):
         """
         pass
 
-    def visit_let_stmt_(self, op):
-        """Visitor implementation for LetStmt."""
+    def visit_bind_(self, op):
+        """Visitor implementation for Bind."""
         self.visit_expr(op.value)
-        self.visit_stmt(op.body)
+
+    def visit_let_stmt_(self, op):
+        """Compatibility visitor implementation for LetStmt."""
+        if hasattr(op, "body"):
+            self.visit_expr(op.value)
+            self.visit_stmt(op.body)
+            return
+        self.visit_bind_(op)
 
     def visit_attr_(self, op):
         """Visitor implementation for AttrStmt."""
@@ -245,6 +264,8 @@ class StmtVisitor(StmtFunctor):
         """Visitor implementation for For."""
         self.visit_expr(op.min)
         self.visit_expr(op.extent)
+        if op.step is not None:
+            self.visit_expr(op.step)
         self.visit_stmt(op.body)
 
     def visit_while_(self, op):
@@ -273,7 +294,10 @@ class StmtVisitor(StmtFunctor):
 
     def visit_decl_buffer_(self, op):
         """Visitor implementation for DeclBuffer."""
-        self.visit_stmt(op.body)
+        if hasattr(op, "body"):
+            self.visit_stmt(op.body)
+            return
+        return
 
     def visit_buffer_store_(self, op):
         """Visitor implementation for BufferStore."""
@@ -285,8 +309,9 @@ class StmtVisitor(StmtFunctor):
     def visit_assert_(self, op):
         """Visitor implementation for AssertStmt."""
         self.visit_expr(op.condition)
-        self.visit_expr(op.message)
-        self.visit_stmt(op.body)
+        for message_part in op.message_parts:
+            if isinstance(message_part, PrimExpr):
+                self.visit_expr(message_part)
 
     def visit_seqstmt_(self, op):
         """Visitor implementation for SeqStmt."""
@@ -359,7 +384,10 @@ class StmtVisitor(StmtFunctor):
 
     def visit_alloc_buffer_(self, op):
         """Visitor implementation for AllocBuffer."""
-        self.visit_stmt(op.body)
+        if hasattr(op, "body"):
+            self.visit_stmt(op.body)
+            return
+        return
 
 
 class StmtMutator(StmtFunctor):
@@ -387,15 +415,24 @@ class StmtMutator(StmtFunctor):
         """
         return expr
 
-    def visit_let_stmt_(self, op):
-        """Mutator implementation for LetStmt."""
+    def visit_bind_(self, op):
+        """Mutator implementation for Bind."""
         value = self.visit_expr(op.value)
-        body = self.visit_stmt(op.body)
 
-        if value is op.value and body is op.body:
+        if value is op.value:
             return op
 
-        return tvm.tir.LetStmt(op.var, value, body, op.span)
+        return tvm.tir.Bind(op.var, value, op.span)
+
+    def visit_let_stmt_(self, op):
+        """Compatibility mutator implementation for LetStmt."""
+        if hasattr(op, "body"):
+            value = self.visit_expr(op.value)
+            body = self.visit_stmt(op.body)
+            if value is op.value and body is op.body:
+                return op
+            return tvm.tir.LetStmt(op.var, value, body, op.span)
+        return self.visit_bind_(op)
 
     def visit_attr_(self, op):
         """Mutator implementation for AttrStmt."""
@@ -422,13 +459,22 @@ class StmtMutator(StmtFunctor):
         """Mutator implementation for For."""
         min_val = self.visit_expr(op.min)
         extent = self.visit_expr(op.extent)
+        step = self.visit_expr(op.step) if op.step is not None else None
         body = self.visit_stmt(op.body)
 
-        if min_val is op.min and extent is op.extent and body is op.body:
+        if min_val is op.min and extent is op.extent and step is op.step and body is op.body:
             return op
 
         return tvm.tir.For(
-            op.loop_var, min_val, extent, op.kind, body, op.thread_binding, op.annotations, op.span
+            op.loop_var,
+            min_val,
+            extent,
+            op.kind,
+            body,
+            op.thread_binding,
+            op.annotations,
+            step,
+            op.span,
         )
 
     def visit_while_(self, op):
@@ -488,12 +534,12 @@ class StmtMutator(StmtFunctor):
 
     def visit_decl_buffer_(self, op):
         """Mutator implementation for DeclBuffer."""
-        body = self.visit_stmt(op.body)
-
-        if body is op.body:
-            return op
-
-        return tvm.tir.DeclBuffer(op.buffer, body, op.span)
+        if hasattr(op, "body"):
+            body = self.visit_stmt(op.body)
+            if body is op.body:
+                return op
+            return tvm.tir.DeclBuffer(op.buffer, body, op.span)
+        return op
 
     def visit_buffer_store_(self, op):
         """Mutator implementation for BufferStore."""
@@ -534,13 +580,21 @@ class StmtMutator(StmtFunctor):
     def visit_assert_(self, op):
         """Mutator implementation for AssertStmt."""
         condition = self.visit_expr(op.condition)
-        message = self.visit_expr(op.message)
-        body = self.visit_stmt(op.body)
+        message_parts = []
+        message_parts_changed = False
+        for message_part in op.message_parts:
+            if isinstance(message_part, PrimExpr):
+                new_message_part = self.visit_expr(message_part)
+                if new_message_part is not message_part:
+                    message_parts_changed = True
+                message_parts.append(new_message_part)
+            else:
+                message_parts.append(message_part)
 
-        if condition is op.condition and message is op.message and body is op.body:
+        if condition is op.condition and not message_parts_changed:
             return op
 
-        return tvm.tir.AssertStmt(condition, message, body, op.span)
+        return tvm.tir.AssertStmt(op.kind, condition, message_parts, op.span)
 
     def visit_producer_store_(self, op):
         """Mutator implementation for ProducerStore."""
@@ -818,10 +872,12 @@ class StmtMutator(StmtFunctor):
 
     def visit_alloc_buffer_(self, op):
         """Mutator implementation for AllocBuffer."""
-        body = self.visit_stmt(op.body)
-        if body is op.body:
-            return op
-        return tvm.tir.AllocBuffer(op.buffer, body, op.span)
+        if hasattr(op, "body"):
+            body = self.visit_stmt(op.body)
+            if body is op.body:
+                return op
+            return tvm.tir.AllocBuffer(op.buffer, body, op.annotations, op.span)
+        return op
 
     def __call__(self, stmt):
         """Call mutator on statement.

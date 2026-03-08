@@ -71,6 +71,37 @@ class TIRxOpScheduler : public StmtExprMutator {
   }
 
  private:
+  class BufferRefRewriter : public StmtExprMutator {
+   public:
+    static Stmt Rewrite(const Stmt& stmt, const Buffer& src, const Buffer& dst) {
+      if (src.same_as(dst)) {
+        return stmt;
+      }
+      return BufferRefRewriter(src, dst)(stmt);
+    }
+
+   private:
+    BufferRefRewriter(Buffer src, Buffer dst) : src_(std::move(src)), dst_(std::move(dst)) {}
+
+    Buffer VisitBufferDef(const Buffer& buffer, bool alloc_data) final {
+      Buffer new_buffer = StmtExprMutator::VisitBufferDef(buffer, alloc_data);
+      if (new_buffer.same_as(src_)) {
+        return dst_;
+      }
+      return new_buffer;
+    }
+
+    Buffer VisitBufferUse(const Buffer& buffer) final {
+      if (buffer.same_as(src_)) {
+        return dst_;
+      }
+      return StmtExprMutator::VisitBufferUse(buffer);
+    }
+
+    Buffer src_;
+    Buffer dst_;
+  };
+
   class KernelReplacePointSearcher : public StmtExprMutator {
    public:
     explicit KernelReplacePointSearcher(const Stmt& body) : body_(body) {}
@@ -103,9 +134,15 @@ class TIRxOpScheduler : public StmtExprMutator {
       for (const auto& stmt : device_init_stmts_) {
         body = KernelReplacePointSearcher::Seek(stmt, body);
       }
-      // Insert alloc buffers as AllocBuffer stmts wrapping the body
-      for (auto it = alloc_buffers_.rbegin(); it != alloc_buffers_.rend(); ++it) {
-        body = tvm::tir::AllocBuffer(*it, body);
+      // Insert alloc buffers at the beginning of the kernel body.
+      if (!alloc_buffers_.empty()) {
+        std::vector<Stmt> seq;
+        seq.reserve(alloc_buffers_.size() + 1);
+        for (const auto& buffer : alloc_buffers_) {
+          seq.push_back(tvm::tir::AllocBuffer(buffer));
+        }
+        seq.push_back(std::move(body));
+        body = SeqStmt::Flatten(seq);
       }
       alloc_buffers_.clear();
       Stmt res = ExecScopeStmt(op->exec_scope, body);
@@ -148,6 +185,33 @@ class TIRxOpScheduler : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const SeqStmtNode* op) final {
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    if (post_buffer_def_stmts_.empty()) {
+      return stmt;
+    }
+    const auto* seq = stmt.as<SeqStmtNode>();
+    if (seq == nullptr) {
+      return stmt;
+    }
+
+    std::vector<Stmt> rebuilt;
+    rebuilt.reserve(seq->seq.size() + post_buffer_def_stmts_.size());
+    bool changed = false;
+    for (const Stmt& s : seq->seq) {
+      rebuilt.push_back(s);
+      if (const auto* alloc = s.as<AllocBufferNode>()) {
+        changed |= AppendPostBufferDefStmts(&rebuilt, alloc->buffer, alloc->buffer);
+      } else if (const auto* decl = s.as<DeclBufferNode>()) {
+        changed |= AppendPostBufferDefStmts(&rebuilt, decl->buffer, decl->buffer);
+      }
+    }
+    if (!changed) {
+      return stmt;
+    }
+    return SeqStmt::Flatten(rebuilt);
+  }
+
   Stmt VisitStmt_(const ForNode* op) final {
     // Collect the loop variables
     auto loop_var = Downcast<Var>(op->loop_var);
@@ -157,33 +221,25 @@ class TIRxOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const AllocBufferNode* op) final {
-    Stmt body = VisitStmt(op->body);
-    auto it = post_buffer_def_stmts_.find(op->buffer.get());
-    if (it != post_buffer_def_stmts_.end()) {
-      for (const auto& stmt : it->second) {
-        body = KernelReplacePointSearcher::Seek(stmt, body);
-      }
-      post_buffer_def_stmts_.erase(it);
-    }
-    if (body.same_as(op->body)) return ffi::GetRef<Stmt>(op);
-    auto n = CopyOnWrite(op);
-    n->body = std::move(body);
-    return Stmt(n);
+    Buffer old_buffer = op->buffer;
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    op = stmt.as<AllocBufferNode>();
+    TVM_FFI_ICHECK(op);
+
+    std::vector<Stmt> seq{stmt};
+    AppendPostBufferDefStmts(&seq, old_buffer, op->buffer);
+    return SeqStmt::Flatten(seq);
   }
 
   Stmt VisitStmt_(const DeclBufferNode* op) final {
-    Stmt body = VisitStmt(op->body);
-    auto it = post_buffer_def_stmts_.find(op->buffer.get());
-    if (it != post_buffer_def_stmts_.end()) {
-      for (const auto& stmt : it->second) {
-        body = KernelReplacePointSearcher::Seek(stmt, body);
-      }
-      post_buffer_def_stmts_.erase(it);
-    }
-    if (body.same_as(op->body)) return ffi::GetRef<Stmt>(op);
-    auto n = CopyOnWrite(op);
-    n->body = std::move(body);
-    return Stmt(n);
+    Buffer old_buffer = op->buffer;
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    op = stmt.as<DeclBufferNode>();
+    TVM_FFI_ICHECK(op);
+
+    std::vector<Stmt> seq{stmt};
+    AppendPostBufferDefStmts(&seq, old_buffer, op->buffer);
+    return SeqStmt::Flatten(seq);
   }
 
   Stmt VisitStmt_(const tirx::OpCallNode* op) final {
@@ -209,7 +265,7 @@ class TIRxOpScheduler : public StmtExprMutator {
     if (auto mapping = sctx->callbacks.Get(tirx::callback::kPostBufferDefStmt)) {
       auto map = Downcast<ffi::Map<Buffer, Array<Stmt>>>(mapping.value());
       for (const auto& [buffer, stmts] : map) {
-        auto& vec = post_buffer_def_stmts_[buffer.get()];
+        auto& vec = post_buffer_def_stmts_[buffer];
         vec.insert(vec.end(), stmts.begin(), stmts.end());
       }
     }
@@ -223,10 +279,35 @@ class TIRxOpScheduler : public StmtExprMutator {
   std::vector<Buffer> alloc_buffers_;
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
-  std::unordered_map<const BufferNode*, std::vector<Stmt>> post_buffer_def_stmts_;
+  std::unordered_map<Buffer, std::vector<Stmt>, ObjectPtrHash, ObjectPtrEqual>
+      post_buffer_def_stmts_;
 
   bool is_first_block_{true};
   bool is_first_thread_attr_{true};
+
+  bool AppendPostBufferDefStmts(std::vector<Stmt>* seq, const Buffer& old_buffer,
+                                const Buffer& new_buffer) {
+    auto append_with_remap = [this, seq, &new_buffer](auto it) -> bool {
+      Buffer src = it->first;
+      for (const auto& stmt : it->second) {
+        Stmt remapped = BufferRefRewriter::Rewrite(stmt, src, new_buffer);
+        seq->push_back(KernelReplacePointSearcher::Seek(remapped, Evaluate(0)));
+      }
+      post_buffer_def_stmts_.erase(it);
+      return true;
+    };
+
+    bool changed = false;
+    if (auto it = post_buffer_def_stmts_.find(old_buffer); it != post_buffer_def_stmts_.end()) {
+      changed |= append_with_remap(it);
+    }
+    if (!new_buffer.same_as(old_buffer)) {
+      if (auto it = post_buffer_def_stmts_.find(new_buffer); it != post_buffer_def_stmts_.end()) {
+        changed |= append_with_remap(it);
+      }
+    }
+    return changed;
+  }
 
   // No failure aggregation; pass surfaces per-op exceptions
 };

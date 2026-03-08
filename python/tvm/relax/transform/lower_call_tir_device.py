@@ -61,12 +61,7 @@ class DeviceFuncToKernel(StmtExprVisitor):
         const_tile_num = [T.int32(n) for n in tile_num]
 
         def _get_scope_id():
-            var_list = T.scope_id(const_tile_num, "kernel", mutator.exec_scope.name)
-            if not isinstance(var_list, T.Var):
-                for i, v in enumerate(var_list):
-                    T.LetStmt(T.Var(f"id_{i}", dtype=tile_idx[i].dtype), v)
-            else:
-                T.LetStmt(T.Var("id_0", dtype=tile_idx[0].dtype), var_list)
+            T.scope_id(const_tile_num, "kernel", mutator.exec_scope.name)
 
         @T.prim_func(tirx=True)
         def kernel_func():

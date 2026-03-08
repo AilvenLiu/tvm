@@ -69,6 +69,11 @@ class PrimFunc(BaseFunc, Scriptable):
         attrs=None,
         span=None,
     ):
+        # Legacy compatibility: expand body-carrying leaf stmt wrappers
+        # (e.g. DeclBuffer/AllocBuffer/LetStmt forms) into SeqStmt form.
+        from .stmt import _normalize_legacy_stmt
+
+        body = _normalize_legacy_stmt(body)
         param_list = []
         buffer_map = {} if buffer_map is None else buffer_map
         for x in params:

@@ -100,7 +100,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     }
     auto new_stmt = storage_lower(stmt);
     for (const auto& buf : param_flattened_buffers) {
-      new_stmt = DeclBuffer(buf, new_stmt);
+      new_stmt = SeqStmt::Flatten(DeclBuffer(buf), std::move(new_stmt));
     }
     return std::make_pair(new_stmt, ffi::Map<Var, Buffer>(new_buffer_map));
   }
@@ -134,25 +134,22 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       return GetFlattenedBuffer(buf, /*is_alloc=*/true);
     };
     auto buffer = mutate(op->buffer);
-    auto body = VisitStmt(op->body);
-    if (buffer.same_as(op->buffer) && body.same_as(op->body)) {
+    if (buffer.same_as(op->buffer)) {
       return ffi::GetRef<Stmt>(op);
-    } else {
-      auto n = CopyOnWrite(op);
-      n->buffer = buffer;
-      n->body = body;
-      return Stmt(n);
     }
+    auto n = CopyOnWrite(op);
+    n->buffer = buffer;
+    return Stmt(n);
   }
 
   Stmt VisitStmt_(const DeclBufferNode* op) final {
     auto buffer = GetFlattenedBuffer(op->buffer);
-
-    DeclBuffer decl_buffer = ffi::GetRef<DeclBuffer>(op);
-    auto n = decl_buffer.CopyOnWrite();
+    if (buffer.same_as(op->buffer)) {
+      return ffi::GetRef<Stmt>(op);
+    }
+    auto n = CopyOnWrite(op);
     n->buffer = buffer;
-
-    return StmtExprMutator::VisitStmt_(decl_buffer.get());
+    return Stmt(n);
   }
 
   Buffer GetFlattenedBuffer(Buffer buf, bool is_alloc = false) {
@@ -350,8 +347,7 @@ class BufferOffsetRemover : public StmtExprMutator {
       buffer_remap_[op->buffer] = buffer;
       auto n = CopyOnWrite(op);
       n->buffer = ffi::GetRef<Buffer>(n_buffer);
-      n->body = StmtExprMutator::VisitStmt(op->body);
-      return StmtExprMutator::VisitStmt_(n.get());
+      return Stmt(n);
     }
   }
 

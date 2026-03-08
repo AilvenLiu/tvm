@@ -36,8 +36,8 @@ class EventTensorReplacer(BufferReplacer):
             new_buffer, new_data = convert_event_tensor(buffer)
             self.buffer_map[buffer] = new_buffer
             self.var_map[buffer.data] = new_data
-            body = self.visit_stmt(op.body)
-            return AllocBuffer(new_buffer, body)
+            op = super().visit_alloc_buffer_(op)
+            return AllocBuffer(new_buffer, op.annotations, op.span)
         return super().visit_alloc_buffer_(op)
 
 

@@ -39,8 +39,8 @@ namespace {
 inline bool IsBuiltin(const CallNode* call, const Op& op) { return call && call->op.same_as(op); }
 
 // Is a stack allocation for a tensormap handle?
-inline bool IsTensorMapAlloca(const LetStmtNode* let) {
-  if (const auto* call = let->value.as<CallNode>()) {
+inline bool IsTensorMapAlloca(const BindNode* bind) {
+  if (const auto* call = bind->value.as<CallNode>()) {
     if (IsBuiltin(call, builtin::tvm_stack_alloca())) {
       if (call->args.size() == 2) {
         if (const auto* type_str = call->args[0].as<StringImmNode>()) {
@@ -163,14 +163,36 @@ class CuTensorMapDedupRewriter : public StmtExprMutator {
   using StmtExprMutator::VisitExpr_;
   using StmtExprMutator::VisitStmt_;
 
+  Stmt VisitStmt_(const SeqStmtNode* op) final {
+    ffi::Array<Stmt> seq;
+    seq.reserve(op->seq.size());
+    bool changed = false;
+    for (const Stmt& stmt : op->seq) {
+      Stmt new_stmt = VisitStmt(stmt);
+      // Dropped statements are represented as Evaluate(0).
+      if (const auto* eval = new_stmt.as<EvaluateNode>()) {
+        if (is_zero(eval->value)) {
+          changed = true;
+          continue;
+        }
+      }
+      if (!new_stmt.same_as(stmt)) {
+        changed = true;
+      }
+      seq.push_back(std::move(new_stmt));
+    }
+    if (!changed) {
+      return ffi::GetRef<Stmt>(op);
+    }
+    return SeqStmt::Flatten(seq);
+  }
+
   PrimExpr VisitExpr_(const VarNode* op) final {
     Var v = ffi::GetRef<Var>(op);
     auto it = var_remap_.find(v);
     if (it != var_remap_.end()) {
-      MarkIfTensorMapVar(it->second);
       return it->second;
     }
-    MarkIfTensorMapVar(v);
     return ffi::GetRef<PrimExpr>(op);
   }
 
@@ -229,26 +251,19 @@ class CuTensorMapDedupRewriter : public StmtExprMutator {
     }
   }
 
-  Stmt VisitStmt_(const LetStmtNode* op) final {
-    // Rewrite body first (so vars inside can be remapped)
-    Stmt body = VisitStmt(op->body);
+  Stmt VisitStmt_(const BindNode* op) final {
+    PrimExpr value = VisitExpr(op->value);
     if (IsTensorMapAlloca(op)) {
-      // If this Let allocates a tensormap that is remapped to a canonical var, drop it
+      // If this bind allocates a tensormap that is remapped to a canonical var, drop it.
       auto it = var_remap_.find(op->var);
       if (it != var_remap_.end()) {
-        return body;
-      }
-      // Or if the tensormap var is unused after rewriting, drop it
-      if (used_tensormap_vars_.count(op->var) == 0) {
-        return body;
+        return Evaluate(0);
       }
     }
-    // Otherwise, keep the Let (with potentially mutated value/body)
-    PrimExpr value = VisitExpr(op->value);
-    if (value.same_as(op->value) && body.same_as(op->body)) {
+    if (value.same_as(op->value)) {
       return ffi::GetRef<Stmt>(op);
     }
-    return LetStmt(op->var, value, body);
+    return Bind(op->var, value, op->span);
   }
 
   Stmt VisitStmt_(const EvaluateNode* op) final {
@@ -275,17 +290,6 @@ class CuTensorMapDedupRewriter : public StmtExprMutator {
   std::unordered_map<Var, Var, ObjectPtrHash, ObjectPtrEqual> var_remap_;
   // Track which parameter keys have already emitted an encode call
   std::vector<std::vector<ffi::Array<PrimExpr>>> emitted_keys_;
-
-  // Track used tensormap vars post-remap to safely remove dead allocas
-  std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> used_tensormap_vars_;
-
-  void MarkIfTensorMapVar(const Var& v) {
-    if (const auto* ptr = v->type_annotation.as<PointerTypeNode>()) {
-      if (ptr->element_type.as<TensorMapTypeNode>()) {
-        used_tensormap_vars_.insert(v);
-      }
-    }
-  }
 };
 
 namespace transform {

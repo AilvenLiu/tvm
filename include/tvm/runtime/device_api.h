@@ -344,6 +344,8 @@ inline const char* DLDeviceType2Str(int type) {
       return "webgpu";
     case kDLHexagon:
       return "hexagon";
+    case kDLTrn:
+      return "trn";
     default:
       TVM_FFI_THROW(InternalError) << "unknown type = " << type;
   }

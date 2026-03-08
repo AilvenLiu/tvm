@@ -407,8 +407,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
     B_elem_per_16B = 128 // DataType(B_type).bits
 
     # Allocate descriptor cells and encode once, right after A/B buffer defs.
-    # Uses add_post_buffer_def_stmt with kernel_replace_point so the DeclBuffer
-    # for descA/descB wraps the continuation (everything after A/B's DeclBuffer).
+    # The callback is inserted as a flat SeqStmt after the target buffer def.
     A_base = [0] * len(A_buffer.shape)
     B_base = [0] * len(B_buffer.shape)
     descA_buf = tvm.tir.decl_buffer((1,), "uint64", name="descA", scope="local")
@@ -416,7 +415,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
     krp = KernelReplacePoint(workspace={}, config={})
 
     def _make_desc_wrap(desc_buf, smem_buf, base, ldo, sdo, swizzle_val):
-        """Build: AllocBuffer(desc, { encode(desc, smem); krp })"""
+        """Build: { AllocBuffer(desc); encode(desc, smem); krp }"""
         encode_call = tvm.tir.call_intrin(
             "",
             "tir.ptx_tcgen05_encode_matrix_descriptor",
@@ -426,7 +425,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
             sdo,
             swizzle_val,
         )
-        return AllocBuffer(desc_buf, SeqStmt([Evaluate(encode_call), krp]))
+        return SeqStmt([AllocBuffer(desc_buf), Evaluate(encode_call), krp])
 
     wrap_A = _make_desc_wrap(descA_buf, A_buffer, A_base, A_ldo, A_sdo, A_swizzle_mode.value)
     wrap_B = _make_desc_wrap(descB_buf, B_buffer, B_base, B_ldo, B_sdo, B_swizzle_mode.value)

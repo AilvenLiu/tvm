@@ -858,23 +858,23 @@ def copy_tma_impl(
     # fmt: off
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def create_tensor_map():
-        with Tx.LetStmt(Tx.tvm_stack_alloca("tensormap", 1), var=tensor_map):
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                tensor_map,
-                g_buf.dtype,
-                tma_rank,
-                g_buf.data,
-                *reversed(tma_g_shape),
-                *reversed(tma_g_strides_for_map) if tma_rank > 1 else [],
-                *reversed(box_dim),
-                *element_strides,
-                0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
-                swizzle_mode.value,
-                2,  # CU_TENSOR_MAP_L2_PROMOTION_L2_128B
-                0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
-            )
-            Tx.tvm_kernel_replace_point()
+        Tx.Bind(Tx.tvm_stack_alloca("tensormap", 1), var=tensor_map)
+        Tx.call_packed(
+            "runtime.cuTensorMapEncodeTiled",
+            tensor_map,
+            g_buf.dtype,
+            tma_rank,
+            g_buf.data,
+            *reversed(tma_g_shape),
+            *reversed(tma_g_strides_for_map) if tma_rank > 1 else [],
+            *reversed(box_dim),
+            *element_strides,
+            0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
+            swizzle_mode.value,
+            2,  # CU_TENSOR_MAP_L2_PROMOTION_L2_128B
+            0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
+        )
+        Tx.tvm_kernel_replace_point()
     # fmt: on
     # create_tensor_map.show()
 

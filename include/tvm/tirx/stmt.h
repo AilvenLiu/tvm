@@ -827,32 +827,6 @@ class MatchBufferRegion : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(MatchBufferRegionNode);
 };
 
-class AllocBufferNode : public StmtNode {
- public:
-  /*! \brief The buffer of the alloc buffer. */
-  Buffer buffer;
-  /*! \brief The buffer view of the alloc buffer. */
-  Stmt body;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocBufferNode>()
-        .def_ro("buffer", &AllocBufferNode::buffer, refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("body", &AllocBufferNode::body)
-        .def_ro("span", &AllocBufferNode::span);
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocBuffer", AllocBufferNode, StmtNode);
-};
-
-class AllocBuffer : public Stmt {
- public:
-  TVM_DLL explicit AllocBuffer(Buffer buffer, Stmt body, Span span = Span());
-
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocBuffer, Stmt, AllocBufferNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBufferNode);
-};
-
 /*!
  * \brief A block is a basic schedule unit in TIR.
  * \note SBlock's body is parameterized by iter vars.
@@ -1004,7 +978,7 @@ class ExecScopeStmtNode : public StmtNode {
         .def_ro("exec_scope", &ExecScopeStmtNode::exec_scope)
         .def_ro("body", &ExecScopeStmtNode::body);
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tir.ExecScopeStmt", ExecScopeStmtNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ExecScopeStmt", ExecScopeStmtNode, StmtNode);
 };
 
 /*!
@@ -1336,6 +1310,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

@@ -28,6 +28,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "codegen_c.h"
 
@@ -57,7 +58,7 @@ class CodeGenTrainium final : public CodeGenC {
   std::string GetStorageScopeStr(const std::string& scope);           // NOLINT(*)
   void VisitExpr_(const VarNode* op, std::ostream& os) final;         // NOLINT(*)
   void PrintType(DataType t, std::ostream& os) final;                 // NOLINT(*)
-  void VisitStmt_(const AllocateNode* op) final;                      // NOLINT(*)
+  void VisitStmt_(const AllocBufferNode* op) final;                   // NOLINT(*)
   void VisitStmt_(const AttrStmtNode* op) final;                      // NOLINT(*)
   void VisitStmt_(const ForNode* op) final;                           // NOLINT(*)
   void VisitStmt_(const BufferStoreNode* op) final;                   // NOLINT(*)=
@@ -79,6 +80,8 @@ class CodeGenTrainium final : public CodeGenC {
   NKIInstructionCtx ctx_;
   std::unordered_map<std::string, std::string> opcode_map_;
   std::unordered_map<Buffer, std::string, ObjectPtrHash, ObjectPtrEqual> buffer_idmap_;
+  std::unordered_map<const VarNode*, std::string> data_buffer_idmap_;
+  std::unordered_map<const VarNode*, Buffer> data_decl_buffer_map_;
   bool is_outermost_loop_ = true;
 };
 }  // namespace codegen

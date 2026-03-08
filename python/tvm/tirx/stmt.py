@@ -26,21 +26,21 @@ Each statement node have subfields that can be visited from python side.
     assert isinstance(st, tvm.tirx.stmt.BufferStore)
     assert(st.buffer == buffer)
 """
+
 from collections.abc import Mapping
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import tvm_ffi
 
-from tvm import tir
 from tvm.ir import Op, PrimExpr, Range, Span
-from tvm.runtime import Object, Scriptable, Tensor, const
-from tvm.tir import FloatImm
+from tvm.runtime import Object, Scriptable, const
+from tvm.tirx import FloatImm
 
 from . import _ffi_api
 from .buffer import Buffer
-from .expr import IterVar, StringImm, Var
 from .exec_scope import ExecScope
+from .expr import IterVar, StringImm, Var
 
 
 @tvm_ffi.register_object("tir.Stmt")
@@ -48,7 +48,46 @@ class Stmt(Object, Scriptable):
     """Base class of all the statements."""
 
 
-@tvm_ffi.register_object("tirx.Bind")
+def _normalize_legacy_stmt(stmt: Stmt | None) -> Stmt | None:
+    """Expand legacy body-carrying leaf stmt wrappers into SeqStmt form.
+
+    Legacy python compatibility may attach a `body` attribute to leaf statements
+    (Bind/DeclBuffer/AllocBuffer). This helper converts such wrappers to the new
+    leaf + SeqStmt representation when embedding inside another statement node.
+    """
+
+    if stmt is None:
+        return None
+
+    prefix: list[Stmt] = []
+    cur = stmt
+    while True:
+        if isinstance(cur, Bind) and hasattr(cur, "body"):
+            prefix.append(Bind(cur.var, cur.value, cur.span))
+            cur = cur.body
+            continue
+        if isinstance(cur, DeclBuffer) and hasattr(cur, "body"):
+            prefix.append(DeclBuffer(cur.buffer, cur.span))
+            cur = cur.body
+            continue
+        if isinstance(cur, AllocBuffer) and hasattr(cur, "body"):
+            prefix.append(AllocBuffer(cur.buffer, cur.annotations, cur.span))
+            cur = cur.body
+            continue
+        break
+
+    if not prefix:
+        return stmt
+
+    normalized_tail = _normalize_legacy_stmt(cur)
+    if normalized_tail is not None:
+        prefix.append(normalized_tail)
+    if len(prefix) == 1:
+        return prefix[0]
+    return SeqStmt(prefix)
+
+
+@tvm_ffi.register_object("tir.Bind")
 class Bind(Stmt):
     """Bind node.
 
@@ -73,13 +112,59 @@ class Bind(Stmt):
     value: PrimExpr
     span: Span | None
 
-    def __init__(self, var: Var, value: PrimExpr, span: Span | None = None) -> None:
+    def __init__(self, var: Var, value: PrimExpr, *args, **kwargs) -> None:
+        body: Stmt | None = None
+        span: Span | None = None
+
+        if len(args) == 1:
+            arg0 = args[0]
+            if isinstance(arg0, Stmt):
+                body = arg0
+            elif arg0 is None or isinstance(arg0, Span):
+                span = arg0
+            else:
+                raise TypeError(
+                    "Bind expects (var, value[, span]) or legacy (var, value, body[, span])"
+                )
+        elif len(args) == 2:
+            body, span = args
+            if body is not None and not isinstance(body, Stmt):
+                raise TypeError("Legacy Bind/LetStmt body must be a Stmt or None")
+            if span is not None and not isinstance(span, Span):
+                raise TypeError("Bind span must be a Span or None")
+        elif len(args) > 2:
+            raise TypeError(
+                "Bind expects (var, value[, span]) or legacy (var, value, body[, span])"
+            )
+
+        if kwargs:
+            invalid_keys = set(kwargs.keys()) - {"body", "span"}
+            if invalid_keys:
+                raise TypeError(f"Unexpected keyword arguments for Bind: {invalid_keys}")
+            if "body" in kwargs:
+                kw_body = kwargs["body"]
+                if kw_body is not None and not isinstance(kw_body, Stmt):
+                    raise TypeError("Bind body must be a Stmt or None")
+                if body is not None and kw_body is not None and body is not kw_body:
+                    raise TypeError("Bind body specified by both args and kwargs")
+                body = kw_body if kw_body is not None else body
+            if "span" in kwargs:
+                kw_span = kwargs["span"]
+                if kw_span is not None and not isinstance(kw_span, Span):
+                    raise TypeError("Bind span must be a Span or None")
+                if span is not None and kw_span is not None and span is not kw_span:
+                    raise TypeError("Bind span specified by both args and kwargs")
+                span = kw_span if kw_span is not None else span
+
         self.__init_handle_by_constructor__(
             _ffi_api.Bind,
             var,
             value,
             span,  # type: ignore
         )
+        # Legacy LetStmt compatibility. Body is carried on python side only.
+        if body is not None:
+            self.body = body
 
 
 @tvm_ffi.register_object("tirx.AssertStmt")
@@ -198,6 +283,7 @@ class For(Stmt):
         step: PrimExpr | None = None,
         span: Span | None = None,
     ) -> None:
+        body = _normalize_legacy_stmt(body)
         self.__init_handle_by_constructor__(
             _ffi_api.For,  # type: ignore
             loop_var,
@@ -233,6 +319,7 @@ class While(Stmt):
     span: Span | None
 
     def __init__(self, condition: PrimExpr, body: Stmt, span: Span | None = None) -> None:
+        body = _normalize_legacy_stmt(body)
         self.__init_handle_by_constructor__(_ffi_api.While, condition, body, span)  # type: ignore
 
 
@@ -275,7 +362,12 @@ class BufferStore(Stmt):
         span: Span | None = None,
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.BufferStore, buffer, value, indices, predicate, span  # type: ignore
+            _ffi_api.BufferStore,
+            buffer,
+            value,
+            indices,
+            predicate,
+            span,  # type: ignore
         )
 
 
@@ -300,13 +392,80 @@ class AllocBuffer(Stmt):
     buffer: Buffer
     span: Span | None
 
-    def __init__(
-        self,
-        buffer: Buffer,
-        annotations: dict | None = None,
-        span: Span | None = None,
-    ) -> None:
+    def __init__(self, buffer: Buffer, *args, **kwargs) -> None:
+        body: Stmt | None = None
+        annotations: dict | None = None
+        span: Span | None = None
+
+        idx = 0
+        argc = len(args)
+
+        # Legacy form: AllocBuffer(buffer, body[, annotations][, span])
+        if idx < argc and isinstance(args[idx], Stmt):
+            body = args[idx]
+            idx += 1
+
+        if idx < argc:
+            arg = args[idx]
+            if isinstance(arg, Mapping):
+                annotations = dict(arg)
+                idx += 1
+            elif arg is None:
+                annotations = None
+                idx += 1
+            elif isinstance(arg, Span):
+                span = arg
+                idx += 1
+            else:
+                raise TypeError(
+                    "AllocBuffer expects (buffer[, annotations][, span]) or "
+                    "legacy (buffer, body[, annotations][, span])"
+                )
+
+        if idx < argc:
+            arg = args[idx]
+            if arg is None or isinstance(arg, Span):
+                span = arg
+                idx += 1
+            else:
+                raise TypeError("AllocBuffer span must be a Span or None")
+
+        if idx != argc:
+            raise TypeError(
+                "AllocBuffer expects (buffer[, annotations][, span]) or "
+                "legacy (buffer, body[, annotations][, span])"
+            )
+
+        if kwargs:
+            invalid_keys = set(kwargs.keys()) - {"body", "annotations", "span"}
+            if invalid_keys:
+                raise TypeError(f"Unexpected keyword arguments for AllocBuffer: {invalid_keys}")
+            if "body" in kwargs:
+                kw_body = kwargs["body"]
+                if kw_body is not None and not isinstance(kw_body, Stmt):
+                    raise TypeError("AllocBuffer body must be a Stmt or None")
+                if body is not None and kw_body is not None and body is not kw_body:
+                    raise TypeError("AllocBuffer body specified by both args and kwargs")
+                body = kw_body if kw_body is not None else body
+            if "annotations" in kwargs:
+                kw_ann = kwargs["annotations"]
+                if kw_ann is not None and not isinstance(kw_ann, Mapping):
+                    raise TypeError("AllocBuffer annotations must be Mapping or None")
+                if annotations is not None and kw_ann is not None and annotations != dict(kw_ann):
+                    raise TypeError("AllocBuffer annotations specified by both args and kwargs")
+                annotations = dict(kw_ann) if kw_ann is not None else annotations
+            if "span" in kwargs:
+                kw_span = kwargs["span"]
+                if kw_span is not None and not isinstance(kw_span, Span):
+                    raise TypeError("AllocBuffer span must be a Span or None")
+                if span is not None and kw_span is not None and span is not kw_span:
+                    raise TypeError("AllocBuffer span specified by both args and kwargs")
+                span = kw_span if kw_span is not None else span
+
         self.__init_handle_by_constructor__(_ffi_api.AllocBuffer, buffer, annotations, span)
+        # Legacy compatibility. Body is carried on python side only.
+        if body is not None:
+            self.body = body
 
 
 @tvm_ffi.register_object("tirx.DeclBuffer")
@@ -325,8 +484,52 @@ class DeclBuffer(Stmt):
     buffer: Buffer
     span: Span | None
 
-    def __init__(self, buffer: Buffer, span: Span | None = None) -> None:
+    def __init__(self, buffer: Buffer, *args, **kwargs) -> None:
+        body: Stmt | None = None
+        span: Span | None = None
+
+        if len(args) == 1:
+            arg0 = args[0]
+            if isinstance(arg0, Stmt):
+                body = arg0
+            elif arg0 is None or isinstance(arg0, Span):
+                span = arg0
+            else:
+                raise TypeError(
+                    "DeclBuffer expects (buffer[, span]) or legacy (buffer, body[, span])"
+                )
+        elif len(args) == 2:
+            body, span = args
+            if body is not None and not isinstance(body, Stmt):
+                raise TypeError("Legacy DeclBuffer body must be a Stmt or None")
+            if span is not None and not isinstance(span, Span):
+                raise TypeError("DeclBuffer span must be a Span or None")
+        elif len(args) > 2:
+            raise TypeError("DeclBuffer expects (buffer[, span]) or legacy (buffer, body[, span])")
+
+        if kwargs:
+            invalid_keys = set(kwargs.keys()) - {"body", "span"}
+            if invalid_keys:
+                raise TypeError(f"Unexpected keyword arguments for DeclBuffer: {invalid_keys}")
+            if "body" in kwargs:
+                kw_body = kwargs["body"]
+                if kw_body is not None and not isinstance(kw_body, Stmt):
+                    raise TypeError("DeclBuffer body must be a Stmt or None")
+                if body is not None and kw_body is not None and body is not kw_body:
+                    raise TypeError("DeclBuffer body specified by both args and kwargs")
+                body = kw_body if kw_body is not None else body
+            if "span" in kwargs:
+                kw_span = kwargs["span"]
+                if kw_span is not None and not isinstance(kw_span, Span):
+                    raise TypeError("DeclBuffer span must be a Span or None")
+                if span is not None and kw_span is not None and span is not kw_span:
+                    raise TypeError("DeclBuffer span specified by both args and kwargs")
+                span = kw_span if kw_span is not None else span
+
         self.__init_handle_by_constructor__(_ffi_api.DeclBuffer, buffer, span)
+        # Legacy compatibility. Body is carried on python side only.
+        if body is not None:
+            self.body = body
 
 
 @tvm_ffi.register_object("tirx.AttrStmt")
@@ -365,8 +568,14 @@ class AttrStmt(Stmt):
         body: Stmt,
         span: Span | None = None,
     ) -> None:
+        body = _normalize_legacy_stmt(body)
         self.__init_handle_by_constructor__(
-            _ffi_api.AttrStmt, node, attr_key, value, body, span  # type: ignore
+            _ffi_api.AttrStmt,
+            node,
+            attr_key,
+            value,
+            body,
+            span,  # type: ignore
         )
 
 
@@ -387,6 +596,7 @@ class SeqStmt(Stmt):
     span: Span | None
 
     def __init__(self, seq: list[Stmt], span: Span | None = None) -> None:
+        seq = [_normalize_legacy_stmt(s) for s in seq]
         self.__init_handle_by_constructor__(_ffi_api.SeqStmt, seq, span)  # type: ignore
 
     def __getitem__(self, i: int):
@@ -426,8 +636,14 @@ class IfThenElse(Stmt):
         else_case: Stmt | None,
         span: Span | None = None,
     ) -> None:
+        then_case = _normalize_legacy_stmt(then_case)
+        else_case = _normalize_legacy_stmt(else_case)
         self.__init_handle_by_constructor__(
-            _ffi_api.IfThenElse, condition, then_case, else_case, span  # type: ignore
+            _ffi_api.IfThenElse,
+            condition,
+            then_case,
+            else_case,
+            span,  # type: ignore
         )
 
 
@@ -556,28 +772,10 @@ class MatchBufferRegion(Object, Scriptable):
 
     def __init__(self, buffer: Buffer, source: BufferRegion) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.MatchBufferRegion, buffer, source  # type: ignore
+            _ffi_api.MatchBufferRegion,
+            buffer,
+            source,  # type: ignore
         )
-
-
-@tvm_ffi.register_object("tir.AllocBuffer")
-class AllocBuffer(Object, Scriptable):
-    """AllocBuffer node.
-
-    Parameters
-    ----------
-    buffer : Buffer
-        The buffer of the alloc buffer.
-
-    body : Stmt
-        The body of the alloc buffer.
-    """
-
-    buffer: Buffer
-    body: Stmt
-
-    def __init__(self, buffer: Buffer, body: Stmt, span: Optional[Span] = None) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.AllocBuffer, buffer, body, span)
 
 
 @tvm_ffi.register_object("tir.SBlock")
@@ -626,7 +824,7 @@ class SBlock(Stmt):
     alloc_buffers: list[Buffer]
     match_buffers: list[MatchBufferRegion]
     annotations: Mapping[str, Object]
-    span: Optional[Span]
+    span: Span | None
 
     def __init__(
         self,
@@ -647,6 +845,8 @@ class SBlock(Stmt):
             match_buffers = []
         if annotations is None:
             annotations = {}
+        body = _normalize_legacy_stmt(body)
+        init = _normalize_legacy_stmt(init)
         self.__init_handle_by_constructor__(
             _ffi_api.SBlock,  # type: ignore
             iter_vars,
@@ -725,14 +925,15 @@ class ExecScopeStmt(Stmt):
 
     exec_scope: ExecScope
     body: Stmt
-    span: Optional[Span]
+    span: Span | None
 
     def __init__(
         self,
         exec_scope: ExecScope,
         body: Stmt,
-        span: Optional[Span] = None,
+        span: Span | None = None,
     ) -> None:
+        body = _normalize_legacy_stmt(body)
         self.__init_handle_by_constructor__(
             _ffi_api.ExecScopeStmt,  # type: ignore
             exec_scope,
@@ -749,7 +950,7 @@ class Break(Stmt):
     ----------
     """
 
-    def __init__(self, span: Optional[Span] = None) -> None:
+    def __init__(self, span: Span | None = None) -> None:
         self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
 
 
@@ -761,8 +962,9 @@ class Continue(Stmt):
     ----------
     """
 
-    def __init__(self, span: Optional[Span] = None) -> None:
+    def __init__(self, span: Span | None = None) -> None:
         self.__init_handle_by_constructor__(_ffi_api.Continue, span)  # type: ignore
+
 
 def stmt_seq(*args: PrimExpr | Stmt) -> SeqStmt:
     """Make sequence of statements
@@ -836,19 +1038,19 @@ class OpCall(Stmt):
         The explicit variant name to dispatch to.
     """
 
-    args: List[PrimExpr]
-    workspace: Dict[str, Buffer]
-    config: Dict[str, Any]
-    dispatch: Optional[str]
+    args: list[PrimExpr]
+    workspace: dict[str, Buffer]
+    config: dict[str, Any]
+    dispatch: str | None
     _registry = {}
 
     def __init__(
         self,
-        *args: List[PrimExpr],
-        op: Optional[Op] = None,
-        workspace: Dict[str, Buffer] = None,
-        config: Dict[str, Any] = None,
-        dispatch: Optional[str] = None,
+        *args: list[PrimExpr],
+        op: Op | None = None,
+        workspace: dict[str, Buffer] = None,
+        config: dict[str, Any] = None,
+        dispatch: str | None = None,
     ) -> None:
         if workspace is None:
             workspace = {}
@@ -859,7 +1061,12 @@ class OpCall(Stmt):
             op = self.__class__.op
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
-            _ffi_api.OpCall, op, args, workspace, config, dispatch  # pylint: disable=no-member
+            _ffi_api.OpCall,
+            op,
+            args,
+            workspace,
+            config,
+            dispatch,  # pylint: disable=no-member
         )
         casted_op = OpCall.downcast(self)
         casted_op.validate()
@@ -876,21 +1083,22 @@ class OpCall(Stmt):
             return instance  # Unknown op: return as-is
         new_instance = subclass.__new__(subclass)
         new_instance.__init_handle_by_constructor__(
-            _ffi_api.OpCallCopyHandle, instance  # pylint: disable=no-member
+            _ffi_api.OpCallCopyHandle,
+            instance,  # pylint: disable=no-member
         )
         return new_instance
 
     @property
-    def srcs(self) -> List[PrimExpr]:
+    def srcs(self) -> list[PrimExpr]:
         raise NotImplementedError("Subclass must implement this method")
 
     @property
-    def dsts(self) -> List[PrimExpr]:
+    def dsts(self) -> list[PrimExpr]:
         raise NotImplementedError("Subclass must implement this method")
 
     def get_private_buffers(
-        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
-    ) -> Dict[str, Any]:
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+    ) -> dict[str, Any]:
         """
         Create private (intermediate) buffers needed in this operator.
 
@@ -921,13 +1129,13 @@ class OpCall(Stmt):
             raise ValueError(f"Unsupported target: {sctx.target.kind.name}")
 
     def get_private_buffers_trn(
-        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
-    ) -> Dict[str, Any]:
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+    ) -> dict[str, Any]:
         return {}
 
     def get_private_buffers_cuda(
-        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
-    ) -> Dict[str, Any]:
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+    ) -> dict[str, Any]:
         return {}
 
     def validate(self) -> None:

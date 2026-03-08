@@ -35,12 +35,12 @@ from tvm.script import relax as R
 from tvm.script import tir as T
 from tvm.tir import (
     AttrStmt,
+    Bind,
     Buffer,
     BufferStore,
     Evaluate,
     ExecScopeStmt,
     IntImm,
-    LetStmt,
     PrimExpr,
     PrimFunc,
     SBlockRealize,
@@ -90,6 +90,26 @@ def _find_outermost_exec_scope(stmt):
     if isinstance(stmt, ExecScopeStmt):
         return stmt.exec_scope
     raise ValueError("No ExecScopeStmt found in device function body")
+
+
+def _as_seq(stmts: list[Stmt], span=None) -> Stmt:
+    """Build a SeqStmt when needed, otherwise return the single stmt."""
+    if not stmts:
+        return Evaluate(0)
+    if len(stmts) == 1:
+        return stmts[0]
+    return SeqStmt(stmts, span)
+
+
+def _prepend_stmt(body: Stmt, prefix: Stmt, span=None) -> Stmt:
+    """Insert one statement before a body while preserving sequence shape."""
+    if isinstance(body, SeqStmt):
+        return SeqStmt([prefix, *body.seq], body.span)
+    return SeqStmt([prefix, body], span)
+
+
+def _prepend_bind(body: Stmt, var: Var, value: PrimExpr, span=None) -> Stmt:
+    return _prepend_stmt(body, Bind(var=var, value=value, span=span), span)
 
 
 # FIXME: add decl_buffer for all newly generated buffers
@@ -366,66 +386,81 @@ class EventHandleHelper(PyExprVisitor):
 class EventPrimFuncHelper(StmtExprMutator):
     # This class is used to post process the primfunc body generated for event operations
     # Will aggregates all statements immediately following a marked Block into that Block's body.
-    # The purpose is to fix the scope of the var declared in the input dependency (like LetStmt)
+    # The purpose is to fix the scope of vars declared in input dependency callbacks.
     def __init__(self):
         super().__init__()
         self.stmt_list = []
 
+    @staticmethod
+    def _is_mark(stmt: Stmt, mark: str) -> bool:
+        return (
+            isinstance(stmt, AttrStmt)
+            and stmt.attr_key == "marks"
+            and isinstance(stmt.value, tvm.tir.StringImm)
+            and stmt.value.value == mark
+        )
+
+    @staticmethod
+    def _extract_entry_payload(
+        stmt: Stmt,
+    ) -> tuple[list[Stmt], list[tuple[Var, PrimExpr, object]]] | None:
+        # New form: SeqStmt([prefix..., Bind..., entry_mark])
+        if EventPrimFuncHelper._is_mark(stmt, "entry_mark"):
+            return ([], [])
+        if isinstance(stmt, SeqStmt) and len(stmt.seq) >= 1:
+            if not EventPrimFuncHelper._is_mark(stmt.seq[-1], "entry_mark"):
+                return None
+            seq = list(stmt.seq[:-1])
+            binds = []
+            while len(seq) > 0 and isinstance(seq[-1], Bind):
+                bind_stmt = seq.pop()
+                binds.append((bind_stmt.var, bind_stmt.value, bind_stmt.span))
+            binds.reverse()
+            return (seq, binds)
+
+        # Legacy form: LetStmt(var, value, body=...entry_mark...)
+        binds = []
+        cur = stmt
+        while hasattr(cur, "var") and hasattr(cur, "value") and hasattr(cur, "body"):
+            binds.append((cur.var, cur.value, cur.span))
+            cur = cur.body
+        if binds and EventPrimFuncHelper._is_mark(cur, "entry_mark"):
+            return ([], binds)
+        return None
+
     def visit_seqstmt_(self, op):
         new_seq = []
         seq = [stmt for stmt in op.seq]
-        if (
-            isinstance(seq[-1], AttrStmt)
-            and seq[-1].attr_key == "marks"
-            and seq[-1].value.value == "entry_mark"
-        ):
+        if seq and self._is_mark(seq[-1], "entry_mark"):
             stmt_list = self.stmt_list
             self.stmt_list = []
             seq = seq[:-1] + stmt_list
         for stmt in reversed(seq):
-            if (
-                isinstance(stmt, AttrStmt)
-                and stmt.attr_key == "marks"
-                and stmt.value.value == "beg_mark"
-            ):
-                if (
-                    isinstance(stmt.body, AttrStmt)
-                    and stmt.body.attr_key == "marks"
-                    and stmt.body.value.value == "entry_mark"
-                ):
+            if self._is_mark(stmt, "beg_mark"):
+                entry_payload = self._extract_entry_payload(stmt.body)
+                if entry_payload is None:
+                    raise ValueError(
+                        "Expected beg_mark body to end with entry_mark and optional binds, "
+                        f"but got {type(stmt.body)}"
+                    )
+                prefix_stmts, entry_binds = entry_payload
+                if len(prefix_stmts) == 0 and len(entry_binds) == 0:
                     continue
-                if not isinstance(stmt.body, LetStmt):
-                    # TODO: Need more Robust way to handle other stmt types
-                    raise ValueError(f"Supported stmt type is LetStmt, but got {type(stmt.body)}")
-                assert len(self.stmt_list) == 0
-                self.stmt_list = new_seq
-                new_seq = [self.visit_stmt(stmt.body)]
+                captured = new_seq
+                bound_body = _as_seq(captured)
+                for var, value, span in entry_binds:
+                    bound_body = _prepend_bind(bound_body, var, value, span)
+                if len(prefix_stmts) > 0:
+                    prefix_seq = list(prefix_stmts)
+                    if isinstance(bound_body, SeqStmt):
+                        prefix_seq.extend(bound_body.seq)
+                    else:
+                        prefix_seq.append(bound_body)
+                    bound_body = _as_seq(prefix_seq)
+                new_seq = [bound_body]
             else:
                 new_seq.insert(0, self.visit_stmt(stmt))
-        if len(new_seq) == 1:
-            return new_seq[0]
-        else:
-            return SeqStmt(new_seq, op.span)
-
-    def visit_let_stmt_(self, op):
-        op = super().visit_let_stmt_(op)
-        if (
-            isinstance(op.body, AttrStmt)
-            and op.body.attr_key == "marks"
-            and op.body.value.value == "entry_mark"
-        ):
-            stmt_list = self.stmt_list
-            self.stmt_list = []
-            if len(stmt_list) > 0:
-                if len(stmt_list) == 1:
-                    body = stmt_list[0]
-                else:
-                    body = SeqStmt(stmt_list)
-            else:
-                body = Evaluate(0)
-            return tvm.tir.LetStmt(op.var, op.value, body, op.span)
-        else:
-            return op
+        return _as_seq(new_seq, op.span)
 
 
 class EventOpInserter(StmtExprMutator):
@@ -584,7 +619,7 @@ class PersistentVarCollector(StmtExprMutator):
                 else self.persistent_vars_megakernel
             )
             cur_persistent_vars[op.buffer.name].append(op.buffer)
-            return op.body
+            return Evaluate(0)
         return op
 
     def visit_decl_buffer_(self, op):
@@ -596,7 +631,7 @@ class PersistentVarCollector(StmtExprMutator):
                 else self.persistent_vars_megakernel
             )
             cur_persistent_vars[op.buffer.name].append(op.buffer)
-            return op.body
+            return Evaluate(0)
         return op
 
     def visit_allocate_(self, op):
@@ -685,12 +720,20 @@ class DuplicateVarReplacer(StmtExprMutator):
         super().__init__()
         self.vars = {}
 
+    def visit_bind_(self, op):
+        assert op.var not in self.vars
+        self.vars[op.var] = T.Var("var", dtype=op.value.dtype, span=op.var.span)
+        value = self.visit_expr(op.value)
+        return Bind(self.vars[op.var], value, op.span)
+
     def visit_let_stmt_(self, op):
+        if not hasattr(op, "body"):
+            return self.visit_bind_(op)
         assert op.var not in self.vars
         self.vars[op.var] = T.Var("var", dtype=op.value.dtype, span=op.var.span)
         value = self.visit_expr(op.value)
         body = self.visit_stmt(op.body)
-        return tvm.tir.LetStmt(self.vars[op.var], value, body, op.span)
+        return _prepend_bind(body, self.vars[op.var], value, op.span)
 
     def visit_for_(self, op):
         assert op.loop_var not in self.vars
@@ -751,7 +794,7 @@ class DynSharedMemCollector(StmtExprMutator):
         if op.buffer.scope() == "shared.dyn":
             if self.dyn_shared_mem_buffer is None:
                 self.dyn_shared_mem_buffer = op.buffer
-                return op.body
+                return Evaluate(0)
             else:
                 raise ValueError(
                     f"Multiple dynamic shared memory buffers found: {self.dyn_shared_mem_buffer} and {op.buffer}"  # noqa: E501
@@ -957,7 +1000,11 @@ class DependencyHandler(StmtExprMutator):
     def rewrite(
         self, stmt: Stmt, buffer_replace_map: dict[Buffer, Buffer], cur_buf_list: list[Buffer]
     ) -> tuple[Stmt, list[PrimExpr]]:
-        self.cur_buf_set = {buffer_replace_map[buf]: i for i, buf in enumerate(cur_buf_list)}
+        # Some output buffers may not require remapping after replacement.
+        # Fall back to the original buffer in that case.
+        self.cur_buf_set = {
+            buffer_replace_map.get(buf, buf): i for i, buf in enumerate(cur_buf_list)
+        }
         self.cur_out_prim_expr = [None] * len(cur_buf_list)
         new_stmt = self.visit_stmt(stmt)
         for prim_expr in self.cur_out_prim_expr:
@@ -988,11 +1035,12 @@ class DependencyHandler(StmtExprMutator):
                 self.cur_out_prim_expr[self.cur_buf_set[op.buffer]] = T.Var(
                     "var", dtype=op.value.dtype, span=op.value.span
                 )
-                return LetStmt(
+                bind_stmt = Bind(
                     var=self.cur_out_prim_expr[self.cur_buf_set[op.buffer]],
                     value=op.value,
-                    body=entry_mark,
+                    span=op.span,
                 )
+                return SeqStmt([bind_stmt, entry_mark], op.span)
         return super().visit_buffer_store_(op)
 
     def _is_entry_mark(self, stmt: Stmt) -> bool:
@@ -1002,40 +1050,52 @@ class DependencyHandler(StmtExprMutator):
             and stmt.value.value == "entry_mark"
         )
 
+    def _extract_entry_binding(
+        self, stmt: Stmt
+    ) -> tuple[Var, PrimExpr, object] | tuple[None, None, None] | None:
+        if self._is_entry_mark(stmt):
+            return (None, None, None)
+        if isinstance(stmt, SeqStmt) and len(stmt.seq) == 2:
+            bind_stmt, mark_stmt = stmt.seq
+            if isinstance(bind_stmt, Bind) and self._is_entry_mark(mark_stmt):
+                return (bind_stmt.var, bind_stmt.value, bind_stmt.span)
+        # Legacy LetStmt(var, value, body=entry_mark) compatibility.
+        if hasattr(stmt, "var") and hasattr(stmt, "value") and hasattr(stmt, "body"):
+            if self._is_entry_mark(stmt.body):
+                return (stmt.var, stmt.value, stmt.span)
+        return None
+
+    def _build_entry_mark_with_bindings(self, bindings: list[tuple[Var, PrimExpr, object]]) -> Stmt:
+        entry_mark = AttrStmt(
+            T.StringImm("__mark_wrapper"),
+            "marks",
+            T.StringImm("entry_mark"),
+            Evaluate(0),
+        )
+        if len(bindings) == 0:
+            return entry_mark
+        bind_stmts = [
+            Bind(var=var, value=value, span=span) for var, value, span in reversed(bindings)
+        ]
+        return SeqStmt([*bind_stmts, entry_mark])
+
     def visit_seqstmt_(self, op):
         op = super().visit_seqstmt_(op)
         inv_seq = []
         flag = True
-        out_var = []
+        out_bindings: list[tuple[Var, PrimExpr, object]] = []
         for stmt in reversed(op.seq):
-            if self._is_entry_mark(stmt):
-                assert flag
-            elif isinstance(stmt, LetStmt) and self._is_entry_mark(stmt.body):
-                assert flag
-                out_var.append((stmt.var, stmt.value))
-            else:
-                if flag:
-                    flag = False
-                    entry_mark = AttrStmt(
-                        T.StringImm("__mark_wrapper"),
-                        "marks",
-                        T.StringImm("entry_mark"),
-                        Evaluate(0),
-                    )
-                    for var, value in reversed(out_var):
-                        entry_mark = LetStmt(var=var, value=value, body=entry_mark)
-                    inv_seq.append(entry_mark)
-                inv_seq.append(stmt)
+            entry_binding = self._extract_entry_binding(stmt)
+            if entry_binding is not None and flag:
+                if entry_binding[0] is not None:
+                    out_bindings.append(entry_binding)
+                continue
+            if flag:
+                flag = False
+                inv_seq.append(self._build_entry_mark_with_bindings(out_bindings))
+            inv_seq.append(stmt)
         if flag:
-            entry_mark = AttrStmt(
-                T.StringImm("__mark_wrapper"),
-                "marks",
-                T.StringImm("entry_mark"),
-                Evaluate(0),
-            )
-            for var, value in reversed(out_var):
-                entry_mark = LetStmt(var=var, value=value, body=entry_mark)
-            return entry_mark
+            return self._build_entry_mark_with_bindings(out_bindings)
         else:
             assert len(inv_seq) > 1
             return SeqStmt(list(reversed(inv_seq)), op.span)
@@ -1618,8 +1678,11 @@ class _Rewriter(PyExprMutator):
 
                 replacer = BufferReplacer(buffer_replace_map, var_replace_map)
                 func_body = replacer.visit_stmt(f_init.body)
+                # Some init paths do not remap the output buffer attributes; in that case
+                # keep using the original output buffer for the rewrite target.
+                rewritten_out_buffer = buffer_replace_map.get(out_buffer, out_buffer)
                 stmt = InitEtensorFuncHandler().rewrite(
-                    func_body, buffer_replace_map[out_buffer], etensor_buf_1d, idx
+                    func_body, rewritten_out_buffer, etensor_buf_1d, idx
                 )
                 T.add_to_parent(stmt)
 
@@ -1831,7 +1894,7 @@ class _Rewriter(PyExprMutator):
         for var, cast_var_list in cast_var_map.items():
             new_var_expr = replacer.visit_expr(var)
             for cast_var in cast_var_list:
-                new_body = LetStmt(cast_var, T.cast(new_var_expr, "int32"), new_body)
+                new_body = _prepend_bind(new_body, cast_var, T.cast(new_var_expr, "int32"))
         return persistent_kernel.with_body(new_body), new_sym_vars, old_sym_vars
 
     def _build_gen_exec_queue_kernel(self):

@@ -19,7 +19,7 @@
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tir.buffer import Buffer
-from tvm.tir.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, Stmt
+from tvm.tir.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, SeqStmt, Stmt
 from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
 from tvm.tirx.op_schedule.schedule_context import ScheduleContext
@@ -85,7 +85,7 @@ class PrivateAllocMutator(StmtMutator):
             for stmt in self.init_stmts:
                 body = seek_kernel_replace_point(stmt, body)
             for buffer in reversed(self.alloc_buffers):
-                body = AllocBuffer(buffer, body)
+                body = SeqStmt([AllocBuffer(buffer), body])
             return ExecScopeStmt(op.exec_scope, body)
         return op
 

@@ -187,8 +187,6 @@ void StmtVisitor::VisitStmt_(const tirx::OpCallNode* op) {
   }
 }
 
-void StmtVisitor::VisitStmt_(const AllocBufferNode* op) { this->VisitStmt(op->body); }
-
 class StmtMutator::Internal {
  public:
   /*!
@@ -725,17 +723,6 @@ Stmt StmtMutator::VisitStmt_(const tirx::OpCallNode* op) {
     auto n = CopyOnWrite(op);
     n->args = std::move(args);
     if (config_changed) n->config = std::move(config);
-    return Stmt(n);
-  }
-}
-
-Stmt StmtMutator::VisitStmt_(const AllocBufferNode* op) {
-  Stmt body = this->VisitStmt(op->body);
-  if (body.same_as(op->body)) {
-    return ffi::GetRef<Stmt>(op);
-  } else {
-    auto n = CopyOnWrite(op);
-    n->body = std::move(body);
     return Stmt(n);
   }
 }

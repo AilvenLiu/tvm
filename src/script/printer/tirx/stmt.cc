@@ -171,7 +171,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Bind>("", [](tirx::Bind stmt, AccessPath p, IRDocsifier d) -> Doc {
-      bool concise = AllowConciseScoping(d, stmt);
       // Step 1. Type annotation
       TVM_FFI_ICHECK(stmt->var->type_annotation.defined())
           << "Type annotation is required for variable: " << stmt->var->name_hint;
@@ -188,13 +187,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       if (!d->IsVarDefined(stmt->var)) {
         TVM_FFI_ICHECK(!d->frames.empty());
         ExprDoc lhs = DefineVar(stmt->var, d->frames.back(), d);
-        if (concise) {
-          ExprDoc let_ann = type_doc.defined()
-                                ? ExprDoc(IndexDoc(TIR(d, "let"), {type_doc.value()}))
-                                : TIR(d, "let");
-          return AssignDoc(lhs, rhs, let_ann);
-        }
-        return AssignDoc(lhs, rhs, type_doc);
+        ExprDoc let_ann = type_doc.defined() ? ExprDoc(IndexDoc(TIR(d, "let"), {type_doc.value()}))
+                                             : TIR(d, "let");
+        return AssignDoc(lhs, rhs, let_ann);
       } else {
         ExprDoc lhs = d->AsDoc<ExprDoc>(stmt->var, p->Attr("var"));
         return AssignDoc(lhs, rhs, std::nullopt);
@@ -641,22 +636,18 @@ ffi::Optional<ExprDoc> TryDeclBufferSugar(const tirx::Buffer& child, const Acces
 
 Doc DeclBufferDoc(tirx::DeclBuffer stmt, AccessPath p, IRDocsifier d,
                   BufferVarDefinition var_definitions) {
-  bool concise = AllowConciseScoping(d, stmt);
-
   // Try sugar detection when syntax_sugar is enabled
   if (d->cfg->syntax_sugar) {
     if (auto sugar = TryDeclBufferSugar(stmt->buffer, p, d)) {
-      With<TIRFrame> f(d, stmt);
-      ExprDoc lhs = DefineBuffer(stmt->buffer, *f, d);
+      ExprDoc lhs = DefineBuffer(stmt->buffer, d->frames.back(), d);
       // Define data pointer inline if needed
       if (!d->IsVarDefined(stmt->buffer->data)) {
         tirx::Buffer buf = stmt->buffer;
-        d->Define(stmt->buffer->data, *f, [d, buf, p]() {
+        d->Define(stmt->buffer->data, d->frames.back(), [d, buf, p]() {
           return d->AsDoc<ExprDoc>(buf, p->Attr("buffer"))->Attr("data");
         });
       }
-      AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
-      return DoConciseScoping(lhs, sugar.value(), &(*f)->stmts, concise);
+      return AssignDoc(lhs, sugar.value(), std::nullopt);
     }
   }
   ExprDoc rhs = BufferDecl(stmt->buffer, "decl_buffer", {}, p->Attr("buffer"), d->frames.back(), d,
@@ -673,98 +664,11 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         });
 
 namespace {
-
-bool IsTIRxFunc(const IRDocsifier& d) {
-  for (Frame f : d->frames) {
-    if (const auto* tir_f = f.as<TIRFrameNode>()) {
-      if (auto func = tir_f->tir.as<tirx::PrimFuncNode>()) {
-        if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRx)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-bool IsScalarBuffer(const tirx::Buffer& buffer) {
-  return buffer->shape.size() == 1 && tirx::is_one(buffer->shape[0]);
-}
-
 Doc AllocBufferDoc(tirx::AllocBuffer stmt, AccessPath p, IRDocsifier d) {
-  bool concise = AllowConciseScoping(d, stmt);
-
-  // TIRX scalar: print as  x: T.dtype = init  or  x: T.dtype
-  if (concise && IsTIRxFunc(d) && IsScalarBuffer(stmt->buffer)) {
-    // Define the buffer and its data pointer in a frame
-    With<TIRFrame> f(d, stmt);
-    ExprDoc lhs = DefineBuffer(stmt->buffer, *f, d);
-    // Define the buffer's data pointer inline as buffer_name.data
-    if (!d->IsVarDefined(stmt->buffer->data)) {
-      tirx::Buffer buf = stmt->buffer;
-      d->Define(stmt->buffer->data, *f,
-                [d, buf, p]() { return d->AsDoc<ExprDoc>(buf, p->Attr("buffer"))->Attr("data"); });
-    }
-    // Type annotation: T.dtype
-    ExprDoc type_ann = TIR(d, DType2Str(stmt->buffer->dtype));
-
-    // Check if the first body statement is a BufferStore to this buffer (init pattern)
-    tirx::Stmt body = stmt->body;
-    ffi::Optional<ExprDoc> init_rhs = std::nullopt;
-    const tirx::BufferStoreNode* init_store = nullptr;
-
-    if (const auto* seq = body.as<tirx::SeqStmtNode>()) {
-      if (seq->seq.size() > 0) {
-        init_store = seq->seq[0].as<tirx::BufferStoreNode>();
-      }
-    } else {
-      init_store = body.as<tirx::BufferStoreNode>();
-    }
-
-    // Check that init value doesn't reference the buffer itself (self-referencing init)
-    auto init_refs_self = [&](const tirx::BufferStoreNode* store) -> bool {
-      if (!store) return false;
-      bool found = false;
-      tirx::PostOrderVisit(store->value, [&](const ObjectRef& node) {
-        if (const auto* load = node.as<tirx::BufferLoadNode>()) {
-          if (load->buffer.same_as(stmt->buffer)) found = true;
-        }
-      });
-      return found;
-    };
-
-    if (init_store && init_store->buffer.same_as(stmt->buffer) && init_store->indices.size() == 1 &&
-        tirx::is_zero(init_store->indices[0]) && !init_refs_self(init_store)) {
-      init_rhs = d->AsDoc<ExprDoc>(init_store->value, p->Attr("body")->Attr("value"));
-      // Process rest of body (skip the init store)
-      if (const auto* seq = body.as<tirx::SeqStmtNode>()) {
-        for (int i = 1, n = seq->seq.size(); i < n; ++i) {
-          f->get()->allow_concise_scoping = (i == n - 1);
-          Doc doc = d->AsDoc(seq->seq[i], p->Attr("body")->Attr("seq")->ArrayItem(i));
-          if (const auto* block = doc.as<StmtBlockDocNode>()) {
-            (*f)->stmts.insert((*f)->stmts.end(), block->stmts.begin(), block->stmts.end());
-          } else {
-            (*f)->stmts.push_back(Downcast<StmtDoc>(doc));
-          }
-        }
-      }
-      // If body was just the single BufferStore, no more body to process
-    } else {
-      // No init pattern, process full body
-      AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
-    }
-
-    ffi::Array<StmtDoc>* stmts = &(*f)->stmts;
-    stmts->insert(stmts->begin(), AssignDoc(lhs, init_rhs, type_ann));
-    return StmtBlockDoc(*stmts);
-  }
-
   ExprDoc rhs = BufferDecl(stmt->buffer, "alloc_buffer", {}, p->Attr("buffer"), d->frames.back(), d,
                            BufferVarDefinition::DataPointer);
-  With<TIRFrame> f(d, stmt);
-  ExprDoc lhs = DefineBuffer(stmt->buffer, *f, d);
-  AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
-  return DoConciseScoping(lhs, rhs, &(*f)->stmts, concise);
+  ExprDoc lhs = DefineBuffer(stmt->buffer, d->frames.back(), d);
+  return AssignDoc(lhs, rhs, std::nullopt);
 }
 }  // namespace
 
@@ -914,65 +818,6 @@ TVM_SCRIPT_REPR(tirx::BindNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::AttrStmtNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::AssertStmtNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::WhileNode, ReprPrintTIR);
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::AllocBuffer>(  //
-        "", [](tirx::AllocBuffer stmt, AccessPath p, IRDocsifier d) -> Doc {
-          tirx::Buffer buffer = stmt->buffer;
-          AccessPath buffer_p = p->Attr("buffer");
-          Frame frame = d->frames.back();
-          // Define buffer's data var inline as buffer.data
-          if (!d->IsVarDefined(buffer->data)) {
-            d->Define(buffer->data, frame, [buffer, buffer_p, d]() {
-              return d->AsDoc<ExprDoc>(buffer, buffer_p)->Attr("data");
-            });
-          }
-          // Build simplified T.alloc_buffer(shape, dtype, scope=...) call.
-          // Only print shape, dtype, scope (and annotations if non-empty).
-          ffi::Array<ExprDoc> args;
-          ffi::Array<ffi::String> kwargs_keys;
-          ffi::Array<ExprDoc> kwargs_values;
-          // shape (positional)
-          {
-            int n = buffer->shape.size();
-            ffi::Array<ExprDoc> shape_docs;
-            shape_docs.reserve(n);
-            AccessPath shape_p = buffer_p->Attr("shape");
-            for (int i = 0; i < n; ++i) {
-              PrimExpr e = buffer->shape[i];
-              AccessPath e_p = shape_p->ArrayItem(i);
-              if (!d->IsVarDefined(e) && e->IsInstance<tirx::VarNode>()) {
-                ExprDoc lhs = DefineVar(Downcast<tirx::Var>(e), frame, d);
-                lhs->source_paths.push_back(e_p);
-                frame->stmts.push_back(
-                    AssignDoc(lhs, PrintVarCreation(Downcast<tirx::Var>(e), e_p, d), std::nullopt));
-              }
-              shape_docs.push_back(d->AsDoc<ExprDoc>(e, e_p));
-            }
-            args.push_back(TupleDoc(shape_docs));
-          }
-          // dtype (positional, skip if default float32)
-          if (buffer->dtype != d->cfg->buffer_dtype) {
-            args.push_back(LiteralDoc::DataType(buffer->dtype, buffer_p->Attr("dtype")));
-          }
-          // scope (keyword, skip if "global")
-          {
-            ffi::String scope = buffer.scope();
-            if (scope != "global") {
-              kwargs_keys.push_back("scope");
-              kwargs_values.push_back(LiteralDoc::Str(
-                  scope, buffer_p->Attr("data")->Attr("type_annotation")->Attr("storage_scope")));
-            }
-          }
-          // annotations (keyword, skip if empty)
-          if (!stmt->annotations.empty()) {
-            kwargs_keys.push_back("annotations");
-            kwargs_values.push_back(d->AsDoc<ExprDoc>(stmt->annotations, p->Attr("annotations")));
-          }
-          ExprDoc rhs = TIR(d, "alloc_buffer")->Call(args, kwargs_keys, kwargs_values);
-          ExprDoc lhs = DefineBuffer(stmt->buffer, frame, d);
-          return AssignDoc(lhs, rhs, std::nullopt);
-        });
-
 TVM_SCRIPT_REPR(tirx::AllocBufferNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BreakNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::ContinueNode, ReprPrintTIR);

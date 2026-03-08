@@ -55,6 +55,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   }
 
  private:
+  using StmtExprMutator::VisitStmt_;
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
   /*!
@@ -81,7 +82,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
-  Stmt VisitStmt_(const LetStmtNode* op) final {
+  Stmt VisitStmt_(const BindNode* op) final {
     if (op->var->name_hint == "warp_id_in_cta") {
       IterVar warp_iv(Range::FromMinExtent(0, 1), op->var, kThreadIndex, "warp_id_in_cta");
       launch_params_["warp_id_in_cta"] = warp_iv;
@@ -119,12 +120,23 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     // Check for scope_partition AttrStmt wrapping the body
     auto stripped_body = StripBodyAttr(op->body, attr::tirx_scope_partition);
     if (stripped_body.defined()) {
-      // Peel off any LetStmts wrapping the body (e.g., from scope_id resolution)
+      // Peel off any leading Bind stmts wrapping the body (e.g., from scope_id resolution)
       Stmt inner_body = stripped_body.value();
-      std::vector<std::pair<Var, PrimExpr>> let_stmts;
-      while (auto let_node = inner_body.as<LetStmtNode>()) {
-        let_stmts.push_back({let_node->var, let_node->value});
-        inner_body = let_node->body;
+      ffi::Array<Stmt> leading_binds;
+      if (auto seq = inner_body.as<SeqStmtNode>()) {
+        size_t bind_count = 0;
+        while (bind_count < seq->seq.size() && seq->seq[bind_count].as<BindNode>()) {
+          leading_binds.push_back(seq->seq[bind_count]);
+          ++bind_count;
+        }
+        if (bind_count > 0) {
+          ffi::Array<Stmt> rest;
+          rest.reserve(seq->seq.size() - bind_count);
+          for (size_t i = bind_count; i < seq->seq.size(); ++i) {
+            rest.push_back(seq->seq[i]);
+          }
+          inner_body = SeqStmt::Flatten(rest);
+        }
       }
 
       auto seq = inner_body.as<SeqStmt>();
@@ -142,9 +154,9 @@ class ExecScopeSliceResolver : public StmtExprMutator {
             << "TIRxError: ExecScopeStmt with scope partition has invalid body " << op->body;
         body = IfThenElse(if_then.value()->condition, if_then.value()->then_case, body);
       }
-      // Re-wrap with peeled LetStmts (in reverse order)
-      for (int i = let_stmts.size() - 1; i >= 0; i--) {
-        body = LetStmt(let_stmts[i].first, let_stmts[i].second, body);
+      // Re-wrap with peeled leading Bind stmts.
+      if (!leading_binds.empty()) {
+        body = SeqStmt::Flatten(leading_binds, body);
       }
 
       // If this node is also a scope_slice, resolve it

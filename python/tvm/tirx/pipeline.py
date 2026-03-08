@@ -96,16 +96,12 @@ class MBarrier:
 
     def remote_view(self, rank):
         """Create a view of this barrier mapped to another CTA's shared memory."""
-        from functools import partial
-
         from tvm.ir import PointerType, PrimType
         from tvm.tir import Var as TIRVar
 
         expr = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(self.buf.ptr_to([0]), rank))
         ptr = TIRVar("remote_mbar_ptr", PointerType(PrimType("uint64")))
-        let_frame = Tx.LetStmt(expr, var=ptr)
-        let_frame.add_callback(partial(let_frame.__exit__, None, None, None))
-        let_frame.__enter__()
+        Tx.Bind(expr, var=ptr)
         buf = Tx.decl_buffer([self.depth], "uint64", data=ptr, scope="shared", name="remote_mbar")
         remote = object.__new__(type(self))
         remote.buf = buf

@@ -433,10 +433,11 @@ void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
 }
 
 ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
-    ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data, ffi::Array<PrimExpr> strides,
-    PrimExpr elem_offset, ffi::String storage_scope, int align, int offset_factor,
-    ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
-    ffi::Optional<TLayout> layout, ffi::Array<PrimExpr> allocated_addr) {
+    ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data,
+    ffi::Array<PrimExpr> strides, PrimExpr elem_offset, ffi::String storage_scope, int align,
+    int offset_factor, ffi::String buffer_type_str,
+    ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<TLayout> layout,
+    ffi::Array<PrimExpr> allocated_addr) {
   std::string scope = static_cast<std::string>(storage_scope);
   if (scope.empty()) {
     scope = "global";
@@ -1029,7 +1030,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Then", Then)
       .def("script.ir_builder.tir.Else", Else)
       .def("script.ir_builder.tir.DeclBuffer", DeclBuffer)
-      .def("script.ir_builder.tir.AllocBuffer", AllocBuffer)
       .def("script.ir_builder.tir.LaunchThread",
            [](ffi::Variant<tvm::tirx::Var, ffi::String> thread_tag_or_var, PrimExpr extent) {
              if (auto var = thread_tag_or_var.as<tvm::tirx::Var>()) {

@@ -215,8 +215,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     def impl():
         warp_cnt = Tx.meta_var(Tx.ceildiv(thread_cnt, threads_per_warp))
         for tid_x in Tx.thread_binding(thread_cnt, "threadIdx.x"):
-            thread_buffer = Tx.allocate([1], dtype=dtype, scope="local")
-            thread_data = Tx.Buffer(1, data=thread_buffer, dtype=dtype, scope="local")
+            thread_data = Tx.alloc_buffer([1], dtype=dtype, scope="local")
             for step in Tx.serial(Tx.ceildiv(spatial_len, warp_cnt)):
                 # reduction on dst_indices
                 spa_fused = Tx.meta_var(step * warp_cnt + Tx.floordiv(tid_x, threads_per_warp))
