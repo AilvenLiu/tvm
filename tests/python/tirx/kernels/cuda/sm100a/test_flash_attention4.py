@@ -365,7 +365,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                 phase_q_load = Tx.alloc_local([1], "int32")
 
-                stage_kv = Tx.alloc_local([1], "int32")
+                stage_kv = Tx.alloc_local([1], "uint32")
 
                 bar_load_q_full = BarrierWithExpectTx(pool, SMEM_PIPE_DEPTH_Q, True)
                 bar_load_q_empty = BarrierWithCommit(pool, SMEM_PIPE_DEPTH_Q, False)  # init_phase = 1  # noqa: E501
@@ -581,13 +581,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     acc: Tx.int32
                                     acc = 0
 
-                                    # Encode instruction descriptors once
-                                    descI_qk: Tx.uint32
-                                    Tx.ptx.tcgen05.encode_instr_descriptor(
-                                        Tx.address_of(descI_qk), "float32", "float16", "float16",  # noqa: F821
-                                        MMA_M, MMA_N, MMA_K,
-                                        trans_a=False, trans_b=False, n_cta_groups=CTA_GROUP,
-                                    )
+                                    # Encode instruction descriptor for PV GEMM (QK uses gemm_async)
                                     descI_pv: Tx.uint32
                                     Tx.ptx.tcgen05.encode_instr_descriptor(
                                         Tx.address_of(descI_pv), "float32", "float16", "float16",  # noqa: F821
@@ -597,31 +591,14 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                                     @Tx.inline
                                     def gemm_qk(q_stage, kv_stage, tmem_col_s, bar_s_full):
-                                        descQ = SmemDescriptor("Q")
-                                        descK = SmemDescriptor("K")
-                                        # All threads: encode base descriptors ONCE
-                                        descQ.init(Q_smem.ptr_to([q_stage, 0, 0]),
-                                                   ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
-                                        descK.init(K_smem.ptr_to([kv_stage, 0, 0]),
-                                                   ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)  # noqa: E501
-
-                                        for blk_k in Tx.unroll(NUM_BLK_K):
-                                            for ki in Tx.unroll(BLK_K // MMA_K):
-                                                k: Tx.let = blk_k * (BLK_K // MMA_K) + ki
-                                                offset = Tx.meta_var(
-                                                    (blk_k * BLK_M * BLK_K + ki * MMA_K) * F16_BYTES >> 4  # noqa: E501
-                                                )
-                                                if Tx.ptx.elect_sync():
-                                                    Tx.ptx.tcgen05.mma(
-                                                        "float32", "float16", "float16",
-                                                        Tx.cuda.get_tmem_addr(0, 0, tmem_col_s),
-                                                        descQ.add_16B_offset(offset),
-                                                        descK.add_16B_offset(offset),
-                                                        descI_qk,  # noqa: F821
-                                                        use_a_tmem=False,
-                                                        cta_group=CTA_GROUP,
-                                                        enable_input_d=(k > 0),
-                                                    )
+                                        with Tx.warp():
+                                            Tx.gemm_async(
+                                                tmem[0:128, tmem_col_s : tmem_col_s + MMA_N],
+                                                Q_smem[q_stage, 0:BLK_M, 0:HEAD_DIM],
+                                                K_smem[kv_stage, 0:BLK_N, 0:HEAD_DIM],
+                                                dispatch="tcgen05",
+                                                cta_group=CTA_GROUP,
+                                            )
                                         bar_s_full.arrive(q_stage)
 
                                     @Tx.inline
