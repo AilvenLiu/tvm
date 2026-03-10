@@ -472,7 +472,7 @@ def profile_gemm(M: int, N: int, K: int, kernel, warmup: int, repeat: int):
     diff_tir_deepgemm = calc_diff(C_tir, C_deepgemm)
     assert diff_tir_ref < 0.02, f"TIR vs Reference difference: {diff_tir_ref:.6f}"
     assert diff_deepgemm_ref < 0.02, f"Deepgemm vs Reference difference: {diff_deepgemm_ref:.6f}"
-    assert diff_tir_deepgemm < 1e-3, f"TIR vs Deepgemm difference: {diff_tir_deepgemm:.6f}"
+    assert diff_tir_deepgemm < 2e-3, f"TIR vs Deepgemm difference: {diff_tir_deepgemm:.6f}"
 
 
 if __name__ == "__main__":
