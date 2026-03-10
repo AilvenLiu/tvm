@@ -42,6 +42,7 @@ from .common import (
     copy_vec_load_impl,
     get_st_extent,
     get_vec_len,
+    smem_desc_add_16B_offset,
     validate_copy_op,
 )
 from .exec_scope_utils import exec_scope_ok
@@ -494,7 +495,7 @@ def copy_smem_tmem_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False) 
             frags_per_atom = atom_cols // vec_len
             return (ci // frags_per_atom) * copy_rows * bytes_per_copy // 16 * frags_per_atom + (
                 ci % frags_per_atom
-            )
+            ) * (bytes_per_copy // 16)
 
     # Get config
     cta_group = op_call.config.get("cta_group", 1)
@@ -509,17 +510,6 @@ def copy_smem_tmem_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False) 
     smem_ptr_base = smem_buf.ptr_to([smem_st[0], smem_st[1]])
     tmem_col_start = tmem_st[1]
 
-    # Build the descriptor add_16B_offset helper
-    add_16B_offset_func = "tvm_builtin_smem_desc_add_16B_offset"
-    add_16B_offset_src = f"""
-__forceinline__ __device__ uint64_t {add_16B_offset_func}(uint64_t desc_base, int32_t offset) {{
-    union {{ uint64_t d; struct {{ uint32_t lo; uint32_t hi; }}; }} desc;
-    desc.d = desc_base;
-    desc.lo += static_cast<uint32_t>(offset);
-    return desc.d;
-}}
-"""
-
     # fmt: off
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
@@ -530,10 +520,7 @@ __forceinline__ __device__ uint64_t {add_16B_offset_func}(uint64_t desc_base, in
         for ci in Tx.unroll(num_col_iters):
             offset_16B = Tx.meta_var(desc_offset_16B(ci))
             tmem_col = Tx.meta_var((tmem_col_start + ci * vec_len) * smem_dtype_bits // 32)
-            desc_val = Tx.cuda.func_call(
-                add_16B_offset_func, cp_desc[0], offset_16B,
-                source_code=add_16B_offset_src, return_type="uint64"
-            )
+            desc_val = smem_desc_add_16B_offset(cp_desc[0], offset_16B)
             Tx.ptx.tcgen05.cp(
                 tmem_addr[0],
                 0,

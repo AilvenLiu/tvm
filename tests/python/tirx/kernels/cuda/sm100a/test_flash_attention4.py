@@ -121,11 +121,9 @@ def get_flash_attention4_kernel(batch_size, seq_len_q, seq_len_kv, num_qo_heads,
     SEQ_Q_PER_TILE = BLK_M // GQA_RATIO       # e.g., 32 sequence positions per tile
 
     HEAD_DIM // MMA_K
-    NUM_MMA_PV = BLK_N // MMA_K
     NUM_BLK_K = HEAD_DIM // BLK_K
     NUM_EPI_TILE = HEAD_DIM // EPI_TILE
     CTA_GROUP = 1
-    SWIZZLE = 3
 
     # Block info for causal masking (following flash_attn/cute/block_info.py)
     def get_n_block_max(m_block_idx, causal):
@@ -581,14 +579,6 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                                     acc: Tx.int32
                                     acc = 0
 
-                                    # Encode instruction descriptor for PV GEMM (QK uses gemm_async)
-                                    descI_pv: Tx.uint32
-                                    Tx.ptx.tcgen05.encode_instr_descriptor(
-                                        Tx.address_of(descI_pv), "float32", "float16", "float16",  # noqa: F821
-                                        MMA_M, MMA_N, MMA_K,
-                                        trans_a=False, trans_b=True, n_cta_groups=CTA_GROUP,
-                                    )
-
                                     @Tx.inline
                                     def gemm_qk(q_stage, kv_stage, tmem_col_s, bar_s_full):
                                         with Tx.warp():
@@ -603,53 +593,32 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 
                                     @Tx.inline
                                     def gemm_pv(i_q, kv_stage, tmem_col_o, tmem_col_p, should_accumulate, bar_p_full_2):  # noqa: E501
-                                        descV = SmemDescriptor("V")
-                                        # All threads: encode V descriptor ONCE
-                                        descV.init(V_smem.ptr_to([kv_stage, 0, 0]),
-                                                   ldo=BLK_N * BLK_K * F16_BYTES // F128_BYTES,
-                                                   sdo=8 * BLK_K * F16_BYTES // F128_BYTES,
-                                                   swizzle=SWIZZLE)
-
-                                        # First MMA (k=0): runtime accumulate flag
-                                        if Tx.ptx.elect_sync():
-                                            Tx.ptx.tcgen05.mma(
-                                                "float32", "float16", "float16",
-                                                Tx.cuda.get_tmem_addr(0, 0, tmem_col_o),
-                                                Tx.cuda.get_tmem_addr(0, 0, tmem_col_p),
-                                                descV.add_16B_offset(0), descI_pv,  # noqa: F821
-                                                use_a_tmem=True, cta_group=CTA_GROUP,
-                                                enable_input_d=should_accumulate,
+                                        # TODO: gemm_async causes more spills
+                                        K_SPLIT = Tx.meta_var(6 * MMA_K)  # 96 — first 6 MMA iterations  # noqa: E501
+                                        # First part: k=0..5 (P cols 0..95, V rows 0..95)
+                                        with Tx.warp():
+                                            Tx.gemm_async(
+                                                tmem[0:128, tmem_col_o : tmem_col_o + MMA_N],
+                                                tmem_as_f16[0:128, tmem_col_p * 2 : tmem_col_p * 2 + K_SPLIT],  # noqa: E501
+                                                V_smem[kv_stage, 0:K_SPLIT, 0:HEAD_DIM],
+                                                transB=True,
+                                                accum=should_accumulate,
+                                                dispatch="tcgen05",
+                                                cta_group=CTA_GROUP,
                                             )
-
-
-                                        # MMAs k=1..5 (before barrier wait)
-                                        for k in Tx.unroll(1, 6):
-                                            v_offset = Tx.meta_var((k * MMA_K * BLK_K * F16_BYTES) >> 4)  # noqa: E501
-                                            if Tx.ptx.elect_sync():
-                                                Tx.ptx.tcgen05.mma(
-                                                    "float32", "float16", "float16",
-                                                    Tx.cuda.get_tmem_addr(0, 0, tmem_col_o),
-                                                    Tx.cuda.get_tmem_addr(0, 0, tmem_col_p + k * MMA_K // 2),  # noqa: E501
-                                                    descV.add_16B_offset(v_offset), descI_pv,  # noqa: F821
-                                                    use_a_tmem=True, cta_group=CTA_GROUP,
-                                                    enable_input_d=True,
-                                                )
-
-                                        # Barrier wait (all threads)
+                                        # Wait for last 1/4 of P
                                         Tx.ptx.mbarrier.try_wait(bar_p_full_2.mbar.ptr_to([i_q]), phase_tmem[0])  # noqa: E501
-
-                                        # MMAs k=6..NUM_MMA_PV-1 (after barrier wait)
-                                        for k in Tx.unroll(6, NUM_MMA_PV):
-                                            v_offset = Tx.meta_var((k * MMA_K * BLK_K * F16_BYTES) >> 4)  # noqa: E501
-                                            if Tx.ptx.elect_sync():
-                                                Tx.ptx.tcgen05.mma(
-                                                    "float32", "float16", "float16",
-                                                    Tx.cuda.get_tmem_addr(0, 0, tmem_col_o),
-                                                    Tx.cuda.get_tmem_addr(0, 0, tmem_col_p + k * MMA_K // 2),  # noqa: E501
-                                                    descV.add_16B_offset(v_offset), descI_pv,  # noqa: F821
-                                                    use_a_tmem=True, cta_group=CTA_GROUP,
-                                                    enable_input_d=True,
-                                                )
+                                        # Second part: k=6..7 (P cols 96..127, V rows 96..127)
+                                        with Tx.warp():
+                                            Tx.gemm_async(
+                                                tmem[0:128, tmem_col_o : tmem_col_o + MMA_N],
+                                                tmem_as_f16[0:128, tmem_col_p * 2 + K_SPLIT : tmem_col_p * 2 + BLK_N],  # noqa: E501
+                                                V_smem[kv_stage, K_SPLIT:BLK_N, 0:HEAD_DIM],
+                                                transB=True,
+                                                accum=True,
+                                                dispatch="tcgen05",
+                                                cta_group=CTA_GROUP,
+                                            )
 
                                     for i_q in Tx.unroll(SMEM_PIPE_DEPTH_Q):
                                         tmem_col_s: Tx.let = tmem_s_base + i_q * tmem_offset

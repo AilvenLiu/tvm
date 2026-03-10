@@ -54,6 +54,26 @@ def get_indices(nth, start, extent):
     return [r + s for r, s in zip(reversed(relative), start)]
 
 
+def smem_desc_add_16B_offset(desc_val, offset):
+    """Add a 16B-aligned byte offset to the lower 32 bits of a SMEM descriptor.
+
+    Uses the SmemDescriptor union defined in the CUDA header (header.py).
+    All callers must share a single implementation to avoid codegen conflicts.
+    """
+    func_name = "tvm_builtin_smem_desc_add_16B_offset"
+    source_code = f"""
+__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
+    SmemDescriptor desc;
+    desc.desc_ = desc_base;
+    desc.lo += static_cast<uint32_t>(offset);
+    return desc.desc_;
+}}
+"""
+    return Tx.cuda.func_call(
+        func_name, desc_val, offset, source_code=source_code, return_type="uint64"
+    )
+
+
 class CopyInstType(Enum):
     """Enumeration of instruction types for memory operations."""
 

@@ -1712,5 +1712,138 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
         np.testing.assert_allclose(C_tvm.numpy(), C_ref, atol=1e-3, rtol=1e-3)
 
 
+@pytest.mark.parametrize(
+    "task",
+    [
+        # fp16 A from TMEM, K=64 (4 ki iterations)
+        (128, 32, 64, "float16", "float16", 3),
+        # fp16 A from TMEM, K=128 (8 ki iterations)
+        (128, 32, 128, "float16", "float16", 3),
+        # bf16 A from TMEM, K=64
+        (128, 64, 64, "bfloat16", "bfloat16", 3),
+    ],
+    ids=["fp16_K64", "fp16_K128", "bf16_K64"],
+)
+def test_gemm_tcgen05_tmem_a(task):
+    """Test gemm_async with A operand in TMEM (loaded via tcgen05.cp from SMEM).
+
+    Loads A from global to SMEM via TMA, then copies A from SMEM to TMEM via
+    Tx.copy (tcgen05.cp schedule), and issues gemm_async with A in TMEM.
+    transA must be False when A is in TMEM (hardware constraint).
+    """
+    M, N, K, A_dtype, B_dtype, swizzle_mode = task
+    C_dtype = "float32"
+
+    A_elem_bytes = tvm.runtime.DataType(A_dtype).bits // 8
+    B_elem_bytes = tvm.runtime.DataType(B_dtype).bits // 8
+    C_elem_bytes = tvm.runtime.DataType(C_dtype).bits // 8
+    C_elem_32b = 4 // C_elem_bytes
+    A_elem_per_32b = 32 // tvm.runtime.DataType(A_dtype).bits
+
+    # TMEM layout: C output uses columns [0, N), A uses columns [N, N + K/A_elem_per_32b)
+    A_TMEM_START = N
+    A_TMEM_COLS = K // A_elem_per_32b
+    total_tmem_cols = N + A_TMEM_COLS
+    C_shape = (128, max(total_tmem_cols, 32))
+    cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
+
+    A_smem_shape = (M, K)
+    B_smem_shape = (N, K)
+    A_layout = tma_shared_layout(A_dtype, swizzle_mode, A_smem_shape)
+    B_layout = tma_shared_layout(B_dtype, swizzle_mode, B_smem_shape)
+
+    total_bytes = M * K * A_elem_bytes + N * K * B_elem_bytes
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def gemm_async_fn(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, A_smem_shape, A_dtype)
+        B = Tx.match_buffer(B_ptr, B_smem_shape, B_dtype)
+        C = Tx.match_buffer(C_ptr, C_shape, C_dtype)
+
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            tid_in_wg = Tx.thread_id([128], parent="warpgroup")
+
+            A_smem = Tx.alloc_buffer(A_smem_shape, A_dtype, scope="shared", layout=A_layout)
+            B_smem = Tx.alloc_buffer(B_smem_shape, B_dtype, scope="shared", layout=B_layout)
+            tmem_addr = Tx.alloc_shared([1], "uint32")
+            tma_mbar = Tx.alloc_shared([1], "uint64")
+            cp_mbar = Tx.alloc_shared([1], "uint64")
+            mma_mbar = Tx.alloc_shared([1], "uint64")
+
+            with Tx.thread()[0:1]:
+                Tx.ptx.mbarrier.init(tma_mbar.ptr_to([0]), 1)
+                Tx.ptx.mbarrier.init(cp_mbar.ptr_to([0]), 1)
+                Tx.ptx.mbarrier.init(mma_mbar.ptr_to([0]), 1)
+            Tx.ptx.fence.proxy_async("shared::cta")
+            Tx.cuda.cta_sync()
+
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
+            Tx.cuda.cta_sync()
+
+            tmem = Tx.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, C_shape[1]) : (1 @ TLane, 1 @ TCol)]))  # noqa: E501
+            A_tmem = Tx.decl_buffer((M, K), A_dtype, scope="tmem", allocated_addr=A_TMEM_START, layout=TileLayout(S[(M, K) : (1 @ TLane, 1 @ TCol)]))  # noqa: E501
+
+            # TMA load A and B from global to SMEM
+            with Tx.thread()[0:1]:
+                tma_args = Tx.meta_var({"dispatch": "tma", "mbar": tma_mbar.ptr_to([0])})
+                Tx.copy_async(A_smem[:, :], A[:, :], **tma_args)
+                Tx.copy_async(B_smem[:, :], B[:, :], **tma_args)
+                Tx.ptx.mbarrier.arrive.expect_tx(tma_mbar.ptr_to([0]), total_bytes)
+            Tx.ptx.mbarrier.try_wait(tma_mbar.ptr_to([0]), 0)
+            Tx.cuda.cta_sync()
+
+            # Copy A from SMEM to TMEM via tcgen05.cp
+            with Tx.thread()[0:1]:
+                Tx.copy(A_tmem[0:M, 0:K], A_smem[0:M, 0:K], mbar=cp_mbar.ptr_to([0]))
+            Tx.ptx.mbarrier.try_wait(cp_mbar.ptr_to([0]), 0)
+            Tx.cuda.cta_sync()
+
+            # gemm_async with A in TMEM, B in SMEM
+            with Tx.thread()[0:1]:
+                Tx.gemm_async(tmem[0:128, 0:N], A_tmem[0:M, 0:K], B_smem[0:N, 0:K], dispatch="tcgen05")  # noqa: E501
+                Tx.ptx.tcgen05.commit(mma_mbar.ptr_to([0]), cta_group=1)
+            Tx.ptx.mbarrier.try_wait(mma_mbar.ptr_to([0]), 0)
+            Tx.cuda.cta_sync()
+
+            # Copy result from TMEM to global
+            Tx.ptx.tcgen05.fence.after_thread_sync()
+            C_reg = Tx.alloc_local(N, dtype=C_dtype)
+            C_view = C_reg.view(128, N, layout=TileLayout(S[(128, N) : (1@axis_tid_in_wg, 1)]))
+            with Tx.warpgroup()[0:1]:
+                Tx.copy(C_view[:, :], tmem[0:128, 0:N])
+            Tx.cuda.cta_sync()
+            with Tx.thread():
+                Tx.copy(C[tid_in_wg, 0:N], C_reg[:])
+
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
+                Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=1)
+    # fmt: on
+
+    dev = tvm.cuda(0)
+    np.random.seed(0)
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": gemm_async_fn})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        A_np = np.random.randn(M, K).astype(A_dtype)
+        B_np = np.random.randn(N, K).astype(B_dtype)
+        C_np = np.zeros(C_shape, dtype=C_dtype)
+        A_tvm = tvm.runtime.tensor(A_np, dev)
+        B_tvm = tvm.runtime.tensor(B_np, dev)
+        C_tvm = tvm.runtime.tensor(C_np, dev)
+        mod["main"](A_tvm, B_tvm, C_tvm)
+
+        # Reference: C = A @ B.T (transB=False default: B is [N, K])
+        C_ref = np.zeros(C_shape, dtype=C_dtype)
+        C_ref[0:128, 0:N] = A_np.astype(np.float32) @ B_np.astype(np.float32).T
+        np.testing.assert_allclose(C_tvm.numpy(), C_ref, atol=1e-3, rtol=1e-3)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

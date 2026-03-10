@@ -35,7 +35,7 @@ from tvm.tir.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
 from tvm.tirx.op_schedule import ScheduleContext, predicate, register_dispatch
 from tvm.tirx.operator.op import KernelReplacePoint
 
-from .common import get_st_extent
+from .common import get_st_extent, smem_desc_add_16B_offset
 from .exec_scope_utils import single_thread
 from .tma_utils import SwizzleMode, tma_atom_layout, tma_atom_shape
 
@@ -175,7 +175,8 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
         A PrimFunc implementing the tcgen05 MMA schedule.
 
     Raises:
-        ValueError: If buffer scopes are invalid (C must be tmem, A/B must be shared).
+        ValueError: If buffer scopes are invalid (C must be tmem, A must be shared or tmem,
+            B must be shared).
         AssertionError: If shape/layout constraints are not satisfied.
     """
     warp_scope = sctx.exec_scope.name == "warp"
@@ -192,7 +193,14 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     )
 
     C_scope, A_scope, B_scope = C_buffer.scope(), A_buffer.scope(), B_buffer.scope()
-    if not (C_scope == "tmem" and A_scope.startswith("shared") and B_scope.startswith("shared")):
+    a_is_tmem = A_scope == "tmem"
+    if a_is_tmem:
+        if not (C_scope == "tmem" and B_scope.startswith("shared")):
+            raise ValueError(
+                f"tcgen05 schedule expected C_scope=tmem, B_scope=shared when A is tmem, "
+                f"got C_scope={C_scope}, B_scope={B_scope}"
+            )
+    elif not (C_scope == "tmem" and A_scope.startswith("shared") and B_scope.startswith("shared")):
         raise ValueError(
             f"tcgen05 schedule expected C_scope=tmem, A_scope=shared, B_scope=shared, got C_scope={C_scope}, A_scope={A_scope}, B_scope={B_scope}"  # noqa: E501
         )
@@ -285,9 +293,12 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     B_slice_layout = B_buffer.layout.slice(B_buffer.shape, B_buffer_region.region)
     C_slice_layout = C_buffer.layout.slice(C_buffer.shape, C_buffer_region.region)
     # Extract pre-swizzle tile layout for descriptor offset computation
-    A_slice_tile = (
-        A_slice_layout.tile_layout if isinstance(A_slice_layout, ComposeLayout) else A_slice_layout
-    )
+    if not a_is_tmem:
+        A_slice_tile = (
+            A_slice_layout.tile_layout
+            if isinstance(A_slice_layout, ComposeLayout)
+            else A_slice_layout
+        )
     B_slice_tile = (
         B_slice_layout.tile_layout if isinstance(B_slice_layout, ComposeLayout) else B_slice_layout
     )
@@ -416,9 +427,14 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
             f"No compatible swizzle mode found for dtype {dtype} with region shape {shape_2d}"
         )
 
-    A_swizzle_mode, A_ldo, A_sdo, a_mn_major = compute_canonical_params(
-        A_buffer, A_buffer_region, A_type, transA
-    )
+    if a_is_tmem:
+        # TMEM A: hardware requires transA=False (no transpose from TMEM)
+        assert not transA, "tcgen05 schedule: transA must be False when A is in tmem"
+        a_mn_major = False
+    else:
+        A_swizzle_mode, A_ldo, A_sdo, a_mn_major = compute_canonical_params(
+            A_buffer, A_buffer_region, A_type, transA
+        )
     B_swizzle_mode, B_ldo, B_sdo, b_mn_major = compute_canonical_params(
         B_buffer, B_buffer_region, B_type, transB
     )
@@ -482,6 +498,20 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     tmem_addr = C_buffer.allocated_addr[0]
     tmem_offset_32b = C_slice_layout.offset.get(TCol, 0)
 
+    # Validate TMEM A layout: (A_dim2, A_dim1):(1@TLane, 1@TCol)
+    if a_is_tmem:
+        A_tmem_base = TileLayout(S[(A_dim2, A_dim1) : (1 @ TLane, 1 @ TCol)])
+        expected_a_layout = TileLayout.from_iters(
+            A_tmem_base.shard, A_tmem_base.replica, A_slice_layout.offset
+        ).canonicalize()
+        tvm.ir.assert_structural_equal(A_slice_layout.canonicalize(), expected_a_layout)
+        assert A_buffer.allocated_addr is not None, "TMEM A buffer must have allocated_addr"
+        A_tmem_addr = A_buffer.allocated_addr[0]
+        A_elem_per_32b = 32 // DataType(A_type).bits
+        # TCol offset is in element units (not 32-bit columns) for sub-32-bit dtypes.
+        # Convert to 32-bit column units for get_tmem_addr.
+        A_tmem_offset_32b = A_slice_layout.offset.get(TCol, 0) // A_elem_per_32b
+
     # Convert accum to TIR bool outside the macro (TIR AST evaluator doesn't
     # support short-circuit evaluation, so accum.dtype inside macro would fail
     # when accum is a Python bool).
@@ -492,31 +522,18 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     else:
         accum_expr = accum
 
-    # SmemDescriptor optimization: encode once at buffer def, add_16B_offset per ki
-    def smem_desc_add_16B_offset(desc_cell, offset):
-        func_name = "tvm_builtin_smem_desc_add_16B_offset"
-        source_code = f"""
-__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
-    SmemDescriptor desc;
-    desc.desc_ = desc_base;
-    desc.lo += static_cast<uint32_t>(offset);
-    return desc.desc_;
-}}
-"""
-        return Tx.cuda.func_call(
-            func_name, desc_cell, offset, source_code=source_code, return_type="uint64"
-        )
-
     # 16B element count for descriptor offset computation
-    A_elem_per_16B = 128 // DataType(A_type).bits
     B_elem_per_16B = 128 // DataType(B_type).bits
+    if not a_is_tmem:
+        A_elem_per_16B = 128 // DataType(A_type).bits
 
     # Allocate descriptor cells and encode once, right after A/B buffer defs.
     # The callback is inserted as a flat SeqStmt after the target buffer def.
-    A_base = [0] * len(A_buffer.shape)
     B_base = [0] * len(B_buffer.shape)
-    descA_buf = tvm.tir.decl_buffer((1,), "uint64", name="descA", scope="local")
     descB_buf = tvm.tir.decl_buffer((1,), "uint64", name="descB", scope="local")
+    if not a_is_tmem:
+        A_base = [0] * len(A_buffer.shape)
+        descA_buf = tvm.tir.decl_buffer((1,), "uint64", name="descA", scope="local")
     krp = KernelReplacePoint(workspace={}, config={})
 
     def _make_lo_uniform(desc):
@@ -556,11 +573,38 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         )
 
     # TODO: deduplicate desc pointing to the same buffer
-    wrap_A = _make_desc_wrap(descA_buf, A_buffer, A_base, A_ldo, A_sdo, A_swizzle_mode.value)
+    if not a_is_tmem:
+        wrap_A = _make_desc_wrap(descA_buf, A_buffer, A_base, A_ldo, A_sdo, A_swizzle_mode.value)
+        sctx.add_post_buffer_def_stmt(A_buffer, wrap_A)
     wrap_B = _make_desc_wrap(descB_buf, B_buffer, B_base, B_ldo, B_sdo, B_swizzle_mode.value)
-    sctx.add_post_buffer_def_stmt(A_buffer, wrap_A)
     sctx.add_post_buffer_def_stmt(B_buffer, wrap_B)
     elect_pred = Tx.ptx.elect_sync() if warp_scope else True
+
+    # Helper: compute B descriptor value for a given (ni, ki) tile
+    def _b_desc_val(descB_in, ni, ki):
+        B_linear = (
+            ki * MMA_K * B_extent[-1] + ni * N_mma_per_cta
+            if transB
+            else ni * N_mma_per_cta * B_extent[-1] + ki * MMA_K
+        )
+        B_offset = tvm.tir.floordiv(B_slice_tile.apply(B_linear)["m"], B_elem_per_16B)
+        return smem_desc_add_16B_offset(descB_in, B_offset)
+
+    # Helper: compute A operand (TMEM address or SMEM descriptor) for a given (mi, ki) tile
+    def _a_operand(mi, ki, descA_in=None):
+        if a_is_tmem:
+            # A is [M, K] non-transposed: M→TLane (rows), K→TCol (cols)
+            a_row = mi * M_mma
+            a_col = A_tmem_offset_32b + ki * (MMA_K // A_elem_per_32b)
+            return Tx.cuda.get_tmem_addr(A_tmem_addr, a_row, a_col)
+        else:
+            A_linear = (
+                ki * MMA_K * A_extent[-1] + mi * M_mma
+                if transA
+                else mi * M_mma * A_extent[-1] + ki * MMA_K
+            )
+            A_offset = tvm.tir.floordiv(A_slice_tile.apply(A_linear)["m"], A_elem_per_16B)
+            return smem_desc_add_16B_offset(descA_in, A_offset)
 
     if is_block_scaled:
         # Compute per-ki SF element steps from region extents
@@ -582,22 +626,18 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
         # distinct SF (i.e. sfa_elems_per_ki > 0 so each ki advances to a new element)
         needs_sf_id = sfa_sf_mma_k < SFA_elem_per_col and sfa_elems_per_ki > 0 and descI is None
 
-        # fmt: off
+    # Build main_impl: descA_in is None when A is in TMEM (ignored by _a_operand).
+    # fmt: off
+    if is_block_scaled:
         @Tx.inline
         def main_impl(descA_in, descB_in, descI_in):
             for mi in Tx.unroll(M_tiles):
               for ni in Tx.unroll(N_tiles):
                 for ki in Tx.unroll(K_iters):
-                    A_linear = ki * MMA_K * A_extent[-1] + mi * M_mma if transA else mi * M_mma * A_extent[-1] + ki * MMA_K  # noqa: E501
-                    B_linear = ki * MMA_K * B_extent[-1] + ni * N_mma_per_cta if transB else ni * N_mma_per_cta * B_extent[-1] + ki * MMA_K  # noqa: E501
-                    A_offset = tvm.tir.floordiv(A_slice_tile.apply(A_linear)["m"], A_elem_per_16B)
-                    B_offset = tvm.tir.floordiv(B_slice_tile.apply(B_linear)["m"], B_elem_per_16B)
-                    descA_val = smem_desc_add_16B_offset(descA_in, A_offset)
-                    descB_val = smem_desc_add_16B_offset(descB_in, B_offset)
+                    a_val = _a_operand(mi, ki, descA_in)
+                    descB_val = _b_desc_val(descB_in, ni, ki)
                     should_accum = tvm.tir.any(ki != 0, accum_expr)
-                    # SFA: 2D flat index (mi*M_mma row, ki K-position)
                     sfa_linear = mi * M_mma * SFA_K_total + ki * sfa_elems_per_ki
-                    # SFB: 2D flat index (ni*N_mma_per_cta row, ki K-position)
                     sfb_linear = ni * N_mma_per_cta * SFB_K_total + ki * sfb_elems_per_ki
                     sfa_tcol = SFA_slice_layout.apply(sfa_linear).get("TCol", 0)
                     sfb_tcol = SFB_slice_layout.apply(sfb_linear).get("TCol", 0)
@@ -611,59 +651,49 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
                         Tx.ptx.tcgen05.mma.block_scale(
                             C_type, A_type, B_type, SFA_type, SFB_type,
                             Tx.cuda.get_tmem_addr(tmem_addr, mi * M_mma, tmem_col),
-                            descA_val, descB_val,
+                            a_val, descB_val,
                             sfa_addr, sfb_addr,
-                            descI_in, False, cta_group, should_accum,
+                            descI_in, a_is_tmem, cta_group, should_accum,
                         )
-        # fmt: on
     else:
-        # fmt: off
         @Tx.inline
         def main_impl(descA_in, descB_in, descI_in):
             for mi in Tx.unroll(M_tiles):
               for ni in Tx.unroll(N_tiles):
                 for ki in Tx.unroll(K_iters):
-                    A_linear = ki * MMA_K * A_extent[-1] + mi * M_mma if transA else mi * M_mma * A_extent[-1] + ki * MMA_K  # noqa: E501
-                    B_linear = ki * MMA_K * B_extent[-1] + ni * N_mma_per_cta if transB else ni * N_mma_per_cta * B_extent[-1] + ki * MMA_K  # noqa: E501
-                    A_offset = tvm.tir.floordiv(A_slice_tile.apply(A_linear)["m"], A_elem_per_16B)
-                    B_offset = tvm.tir.floordiv(B_slice_tile.apply(B_linear)["m"], B_elem_per_16B)
-                    descA_val = smem_desc_add_16B_offset(descA_in, A_offset)
-                    descB_val = smem_desc_add_16B_offset(descB_in, B_offset)
+                    a_val = _a_operand(mi, ki, descA_in)
+                    descB_val = _b_desc_val(descB_in, ni, ki)
                     should_accum = tvm.tir.any(ki != 0, accum_expr)
                     tmem_col = tmem_offset_32b + ni * (N_mma // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma(
                             "float32", A_type, B_type,
                             Tx.cuda.get_tmem_addr(tmem_addr, mi * M_mma, tmem_col),
-                            descA_val, descB_val, descI_in, False, cta_group, should_accum,
+                            a_val, descB_val, descI_in, a_is_tmem, cta_group, should_accum,
                         )
-        # fmt: on
+
+    descA_val = None if a_is_tmem else descA_buf[0]
 
     if descI is not None:
-        # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
-            main_impl(descA_buf[0], descB_buf[0], descI)
-        # fmt: on
+            main_impl(descA_val, descB_buf[0], descI)
     elif is_block_scaled:
-        # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
             Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,  # noqa: E501, F821
                                                                SFA_init_addr, SFB_init_addr,
                                                                M_mma * cta_group, N_mma, MMA_K, a_mn_major, b_mn_major, cta_group)  # noqa: E501
-            main_impl(descA_buf[0], descB_buf[0], descI_local)  # noqa: F821
-        # fmt: on
+            main_impl(descA_val, descB_buf[0], descI_local)  # noqa: F821
     else:
-        # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
             Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,  # noqa: E501, F821
                                                   M_mma * cta_group, N_mma, MMA_K, a_mn_major, b_mn_major, cta_group)  # noqa: E501
-            main_impl(descA_buf[0], descB_buf[0], descI_local)  # noqa: F821
-        # fmt: on
+            main_impl(descA_val, descB_buf[0], descI_local)  # noqa: F821
+    # fmt: on
 
     return impl
 
@@ -671,7 +701,7 @@ __forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offs
 # === Variant: gemm_async/tcgen05 (priority=10) ===
 #
 # When: gemm_async op at single-thread exec scope on Blackwell (SM100+).
-# Requires A and B in smem (with TMA-compatible swizzle layout), accum in tmem.
+# Requires A in smem (with TMA-compatible swizzle layout) or tmem, B in smem, accum in tmem.
 #
 # Before (OpCall — regular MMA):
 #     Tx.gemm_async(C_tmem[0:64, 0:256], A_smem[0:64, 0:64], B_smem[0:256, 0:64])

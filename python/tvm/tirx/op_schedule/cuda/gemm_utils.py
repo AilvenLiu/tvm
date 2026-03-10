@@ -23,6 +23,8 @@ from tvm.tir import Buffer
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_schedule import ScheduleContext
 
+from .common import smem_desc_add_16B_offset
+
 
 def validate_gemm_op(op_call: OpCall, sctx: ScheduleContext) -> bool:
     """Sanity check for gemm op"""
@@ -86,15 +88,4 @@ class SmemDescriptor:
 
     def add_16B_offset(self, offset):
         """Add 16B-aligned offset to lower 32 bits of descriptor."""
-        func_name = "tvm_builtin_smem_desc_add_16B_offset"
-        source_code = f"""
-__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
-    union {{ uint64_t d; struct {{ uint32_t lo; uint32_t hi; }}; }} desc;
-    desc.d = desc_base;
-    desc.lo += static_cast<uint32_t>(offset);
-    return desc.d;
-}}
-"""
-        return Tx.cuda.func_call(
-            func_name, self._buf[0], offset, source_code=source_code, return_type="uint64"
-        )
+        return smem_desc_add_16B_offset(self._buf[0], offset)

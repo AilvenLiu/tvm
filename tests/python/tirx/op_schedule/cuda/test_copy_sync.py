@@ -485,6 +485,27 @@ SMEM2TMEM_TASKS = [
         for w in [4, 8, 16, 128]
         for sh, mc in [("128x256b", ""), ("128x128b", ""), ("32x128b", "warpx4")]
     ],
+    # --- 128x256b with swizzle (regression: desc_offset_16B within-atom scaling) ---
+    # Tests the fix where within-atom offset must be multiplied by bytes_per_copy//16.
+    # Only triggered when smem_rows=128 + col_bits%256==0 (→128x256b) + swizzle>0.
+    pytest.param(
+        _smem2tmem_task("float16", 32, swizzle_mode=3, smem_rows=128), id="128x256b-swz3-f16-32"
+    ),
+    pytest.param(
+        _smem2tmem_task("float16", 64, swizzle_mode=3, smem_rows=128), id="128x256b-swz3-f16-64"
+    ),
+    pytest.param(
+        _smem2tmem_task("float16", 16, swizzle_mode=2, smem_rows=128), id="128x256b-swz2-f16-16"
+    ),
+    pytest.param(
+        _smem2tmem_task("float16", 32, swizzle_mode=2, smem_rows=128), id="128x256b-swz2-f16-32"
+    ),
+    pytest.param(
+        _smem2tmem_task("float32", 32, swizzle_mode=3, smem_rows=128), id="128x256b-swz3-f32-32"
+    ),
+    pytest.param(
+        _smem2tmem_task("float32", 16, swizzle_mode=2, smem_rows=128), id="128x256b-swz2-f32-16"
+    ),
 ]
 
 
