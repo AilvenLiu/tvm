@@ -15,20 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-  http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+import os
+import sys
 
 import flashinfer.fused_moe as fused_moe
 import numpy as np
@@ -37,78 +25,13 @@ import pytest
 import torch
 from flashinfer.autotuner import autotune
 from flashinfer.testing.utils import bench_gpu_time
-from sglang.srt.layers.moe import MoeRunnerConfig
-from sglang.srt.layers.moe.fused_moe_triton.fused_moe import (
-    fused_moe as fused_moe_triton,
-)
-from sglang.srt.layers.moe.topk import StandardTopKOutput
 from torch.nn import functional as F
 
-test_configs = [
-    {
-        "batch_size": 1,
-        "hidden_size": 2048,
-        "num_experts": 128,
-        "top_k": 8,
-        "intermediate_size": 768,
-    },
-]
+sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"))
+import fused_moe as fused_moe_kernel  # noqa: E402
 
 
-def compute_routing(router_logits: torch.Tensor, top_k: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute routing weights and selected experts from router logits.
-
-    Args:
-        router_logits (torch.Tensor): Router logits of shape [batch_size, num_experts]
-        top_k (int): Number of experts to route to per token
-
-    Returns:
-        tuple[torch.Tensor, torch.Tensor]: A tuple containing:
-            - routing_weights: Expert weights of shape [batch_size, top_k]
-            - selected_experts: Expert indices of shape [batch_size, top_k]
-    """
-    routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-    routing_weights, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
-    routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-    routing_weights = routing_weights.float()
-    return routing_weights, selected_experts
-
-
-def fused_moe_sglang(
-    hidden_states,
-    w13,
-    w2,
-    router_logits,
-    routing_weights,
-    selected_experts,
-):
-    topk_output = StandardTopKOutput(
-        topk_weights=routing_weights,
-        topk_ids=selected_experts,
-        router_logits=router_logits,
-    )
-    moe_config = MoeRunnerConfig(inplace=False)
-    return fused_moe_triton(hidden_states, w13, w2, topk_output, moe_config)
-
-
-def gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size):
-    e = num_experts
-    m = batch_size
-    n = intermediate_size
-    k = hidden_size
-    otype = torch.float16
-    w1 = torch.randn((e, 2 * n, k), device="cuda", dtype=otype) / 10
-    w13 = torch.cat((w1[:, n:, :], w1[:, :n, :]), dim=1).contiguous()
-    w31 = torch.cat((w1[:, :n, :], w1[:, n:, :]), dim=1).contiguous()
-    w2 = torch.randn((e, k, n), device="cuda", dtype=otype) / 10
-    x = torch.randn(m, k, dtype=otype).cuda()
-    router_logits = torch.randn(m, e, dtype=otype).cuda()
-    routing_weights, selected_experts = compute_routing(router_logits, top_k)
-    return x, w13, w31, w2, router_logits, routing_weights, selected_experts.to(torch.int)
-
-
-@pytest.mark.parametrize("config", test_configs)
+@pytest.mark.parametrize("config", fused_moe_kernel.test_configs)
 def bench_fused_moe(config):
     batch_size = config["batch_size"]
     hidden_size = config["hidden_size"]
@@ -118,8 +41,8 @@ def bench_fused_moe(config):
 
     torch.manual_seed(42)
 
-    hidden_states, w13, w31, w2, router_logits, routing_weights, selected_experts = gen_input(
-        batch_size, hidden_size, num_experts, top_k, intermediate_size
+    hidden_states, w13, w31, w2, router_logits, routing_weights, selected_experts = (
+        fused_moe_kernel.gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size)
     )
 
     def print_result(backend, median_ms):
@@ -179,7 +102,7 @@ def bench_fused_moe(config):
     def sglang():
         def func():
             with nvtx.annotate("sglang"):
-                return fused_moe_sglang(
+                return fused_moe_kernel.fused_moe_sglang(
                     hidden_states,
                     w13,
                     w2,
@@ -206,5 +129,5 @@ def bench_fused_moe(config):
 
 
 if __name__ == "__main__":
-    for config in test_configs:
+    for config in fused_moe_kernel.test_configs:
         bench_fused_moe(config)

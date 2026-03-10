@@ -94,6 +94,13 @@ Run TIRX tests:
 pytest tests/python/tirx/ -n 16
 ```
 
+**SM100a and megakernel tests** require the [tirx-kernels](https://github.com/mlc-ai/tirx-kernels) repo (kernel definitions are maintained separately). Clone it before running tests:
+```bash
+git clone git@github.com:mlc-ai/tirx-kernels.git ~/tirx-kernels
+# If tirx-kernels is at a non-default location (~), set:
+export TIRX_KERNELS_PATH=/path/to/tirx-kernels/kernels
+```
+
 **Kernel performance**: When modifying anything that affects code generation (kernels, op schedules, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 
 ## Code Style

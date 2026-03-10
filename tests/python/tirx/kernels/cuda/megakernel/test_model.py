@@ -61,9 +61,19 @@ from tvm.tirx.megakernel.utils.config import (
 
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
-from .test_layer import MegaKernelDenseLayer
-from .test_lm_head import LMHeadLayer
-from .test_moe_full_layer import MegaKernelMOEFullLayer
+import os
+import sys
+
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "megakernel",
+    ),
+)
+from layer import MegaKernelDenseLayer
+from lm_head import LMHeadLayer
+from moe_full_layer import MegaKernelMOEFullLayer
 
 # pyright: reportInvalidTypeForm=false
 

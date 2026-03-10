@@ -15,108 +15,23 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
 
 import numpy as np
 
 import tvm
 import tvm.testing
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.kernels.topk_softmax import TopkSoftmaxTile
-from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
 from tvm.tirx.megakernel.utils.utils import get_source
 
-
-class TopkSoftmaxKernel:
-    def __init__(self):
-        self.tile_attr = {}
-        self.class_list = set()
-
-    def set_tiles(self, num_experts, num_tokens, topk, dtype="float32"):
-        self.topk_softmax_tile = self._add_tile(
-            TopkSoftmaxTile(num_experts, num_tokens, topk, dtype),
-            ProfileEventType.TOPK_SOFTMAX,
-        )
-
-    @Tx.inline
-    def run_tile(self, tile, *args):
-        with Tx.cta():
-            tile.run(*args)
-
-    def _add_tile(self, tile, profiler_event_type):
-        self.tile_attr[tile] = profiler_event_type
-        self.class_list.add(tile.__class__)
-        return tile
-
-    def device_init_all(self):
-        for tile in self.tile_attr.keys():
-            tile.init()
-
-    def get_func_static(self, num_experts, dtype="float32"):
-        # fmt: off
-        @Tx.prim_func(tirx=True)
-        def main(gating_output_ptr: Tx.handle, topk_weights_ptr: Tx.handle, topk_indices_ptr: Tx.handle):  # noqa: E501
-            Tx.func_attr({"global_symbol": "main", "target": Tx.target("cuda")})
-
-            num_tokens = Tx.int32()
-            topk = Tx.int32()
-
-            gating_output_global = Tx.match_buffer(gating_output_ptr, [num_tokens, num_experts], dtype, scope="global")  # noqa: E501
-            topk_weights_global = Tx.match_buffer(topk_weights_ptr, [num_tokens, topk], "float32", scope="global")  # noqa: E501
-            topk_indices_global = Tx.match_buffer(topk_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
-
-            self.set_tiles(num_experts, num_tokens, topk, dtype)
-
-            with Tx.kernel():
-                bx = Tx.cta_id([self.topk_softmax_tile.PERSISTENT_SM_NUMBER], parent="kernel")
-                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                Tx.thread_id([self.topk_softmax_tile.bdx], parent="warp")
-                with Tx.cta():
-                    # no need of smem_manager
-                    self.device_init_all()
-
-                    # TODO: initialize event tensors & tile scheduler
-                    self.run_tile(self.topk_softmax_tile, bx, 0, 0, gating_output_global, topk_weights_global, topk_indices_global)  # noqa: E501
-        # fmt: on
-        return main
-
-    def get_module_static(self, num_experts, dtype="float32"):
-        @I.ir_module(tirx=True)
-        class StaticModule:
-            @Tx.prim_func(tirx=True)
-            def main():
-                pass
-
-        module: tvm.IRModule = StaticModule
-        module.update_func(module.get_global_var("main"), self.get_func_static(num_experts, dtype))
-        return module
-
-
-arg_dict = {}
-
-
-def prepare_data(num_tokens, num_experts, topk, dtype):
-    global arg_dict
-    import torch
-
-    torch.manual_seed(42)
-
-    dtype_dict = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
-    }
-    arg_dict["gating_output"] = torch.randn((num_tokens, num_experts), dtype=dtype_dict.get(dtype))
-    arg_dict["topk_weights"] = torch.empty((num_tokens, topk), dtype=torch.float32)
-    arg_dict["topk_indices"] = torch.empty((num_tokens, topk), dtype=torch.int32)
-
-    return arg_dict
+sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "loss"))
+import topk_softmax  # noqa: E402
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=False)
 def test(kernel, num_tokens, num_experts, topk, dtype):
-    arg_dict = prepare_data(num_tokens, num_experts, topk, dtype)
+    arg_dict = topk_softmax.prepare_data(num_tokens, num_experts, topk, dtype)
 
     def tir(arg_dict):
         DEV = tvm.cuda(0)
@@ -142,7 +57,7 @@ def test(kernel, num_tokens, num_experts, topk, dtype):
 
     def sglang(arg_dict):
         import torch
-        from sgl_kernel import topk_softmax
+        from sgl_kernel import topk_softmax as topk_softmax_sglang
 
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
@@ -151,7 +66,7 @@ def test(kernel, num_tokens, num_experts, topk, dtype):
             std_arg_dict[key] = value.to(torch_dev)
 
         def func():
-            topk_softmax(
+            topk_softmax_sglang(
                 topk_weights=std_arg_dict["topk_weights"],
                 topk_ids=std_arg_dict["topk_indices"],
                 gating_output=std_arg_dict["gating_output"],
@@ -179,7 +94,7 @@ if __name__ == "__main__":
         for num_experts in [32, 64, 128, 256]:
             if num_experts == 256 and dtype == "float32":
                 continue
-            mega_kernel_wrapper_static = TopkSoftmaxKernel()
+            mega_kernel_wrapper_static = topk_softmax.TopkSoftmaxKernel()
             mega_static_module = mega_kernel_wrapper_static.get_module_static(num_experts, dtype)
             src, lib_static = get_source(mega_static_module)
             # print(src)

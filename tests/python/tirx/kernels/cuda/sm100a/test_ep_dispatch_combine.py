@@ -16,6 +16,8 @@
 # under the License.
 
 import argparse
+import os
+import sys
 import tempfile
 
 import numpy as np
@@ -24,432 +26,9 @@ import tvm
 import tvm.testing
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
-from tvm.script import ir as I
-from tvm.script import tirx as Tx
-from tvm.tirx.megakernel.kernels.ep_combine import EPCombineRecvTile, EPCombineSendTile
-from tvm.tirx.megakernel.kernels.ep_dispatch import (
-    EPDispatchPrecomputeTile,
-    EPDispatchRecvTile,
-    EPDispatchSendTile,
-)
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType
 
-
-class EPDispatchKernel:
-    def __init__(self):
-        self.tile_attr = {}
-        self.class_list = set()
-
-    def set_tiles(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        self.ep_dispatch_precompute_tile = self._add_tile(
-            EPDispatchPrecomputeTile(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-            ProfileEventType.EP_DISPATCH_PRECOMPUTE,
-        )
-        self.ep_dispatch_send_tile = self._add_tile(
-            EPDispatchSendTile(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-            ProfileEventType.EP_DISPATCH_SEND,
-        )
-        self.ep_dispatch_recv_tile = self._add_tile(
-            EPDispatchRecvTile(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-            ProfileEventType.EP_DISPATCH_RECV,
-        )
-
-    @Tx.inline
-    def run_tile(self, tile, *args):
-        self.smem_manager.enter_tile_runtime(tile)
-        with Tx.cta():
-            tile.run(*args)
-
-    def _add_tile(self, tile, profiler_event_type):
-        self.tile_attr[tile] = profiler_event_type
-        self.class_list.add(tile.__class__)
-        return tile
-
-    def class_init_all(self, smem_manager: SmemManager):
-        self.smem_manager = smem_manager
-        for cls in self.class_list:
-            if cls.need_init:
-                smem_manager.set_tile(cls)
-                cls.class_init(smem_manager)
-
-    def class_finalize_all(self):
-        for cls in self.class_list:
-            if cls.need_init:
-                cls.class_finalize()
-
-    def device_init_all(self, smem_manager: SmemManager):
-        for tile, _ in self.tile_attr.items():
-            smem_manager.set_tile(tile)
-            tile.init(smem_manager)
-
-    def get_func_static(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        local_num_experts = total_num_experts // world_size
-
-        # fmt: off
-        @Tx.prim_func(tirx=True)
-        def main_dispatch(
-            # input
-            send_tokens_ptr: Tx.handle,
-            route_experts_ptr: Tx.handle,
-
-            # output
-            recv_tokens_ptr: Tx.handle,
-            num_recv_tokens_ptr: Tx.handle,
-
-            # signal buffers
-            target_wait_ptr: Tx.handle,
-            actual_wait_ptr: Tx.handle,
-
-            # auxiliary buffers
-            dst_token_indices_ptr: Tx.handle,
-            dst_token_idx_ptr: Tx.handle,
-        ):
-            Tx.func_attr({"global_symbol": "main_dispatch", "target": Tx.target("cuda")})
-
-            # match buffers
-            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")  # noqa: E501
-            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")  # noqa: E501
-            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")  # noqa: E501
-            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")  # noqa: E501
-            target_wait_global = Tx.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")  # noqa: E501
-            actual_wait_global = Tx.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")  # noqa: E501
-            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
-            dst_token_idx_global = Tx.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")  # noqa: E501
-
-            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)  # noqa: E501
-
-            with Tx.kernel():
-                bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                Tx.thread_id([32], parent="warp")
-                Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-                rank = Tx.nvshmem.my_pe()
-
-                with Tx.cta():
-                    buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
-                    self.device_init_all(smem_manager)
-                    self.class_init_all(smem_manager)
-
-                    smem_manager.init()
-
-                    with Tx.cta()[KernelConfig.SM_NUMBER - 16 : KernelConfig.SM_NUMBER]:
-                        dst_expert_st = Tx.meta_var(Tx.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)  # noqa: E501
-                        self.run_tile(self.ep_dispatch_precompute_tile, dst_expert_st, route_experts_global, target_wait_global, rank)  # noqa: E501
-                    with Tx.cta()[0:num_tokens]:
-                        self.run_tile(self.ep_dispatch_send_tile, bx, send_tokens_global, route_experts_global, recv_tokens_global, actual_wait_global, dst_token_indices_global, dst_token_idx_global, rank)  # noqa: E501
-                    with Tx.cta()[0:total_num_experts]:
-                        local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
-                        src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
-                        self.run_tile(self.ep_dispatch_recv_tile, local_expert_idx, src_rank_idx, num_recv_tokens_global, target_wait_global, actual_wait_global, rank)  # noqa: E501
-
-                    smem_manager.exit_tile_runtime()
-                    self.class_finalize_all()
-
-        # fmt: on
-        return main_dispatch
-
-    def get_module_static(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        @I.ir_module(tirx=True)
-        class StaticModule:
-            @Tx.prim_func(tirx=True)
-            def main_dispatch():
-                pass
-
-        module: tvm.IRModule = StaticModule
-        module.update_func(
-            module.get_global_var("main_dispatch"),
-            self.get_func_static(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-        )
-        return module
-
-
-class EPCombineKernel:
-    def __init__(self):
-        self.tile_attr = {}
-        self.class_list = set()
-
-    def set_tiles(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        self.ep_combine_send_tile = self._add_tile(
-            EPCombineSendTile(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-            ProfileEventType.EP_COMBINE_SEND,
-        )
-        self.ep_combine_recv_tile = self._add_tile(
-            EPCombineRecvTile(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-            ProfileEventType.EP_COMBINE_RECV,
-        )
-
-    @Tx.inline
-    def run_tile(self, tile, *args):
-        self.smem_manager.enter_tile_runtime(tile)
-        with Tx.cta():
-            tile.run(*args)
-
-    def _add_tile(self, tile, profiler_event_type):
-        self.tile_attr[tile] = profiler_event_type
-        self.class_list.add(tile.__class__)
-        return tile
-
-    def class_init_all(self, smem_manager: SmemManager):
-        self.smem_manager = smem_manager
-        for cls in self.class_list:
-            if cls.need_init:
-                smem_manager.set_tile(cls)
-                cls.class_init(smem_manager)
-
-    def class_finalize_all(self):
-        for cls in self.class_list:
-            if cls.need_init:
-                cls.class_finalize()
-
-    def device_init_all(self, smem_manager: SmemManager):
-        for tile, _ in self.tile_attr.items():
-            smem_manager.set_tile(tile)
-            tile.init(smem_manager)
-
-    def get_func_static(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        local_num_experts = total_num_experts // world_size
-
-        # fmt: off
-        @Tx.prim_func(tirx=True)
-        def main_combine(
-            # input
-            send_tokens_ptr: Tx.handle,
-            route_experts_ptr: Tx.handle,
-            route_weights_ptr: Tx.handle,
-            num_recv_tokens_ptr: Tx.handle,
-            dst_token_indices_ptr: Tx.handle,
-
-            # output
-            recv_tokens_ptr: Tx.handle,
-
-            # signal buffers
-            buf_wait_ptr: Tx.handle,
-
-            # auxiliary buffers
-            buf_recv_ptr: Tx.handle,
-        ):
-            Tx.func_attr({"global_symbol": "main_combine", "target": Tx.target("cuda")})
-
-            # match buffers
-            send_tokens_global = Tx.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
-            route_experts_global = Tx.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")  # noqa: E501
-            route_weights_global = Tx.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")  # noqa: E501
-            num_recv_tokens_global = Tx.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")  # noqa: E501
-            dst_token_indices_global = Tx.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")  # noqa: E501
-            recv_tokens_global = Tx.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
-            buf_wait_global = Tx.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")  # noqa: E501
-            buf_recv_global = Tx.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")  # noqa: E501
-
-            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)  # noqa: E501
-
-            with Tx.kernel():
-                bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-                Tx.thread_id([32], parent="warp")
-                Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-                rank = Tx.nvshmem.my_pe()
-
-                with Tx.cta():
-                    buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                    smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
-                    self.device_init_all(smem_manager)
-                    self.class_init_all(smem_manager)
-
-                    smem_manager.init()
-
-                    with Tx.cta()[0:total_num_experts]:
-                        local_expert_idx = Tx.meta_var(Tx.int32(bx // world_size))
-                        src_rank_idx = Tx.meta_var(Tx.int32(bx % world_size))
-                        self.run_tile(self.ep_combine_send_tile, local_expert_idx, src_rank_idx, send_tokens_global, buf_recv_global, buf_wait_global, num_recv_tokens_global, rank)  # noqa: E501
-                    with Tx.cta()[0:num_tokens]:
-                        self.run_tile(self.ep_combine_recv_tile, bx, recv_tokens_global, route_experts_global, route_weights_global, buf_recv_global, buf_wait_global, dst_token_indices_global, rank)  # noqa: E501
-
-                    smem_manager.exit_tile_runtime()
-                    self.class_finalize_all()
-
-        # fmt: on
-        return main_combine
-
-    def get_module_static(
-        self,
-        num_tokens,
-        total_num_experts,
-        topk,
-        hidden_dim,
-        in_dtype,
-        out_dtype,
-        world_size,
-        n_dp_groups,
-    ):
-        @I.ir_module(tirx=True)
-        class StaticModule:
-            @Tx.prim_func(tirx=True)
-            def main_combine():
-                pass
-
-        module: tvm.IRModule = StaticModule
-        module.update_func(
-            module.get_global_var("main_combine"),
-            self.get_func_static(
-                num_tokens,
-                total_num_experts,
-                topk,
-                hidden_dim,
-                in_dtype,
-                out_dtype,
-                world_size,
-                n_dp_groups,
-            ),
-        )
-        return module
-
-
-arg_dict = {}
-
-
-def prepare_data(
-    num_tokens,
-    total_num_experts,
-    topk,
-    hidden_dim,
-    in_dtype,
-    out_dtype,
-    world_size,
-    n_dp_groups,
-):
-    global arg_dict
-    import torch
-
-    torch.manual_seed(42)
-
-    torch_dev = torch.device("cuda")
-    dtype_dict = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float8_e4m3fn": torch.float8_e4m3fn,
-    }
-    arg_dict["send_tokens"] = torch.randn(
-        world_size,  # scatter to world_size GPUs
-        num_tokens,
-        hidden_dim,
-        dtype=dtype_dict.get(in_dtype),
-    ).to(torch_dev)
-    rand_scores = torch.rand(world_size * num_tokens, total_num_experts)
-    _, top_indices = torch.topk(rand_scores, k=topk, dim=1)
-    arg_dict["route_experts"] = (
-        top_indices.reshape(world_size, num_tokens, topk).to(torch.uint32).to(torch_dev)
-    )
-    arg_dict["route_weights"] = torch.rand(
-        world_size, num_tokens, topk, dtype=dtype_dict.get(out_dtype)
-    ).to(torch_dev)
-
-    return arg_dict
+sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"))
+import ep_dispatch_combine  # noqa: E402
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=False)
@@ -469,7 +48,7 @@ def test(
     import ml_dtypes
     import torch
 
-    arg_dict = prepare_data(
+    arg_dict = ep_dispatch_combine.prepare_data(
         num_tokens,
         total_num_experts,
         topk,
@@ -680,6 +259,8 @@ def test(
         "float16": np.float16,
         "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
     }
+    import torch
+
     ref = torch.zeros_like(arg_dict["send_tokens"]).to(torch.device("cuda"))
     for k in range(topk):
         ref += arg_dict["send_tokens"] * arg_dict["route_weights"][:, :, k][..., None]
@@ -719,7 +300,7 @@ if __name__ == "__main__":
     n_dp_groups = int(args.n_dp_groups)
     debug = args.debug
 
-    dispatch_kernel_wrapper = EPDispatchKernel()
+    dispatch_kernel_wrapper = ep_dispatch_combine.EPDispatchKernel()
     dispatch_static_module = dispatch_kernel_wrapper.get_module_static(
         num_tokens,
         total_num_experts,
@@ -730,7 +311,7 @@ if __name__ == "__main__":
         world_size,
         n_dp_groups,
     )
-    combine_kernel_wrapper = EPCombineKernel()
+    combine_kernel_wrapper = ep_dispatch_combine.EPCombineKernel()
     combine_static_module = combine_kernel_wrapper.get_module_static(
         num_tokens,
         total_num_experts,

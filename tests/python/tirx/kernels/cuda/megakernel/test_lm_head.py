@@ -21,88 +21,20 @@ import numpy as np
 import torch
 
 import tvm
-from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.kernels import GemmTile
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.utils import ceildiv, get_source_func
+from tvm.tirx.megakernel.utils.utils import get_source_func
 
+import os
+import sys
 
-def prepare_data(batch_size, N, K):
-    A = torch.randn((batch_size, K), dtype=torch.float16)
-    B = torch.randn((N, K), dtype=torch.float16)
-    return A, B
-
-
-class LMHeadLayer:
-    def __init__(self, N, K):
-        self.N = N
-        self.K = K
-
-    @Tx.meta_class
-    class TileScheduler:
-        def __init__(self, n):
-            self.n = n
-            self.task_num = ceildiv(n, GemmTile.BLK_N)
-
-        def _alloc_buffer(self):
-            self.idx = Tx.alloc_local([1], "int32", name="idx")
-
-        @Tx.inline
-        def init(self, bx):
-            self._alloc_buffer()
-            self.idx[0] = bx
-
-        @Tx.inline
-        def next(self):
-            self.idx[0] += KernelConfig.SM_NUMBER
-
-        def valid(self):
-            return self.idx[0] < self.task_num
-
-    @Tx.inline
-    def body(self, A, B, out, blk_m):
-        gemm_tile = GemmTile(
-            self.N, self.K, "float16", "float16", split_k_factor=1, BLK_M=blk_m, MMA_M=blk_m
-        )
-        gemm_tile.host_init()
-        with Tx.kernel():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            with Tx.cta():
-                buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-                smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
-                smem_manager.set_tile(gemm_tile)
-                gemm_tile.init(smem_manager)
-                smem_manager.set_tile(gemm_tile.__class__)
-                gemm_tile.class_init(smem_manager)
-                scheduler = self.TileScheduler(self.N)
-                scheduler.init(bx)
-                smem_manager.init()
-                while scheduler.valid():
-                    smem_manager.enter_tile_runtime(gemm_tile)
-                    gemm_tile.run(0, scheduler.idx[0], 0, A, B, out)
-                    smem_manager.exit_tile_runtime()
-                    scheduler.next()
-                gemm_tile.__class__.class_finalize()
-
-    def get_func(self):
-        @Tx.prim_func(tirx=True)
-        def lm_head_gemm(A_ptr: Tx.handle, B_ptr: Tx.handle, out_ptr: Tx.handle):
-            batch_size = Tx.int32()
-            A_global = Tx.match_buffer(A_ptr, [batch_size, self.K], dtype="float16", scope="global")
-            B_global = Tx.match_buffer(B_ptr, [self.N, self.K], dtype="float16", scope="global")
-            out_global = Tx.match_buffer(
-                out_ptr, [batch_size, self.N], dtype="float16", scope="global"
-            )
-            if batch_size <= 32:
-                self.body(A_global, B_global, out_global, 32)
-            elif batch_size <= 64:
-                self.body(A_global, B_global, out_global, 64)
-            else:
-                self.body(A_global, B_global, out_global, 128)
-
-        return lm_head_gemm
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "megakernel",
+    ),
+)
+from lm_head import LMHeadLayer, prepare_data
 
 
 def test(batch_size, N, K, mod):

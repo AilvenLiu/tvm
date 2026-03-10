@@ -42,12 +42,18 @@ from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as Tx
 
-from ..megakernel.test_layer import (
-    MAX_NUM_KV_SPLITS,
-    MAX_TOTAL_NUM_WORKERS,
-    PROFILER_BUFFER_SIZE,
+import os
+import sys
+
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "megakernel",
+    ),
 )
-from ..megakernel.test_static_fused_layer import get_qwen3_layer
+from layer import MAX_NUM_KV_SPLITS, MAX_TOTAL_NUM_WORKERS, PROFILER_BUFFER_SIZE
+from static_fused_layer import get_qwen3_layer
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
 from .test_rope import get_cos_sin_cache_kernel

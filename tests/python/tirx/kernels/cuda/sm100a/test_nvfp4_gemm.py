@@ -17,6 +17,7 @@
 
 """Pytest wrapper for kernels/sm100/nvfp4_gemm.py (Tx.gemm_async based)."""
 
+import os
 import sys
 
 import pytest
@@ -26,7 +27,7 @@ import torch.nn.functional as F
 import tvm
 import tvm.testing
 
-sys.path.insert(0, "kernels/sm100")
+sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
 nvfp4_test = pytest.importorskip("nvfp4_gemm")
 
 

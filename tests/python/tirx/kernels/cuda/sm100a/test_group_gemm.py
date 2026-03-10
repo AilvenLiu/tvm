@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
 import functools
 
 import numpy as np
@@ -30,13 +32,16 @@ from triton import language as tl
 
 import tvm
 import tvm.testing
-from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.kernels.group_gemm_sm100 import GroupGEMMTile
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.config import KernelConfig
-from tvm.tirx.megakernel.utils.utils import ceildiv
-from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
+
+sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
+from group_gemm import (  # noqa: E402
+    MAX_BLK_M,
+    compute_routing,
+    gen_input,
+    get_group_gemm_kernel,
+    prepare_group_gemm,
+)
 
 test_configs = [
     {
@@ -50,114 +55,6 @@ test_configs = [
 ]
 
 DEBUG = False
-MAX_BLK_M = 128
-
-
-def compute_routing(router_logits: torch.Tensor, top_k: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute routing weights and selected experts from router logits.
-
-    Args:
-        router_logits (torch.Tensor): Router logits of shape [batch_size, num_experts]
-        top_k (int): Number of experts to route to per token
-
-    Returns:
-        tuple[torch.Tensor, torch.Tensor]: A tuple containing:
-            - routing_weights: Expert weights of shape [batch_size, top_k]
-            - selected_experts: Expert indices of shape [batch_size, top_k]
-    """
-    routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-    routing_weights, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
-    routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-    routing_weights = routing_weights.float()
-    return routing_weights, selected_experts
-
-
-def prepare_group_gemm(BLK_M, num_experts, selected_experts):
-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-        selected_experts, BLK_M, num_experts
-    )
-    sorted_token_ids = sorted_token_ids[:]
-    return sorted_token_ids, expert_ids, num_tokens_post_padded
-
-
-def gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size):
-    torch.manual_seed(42)
-    e = num_experts
-    m = batch_size
-    n = intermediate_size
-    k = hidden_size
-    otype = torch.float16
-    router_logits = torch.randn(m, e, dtype=otype).cuda()
-    routing_weights, selected_experts = compute_routing(router_logits, top_k)
-
-    x1 = torch.randn(m, k, dtype=otype).cuda()
-    w13 = torch.randn((e, 2 * n, k), device="cuda", dtype=otype)
-    x2 = torch.randn(m, top_k, n, dtype=otype).reshape(batch_size * top_k, intermediate_size).cuda()
-    w2 = torch.randn((e, k, n), device="cuda", dtype=otype)
-
-    selected_experts = selected_experts.to(torch.int)
-
-    return (
-        x1,
-        w13,
-        routing_weights,
-        selected_experts,
-        x2,
-        w2,
-    )
-
-
-def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
-    # fmt: off
-    @Tx.prim_func(tirx=True)
-    def group_gemm(
-        A_ptr: Tx.handle,
-        B_ptr: Tx.handle,
-        C_ptr: Tx.handle,
-        expert_ids_ptr: Tx.handle,
-        sorted_token_ids_ptr: Tx.handle,
-        routing_weights_ptr: Tx.handle,
-        valid_num_tokens_ptr: Tx.handle,
-        num_tokens_post_padded: Tx.Buffer((1), "int32"),
-    ):
-        M = Tx.int32()
-        A = Tx.match_buffer(A_ptr, (M, K), "float16")
-        B = Tx.match_buffer(B_ptr, (E, N, K), "float16")
-        C = Tx.match_buffer(C_ptr, (M, N), "float16")
-        MAX_EXPERT_IDS = Tx.int32()
-        expert_ids = Tx.match_buffer(expert_ids_ptr, (MAX_EXPERT_IDS), "int32")
-        sorted_token_ids = Tx.match_buffer(sorted_token_ids_ptr, (M), "int32")
-        valid_num_tokens = Tx.match_buffer(valid_num_tokens_ptr, (M // MAX_BLK_M), "int32")
-        numel = Tx.int32()
-        routing_weights = Tx.match_buffer(routing_weights_ptr, (numel), "float32")
-        group_gemm_tile = GroupGEMMTile(
-            N, K, E, top_k, numel, "float16", "float16", acc_output=acc_output, low_batch=low_batch
-        )
-        group_gemm_tile.host_init()
-        with Tx.kernel():
-            cta_cnt = Tx.meta_var(KernelConfig.SM_NUMBER)  # persistent kernel
-            bx = Tx.cta_id([cta_cnt], parent="kernel")
-            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-
-            buf = Tx.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-            smem_manager = SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data)
-            smem_manager.set_tile(group_gemm_tile)
-            group_gemm_tile.init(smem_manager)
-            smem_manager.set_tile(group_gemm_tile.__class__)
-            GroupGEMMTile.class_init(smem_manager)
-            M_TILE_CNT = Tx.meta_var(ceildiv(num_tokens_post_padded[0], MAX_BLK_M))
-            N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
-            tile_scheduler = ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1)  # noqa: E501
-            tile_scheduler.init(bx)
-            smem_manager.init()
-            while tile_scheduler.valid():
-                smem_manager.enter_tile_runtime(group_gemm_tile)
-                group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, A, B, C, expert_ids, routing_weights, sorted_token_ids, valid_num_tokens, None)  # noqa: E501
-                tile_scheduler.next_tile()
-            GroupGEMMTile.class_finalize()
-    return group_gemm
-    # fmt: on
 
 
 @pytest.mark.skip(reason="Tensor Memory Leak")
