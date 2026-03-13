@@ -28,6 +28,20 @@ def from_source(code):
     return tvm.script.from_source(code, tirx=True)
 
 
+def _make_minimal_tirx_prim_func():
+    source = (
+        "# from tvm.script import tirx as Tx\n\n"
+        "@Tx.prim_func(tirx=True)\n"
+        "def f(a: Tx.handle):\n"
+        '    A = Tx.match_buffer(a, (1,), "float32")\n'
+        "    with Tx.kernel():\n"
+        "        with Tx.cta():\n"
+        "            with Tx.thread():\n"
+        "                A[0] = Tx.float32(1)"
+    )
+    return from_source(source)
+
+
 def test_roundtrip_scopeid1():
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -177,6 +191,20 @@ def test_print_kwargs_schedule_op_full_code():
     assert code == expected
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
+
+def test_default_script_prefix_tirx_irmodule_non_main():
+    """IRModule with non-main TIRx PrimFunc should default to Tx prefix."""
+    mod = tvm.IRModule({"foo": _make_minimal_tirx_prim_func()})
+    code = mod.script()
+    assert "# from tvm.script import tirx as Tx" in code
+    assert "# from tvm.script import tir as T" not in code
+    assert "@Tx.prim_func(tirx=True)" in code
+    assert "def foo(" in code
+    assert "with Tx.kernel():" in code
+    parsed = from_source(code)
+    assert parsed.script() == code
+    assert_structural_equal(mod, parsed)
 
 
 L_LANE = Tx.TileLayout(Tx.S[32 : 1 @ laneid])

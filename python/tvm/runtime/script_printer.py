@@ -216,14 +216,11 @@ class Scriptable:
             if isinstance(self, PrimFunc) and getattr(self, "attrs", None):
                 is_tirx = self.attrs.get("is_tirx", False)
             elif isinstance(self, IRModule):
-                try:
-                    main_gv = self.get_global_var("main")
-                except ValueError:
-                    main_gv = None
-                if main_gv is not None:
-                    main_func = self[main_gv]
-                    if isinstance(main_func, PrimFunc) and getattr(main_func, "attrs", None):
-                        is_tirx = main_func.attrs.get("is_tirx", False)
+                for _, base_func in self.functions.items():
+                    if isinstance(base_func, PrimFunc) and getattr(base_func, "attrs", None):
+                        if base_func.attrs.get("is_tirx", False):
+                            is_tirx = True
+                            break
             if is_tirx:
                 tir_prefix_val = "Tx"
                 tir_import_module_val = "tirx"
