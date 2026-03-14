@@ -15,25 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
+import os
+import sys
+
+import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
-import argparse
-import math
-
-import numpy as np
-
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.utils import static_scheduler
 from tvm.tirx.megakernel.utils.config import (
-    KernelConfig,
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import get_source, pack_into_32bit
-
-import os
-import sys
+from tvm.tirx.megakernel.utils.utils import get_source
 
 sys.path.insert(
     0,
@@ -45,7 +40,6 @@ sys.path.insert(
 from moe import (
     MegaKernelMOE,
     fused_moe_sglang,
-    arg_dict,
     prepare_data,
 )
 
@@ -216,34 +210,34 @@ def test(
                 for i in range(REPEAT):
                     func()
                 sess._sync_all()
-                sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])  # noqa: F821
-                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict["residual_0"])  # noqa: F821
-                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])  # noqa: E501
+                sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])
+                sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict["residual_0"])
+                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])
                 sess.gather_to_worker0(
-                    disco_arg_dict["hidden_state_attn_mlp"],  # noqa: F821
-                    res_dict["hidden_state_attn_mlp_res"],  # noqa: F821
+                    disco_arg_dict["hidden_state_attn_mlp"],
+                    res_dict["hidden_state_attn_mlp_res"],
                 )
                 sess.copy_from_worker_0(
-                    res_dict["hidden_state_attn_mlp_host"],  # noqa: F821
-                    res_dict["hidden_state_attn_mlp_res"],  # noqa: F821
+                    res_dict["hidden_state_attn_mlp_host"],
+                    res_dict["hidden_state_attn_mlp_res"],
                 )
                 sess.gather_to_worker0(
-                    disco_arg_dict["profiler_buffer"],  # noqa: F821
-                    res_dict["profiler_buffer_res"],  # noqa: F821
+                    disco_arg_dict["profiler_buffer"],
+                    res_dict["profiler_buffer_res"],
                 )
                 sess.copy_from_worker_0(
-                    res_dict["profiler_buffer_host"],  # noqa: F821
-                    res_dict["profiler_buffer_res"],  # noqa: F821
+                    res_dict["profiler_buffer_host"],
+                    res_dict["profiler_buffer_res"],
                 )
                 sess._sync_all()
                 if mk.profiler_on:
                     for r in range(mk.world_size):
                         export_to_perfetto_trace(
-                            res_dict["profiler_buffer_host"].numpy()[r],  # noqa: F821
+                            res_dict["profiler_buffer_host"].numpy()[r],
                             f"{scheduler}-moe-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                             event_type_names,
                         )
-                return res_dict["output_host"].numpy(), res_dict["residual_host"].numpy()  # noqa: F821
+                return res_dict["output_host"].numpy(), res_dict["residual_host"].numpy()
 
     def std(arg_dict, mk: MegaKernelMOE):
         import flashinfer

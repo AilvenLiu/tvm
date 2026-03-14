@@ -24,15 +24,20 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from flux import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from flux import (
     DEBUG,
+    K,
     M,
     N,
-    K,
     flops,
-    flux_gelu_kernel,
     flux_gate_kernel,
+    flux_gelu_kernel,
     get_source,
 )
 

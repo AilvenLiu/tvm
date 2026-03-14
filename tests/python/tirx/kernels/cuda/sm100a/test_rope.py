@@ -25,9 +25,14 @@ import torch
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "activation"))
-import rope  # noqa: E402
-
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "activation",
+    ),
+)
+import rope
 
 # Re-export for backward compatibility (qwen3_layer.py, qwen3_model.py import from here)
 get_cos_sin_cache_kernel = rope.get_cos_sin_cache_kernel

@@ -21,14 +21,18 @@ import sys
 
 import numpy as np
 import pytest
-import torch
 
 import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "ssm"))
-import fftconv  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "ssm"
+    ),
+)
+import fftconv
 
 
 @pytest.mark.parametrize("batch,heads", [(2, 4), (1, 8), (10, 16)])

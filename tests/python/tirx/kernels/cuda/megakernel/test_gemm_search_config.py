@@ -15,28 +15,25 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
+import operator
+import os
+import sys
+
+import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
-import argparse
-import operator
-
-import numpy as np
-
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirx.megakernel.kernels import SplitKReduceTile
 from tvm.tirx.megakernel.utils import static_scheduler
-from tvm.tirx.megakernel.utils.base import MegaKernelWrapper
 from tvm.tirx.megakernel.utils.config import (
     JobType,
     KernelConfig,
     event_type_names,
 )
 from tvm.tirx.megakernel.utils.utils import ceildiv, get_source, pack_into_32bit
-
-import os
-import sys
 
 sys.path.insert(
     0,
@@ -47,7 +44,6 @@ sys.path.insert(
 )
 from gemm_search_config import (
     GemmConfigSearcher,
-    arg_dict,
     prepare_data,
 )
 
@@ -122,7 +118,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                 func,
                 warmup=1,
                 repeat=3,
-                proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{'-tmareduce' if mk.use_tma_reduce else ''}",  # noqa: E501
+                proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{'-tmareduce' if mk.use_tma_reduce else ''}",
             )
             print(f"TIR time: {ms:.3f} ms")
             if mk.profiler_on:
@@ -219,5 +215,5 @@ if __name__ == "__main__":
         print("Top 10 configs:")
         for (split_k, blk_n, use_tma_reduce), ms in sorted_items_asc[:10]:
             print(
-                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms"  # noqa: E501
+                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms"
             )

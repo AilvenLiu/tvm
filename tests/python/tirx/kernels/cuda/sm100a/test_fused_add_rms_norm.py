@@ -24,9 +24,14 @@ import torch
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "activation"))
-import fused_add_rms_norm  # noqa: E402
-
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "activation",
+    ),
+)
+import fused_add_rms_norm
 
 # Re-export for backward compatibility (qwen3_layer.py, qwen3_model.py import from here)
 get_fused_add_rmsnorm_kernel = fused_add_rms_norm.get_fused_add_rmsnorm_kernel

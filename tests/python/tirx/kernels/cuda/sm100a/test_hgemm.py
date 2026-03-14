@@ -24,16 +24,17 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from hgemm import (  # noqa: E402
-    BLK_N,
-    CTA_GROUP,
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from hgemm import (
     DEBUG,
+    K,
     M,
     N,
-    K,
-    NUM_CONSUMER,
-    SM_NUMBER,
     flops,
     get_source,
     hgemm,
@@ -81,6 +82,7 @@ def test_hgemm():
         import cutlass
         import torch
         from cutlass.cute.runtime import from_dlpack
+
         from tvm.tirx.bench.CuTeDSL.dense_gemm_persistent import run
 
         def create_cutlass_tensor(

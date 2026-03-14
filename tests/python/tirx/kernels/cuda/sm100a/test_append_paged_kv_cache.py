@@ -23,8 +23,14 @@ import pytest
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "attention"))
-import append_paged_kv_cache  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "attention",
+    ),
+)
+import append_paged_kv_cache
 
 
 @pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 256, 499])
@@ -70,7 +76,11 @@ def test(batch_size):
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule(
-                {"main": append_paged_kv_cache.get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim)}
+                {
+                    "main": append_paged_kv_cache.get_append_paged_kv_cache_kernel(
+                        num_heads, num_tokens, head_dim
+                    )
+                }
             )
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 

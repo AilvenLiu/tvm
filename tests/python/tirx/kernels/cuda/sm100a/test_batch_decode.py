@@ -23,9 +23,15 @@ import pytest
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "attention"))
-import batch_decode  # noqa: E402
-from batch_decode import PlanInfo, decode_attn_plan, get_decode_kernel, perpare_data  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "attention",
+    ),
+)
+import batch_decode
+from batch_decode import PlanInfo, get_decode_kernel, perpare_data
 
 KV_LAYOUT = batch_decode.KV_LAYOUT
 
@@ -175,7 +181,7 @@ def test(num_heads, seq_len, head_dim, batch_size):
             )
             func()
             print(
-                f"FlashInfer BatchDecodeWithPagedKVCacheWrapper(use_tensor_cores=True) time: {ms:.3f} ms"  # noqa: E501
+                f"FlashInfer BatchDecodeWithPagedKVCacheWrapper(use_tensor_cores=True) time: {ms:.3f} ms"
             )
 
             return (
@@ -264,7 +270,7 @@ def test(num_heads, seq_len, head_dim, batch_size):
 
         with ProtonContext("batch_decode"):
             print(
-                f">>>>>>>>>>>>>>>>>>>>>>>>> Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"  # noqa: E501
+                f">>>>>>>>>>>>>>>>>>>>>>>>> Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"
             )
             O_flashinfer_batch_decode, lse_flashinfer_batch_decode = flashinfer_batch_decode()
             O_flashinfer_batch_decode_tensor_cores, lse_flashinfer_batch_decode_tensor_cores = (

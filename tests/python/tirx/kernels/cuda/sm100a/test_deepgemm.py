@@ -27,11 +27,15 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from deepgemm import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from deepgemm import (
     M,
     N,
-    K,
     calc_diff,
     deepgemm,
     flops,

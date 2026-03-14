@@ -16,6 +16,8 @@
 # under the License.
 
 import math
+import os
+import sys
 import tempfile
 
 import numpy as np
@@ -27,23 +29,21 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirx.bench.utils import export_to_perfetto_trace
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-import ag_hgemm_cpasync as kernel  # noqa: E402
-from ag_hgemm_cpasync import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from ag_hgemm_cpasync import (
     CAPACITY,
     CUDA_EVENT_PROFILER,
     GEMM_M_CLUSTERS,
     GEMM_N_CLUSTERS,
     GROUP_SIZE,
-    K,
     LOCAL_GEMM_M_CLUSTERS,
     LOCAL_M,
     LOCAL_N,
-    M,
-    N,
     PROFILER_BUFFER_SIZE,
     PROFILER_ON,
     TASK_IDX_LEN,
@@ -51,6 +51,8 @@ from ag_hgemm_cpasync import (  # noqa: E402
     VALIDATE,
     WARMUP_ITERS,
     WORLD_SIZE,
+    K,
+    M,
     TaskType,
     a_type,
     b_type,

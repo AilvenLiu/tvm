@@ -27,8 +27,13 @@ import tvm.testing
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"))
-import ep_dispatch_combine  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"
+    ),
+)
+import ep_dispatch_combine
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=False)
@@ -259,7 +264,6 @@ def test(
         "float16": np.float16,
         "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
     }
-    import torch
 
     ref = torch.zeros_like(arg_dict["send_tokens"]).to(torch.device("cuda"))
     for k in range(topk):
@@ -324,7 +328,7 @@ if __name__ == "__main__":
     )
 
     print(
-        f"running: EP={world_size}, DP={world_size}, hidden_dim={hidden_dim}, total_num_experts={total_num_experts}, topk={topk}, num_tokens={num_tokens}, in_dtype={in_dtype}, out_dtype={out_dtype}"  # noqa: E501
+        f"running: EP={world_size}, DP={world_size}, hidden_dim={hidden_dim}, total_num_experts={total_num_experts}, topk={topk}, num_tokens={num_tokens}, in_dtype={in_dtype}, out_dtype={out_dtype}"
     )
     test(
         dispatch_static_module,

@@ -25,11 +25,16 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from tf32_hc_prenorm_gemm import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from tf32_hc_prenorm_gemm import (
+    K,
     M,
     N,
-    K,
     bf16_to_tvm,
     calc_diff,
     flops,

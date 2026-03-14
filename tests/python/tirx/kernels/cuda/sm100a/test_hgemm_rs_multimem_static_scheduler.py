@@ -18,6 +18,8 @@
 # 1.84us
 # gemm perf can be optimized
 
+import os
+import sys
 import tempfile
 
 import numpy as np
@@ -29,27 +31,27 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirx.bench.utils import export_to_perfetto_trace
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-import hgemm_rs_multimem_static_scheduler as kernel  # noqa: E402
-from hgemm_rs_multimem_static_scheduler import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+import hgemm_rs_multimem_static_scheduler as kernel
+from hgemm_rs_multimem_static_scheduler import (
     BLK_M,
     BLK_N,
-    GEMM_SMS,
-    K,
     LOCAL_M,
-    M,
     MAX_TASKS,
-    N,
     N_REPEAT,
     PROFILER_BUFFER_SIZE,
     SM_COUNT,
-    SMEM_OFFSET,
     TILE_M,
     TILE_N,
     WORLD_SIZE,
+    K,
+    M,
+    N,
     a_type,
     b_type,
     d_type,

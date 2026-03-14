@@ -25,8 +25,13 @@ import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.utils.utils import get_source
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "loss"))
-import topk_softmax  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "loss"
+    ),
+)
+import topk_softmax
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=False)
@@ -106,7 +111,7 @@ if __name__ == "__main__":
                     ROWS_PER_WARP = (VPT * 32) // num_experts
                     num_blocks = ((num_tokens + ROWS_PER_WARP - 1) // ROWS_PER_WARP + 8 - 1) // 8
                     print(
-                        f"experiment {itr}: if nonpersistent, would need <<<{num_blocks}, 256>>>, num_tokens {num_tokens}, num_experts {num_experts}, topk {topk}, dtype {dtype}"  # noqa: E501
+                        f"experiment {itr}: if nonpersistent, would need <<<{num_blocks}, 256>>>, num_tokens {num_tokens}, num_experts {num_experts}, topk {topk}, dtype {dtype}"
                     )
                     test(lib_static["main"], num_tokens, num_experts, topk, dtype)
                     itr += 1

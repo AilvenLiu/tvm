@@ -29,6 +29,9 @@ pytest.skip(
     allow_module_level=True,
 )
 
+import os
+import sys
+
 import numpy as np
 from mlc_llm.compiler_pass.attach_support_info import (
     AttachMemoryPlanAttr,
@@ -61,8 +64,6 @@ from tvm.tirx.megakernel.utils.config import (
 
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
-import os
-import sys
 
 sys.path.insert(
     0,
@@ -177,8 +178,8 @@ def test(args):
     TP_SIZE = args.tp_size
     if args.model == "Qwen3-30B-A3B":
         assert TP_SIZE == 1
-    # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface  # noqa: E501
-    #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight  # noqa: E501
+    # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface
+    #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
     use_mega_weights = (
         mk_config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][args.tp_size] == 1
         if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config
@@ -190,7 +191,7 @@ def test(args):
         else f"/raid/catalyst/models/{args.model}-q0f16-MLC"
     )
     MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/{args.model}-q0f16-tp{TP_SIZE}.so"
-    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/{args.model}-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path  # noqa: E501
+    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/{args.model}-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
     DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser()  # NOTE: update this path
 
     # LOAD_WEIGHTS = None  # generate weights

@@ -115,15 +115,59 @@ inline IdDoc DefineBuffer(const tirx::Buffer& buffer, const Frame& frame, const 
 inline void AsDocBody(const tirx::Stmt& stmt, AccessPath p, TIRFrameNode* f, const IRDocsifier& d) {
   if (const auto* seq_stmt = stmt.as<tirx::SeqStmtNode>()) {
     ffi::Array<tirx::Stmt> body = seq_stmt->seq;
-    for (int i = 0, n = body.size(); i < n; ++i) {
-      f->allow_concise_scoping = (i == n - 1);
-      Doc doc = d->AsDoc(body[i], p->Attr("seq")->ArrayItem(i));
+    auto value_refs_buffer = [](const PrimExpr& value, const tirx::Buffer& buffer) {
+      bool found = false;
+      tirx::PostOrderVisit(value, [&](const ObjectRef& node) {
+        if (const auto* load = node.as<tirx::BufferLoadNode>()) {
+          if (load->buffer.same_as(buffer)) {
+            found = true;
+          }
+        }
+      });
+      return found;
+    };
+
+    for (int i = 0, n = body.size(); i < n;) {
+      int consumed = 1;
+      AccessPath item_p = p->Attr("seq")->ArrayItem(i);
+      Doc doc{ffi::UnsafeInit()};
+
+      const auto* alloc = body[i].as<tirx::AllocBufferNode>();
+      if (d->cfg->syntax_sugar && alloc != nullptr && alloc->buffer.IsScalar(true) && i + 1 < n) {
+        const auto* store = body[i + 1].as<tirx::BufferStoreNode>();
+        bool can_merge_init = store != nullptr && store->buffer.same_as(alloc->buffer) &&
+                              !store->predicate.defined() && store->indices.size() == 1 &&
+                              tirx::is_zero(store->indices[0]) &&
+                              !value_refs_buffer(store->value, alloc->buffer);
+        if (can_merge_init) {
+          Doc alloc_doc = d->AsDoc(body[i], item_p);
+          if (const auto* assign = alloc_doc.as<AssignDocNode>()) {
+            if (assign->annotation.defined() && !assign->rhs.defined()) {
+              ExprDoc init_rhs =
+                  d->AsDoc<ExprDoc>(store->value, p->Attr("seq")->ArrayItem(i + 1)->Attr("value"));
+              doc = AssignDoc(assign->lhs, init_rhs, assign->annotation);
+              consumed = 2;
+            } else {
+              doc = alloc_doc;
+            }
+          } else {
+            doc = alloc_doc;
+          }
+        } else {
+          doc = d->AsDoc(body[i], item_p);
+        }
+      } else {
+        doc = d->AsDoc(body[i], item_p);
+      }
+
+      f->allow_concise_scoping = (i + consumed >= n);
       doc->source_paths.push_back(p);
       if (const auto* block = doc.as<StmtBlockDocNode>()) {
         f->stmts.insert(f->stmts.end(), block->stmts.begin(), block->stmts.end());
       } else {
         f->stmts.push_back(Downcast<StmtDoc>(doc));
       }
+      i += consumed;
     }
   } else {
     f->allow_concise_scoping = true;

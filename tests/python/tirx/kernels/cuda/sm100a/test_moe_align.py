@@ -26,8 +26,13 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"))
-import moe_align  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"
+    ),
+)
+import moe_align
 
 
 @pytest.mark.parametrize("task", moe_align.test_configs)
@@ -101,7 +106,10 @@ def test_moe_align(task):
             for i in range(num_tokens_post_pad_std.item() // moe_align.BLOCK_SIZE):
                 valid_num_tokens[i] = torch.sum(
                     (sorted_ids_std[i * moe_align.BLOCK_SIZE : (i + 1) * moe_align.BLOCK_SIZE] >= 0)
-                    & (sorted_ids_std[i * moe_align.BLOCK_SIZE : (i + 1) * moe_align.BLOCK_SIZE] < num_tokens * topk)  # noqa: E501
+                    & (
+                        sorted_ids_std[i * moe_align.BLOCK_SIZE : (i + 1) * moe_align.BLOCK_SIZE]
+                        < num_tokens * topk
+                    )
                 )
             return sorted_ids_std, expert_ids_std, num_tokens_post_pad_std, valid_num_tokens
 

@@ -24,12 +24,17 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from bmk_bnk_mn import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from bmk_bnk_mn import (
+    S_DIM,
+    K,
     M,
     N,
-    K,
-    S_DIM,
     bmk_bnk_mn_gemm,
     calc_diff,
     flops,

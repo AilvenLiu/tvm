@@ -20,6 +20,7 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm.ir import PointerType, PrimType, assert_structural_equal
+from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import laneid
 
@@ -40,6 +41,10 @@ def _make_minimal_tirx_prim_func():
         "                A[0] = Tx.float32(1)"
     )
     return from_source(source)
+
+
+def from_source_tir(code):
+    return tvm.script.from_source(code, tirx=False)
 
 
 def test_roundtrip_scopeid1():
@@ -1072,6 +1077,61 @@ def test_scalar_annotation_syntax():
     assert_structural_equal(test, from_source(code))
 
 
+def test_scalar_allocbuffer_annotation_and_init_merge():
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test():
+        with Tx.kernel():
+            with Tx.thread([128]):
+                phase_mma = Tx.alloc_local((1,), "int32")
+                phase_mma[0] = Tx.int32(0)
+                phase_aux = Tx.alloc_local((1,), "int32")
+                Tx.evaluate(phase_mma[0] + phase_aux[0])
+    # fmt: on
+
+    code = test.script()
+    assert "phase_mma: Tx.int32 = 0" in code
+    assert "phase_aux: Tx.int32" in code
+    assert "phase_mma = Tx.alloc_local" not in code
+    assert "phase_aux = Tx.alloc_local" not in code
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_scalar_allocbuffer_layout_none_keeps_alloc_local():
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test():
+        with Tx.kernel():
+            with Tx.thread([128]):
+                phase_mma = Tx.alloc_local((1,), "int32", layout=None)
+                phase_mma[0] = Tx.int32(0)
+                Tx.evaluate(phase_mma[0])
+    # fmt: on
+
+    code = test.script()
+    assert 'phase_mma = Tx.alloc_local((1,), "int32", layout=None)' in code
+    assert "phase_mma: Tx.int32" not in code
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_scalar_allocbuffer_annotation_in_standard_tir():
+    # fmt: off
+    @T.prim_func
+    def test():
+        x = T.alloc_buffer((1,), "int32", scope="local")
+        x[0] = T.int32(0)
+        T.evaluate(x[0])
+    # fmt: on
+
+    code = test.script()
+    assert "x: T.int32 = 0" in code
+    assert "x = T.alloc_buffer" not in code
+    assert from_source_tir(code).script() == code
+    assert_structural_equal(test, from_source_tir(code))
+
+
 def test_let_annotation_syntax():
     """Test explicit LetStmt syntax: T.let[T.int32] and T.let."""
 
@@ -1214,7 +1274,7 @@ def _collect_buffers(func):
     bufs = {}
 
     def _visit(node):
-        if isinstance(node, (tvm.tir.DeclBuffer, tvm.tir.AllocBuffer)):  # noqa: UP038
+        if isinstance(node, tvm.tir.DeclBuffer | tvm.tir.AllocBuffer):
             bufs[node.buffer.name] = node.buffer
 
     tvm.tir.stmt_functor.post_order_visit(func.body, _visit)

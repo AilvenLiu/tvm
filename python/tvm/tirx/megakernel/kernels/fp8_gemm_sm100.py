@@ -1,56 +1,75 @@
-from typing import Literal
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-import tvm
+
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir.layout import TileLayout, S, TLane, TCol, tid_in_wg as axis_tid_in_wg
-from tvm.tirx.op_schedule.cuda.tma_utils import tma_shared_layout, SwizzleMode
+from tvm.tir.layout import S, TileLayout
 from tvm.tirx.bench.utils import CudaProfiler
-
-from tvm.tirx.megakernel.utils.base import Tile, SmemManager, Barriers
-from tvm.tirx.megakernel.utils.utils import ceildiv, mbarrier_try_wait
-from tvm.tirx.megakernel.utils.config import KernelConfig, ProfileEventType, F16_BYTES, F32_BYTES, F8_BYTES, F128_BYTES
 from tvm.tirx.megakernel.kernels.gemm import GemmTile
+from tvm.tirx.megakernel.utils.base import Barriers, SmemManager
+from tvm.tirx.megakernel.utils.config import (
+    F8_BYTES,
+    F16_BYTES,
+    F32_BYTES,
+    F128_BYTES,
+    KernelConfig,
+)
 
 CTA_GROUP_GLOBAL = 2
+
 
 @T.inline
 def skip():
     pass
 
+
 @Tx.meta_class
 class BarTRANS2MMA(Barriers):
-
     @T.inline
     def arrive(self, idx):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
+
 @Tx.meta_class
 class BarMMA2LD(Barriers):
-
     @T.inline
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP_GLOBAL, cta_mask=3)
+
 
 @Tx.meta_class
 class BarMMA2TMA(Barriers):
-
     @T.inline
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP_GLOBAL, cta_mask=3)
+
 
 class FP8GemmTile(GemmTile):
     BLK_M, BLK_N, BLK_K = 128, 112, 128
     MMA_M, MMA_N, MMA_K = 256, 224, 32
 
     CTA_GROUP = CTA_GROUP_GLOBAL
-    
+
     BLK_SFA, BLK_SFB = 128, 256
     sfa_type = "float8_e8m0fnu"
     sfb_type = "float8_e8m0fnu"
     QUANT_SIZE = BLK_K
 
-    
     SFA_TMEM_START_COL = GemmTile.TMEM_PIPE_DEPTH * MMA_N
     SFB_TMEM_START_COL = GemmTile.TMEM_PIPE_DEPTH * MMA_N + GemmTile.TMEM_PIPE_DEPTH * BLK_SFA // 32
 
@@ -66,25 +85,80 @@ class FP8GemmTile(GemmTile):
     assert SMEM_SIZE <= 232448
     assert GemmTile.TMEM_PIPE_DEPTH * (MMA_N + BLK_SFA // 32 + BLK_SFB // 32) <= 512
 
-    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, use_tma_reduce=False, low_batch=False, prefetch_on=False, profiler_on=False):
-        super().__init__(N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type, use_tma_reduce, low_batch, prefetch_on, profiler_on)
+    def __init__(
+        self,
+        N,
+        K,
+        a_type,
+        b_type,
+        split_k_factor,
+        BLK_M,
+        MMA_M,
+        out_type=None,
+        use_tma_reduce=False,
+        low_batch=False,
+        prefetch_on=False,
+        profiler_on=False,
+    ):
+        super().__init__(
+            N,
+            K,
+            a_type,
+            b_type,
+            split_k_factor,
+            BLK_M,
+            MMA_M,
+            out_type,
+            use_tma_reduce,
+            low_batch,
+            prefetch_on,
+            profiler_on,
+        )
 
         self.A_layout = T.ComposeLayout(
             T.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-            TileLayout(S[(self.SMEM_PIPE_DEPTH, self.BLK_M, self.BLK_K): (self.BLK_M * self.BLK_K, self.BLK_K, 1)]),
+            TileLayout(
+                S[
+                    (self.SMEM_PIPE_DEPTH, self.BLK_M, self.BLK_K) : (
+                        self.BLK_M * self.BLK_K,
+                        self.BLK_K,
+                        1,
+                    )
+                ]
+            ),
         )
         self.B_layout = T.ComposeLayout(
             T.SwizzleLayout(4, 3, 3, swizzle_inner=True),
-            TileLayout(S[(self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K): (self.BLK_N * self.BLK_K, self.BLK_K, 1)]),
+            TileLayout(
+                S[
+                    (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K) : (
+                        self.BLK_N * self.BLK_K,
+                        self.BLK_K,
+                        1,
+                    )
+                ]
+            ),
         )
         self.D_layout = T.ComposeLayout(
             T.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-            TileLayout(S[(self.TMEM_PIPE_DEPTH, self.BLK_M, self.EPI_TILE): (self.BLK_M * self.EPI_TILE, self.EPI_TILE, 1)]),
+            TileLayout(
+                S[
+                    (self.TMEM_PIPE_DEPTH, self.BLK_M, self.EPI_TILE) : (
+                        self.BLK_M * self.EPI_TILE,
+                        self.EPI_TILE,
+                        1,
+                    )
+                ]
+            ),
         )
 
-        self.SFA_layout = TileLayout(S[(self.SMEM_PIPE_DEPTH, self.BLK_SFA // 32, 32): (self.BLK_SFA, 32, 1)])
-        self.SFB_layout = TileLayout(S[(self.SMEM_PIPE_DEPTH, self.BLK_SFB // 32, 32): (self.BLK_SFB, 32, 1)])
-    
+        self.SFA_layout = TileLayout(
+            S[(self.SMEM_PIPE_DEPTH, self.BLK_SFA // 32, 32) : (self.BLK_SFA, 32, 1)]
+        )
+        self.SFB_layout = TileLayout(
+            S[(self.SMEM_PIPE_DEPTH, self.BLK_SFB // 32, 32) : (self.BLK_SFB, 32, 1)]
+        )
+
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
@@ -133,12 +207,28 @@ class FP8GemmTile(GemmTile):
             method="shared",
         )
 
-        self.SFA_smem_2d = T.decl_buffer((self.SMEM_PIPE_DEPTH, self.BLK_SFA), "uint32", data=self.SFA_smem.data, elem_offset=self.SFA_smem.elem_offset, scope="shared.dyn", align=1)
-        self.SFB_smem_2d = T.decl_buffer((self.SMEM_PIPE_DEPTH, self.BLK_SFB), "uint32", data=self.SFB_smem.data, elem_offset=self.SFB_smem.elem_offset, scope="shared.dyn", align=1)
-        
+        self.SFA_smem_2d = T.decl_buffer(
+            (self.SMEM_PIPE_DEPTH, self.BLK_SFA),
+            "uint32",
+            data=self.SFA_smem.data,
+            elem_offset=self.SFA_smem.elem_offset,
+            scope="shared.dyn",
+            align=1,
+        )
+        self.SFB_smem_2d = T.decl_buffer(
+            (self.SMEM_PIPE_DEPTH, self.BLK_SFB),
+            "uint32",
+            data=self.SFB_smem.data,
+            elem_offset=self.SFB_smem.elem_offset,
+            scope="shared.dyn",
+            align=1,
+        )
+
     def _alloc_local(self, m_idx):
         self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
-        self.reg_fp16 = T.alloc_buffer((self.BLK_N * self.CTA_GROUP,), self.out_type, scope="local", name="reg_fp16")
+        self.reg_fp16 = T.alloc_buffer(
+            (self.BLK_N * self.CTA_GROUP,), self.out_type, scope="local", name="reg_fp16"
+        )
         self.stage = T.local_scalar("int32", name="stage")
 
     @classmethod
@@ -155,7 +245,7 @@ class FP8GemmTile(GemmTile):
     @Tx.inline
     def class_init(cls, smem_manager: SmemManager):
         cls._alloc_buffer_class_member(smem_manager)
-        
+
         cls.tma2mma_bar.init(1)
         cls.trans2mma_bar.init(cls.CTA_GROUP * 32)
         cls.mma2ld_bar.init(1)
@@ -163,14 +253,16 @@ class FP8GemmTile(GemmTile):
         cls.ld2mma_bar.init(cls.CTA_GROUP * 128)
 
         with T.warp()[0:1]:
-            T.ptx.tcgen05.alloc(T.address_of(cls.tmem_addr[0]), n_cols=cls.N_COLS, cta_group=cls.CTA_GROUP)
+            T.ptx.tcgen05.alloc(
+                T.address_of(cls.tmem_addr[0]), n_cols=cls.N_COLS, cta_group=cls.CTA_GROUP
+            )
             T.cuda.warp_sync()
 
         T.ptx.fence.proxy_async("shared::cta")
         T.ptx.fence.mbarrier_init()
         T.cuda.cluster_sync()
         T.cuda.trap_when_assert_failed(cls.tmem_addr[0] == 0)
-    
+
     @classmethod
     @Tx.inline
     def class_finalize(cls):
@@ -179,9 +271,22 @@ class FP8GemmTile(GemmTile):
             T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cls.CTA_GROUP)
             T.ptx.tcgen05.dealloc(cls.tmem_addr[0], n_cols=cls.N_COLS, cta_group=cls.CTA_GROUP)
         T.tvm_storage_sync("shared")
-    
+
     @Tx.inline
-    def _run(self, m_idx, n_idx, k_idx, cbx, A, B, output, tile_scheduler, SFA, SFB, profiler: CudaProfiler):
+    def _run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        cbx,
+        A,
+        B,
+        output,
+        tile_scheduler,
+        SFA,
+        SFB,
+        profiler: CudaProfiler,
+    ):
         @Tx.inline
         def partitioned_loop(main_loop, epilogue1, epilogue2):
             for ko in T.serial(self.PIPE_CIRCLE_NUM):
@@ -208,7 +313,7 @@ class FP8GemmTile(GemmTile):
             lane_id = T.thread_id([32], parent="warp")
             tid_in_wg = T.thread_id([128], parent="warpgroup")
             Tx.attr({"tirx.scope_partition": True})
-            
+
             with T.warpgroup()[wg_id == 1]:
                 Tx.attr({"tirx.scope_partition": True})
                 with T.warp(parent="warpgroup")[warp_id == 3]:
@@ -224,23 +329,66 @@ class FP8GemmTile(GemmTile):
                         @Tx.inline
                         def tma_load(ks):
                             self.mma2tma_bar.wait(ks, self.phase[0])
-                            tma_copy = T.meta_var({"dispatch": "tma", "mbar": self.tma2mma_bar.mbar.ptr_to([ks]), "cta_group": self.CTA_GROUP})
-                            
+                            tma_copy = T.meta_var(
+                                {
+                                    "dispatch": "tma",
+                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                    "cta_group": self.CTA_GROUP,
+                                }
+                            )
+
                             with T.thread()[T.ptx.elect_sync()]:
-                                Tx.copy_async(self.A_smem[ks, :, :], A[m_start: m_start + self.BLK_M, k_start: k_start + self.BLK_K], **tma_copy)
-                                Tx.copy_async(self.B_smem[ks, :, :], B[n_start: n_start + self.BLK_N, k_start: k_start + self.BLK_K], **tma_copy)
+                                Tx.copy_async(
+                                    self.A_smem[ks, :, :],
+                                    A[
+                                        m_start : m_start + self.BLK_M,
+                                        k_start : k_start + self.BLK_K,
+                                    ],
+                                    **tma_copy,
+                                )
+                                Tx.copy_async(
+                                    self.B_smem[ks, :, :],
+                                    B[
+                                        n_start : n_start + self.BLK_N,
+                                        k_start : k_start + self.BLK_K,
+                                    ],
+                                    **tma_copy,
+                                )
                                 if self.stage % 4 == 0:
-                                    Tx.copy_async(self.SFA_smem_2d[ks, :], SFA[self.stage // 4, m_start: m_start + self.BLK_M], **tma_copy)
-                                    Tx.copy_async(self.SFB_smem_2d[ks, 0:self.BLK_N * self.CTA_GROUP], SFB[self.stage // 4, n_start_sf: n_start_sf + self.BLK_N * self.CTA_GROUP], **tma_copy)
-                                AB_bytes = T.meta_var(self.BLK_M * self.BLK_K * F8_BYTES + self.BLK_N * self.BLK_K * F8_BYTES)
-                                SFAB_bytes = T.meta_var((self.BLK_N * self.CTA_GROUP + self.BLK_M) * F32_BYTES)
-                                T.ptx.mbarrier.arrive.expect_tx(self.tma2trans_bar.mbar.ptr_to([ks]), T.if_then_else(self.stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
+                                    Tx.copy_async(
+                                        self.SFA_smem_2d[ks, :],
+                                        SFA[self.stage // 4, m_start : m_start + self.BLK_M],
+                                        **tma_copy,
+                                    )
+                                    Tx.copy_async(
+                                        self.SFB_smem_2d[ks, 0 : self.BLK_N * self.CTA_GROUP],
+                                        SFB[
+                                            self.stage // 4,
+                                            n_start_sf : n_start_sf + self.BLK_N * self.CTA_GROUP,
+                                        ],
+                                        **tma_copy,
+                                    )
+                                AB_bytes = T.meta_var(
+                                    self.BLK_M * self.BLK_K * F8_BYTES
+                                    + self.BLK_N * self.BLK_K * F8_BYTES
+                                )
+                                SFAB_bytes = T.meta_var(
+                                    (self.BLK_N * self.CTA_GROUP + self.BLK_M) * F32_BYTES
+                                )
+                                T.ptx.mbarrier.arrive.expect_tx(
+                                    self.tma2trans_bar.mbar.ptr_to([ks]),
+                                    T.if_then_else(
+                                        self.stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes
+                                    ),
+                                )
 
                         @Tx.inline
                         def tma_load_epilogue(ks):
                             self.mma2tma_bar.wait(ks, self.phase[0])
                             with T.thread()[T.ptx.elect_sync()]:
-                                T.ptx.mbarrier.arrive.expect_tx(self.tma2trans_bar.mbar.ptr_to([ks]), 0)
+                                T.ptx.mbarrier.arrive.expect_tx(
+                                    self.tma2trans_bar.mbar.ptr_to([ks]), 0
+                                )
 
                         partitioned_loop(tma_load, skip, tma_load_epilogue)
                         tile_scheduler.next_tile()
@@ -255,7 +403,9 @@ class FP8GemmTile(GemmTile):
                         @Tx.inline
                         def transpose(ks):
                             # wait for sf has been prepared
-                            T.ptx.mbarrier.try_wait(self.tma2trans_bar.mbar.ptr_to([ks]), self.phase[0])
+                            T.ptx.mbarrier.try_wait(
+                                self.tma2trans_bar.mbar.ptr_to([ks]), self.phase[0]
+                            )
                             if self.stage % 4 == 0:
                                 Tx.permute_dims(self.SFA_smem[ks], [0, 2, 1])
                                 Tx.permute_dims(self.SFB_smem[ks, :4], [0, 2, 1])
@@ -266,7 +416,9 @@ class FP8GemmTile(GemmTile):
 
                         @Tx.inline
                         def transpose_epilogue(ks):
-                            T.ptx.mbarrier.try_wait(self.tma2trans_bar.mbar.ptr_to([ks]), self.phase[0])
+                            T.ptx.mbarrier.try_wait(
+                                self.tma2trans_bar.mbar.ptr_to([ks]), self.phase[0]
+                            )
                             self.trans2mma_bar.arrive(ks)
 
                         partitioned_loop(transpose, skip, transpose_epilogue)
@@ -279,11 +431,25 @@ class FP8GemmTile(GemmTile):
                         descSFA = T.local_scalar("uint64")
                         descSFB = T.local_scalar("uint64")
                         descI = T.local_scalar("uint32")
-                        
+
                         tmem_idx = T.local_scalar("int32", "tmem_idx")
                         tmem_phase = T.local_scalar("int32", "tmem_phase")
-                        T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", self.a_type, self.b_type, self.sfa_type, self.sfb_type,
-                                                                            0, 0, self.MMA_M, self.MMA_N, self.MMA_K, False, False, self.CTA_GROUP)
+                        T.ptx.tcgen05.encode_instr_descriptor_block_scaled(
+                            T.address_of(descI),
+                            "float32",
+                            self.a_type,
+                            self.b_type,
+                            self.sfa_type,
+                            self.sfb_type,
+                            0,
+                            0,
+                            self.MMA_M,
+                            self.MMA_N,
+                            self.MMA_K,
+                            False,
+                            False,
+                            self.CTA_GROUP,
+                        )
                         self.phase[0] = 0
                         while tile_scheduler.valid():
                             m_idx = T.meta_var(tile_scheduler.m_idx)
@@ -306,37 +472,103 @@ class FP8GemmTile(GemmTile):
                                     if self.stage % 4 == 0:
                                         for ki in T.unroll(0, self.BLK_SFA // 128):
                                             T.ptx.tcgen05.encode_matrix_descriptor(
-                                                T.address_of(descSFA), self.SFA_smem.ptr_to([ks, ki * 4, 0]),
-                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
+                                                T.address_of(descSFA),
+                                                self.SFA_smem.ptr_to([ks, ki * 4, 0]),
+                                                ldo=16,
+                                                sdo=8 * 4 * F32_BYTES // F128_BYTES,
+                                                swizzle=0,
                                             )
-                                            T.ptx.tcgen05.cp(0, 0, self.SFA_TMEM_START_COL + tmem_idx * self.BLK_SFA // 32 + ki * 4,
-                                                                descSFA, "32x128b", "uint32", "uint32", self.CTA_GROUP, "warpx4")
+                                            T.ptx.tcgen05.cp(
+                                                0,
+                                                0,
+                                                self.SFA_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFA // 32
+                                                + ki * 4,
+                                                descSFA,
+                                                "32x128b",
+                                                "uint32",
+                                                "uint32",
+                                                self.CTA_GROUP,
+                                                "warpx4",
+                                            )
                                         for ki in T.unroll(0, self.BLK_SFB // 128):
                                             T.ptx.tcgen05.encode_matrix_descriptor(
-                                                T.address_of(descSFB), self.SFB_smem.ptr_to([ks, ki * 4, 0]),
-                                                ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
+                                                T.address_of(descSFB),
+                                                self.SFB_smem.ptr_to([ks, ki * 4, 0]),
+                                                ldo=16,
+                                                sdo=8 * 4 * F32_BYTES // F128_BYTES,
+                                                swizzle=0,
                                             )
-                                            T.ptx.tcgen05.cp(0, 0, self.SFB_TMEM_START_COL + tmem_idx * self.BLK_SFB // 32 + ki * 4,
-                                                                descSFB, "32x128b", "uint32", "uint32", self.CTA_GROUP, "warpx4")
+                                            T.ptx.tcgen05.cp(
+                                                0,
+                                                0,
+                                                self.SFB_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFB // 32
+                                                + ki * 4,
+                                                descSFB,
+                                                "32x128b",
+                                                "uint32",
+                                                "uint32",
+                                                self.CTA_GROUP,
+                                                "warpx4",
+                                            )
 
                                     # issue mma
                                     T.cuda.runtime_instr_desc(T.address_of(descI), self.stage % 4)
                                     for ki in T.unroll(self.BLK_K // self.MMA_K):
-                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), self.A_smem.ptr_to([ks, 0, ki * self.MMA_K]),
-                                                                            ldo=1, sdo=8 * self.BLK_K * F8_BYTES // F128_BYTES, swizzle=3)
-                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), self.B_smem.ptr_to([ks, 0, ki * self.MMA_K]),
-                                                                            ldo=1, sdo=8 * self.BLK_K * F8_BYTES // F128_BYTES, swizzle=3)
+                                        T.ptx.tcgen05.encode_matrix_descriptor(
+                                            T.address_of(descA),
+                                            self.A_smem.ptr_to([ks, 0, ki * self.MMA_K]),
+                                            ldo=1,
+                                            sdo=8 * self.BLK_K * F8_BYTES // F128_BYTES,
+                                            swizzle=3,
+                                        )
+                                        T.ptx.tcgen05.encode_matrix_descriptor(
+                                            T.address_of(descB),
+                                            self.B_smem.ptr_to([ks, 0, ki * self.MMA_K]),
+                                            ldo=1,
+                                            sdo=8 * self.BLK_K * F8_BYTES // F128_BYTES,
+                                            swizzle=3,
+                                        )
 
                                         if self.stage == 0 and ki == 0:
-                                            T.ptx.tcgen05.mma.block_scale("float32", self.a_type, self.b_type, self.sfa_type, self.sfb_type, tmem_idx * self.MMA_N, descA, descB,
-                                                                            self.SFA_TMEM_START_COL + tmem_idx * self.BLK_SFA // 32,
-                                                                            self.SFB_TMEM_START_COL + tmem_idx * self.BLK_SFB // 32,
-                                                                            descI, False, self.CTA_GROUP, False)
+                                            T.ptx.tcgen05.mma.block_scale(
+                                                "float32",
+                                                self.a_type,
+                                                self.b_type,
+                                                self.sfa_type,
+                                                self.sfb_type,
+                                                tmem_idx * self.MMA_N,
+                                                descA,
+                                                descB,
+                                                self.SFA_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFA // 32,
+                                                self.SFB_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFB // 32,
+                                                descI,
+                                                False,
+                                                self.CTA_GROUP,
+                                                False,
+                                            )
                                         else:
-                                            T.ptx.tcgen05.mma.block_scale("float32", self.a_type, self.b_type, self.sfa_type, self.sfb_type, tmem_idx * self.MMA_N, descA, descB,
-                                                                            self.SFA_TMEM_START_COL + tmem_idx * self.BLK_SFA // 32,
-                                                                            self.SFB_TMEM_START_COL + tmem_idx * self.BLK_SFB // 32,
-                                                                            descI, False, self.CTA_GROUP, True)
+                                            T.ptx.tcgen05.mma.block_scale(
+                                                "float32",
+                                                self.a_type,
+                                                self.b_type,
+                                                self.sfa_type,
+                                                self.sfb_type,
+                                                tmem_idx * self.MMA_N,
+                                                descA,
+                                                descB,
+                                                self.SFA_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFA // 32,
+                                                self.SFB_TMEM_START_COL
+                                                + tmem_idx * self.BLK_SFB // 32,
+                                                descI,
+                                                False,
+                                                self.CTA_GROUP,
+                                                True,
+                                            )
                                     self.mma2tma_bar.arrive(ks)
 
                                 @Tx.inline
@@ -372,7 +604,9 @@ class FP8GemmTile(GemmTile):
                     T.ptx.tcgen05.fence.after_thread_sync()
 
                     for ko in T.unroll(self.MMA_N // self.EPI_TILE):
-                        stage = (tile_scheduler.tile_idx * self.MMA_N // self.EPI_TILE + ko) % self.TMEM_PIPE_DEPTH
+                        stage = (
+                            tile_scheduler.tile_idx * self.MMA_N // self.EPI_TILE + ko
+                        ) % self.TMEM_PIPE_DEPTH
 
                         # wait the smem to be free
                         if ko >= self.TMEM_PIPE_DEPTH:
@@ -382,13 +616,26 @@ class FP8GemmTile(GemmTile):
 
                         # tmem -> rf (ld) -> smem
                         for ki in T.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
-                            reg_wg = self.reg.view(128, self.TMEM_LD_SIZE, layout=TileLayout(S[(128, self.TMEM_LD_SIZE): (128, self.TMEM_LD_SIZE, 1)]))
-                            col_st = T.meta_var(tmem_idx * self.MMA_N + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE)
+                            reg_wg = self.reg.view(
+                                128,
+                                self.TMEM_LD_SIZE,
+                                layout=TileLayout(
+                                    S[(128, self.TMEM_LD_SIZE) : (128, self.TMEM_LD_SIZE, 1)]
+                                ),
+                            )
+                            col_st = T.meta_var(
+                                tmem_idx * self.MMA_N + ko * self.EPI_TILE + ki * self.TMEM_LD_SIZE
+                            )
                             Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                             with T.thread():
                                 st = T.meta_var(ki * self.TMEM_LD_SIZE)
                                 Tx.cast(self.reg_fp16[st : st + self.TMEM_LD_SIZE], self.reg[:])
-                                Tx.copy(self.output_smem[stage, warp_id * 32 + lane_id, st : st + self.TMEM_LD_SIZE], self.reg_fp16[st : st + self.TMEM_LD_SIZE])
+                                Tx.copy(
+                                    self.output_smem[
+                                        stage, warp_id * 32 + lane_id, st : st + self.TMEM_LD_SIZE
+                                    ],
+                                    self.reg_fp16[st : st + self.TMEM_LD_SIZE],
+                                )
 
                         # the tmem can be overwritten
                         if ko == self.MMA_N // self.EPI_TILE - 1:
@@ -402,7 +649,14 @@ class FP8GemmTile(GemmTile):
                         m_start = (m_idx * self.CTA_GROUP + cbx) * self.BLK_M
                         n_start = n_idx * self.CTA_GROUP * self.BLK_N + ko * self.EPI_TILE
                         with T.thread(parent="warpgroup")[tid_in_wg == 0]:
-                            Tx.copy_async(output[m_start: m_start + self.BLK_M, n_start: n_start + self.EPI_TILE], self.output_smem[stage, :, :], dispatch="tma")
+                            Tx.copy_async(
+                                output[
+                                    m_start : m_start + self.BLK_M,
+                                    n_start : n_start + self.EPI_TILE,
+                                ],
+                                self.output_smem[stage, :, :],
+                                dispatch="tma",
+                            )
                             T.ptx.cp_async.bulk.commit_group()
                     tile_scheduler.next_tile()
                 if tid_in_wg == 0:
@@ -411,6 +665,5 @@ class FP8GemmTile(GemmTile):
 
     def run(self, m_idx, n_idx, k_idx, cbx, A, B, output, tile_scheduler, SFA, SFB, profiler=None):
         self._alloc_local(m_idx)
-        self._run(m_idx, n_idx, k_idx,cbx, A, B, output, tile_scheduler, SFA, SFB, profiler)
+        self._run(m_idx, n_idx, k_idx, cbx, A, B, output, tile_scheduler, SFA, SFB, profiler)
         self.smem_manager.advance()
-        

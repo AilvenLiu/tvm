@@ -15,29 +15,31 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import functools
 import os
 import sys
-import functools
 
 import numpy as np
 import pytest
 import torch
-from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
     try_get_optimal_moe_config,
 )
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
-from torch.nn import functional as F
 from triton import language as tl
 
 import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from group_gemm import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from group_gemm import (
     MAX_BLK_M,
-    compute_routing,
     gen_input,
     get_group_gemm_kernel,
     prepare_group_gemm,

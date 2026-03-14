@@ -16,6 +16,8 @@
 # under the License.
 
 import argparse
+import os
+import sys
 
 import numpy as np
 import torch
@@ -23,9 +25,6 @@ import torch
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.utils.utils import get_source_func
-
-import os
-import sys
 
 sys.path.insert(
     0,

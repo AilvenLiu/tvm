@@ -15,26 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
+import os
+import sys
+
+import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
-import argparse
-import math
-import tempfile
-
-import numpy as np
-
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirx.megakernel.utils import static_scheduler
 from tvm.tirx.megakernel.utils.config import (
-    KernelConfig,
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import get_source, pack_into_32bit
-
-import os
-import sys
 
 sys.path.insert(
     0,
@@ -45,9 +39,8 @@ sys.path.insert(
 )
 from static_fused_layer import (
     MegaKernel,
-    arg_dict,
-    prepare_data,
     get_packed_info,
+    prepare_data,
 )
 
 

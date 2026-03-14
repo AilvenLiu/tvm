@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
 import tempfile
 
 import numpy as np
@@ -25,29 +27,26 @@ import tvm.testing
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from hgemm_rs_cpasync import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from hgemm_rs_cpasync import (
     BLK_M,
     BLK_N,
-    BLK_N_RS,
-    BLK_M_RS,
-    GEMM_SMS,
-    K,
     LOCAL_M,
-    M,
-    N,
     N_REPEAT,
     PROFILER_BUFFER_SIZE,
-    ReduceScatter,
-    SM_COUNT,
     WORLD_SIZE,
+    K,
+    M,
+    N,
+    ReduceScatter,
     a_type,
     b_type,
     d_type,
-    event_type_names,
 )
 
 
@@ -209,10 +208,10 @@ def test_hgemm_rs():
         B_torch = torch.tensor(B_np[i], dtype=torch.float16, device="cuda")
         gemm_out_torch[i] = torch.matmul(A_torch, B_torch.T)
         # gemm_out_res = res_dict["gemm_out_host"].numpy()[i]
-        # np.testing.assert_allclose(gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3)  # noqa: E501
+        # np.testing.assert_allclose(gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3)
 
-    # staging_buffer_torch = gemm_out_torch.reshape(WORLD_SIZE, WORLD_SIZE, LOCAL_M, N).transpose(0, 1)  # noqa: E501
-    # np.testing.assert_allclose(staging_buffer_torch.cpu().numpy(), res_dict["staging_buffer_host"].numpy(), atol=1e-3, rtol=1e-3)  # noqa: E501
+    # staging_buffer_torch = gemm_out_torch.reshape(WORLD_SIZE, WORLD_SIZE, LOCAL_M, N).transpose(0, 1)
+    # np.testing.assert_allclose(staging_buffer_torch.cpu().numpy(), res_dict["staging_buffer_host"].numpy(), atol=1e-3, rtol=1e-3)
 
     gemm_out_torch_sum = torch.sum(gemm_out_torch, dim=0)
     out_res = res_dict["out_host"].numpy().reshape(-1, N)

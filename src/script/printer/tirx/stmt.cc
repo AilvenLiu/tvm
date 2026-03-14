@@ -665,6 +665,16 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 namespace {
 Doc AllocBufferDoc(tirx::AllocBuffer stmt, AccessPath p, IRDocsifier d) {
+  if (d->cfg->syntax_sugar && stmt->buffer.IsScalar(true)) {
+    ExprDoc lhs = DefineBuffer(stmt->buffer, d->frames.back(), d);
+    if (!d->IsVarDefined(stmt->buffer->data)) {
+      tirx::Buffer buf = stmt->buffer;
+      d->Define(stmt->buffer->data, d->frames.back(),
+                [d, buf, p]() { return d->AsDoc<ExprDoc>(buf, p->Attr("buffer"))->Attr("data"); });
+    }
+    ExprDoc type_ann = TIR(d, DType2Str(stmt->buffer->dtype));
+    return AssignDoc(lhs, std::nullopt, type_ann);
+  }
   ExprDoc rhs = BufferDecl(stmt->buffer, "alloc_buffer", {}, p->Attr("buffer"), d->frames.back(), d,
                            BufferVarDefinition::DataPointer);
   ExprDoc lhs = DefineBuffer(stmt->buffer, d->frames.back(), d);

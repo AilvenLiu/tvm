@@ -25,8 +25,13 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from hgemm_1consumer_1cta_swap_splitk import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from hgemm_1consumer_1cta_swap_splitk import (
     PROFILER_BUFFER_SIZE,
     PROFILER_ON,
     event_type_names,

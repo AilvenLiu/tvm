@@ -23,9 +23,14 @@ import pytest
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "activation"))
-import fused_split_silu_multiply  # noqa: E402
-
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "activation",
+    ),
+)
+import fused_split_silu_multiply
 
 # Re-export for backward compatibility (qwen3_layer.py, qwen3_model.py import from here)
 get_fused_split_silu_multiply_kernel_cp_sync = (
@@ -66,7 +71,11 @@ def test(batch_size):
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule(
-                {"main": fused_split_silu_multiply.get_fused_split_silu_multiply_kernel_cp_async(out_dim)}
+                {
+                    "main": fused_split_silu_multiply.get_fused_split_silu_multiply_kernel_cp_async(
+                        out_dim
+                    )
+                }
             )
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
@@ -85,7 +94,11 @@ def test(batch_size):
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule(
-                {"main": fused_split_silu_multiply.get_fused_split_silu_multiply_kernel_cp_sync(out_dim)}
+                {
+                    "main": fused_split_silu_multiply.get_fused_split_silu_multiply_kernel_cp_sync(
+                        out_dim
+                    )
+                }
             )
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 

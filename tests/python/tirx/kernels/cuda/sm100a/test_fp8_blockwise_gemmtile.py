@@ -27,7 +27,12 @@ import torch.nn.functional as F
 import tvm
 import tvm.testing
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
 fp8_test = pytest.importorskip("fp8_blockwise_gemmtile")
 
 

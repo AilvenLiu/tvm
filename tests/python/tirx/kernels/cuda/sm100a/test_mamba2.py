@@ -20,14 +20,18 @@ import sys
 
 import numpy as np
 import pytest
-import torch
 
 import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "ssm"))
-import mamba2  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "ssm"
+    ),
+)
+import mamba2
 
 
 @pytest.mark.parametrize("batch,heads,seq_len", [(1, 16, 256), (2, 8, 512), (10, 16, 128)])

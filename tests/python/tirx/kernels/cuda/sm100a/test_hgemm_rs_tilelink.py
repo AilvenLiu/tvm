@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
 import tempfile
 
 import numpy as np
@@ -25,30 +27,28 @@ import tvm.testing
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-import hgemm_rs_tilelink as kernel  # noqa: E402
-from hgemm_rs_tilelink import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from hgemm_rs_tilelink import (
     BLK_M,
     BLK_N,
-    GEMM_SMS,
-    K,
     LOCAL_M,
-    M,
-    M_SEG,
-    N,
     N_REPEAT,
     PROFILER_BUFFER_SIZE,
     RS_BLK_M,
     RS_BLK_N,
     SM_COUNT,
     WORLD_SIZE,
+    K,
+    M,
+    N,
     a_type,
     b_type,
     d_type,
-    event_type_names,
     test_mma_ss_tma_2sm_persistent,
 )
 

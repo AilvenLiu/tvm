@@ -27,8 +27,13 @@ from flashinfer.autotuner import autotune
 from flashinfer.testing.utils import bench_gpu_time
 from torch.nn import functional as F
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"))
-import fused_moe as fused_moe_kernel  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "moe"
+    ),
+)
+import fused_moe as fused_moe_kernel
 
 
 @pytest.mark.parametrize("config", fused_moe_kernel.test_configs)

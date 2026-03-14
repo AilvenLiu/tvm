@@ -29,23 +29,21 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirx.bench.utils import export_to_perfetto_trace
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-import hgemm_rs_multimem_dynamic_scheduler as kernel  # noqa: E402
-from hgemm_rs_multimem_dynamic_scheduler import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from hgemm_rs_multimem_dynamic_scheduler import (
     CAPACITY,
     CUDA_EVENT_PROFILER,
     GEMM_M_CLUSTERS,
     GEMM_N_CLUSTERS,
     GROUP_SIZE,
-    K,
     LOCAL_M,
-    M,
-    N,
     PROFILER_BUFFER_SIZE,
     PROFILER_ON,
-    RS_M_CLUSTERS,
-    RS_N_CLUSTERS,
-    SM_NUMBER,
     TASK_IDX_LEN,
     TILE_M,
     TILE_N,
@@ -53,6 +51,9 @@ from hgemm_rs_multimem_dynamic_scheduler import (  # noqa: E402
     VALIDATE,
     WARMUP_ITERS,
     WORLD_SIZE,
+    K,
+    M,
+    N,
     TaskType,
     a_type,
     b_type,

@@ -18,17 +18,21 @@
 import os
 import sys
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
-import flashinfer
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "attention"))
-import flash_attention4  # noqa: E402
-from flash_attention4 import *  # noqa: E402, F403
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "attention",
+    ),
+)
+from flash_attention4 import *
 
 
 @pytest.mark.parametrize("seq_len", [8192, 4096, 2048, 1024])
@@ -364,7 +368,7 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
 
         print(
             f"max_abs_err={np.max(diff_cute):.6f}, max_rel_err={max_rel_err:.6f}, "
-            f"mismatches={num_mismatches_cute}/{O_tir.size} ({100.0 * num_mismatches_cute / O_tir.size:.2f}%)"  # noqa: E501
+            f"mismatches={num_mismatches_cute}/{O_tir.size} ({100.0 * num_mismatches_cute / O_tir.size:.2f}%)"
         )
 
         np.testing.assert_allclose(O_tir, O_cutedsl, rtol=rtol, atol=atol)
@@ -390,7 +394,7 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
 
         print(
             f"max_abs_err={np.max(diff_fa):.6f}, max_rel_err={max_rel_err:.6f}, "
-            f"mismatches={num_mismatches_fa}/{O_tir.size} ({100.0 * num_mismatches_fa / O_tir.size:.2f}%)"  # noqa: E501
+            f"mismatches={num_mismatches_fa}/{O_tir.size} ({100.0 * num_mismatches_fa / O_tir.size:.2f}%)"
         )
 
         np.testing.assert_allclose(O_tir, O_flashattn, rtol=rtol, atol=atol)
@@ -416,7 +420,7 @@ def test_flash_attention4(seq_len, num_qo_heads, num_kv_heads, is_causal):
 
         print(
             f"max_abs_err={np.max(diff_flashinfer):.6f}, max_rel_err={max_rel_err:.6f}, "
-            f"mismatches={num_mismatches_flashinfer}/{O_tir.size} ({100.0 * num_mismatches_flashinfer / O_tir.size:.2f}%)"  # noqa: E501
+            f"mismatches={num_mismatches_flashinfer}/{O_tir.size} ({100.0 * num_mismatches_flashinfer / O_tir.size:.2f}%)"
         )
 
 

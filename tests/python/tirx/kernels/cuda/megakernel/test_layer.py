@@ -15,26 +15,21 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
+import os
+import sys
+import tempfile
+
+import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
-import argparse
-import math
-import tempfile
-
-import numpy as np
-
 from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.utils import static_scheduler
 from tvm.tirx.megakernel.utils.config import (
-    KernelConfig,
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import get_source, pack_into_32bit
-
-import os
-import sys
+from tvm.tirx.megakernel.utils.utils import get_source
 
 sys.path.insert(
     0,
@@ -45,11 +40,7 @@ sys.path.insert(
 )
 from layer import (
     MegaKernelDenseLayer,
-    arg_dict,
     prepare_data,
-    MAX_NUM_KV_SPLITS,
-    MAX_TOTAL_NUM_WORKERS,
-    PROFILER_BUFFER_SIZE,
 )
 
 
@@ -390,7 +381,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 sess._sync_all()
                 sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])
                 sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict["residual_0"])
-                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])  # noqa: E501
+                # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])
                 sess.gather_to_worker0(
                     disco_arg_dict["hidden_state_attn_mlp"], res_dict["hidden_state_attn_mlp_res"]
                 )

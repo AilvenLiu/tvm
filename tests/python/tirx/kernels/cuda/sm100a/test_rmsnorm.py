@@ -24,9 +24,15 @@ import torch
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "activation"))
-import rmsnorm  # noqa: E402
-from rmsnorm import EPS, get_rmsnorm_kernel, prepare_data  # noqa: E402, F401
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "activation",
+    ),
+)
+import rmsnorm
+from rmsnorm import EPS, get_rmsnorm_kernel, prepare_data  # noqa: F401
 
 
 @pytest.mark.parametrize("hidden_size", [5120, 128])
@@ -48,7 +54,9 @@ def test_rmsnorm(hidden_size, batch_size):
             out = torch.empty_like(x)
 
             def func():
-                return flashinfer.norm.rmsnorm(x.clone(), weight, rmsnorm.EPS, enable_pdl=False, out=out)
+                return flashinfer.norm.rmsnorm(
+                    x.clone(), weight, rmsnorm.EPS, enable_pdl=False, out=out
+                )
 
             ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
             print(f"flashinfer time: {ms:.3f} ms")

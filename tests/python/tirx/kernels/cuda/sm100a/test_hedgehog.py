@@ -18,16 +18,21 @@
 import os
 import sys
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "attention"))
-import hedgehog  # noqa: E402
-from hedgehog import *  # noqa: E402, F403
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "attention",
+    ),
+)
+from hedgehog import *
 
 
 @pytest.mark.parametrize(

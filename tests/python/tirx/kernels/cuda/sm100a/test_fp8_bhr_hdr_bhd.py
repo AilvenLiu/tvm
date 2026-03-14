@@ -25,8 +25,13 @@ import tvm
 import tvm.testing
 from tvm.tirx.bench.utils import ProtonContext, bench
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"))
-from fp8_bhr_hdr_bhd import (  # noqa: E402
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "gemm"
+    ),
+)
+from fp8_bhr_hdr_bhd import (
     B_DIM,
     D_DIM,
     H_DIM,
@@ -98,9 +103,7 @@ def bench_fp8_bhr_hdr_bhd():
         A_bf16 = torch.randn((B_DIM, H_DIM, R_DIM), dtype=torch.bfloat16, device="cuda")
         B_bf16 = torch.randn((H_DIM, D_DIM, R_DIM), dtype=torch.bfloat16, device="cuda")
         x_fp8 = per_token_cast_to_fp8(A_bf16.view(-1, R_DIM), use_ue8m0=True)
-        x_fp8 = x_fp8[0].view(B_DIM, H_DIM, R_DIM), x_fp8[1].view(
-            B_DIM, H_DIM, ceildiv(R_DIM, 128)
-        )
+        x_fp8 = x_fp8[0].view(B_DIM, H_DIM, R_DIM), x_fp8[1].view(B_DIM, H_DIM, ceildiv(R_DIM, 128))
         y_fp8 = (
             torch.empty_like(B_bf16, dtype=torch.float8_e4m3fn),
             torch.empty(

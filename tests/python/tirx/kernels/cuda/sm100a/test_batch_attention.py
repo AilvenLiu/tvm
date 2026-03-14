@@ -18,18 +18,23 @@
 import os
 import sys
 
+import flashinfer
+import numpy as np
 import pytest
 import torch
-import numpy as np
+import tvm_ffi
 
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
-import flashinfer
-import tvm_ffi
 
-sys.path.insert(0, os.path.join(os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")), "attention"))
-import batch_attention  # noqa: E402
-from batch_attention import *  # noqa: E402, F403
+sys.path.insert(
+    0,
+    os.path.join(
+        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
+        "attention",
+    ),
+)
+from batch_attention import *
 
 
 @pytest.mark.parametrize("num_heads", [(64, 8)])
@@ -259,7 +264,7 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
 
     with ProtonContext("batch_attention"):
         print(
-            f"qo_heads: {qo_heads}, kv_heads: {kv_heads}, seq_len: {seq_len}, head_dim: {head_dim}, batch_size: {batch_size}, seed: {seed}"  # noqa: E501
+            f"qo_heads: {qo_heads}, kv_heads: {kv_heads}, seq_len: {seq_len}, head_dim: {head_dim}, batch_size: {batch_size}, seed: {seed}"
         )
         print("Flashinfer BatchAttention Start", flush=True)
         O_flashinfer_attention = flashinfer_batch_attention()
