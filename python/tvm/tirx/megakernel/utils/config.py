@@ -22,6 +22,7 @@ from typing import Any
 
 import tvm
 
+F8_BYTES = 1
 F16_BYTES = 2
 F32_BYTES = 4
 F128_BYTES = 16
