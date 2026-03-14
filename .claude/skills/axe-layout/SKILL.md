@@ -33,7 +33,7 @@ Do NOT read all references at once. Use the commands below to find what you need
 - C++ impl: `src/tir/ir/layout/*.cc`
 - C++ header: `include/tvm/tir/layout.h`
 - Tests: `tests/python/tirx/test_layout.py`
-- Usage: `python/tvm/tirx/op_schedule/cuda/copy_async.py`
+- Usage: `python/tvm/tirx/op_dispatch/cuda/copy_async.py`
 
 ## Lookup commands
 

@@ -22,7 +22,7 @@ from tvm.tir.buffer import Buffer
 from tvm.tir.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, SeqStmt, Stmt
 from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
-from tvm.tirx.op_schedule.schedule_context import ScheduleContext
+from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
 from tvm.tirx.transform.common import seek_kernel_replace_point
 
 
@@ -51,7 +51,7 @@ class PrivateAllocCollector(StmtVisitor):
         super().visit_for_(op)
 
     def visit_op_call_(self, op: OpCall):
-        sctx = ScheduleContext(
+        sctx = DispatchContext(
             target=self.target,
             exec_scope=self.exec_scope_stack_[-1],
             launch_params=self.launch_params,

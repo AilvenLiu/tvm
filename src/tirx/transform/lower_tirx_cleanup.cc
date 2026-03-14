@@ -49,14 +49,14 @@
 namespace tvm {
 namespace tirx {
 
-class ScheduleContextRemover : public StmtExprMutator {
+class DispatchContextRemover : public StmtExprMutator {
  public:
-  static Stmt Remove(const Stmt& stmt) { return ScheduleContextRemover()(stmt); }
+  static Stmt Remove(const Stmt& stmt) { return DispatchContextRemover()(stmt); }
 
  private:
   Stmt VisitStmt_(const ExecScopeStmtNode* op) final {
     Stmt body = VisitStmt(op->body);
-    // Strip TIRX scheduling AttrStmts from ExecScopeStmt body
+    // Strip TIRX dispatch AttrStmts from ExecScopeStmt body
     // (These are dead-code annotations that were never written but the cleanup pass
     //  historically erased: scope_id_extent_map, thread_var_map, tirx.warp_id_in_cta)
     auto strip = [](Stmt stmt) {
@@ -397,7 +397,7 @@ Pass LowerTIRxCleanup() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     Target target = ResolveTarget(f);
     auto* n = f.CopyOnWrite();
-    n->body = ScheduleContextRemover::Remove(n->body);
+    n->body = DispatchContextRemover::Remove(n->body);
     std::tie(n->body, n->buffer_map) = LayoutApplier::Flatten(n->body, n->buffer_map, target);
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;

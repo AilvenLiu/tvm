@@ -60,7 +60,7 @@ product of iter extents in group i (or L_G admits a direct-sum decomposition).
 
 ### Implementation
 
-`python/tvm/tirx/op_schedule/cuda/copy_async.py` (~875 lines).
+`python/tvm/tirx/op_dispatch/cuda/copy_async.py` (~875 lines).
 
 ---
 

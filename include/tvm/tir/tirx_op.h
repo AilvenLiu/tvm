@@ -76,9 +76,9 @@ constexpr const char* kPostBufferDefStmt = "post_buffer_def_stmt";
 }  // namespace callback
 
 /*!
- * \brief The context information of the kernel required by op schedule.
+ * \brief The context information of the kernel required by op dispatch.
  */
-class ScheduleContextNode : public Object {
+class DispatchContextNode : public Object {
  public:
   /*! \brief The target of the kernel. */
   Target target;
@@ -88,20 +88,20 @@ class ScheduleContextNode : public Object {
   ffi::Map<ffi::String, IterVar> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   ffi::Map<Var, Range> var_range_map;
-  /*! \brief Whether the schedule context is only used for buffer allocation. */
+  /*! \brief Whether the dispatch context is only used for buffer allocation. */
   bool alloc_only;
   /*! \brief Callback to be handled when the operator is scheduled. */
   ffi::Map<ffi::String, ObjectRef> callbacks;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ScheduleContextNode>()
-        .def_ro("target", &ScheduleContextNode::target)
-        .def_ro("exec_scope", &ScheduleContextNode::exec_scope)
-        .def_ro("launch_params", &ScheduleContextNode::launch_params)
-        .def_ro("var_range_map", &ScheduleContextNode::var_range_map)
-        .def_ro("alloc_only", &ScheduleContextNode::alloc_only)
-        .def_ro("callbacks", &ScheduleContextNode::callbacks);
+    refl::ObjectDef<DispatchContextNode>()
+        .def_ro("target", &DispatchContextNode::target)
+        .def_ro("exec_scope", &DispatchContextNode::exec_scope)
+        .def_ro("launch_params", &DispatchContextNode::launch_params)
+        .def_ro("var_range_map", &DispatchContextNode::var_range_map)
+        .def_ro("alloc_only", &DispatchContextNode::alloc_only)
+        .def_ro("callbacks", &DispatchContextNode::callbacks);
   }
 
   /*! \brief Add a buffer to be allocated in the kernel. */
@@ -121,13 +121,13 @@ class ScheduleContextNode : public Object {
    */
   void AddPostBufferDefStmt(Buffer buffer, Stmt stmt);
 
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScheduleContext", ScheduleContextNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.DispatchContext", DispatchContextNode, Object);
 };
 
 /*!
- * \brief Managed reference to ScheduleContextNode.
+ * \brief Managed reference to DispatchContextNode.
  */
-class ScheduleContext : public ObjectRef {
+class DispatchContext : public ObjectRef {
  public:
   /*!
    * \brief Constructor.
@@ -135,24 +135,24 @@ class ScheduleContext : public ObjectRef {
    * \param exec_scope The exec scope of the operator.
    * \param launch_params The kernel launch parameters.
    * \param var_range_map: A map from loop variables to their ranges.
-   * \param alloc_only Whether the schedule context is only used for buffer allocation.
+   * \param alloc_only Whether the dispatch context is only used for buffer allocation.
    * \param callbacks The callbacks to be handled when the operator is scheduled.
    */
-  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
+  TVM_DLL DispatchContext(Target target, ExecScope exec_scope,
                           ffi::Map<ffi::String, IterVar> launch_params = {},
                           ffi::Map<Var, Range> var_range_map = {}, bool alloc_only = false,
                           ffi::Map<ffi::String, ObjectRef> callbacks = {});
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScheduleContext, ObjectRef, ScheduleContextNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(DispatchContext, ObjectRef, DispatchContextNode);
 };
 
 /*!
- * \brief The type of the function that schedules a TIRX operator.
+ * \brief The type of the function that dispatches a TIRX operator.
  * \param op The operator.
  * \param args The arguments.
- * \param context The schedule context.
+ * \param context The dispatch context.
  */
-using FOpScheduler = ffi::TypedFunction<Stmt(tvm::Op, Array<ObjectRef>, ScheduleContext)>;
+using FOpDispatcher = ffi::TypedFunction<Stmt(tvm::Op, Array<ObjectRef>, DispatchContext)>;
 
 /*!
  * \brief See pesudo code below:

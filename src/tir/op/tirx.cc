@@ -40,7 +40,7 @@ namespace tirx {
 namespace tirx {
 >>>>>>>> bd927f10c7 (rename):src/tir/op/tirx.cc
 
-TVM_FFI_STATIC_INIT_BLOCK() { ScheduleContextNode::RegisterReflection(); }
+TVM_FFI_STATIC_INIT_BLOCK() { DispatchContextNode::RegisterReflection(); }
 
 /********************* Utils **********************/
 
@@ -59,7 +59,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { ScheduleContextNode::RegisterReflection(); }
       .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure)) \
       .set_attr<Bool>("TIsTIRxOp", Bool(true))
 
-/********************* ScheduleContext **********************/
+/********************* DispatchContext **********************/
 template <typename Key, typename Value>
 Value getOrSetDefault(ffi::Map<ffi::String, ObjectRef>& m, const Key& key,
                       const Value& defaultValue) {
@@ -72,20 +72,20 @@ Value getOrSetDefault(ffi::Map<ffi::String, ObjectRef>& m, const Key& key,
   return Downcast<Value>((*it).second);
 }
 
-void ScheduleContextNode::AddAllocBuffer(Buffer buffer) {
+void DispatchContextNode::AddAllocBuffer(Buffer buffer) {
   auto buffers = getOrSetDefault(callbacks, callback::kPrivateAlloc, ffi::Array<Buffer>());
   buffers.push_back(buffer);
   callbacks.Set(callback::kPrivateAlloc, buffers);
 }
 
-void ScheduleContextNode::AddInitStmt(Stmt stmt, bool host) {
+void DispatchContextNode::AddInitStmt(Stmt stmt, bool host) {
   auto tag = host ? callback::kHostInitStmt : callback::kDeviceInitStmt;
   auto stmts = getOrSetDefault(callbacks, tag, ffi::Array<Stmt>());
   stmts.push_back(stmt);
   callbacks.Set(tag, stmts);
 }
 
-void ScheduleContextNode::AddPostBufferDefStmt(Buffer buffer, Stmt stmt) {
+void DispatchContextNode::AddPostBufferDefStmt(Buffer buffer, Stmt stmt) {
   auto mapping = getOrSetDefault(callbacks, callback::kPostBufferDefStmt,
                                  ffi::Map<Buffer, ffi::Array<Stmt>>());
   auto it = mapping.find(buffer);
@@ -98,11 +98,11 @@ void ScheduleContextNode::AddPostBufferDefStmt(Buffer buffer, Stmt stmt) {
   callbacks.Set(callback::kPostBufferDefStmt, mapping);
 }
 
-ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
+DispatchContext::DispatchContext(Target target, ExecScope exec_scope,
                                  ffi::Map<ffi::String, IterVar> launch_params,
                                  ffi::Map<Var, Range> var_range_map, bool alloc_only,
                                  ffi::Map<ffi::String, ObjectRef> callbacks) {
-  auto n = ffi::make_object<ScheduleContextNode>();
+  auto n = ffi::make_object<DispatchContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
   n->launch_params = std::move(launch_params);
@@ -115,48 +115,48 @@ ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("tirx.ScheduleContext",
+      .def("tirx.DispatchContext",
            [](Target target, ExecScope exec_scope, ffi::Map<ffi::String, IterVar> launch_params,
               ffi::Map<Var, Range> var_range_map, bool alloc_only,
               ffi::Map<ffi::String, ObjectRef> callbacks) {
-             return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
+             return DispatchContext(target, exec_scope, launch_params, var_range_map, alloc_only,
                                     callbacks);
            })
-      .def_method("tirx.ScheduleContextAddAllocBuffer", &ScheduleContextNode::AddAllocBuffer)
-      .def_method("tirx.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt)
-      .def_method("tirx.ScheduleContextAddPostBufferDefStmt",
-                  &ScheduleContextNode::AddPostBufferDefStmt);
+      .def_method("tirx.DispatchContextAddAllocBuffer", &DispatchContextNode::AddAllocBuffer)
+      .def_method("tirx.DispatchContextAddInitStmt", &DispatchContextNode::AddInitStmt)
+      .def_method("tirx.DispatchContextAddPostBufferDefStmt",
+                  &DispatchContextNode::AddPostBufferDefStmt);
 }
 
-/********************* Schedule Ops **********************/
-#define TIRX_DEFINE_SCHEDULE_OP(OpName) \
-  TIRX_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))
+/********************* Dispatch Ops **********************/
+#define TIRX_DEFINE_DISPATCH_OP(OpName) \
+  TIRX_DEFINE_OP(OpName).set_attr<Bool>("TIsDispatchOp", Bool(true))
 
-TIRX_DEFINE_SCHEDULE_OP(zero);
-TIRX_DEFINE_SCHEDULE_OP(sqrt);
-TIRX_DEFINE_SCHEDULE_OP(exp);
-TIRX_DEFINE_SCHEDULE_OP(exp2);
-TIRX_DEFINE_SCHEDULE_OP(add);
-TIRX_DEFINE_SCHEDULE_OP(sub);
-TIRX_DEFINE_SCHEDULE_OP(mul);
-TIRX_DEFINE_SCHEDULE_OP(fdiv);
-TIRX_DEFINE_SCHEDULE_OP(minimum);
-TIRX_DEFINE_SCHEDULE_OP(maximum);
-TIRX_DEFINE_SCHEDULE_OP(copy);
-TIRX_DEFINE_SCHEDULE_OP(fill);
-TIRX_DEFINE_SCHEDULE_OP(gemm);
-TIRX_DEFINE_SCHEDULE_OP(reciprocal);
-TIRX_DEFINE_SCHEDULE_OP(sum);
-TIRX_DEFINE_SCHEDULE_OP(max);
-TIRX_DEFINE_SCHEDULE_OP(min);
-TIRX_DEFINE_SCHEDULE_OP(memset);
-TIRX_DEFINE_SCHEDULE_OP(reduce_negate);
-TIRX_DEFINE_SCHEDULE_OP(binary_reduce);
-TIRX_DEFINE_SCHEDULE_OP(unary_reduce);
-TIRX_DEFINE_SCHEDULE_OP(binary_chain);
-TIRX_DEFINE_SCHEDULE_OP(select);
-TIRX_DEFINE_SCHEDULE_OP(cast);
-TIRX_DEFINE_SCHEDULE_OP(permute_dims);
+TIRX_DEFINE_DISPATCH_OP(zero);
+TIRX_DEFINE_DISPATCH_OP(sqrt);
+TIRX_DEFINE_DISPATCH_OP(exp);
+TIRX_DEFINE_DISPATCH_OP(exp2);
+TIRX_DEFINE_DISPATCH_OP(add);
+TIRX_DEFINE_DISPATCH_OP(sub);
+TIRX_DEFINE_DISPATCH_OP(mul);
+TIRX_DEFINE_DISPATCH_OP(fdiv);
+TIRX_DEFINE_DISPATCH_OP(minimum);
+TIRX_DEFINE_DISPATCH_OP(maximum);
+TIRX_DEFINE_DISPATCH_OP(copy);
+TIRX_DEFINE_DISPATCH_OP(fill);
+TIRX_DEFINE_DISPATCH_OP(gemm);
+TIRX_DEFINE_DISPATCH_OP(reciprocal);
+TIRX_DEFINE_DISPATCH_OP(sum);
+TIRX_DEFINE_DISPATCH_OP(max);
+TIRX_DEFINE_DISPATCH_OP(min);
+TIRX_DEFINE_DISPATCH_OP(memset);
+TIRX_DEFINE_DISPATCH_OP(reduce_negate);
+TIRX_DEFINE_DISPATCH_OP(binary_reduce);
+TIRX_DEFINE_DISPATCH_OP(unary_reduce);
+TIRX_DEFINE_DISPATCH_OP(binary_chain);
+TIRX_DEFINE_DISPATCH_OP(select);
+TIRX_DEFINE_DISPATCH_OP(cast);
+TIRX_DEFINE_DISPATCH_OP(permute_dims);
 
 /********************* Compose Ops **********************/
 #define TIRX_DEFINE_COMPOSE_OP(OpName) \

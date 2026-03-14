@@ -42,7 +42,7 @@ from tvm.tir.layout import (
     wgid,
     wid_in_wg,
 )
-from tvm.tirx.op_schedule.cuda.tma_utils import SwizzleMode, tma_shared_layout
+from tvm.tirx.op_dispatch.cuda.tma_utils import SwizzleMode, tma_shared_layout
 
 
 def test_axis():

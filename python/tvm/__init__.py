@@ -77,7 +77,7 @@ if not _RUNTIME_ONLY:
 
 # tvm.tirx
 from .tirx import megakernel
-from .tirx import op_schedule
+from .tirx import op_dispatch
 
 
 def _should_print_backtrace():

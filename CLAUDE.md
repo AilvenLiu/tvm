@@ -17,7 +17,7 @@
 
 # TIR Project
 
-A compiler for high-performance AI kernels, built on top of Apache TVM. Adds **TIRX** — an extended tensor IR with hardware-aware layout abstractions, hierarchical execution scopes, async primitives, and an operator scheduling framework. Targets NVIDIA GPUs (Ampere/Hopper/Blackwell) and AWS Trainium.
+A compiler for high-performance AI kernels, built on top of Apache TVM. Adds **TIRX** — an extended tensor IR with hardware-aware layout abstractions, hierarchical execution scopes, async primitives, and an operator dispatch framework. Targets NVIDIA GPUs (Ampere/Hopper/Blackwell) and AWS Trainium.
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ The codebase is an Apache TVM fork. Custom additions are concentrated in these a
 
 ### TIRX DSL & Compiler (`python/tvm/tirx/`)
 - **Operator framework** — `operator/op.py` — Base operator classes (Unary, Binary, Reduction, etc.)
-- **Op schedule** — `op_schedule/cuda/`, `op_schedule/trn/` — Target-specific kernel scheduling (GEMM, copy_async, reduction, etc.)
+- **Op dispatch** — `op_dispatch/cuda/`, `op_dispatch/trn/` — Target-specific kernel scheduling (GEMM, copy_async, reduction, etc.)
 - **Transforms** — `transform/` — Buffer allocation, event tensor legalization
 - **Pipeline & async** — `pipeline.py`, `tile_scheduler.py` — Async pipeline management, tile scheduling
 - **Megakernel** — `megakernel/kernels/` (23 fused LLM kernels), `megakernel/model/` (Llama, Qwen), `megakernel/utils/`
@@ -44,7 +44,7 @@ The codebase is an Apache TVM fork. Custom additions are concentrated in these a
 - `lower_tirx.cc` — Entry point (composes TIRX passes and strips ExecScopeStmt at the end)
 - `lower_tirx_scope_ids.cc` — Scope ID resolution
 - `lower_tirx_scope_slices.cc` — Execution scope slicing
-- `lower_tirx_schedule_ops.cc` — Op schedule lowering
+- `lower_tirx_dispatch_ops.cc` — Op dispatch lowering
 - `lower_tirx_dedup_tensormap.cc` — TensorMap deduplication
 - `lower_tirx_cleanup.cc` — Post-lowering optimization
 - `lower_tirx_opaque.cc` — Opaque block handling
@@ -101,7 +101,7 @@ git clone git@github.com:mlc-ai/tirx-kernels.git ~/tirx-kernels
 export TIRX_KERNELS_PATH=/path/to/tirx-kernels/kernels
 ```
 
-**Kernel performance**: When modifying anything that affects code generation (kernels, op schedules, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
+**Kernel performance**: When modifying anything that affects code generation (kernels, op dispatches, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 
 ## Code Style
 
@@ -128,7 +128,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 <type>(<scope>): <short imperative description>
 
 Types: feat, fix, refactor, perf, test, docs, chore, ci, build
-Scopes: layout, kernel, op, op-schedule, lower-tirx, tvmscript, megakernel, infra
+Scopes: layout, kernel, op, op-dispatch, lower-tirx, tvmscript, megakernel, infra
 ```
 
 Default branch: **`tirx`** (not `main`). Always use `--base tirx` when creating PRs.
@@ -141,7 +141,7 @@ Branch naming: `<type>/<kebab-case-description>`, e.g. `feat/direct-sum`, `fix/s
 
 - **C++ ↔ Python sync**: Changing IR nodes (layout, stmt, op) requires updating both the C++ side (`include/` + `src/`) and Python bindings (`python/tvm/tir/`). Don't forget FFI registration.
 - **Printer ↔ Parser sync**: Modifications to IR printing (`src/script/printer/tir/`) must have corresponding parser changes (`python/tvm/script/parser/tir/`) and vice versa. Run `test_parser_printer.py` to verify round-trip.
-- **New op checklist**: Adding a TIRX operator requires registration in `operator/op.py`, a schedule in `op_schedule/cuda/` (and/or `trn/`), a DSL entry in `ir_builder/tir/tirx.py`, and tests.
+- **New op checklist**: Adding a TIRX operator requires registration in `operator/op.py`, a schedule in `op_dispatch/cuda/` (and/or `trn/`), a DSL entry in `ir_builder/tir/tirx.py`, and tests.
 - Keep documentation in sync with code changes: when modifying code that is referenced in this document or in `.claude/skills/`, update the corresponding documentation immediately.
 - **`Tx.meta_var` is not an accumulator**: `Tx.meta_var` creates a TIR expression, not a mutable variable. Writing `acc = Tx.meta_var(0); for i: acc = acc + x` does NOT accumulate — each reassignment creates a new expression and the compiler may optimize the loop away. For accumulation, write directly into a buffer: `buf[d] = buf[d] + x` (using `Tx.alloc_buffer` or SMEM buffers). Read-only scalars (`val = Tx.meta_var(expr)`) are fine.
 - **Flaky tests**: If tests fail intermittently, first check `nvidia-smi` to see if the GPU is occupied by other workloads. Switch to an idle GPU before re-running.

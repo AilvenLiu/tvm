@@ -61,8 +61,8 @@ Pass LowerTIRxStripExecScope() {
 }  // namespace
 
 Pass LowerTIRx() {
-  std::vector<tvm::transform::Pass> passes = {LowerTIRxResolveScopeIds(), LowerTIRxScheduleOps()};
-  if (std::getenv("TVM_PRINT_AFTER_TIRX_SCHEDULE_OPS")) {
+  std::vector<tvm::transform::Pass> passes = {LowerTIRxResolveScopeIds(), LowerTIRxDispatchOps()};
+  if (std::getenv("TVM_PRINT_AFTER_TIRX_DISPATCH_OPS")) {
     passes.push_back(tvm::transform::PrintIR());
   }
   passes.push_back(LowerTIRxResolveScopeSlices());
@@ -76,7 +76,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tirx.transform.LowerTIRxResolveScopeIds", LowerTIRxResolveScopeIds)
-      .def("tirx.transform.LowerTIRxScheduleOps", LowerTIRxScheduleOps)
+      .def("tirx.transform.LowerTIRxDispatchOps", LowerTIRxDispatchOps)
       .def("tirx.transform.LowerTIRxResolveScopeSlices", LowerTIRxResolveScopeSlices)
       .def("tirx.transform.LowerTIRxDedupCuTensorMaps", LowerTIRxDedupCuTensorMaps)
       .def("tirx.transform.LowerTIRxCleanup", LowerTIRxCleanup)
@@ -84,5 +84,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxx
 }  // namespace tvm

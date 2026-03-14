@@ -43,7 +43,7 @@ from .exec_scope import ExecScope
 from .expr import IterVar, StringImm, Var
 
 if TYPE_CHECKING:
-    from tvm.tirx.op_schedule.schedule_context import ScheduleContext
+    from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
 
 
 @tvm_ffi.register_object("tir.Stmt")
@@ -1100,7 +1100,7 @@ class OpCall(Stmt):
         raise NotImplementedError("Subclass must implement this method")
 
     def get_private_buffers(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "DispatchContext"
     ) -> dict[str, Any]:
         """
         Create private (intermediate) buffers needed in this operator.
@@ -1116,9 +1116,9 @@ class OpCall(Stmt):
             If the buffer is found in the buffer_dict but smaller than required, it will be
             enlarged and updated.
 
-        sctx: ScheduleContext
-            The schedule context.
-            This is used to get the target and reuse op schedule implementations.
+        sctx: DispatchContext
+            The dispatch context.
+            This is used to get the target and reuse op dispatch implementations.
 
         Returns:
             private_buffer_refs: Dict[str, Any]
@@ -1134,12 +1134,12 @@ class OpCall(Stmt):
             raise ValueError(f"Unsupported target: {sctx.target.kind.name}")
 
     def get_private_buffers_trn(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "DispatchContext"
     ) -> dict[str, Any]:
         return {}
 
     def get_private_buffers_cuda(
-        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "ScheduleContext"
+        self, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: "DispatchContext"
     ) -> dict[str, Any]:
         return {}
 

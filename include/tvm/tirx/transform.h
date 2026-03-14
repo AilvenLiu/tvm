@@ -349,10 +349,10 @@ TVM_DLL Pass Filter(ffi::TypedFunction<bool(PrimFunc)> fcond);
 TVM_DLL Pass LowerTIRxResolveScopeIds();
 
 /*!
- * \brief Lower TIRx op calls using registered op schedulers for the given target.
+ * \brief Lower TIRx op calls using registered op dispatchers for the given target.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRxScheduleOps();
+TVM_DLL Pass LowerTIRxDispatchOps();
 
 /*!
  * \brief Resolve exec scope slices introduced during TIRx lowering.

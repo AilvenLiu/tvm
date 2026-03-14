@@ -90,15 +90,15 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
 
           static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-          static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
+          static const auto& dispatch_op_map = Op::GetAttrMap<Bool>("TIsDispatchOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
           TVM_FFI_ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
               << "Only TIRX ops can be used in tirx::tirx::OpCall";
           ffi::String name = op_names.get(op, op->name);
-          if (bool(schedule_op_map.get(op, tvm::Bool(false))) ||
+          if (bool(dispatch_op_map.get(op, tvm::Bool(false))) ||
               bool(async_op_map.get(op, tvm::Bool(false)))) {
-            // Schedule ops
+            // Dispatch ops
             ffi::Array<Doc> args;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
