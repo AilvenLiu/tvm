@@ -41,7 +41,7 @@ The codebase is an Apache TVM fork. Custom additions are concentrated in these a
 - **Printer/Parser** — `src/script/printer/tir/`, `src/script/ir_builder/tir/` — TIRX-aware printing and parsing
 
 ### Lowering Passes (`src/tir/transform/`)
-- `lower_tirx.cc` — Entry point
+- `lower_tirx.cc` — Entry point (composes TIRX passes and strips ExecScopeStmt at the end)
 - `lower_tirx_scope_ids.cc` — Scope ID resolution
 - `lower_tirx_scope_slices.cc` — Execution scope slicing
 - `lower_tirx_schedule_ops.cc` — Op schedule lowering

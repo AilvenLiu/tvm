@@ -18,11 +18,29 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tir.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def _strip_exec_scope_stmt(stmt):
+    return ir_transform(
+        stmt,
+        preorder=lambda _node: None,
+        postorder=lambda node: node.body,
+        only_enable=["tir.ExecScopeStmt"],
+    )
+
+
+def assert_structural_equal(lhs, rhs, *args, **kwargs):
+    if isinstance(lhs, tvm.tir.PrimFunc):
+        lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
+    if isinstance(rhs, tvm.tir.PrimFunc):
+        rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
+    _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
 
 def test_simple_gemm():
@@ -43,6 +61,7 @@ def test_simple_gemm():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
@@ -53,7 +72,7 @@ def test_simple_gemm():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[0, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_f_loop], B_sbuf[p_loop, rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -78,6 +97,7 @@ def test_larger_gemm():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 1024), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 1024), scope="trn.sbuf")
@@ -88,7 +108,7 @@ def test_larger_gemm():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[0, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -120,6 +140,7 @@ def test_gemm_in_a_loop():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -130,7 +151,7 @@ def test_gemm_in_a_loop():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -162,6 +183,7 @@ def test_gemm_with_stride():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 4095), scope="trn.sbuf")
@@ -172,7 +194,7 @@ def test_gemm_with_stride():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + reduction_b_loop * 256 + k * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 1024 + k * 512 + rhs_f_loop * 2], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -205,6 +227,7 @@ def test_gemm_swap_lhs_rhs():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -215,7 +238,7 @@ def test_gemm_swap_lhs_rhs():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -246,6 +269,7 @@ def test_gemm_with_sbuf_output():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             buffer = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
@@ -262,7 +286,7 @@ def test_gemm_with_sbuf_output():
                 for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                     Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], buffer[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -296,6 +320,7 @@ def test_gemm_different_shape():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 8192), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -306,7 +331,7 @@ def test_gemm_different_shape():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[i, lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + lhs_b_loop * 128 + lhs_f_loop], A_sbuf[p_loop, i * 2048 + rhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + rhs_f_loop + 4096], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -331,6 +356,7 @@ def test_gemm_too_large_f_size():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 256), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 1024), scope="trn.sbuf")
@@ -341,7 +367,7 @@ def test_gemm_too_large_f_size():
                   for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in Tx.serial(0, 512, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, rhs_b_loop * 512 + rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -374,6 +400,7 @@ def test_gemm_sbuf_output_with_workspace():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -390,7 +417,7 @@ def test_gemm_sbuf_output_with_workspace():
                 for lhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                     Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, i * 512 + rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], C_psum[0, lhs_f_loop, rhs_f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -453,6 +480,7 @@ def test_gemm_transpose_AB():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -464,7 +492,7 @@ def test_gemm_transpose_AB():
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
 
-    #fmt: off
+        #fmt: off
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -496,6 +524,7 @@ def test_gemm_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
@@ -514,7 +543,7 @@ def test_gemm_guard():
                   for rhs_f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                     if 0 < i and lhs_b_loop - j < 1:
                         Tx.nki.tensor_copy(C_sbuf[lhs_f_loop, rhs_b_loop * 256 + lhs_b_loop * 128 + rhs_f_loop], acc_psum[lhs_b_loop * 2 + rhs_b_loop, lhs_f_loop, rhs_f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -548,6 +577,7 @@ def test_gemm_guard2():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "gemm"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -559,7 +589,7 @@ def test_gemm_guard2():
                     for rhs_f_loop in Tx.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         if reduction_b_loop - j < 1 and reduction_b_loop - j < 1:
                             Tx.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRx()(mod)

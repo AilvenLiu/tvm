@@ -17,11 +17,29 @@
 
 import tvm
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tir.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def _strip_exec_scope_stmt(stmt):
+    return ir_transform(
+        stmt,
+        preorder=lambda _node: None,
+        postorder=lambda node: node.body,
+        only_enable=["tir.ExecScopeStmt"],
+    )
+
+
+def assert_structural_equal(lhs, rhs, *args, **kwargs):
+    if isinstance(lhs, tvm.tir.PrimFunc):
+        lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
+    if isinstance(rhs, tvm.tir.PrimFunc):
+        rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
+    _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
 
 def test_select():
@@ -41,6 +59,7 @@ def test_select():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "select"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -49,7 +68,7 @@ def test_select():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.affine_select(B_sbuf[p_loop, f_loop], p_loop < f_loop, A_sbuf[p_loop, f_loop], Tx.float32(0.0))  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": select})
@@ -76,6 +95,7 @@ def test_select_in_loop():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "select"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -85,7 +105,7 @@ def test_select_in_loop():
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.affine_select(B_sbuf[p_loop, f_loop], (i + 1) * p_loop < f_loop, A_sbuf[p_loop, i * 8192 + f_loop], Tx.float32(0.0))  # noqa: E501
 
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -110,6 +130,7 @@ def test_select_expr_affine():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "select"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -118,7 +139,7 @@ def test_select_expr_affine():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -145,6 +166,7 @@ def test_select_with_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "select"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -154,7 +176,7 @@ def test_select_with_guard():
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - i < 1 and f_loop < j * 128 + 128:
                             Tx.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})
         mod = tvm.tir.transform.LowerTIRx()(mod)

@@ -18,11 +18,30 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tir.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def _strip_exec_scope_stmt(stmt):
+    return ir_transform(
+        stmt,
+        preorder=lambda _node: None,
+        postorder=lambda node: node.body,
+        only_enable=["tir.ExecScopeStmt"],
+    )
+
+
+def assert_structural_equal(lhs, rhs, *args, **kwargs):
+    if isinstance(lhs, tvm.tir.PrimFunc):
+        lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
+    if isinstance(rhs, tvm.tir.PrimFunc):
+        rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
+    _assert_structural_equal(lhs, rhs, *args, **kwargs)
+
 
 Tx_func_map = {
     "add": Tx.add,
@@ -71,6 +90,7 @@ def test_simple_binary(op_type, operands_type):
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer(src1_shape, scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer(src2_shape, scope="trn.sbuf")
@@ -89,7 +109,7 @@ def test_simple_binary(op_type, operands_type):
                             Tx.nki.tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, 0], op_type, Tx.bool(False))  # noqa: E501
                         elif operands_type == "region_broadcast_lhs":
                             Tx.nki.tensorscalar(C_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], A_sbuf[p_loop, 0], op_type, Tx.bool(True))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": binary})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -156,6 +176,7 @@ def test_binary_complex(op_type, operands_type):
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf")
@@ -178,7 +199,7 @@ def test_binary_complex(op_type, operands_type):
                         elif operands_type == "region_broadcast_rhs":
                             Tx.nki.tensortensor(C_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop], B_sbuf_view[p_loop, f_loop], op_type)  # noqa: E501
 
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -206,6 +227,7 @@ def test_binary_broadcast1():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -215,7 +237,7 @@ def test_binary_broadcast1():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
                         Tx.nki.tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", Tx.bool(False))  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -243,6 +265,7 @@ def test_binary_broadcast2():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -252,7 +275,7 @@ def test_binary_broadcast2():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                         Tx.nki.tensortensor(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], B_sbuf[p_loop, b_loop % 4 * 128 + f_loop], "add")  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -280,6 +303,7 @@ def test_binary_broadcast3():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
@@ -289,7 +313,7 @@ def test_binary_broadcast3():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 128, annotations={"nki_dim":"F"}):
                         Tx.nki.tensortensor(C_sbuf[p_loop, b_loop * 128 + f_loop], A_sbuf[p_loop, b_loop * 128 + f_loop], B_sbuf[p_loop, b_loop * 4096 + f_loop], "add")  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -318,6 +342,7 @@ def test_binary_with_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -329,7 +354,7 @@ def test_binary_with_guard():
                         if b_loop % 3 - j < 0:
                             Tx.nki.tensortensor(C_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], A_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], B_sbuf[p_loop, b_loop % 3 * 128 + f_loop], "add")  # noqa: E501
 
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": binary})
         mod = tvm.tir.transform.LowerTIRx()(mod)

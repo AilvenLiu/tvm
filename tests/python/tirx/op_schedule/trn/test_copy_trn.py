@@ -17,11 +17,29 @@
 
 import tvm
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tir.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def _strip_exec_scope_stmt(stmt):
+    return ir_transform(
+        stmt,
+        preorder=lambda _node: None,
+        postorder=lambda node: node.body,
+        only_enable=["tir.ExecScopeStmt"],
+    )
+
+
+def assert_structural_equal(lhs, rhs, *args, **kwargs):
+    if isinstance(lhs, tvm.tir.PrimFunc):
+        lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
+    if isinstance(rhs, tvm.tir.PrimFunc):
+        rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
+    _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
 
 def test_simple_copy():
@@ -40,9 +58,10 @@ def test_simple_copy():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (128, 512), layout=None)
-        A_1 = Tx.decl_buffer((65536,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((65536,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in Tx.serial(0, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -73,9 +92,10 @@ def test_simple_copy_2():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (128, 512), layout=None)
-        A_1 = Tx.decl_buffer((65536,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((65536,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in Tx.serial(0, 512):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -106,9 +126,10 @@ def test_copy_in_a_loop():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (512, 512), layout=None)
-        A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in Tx.grid(4, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -143,9 +164,10 @@ def test_copy_in_a_loop_2():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (512, 512), layout=None)
-        _A_flat = Tx.decl_buffer((262144,), data=A.data, layout=None)
         with Tx.kernel():
+            _A_flat = Tx.decl_buffer((262144,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             A_sbuf_view = Tx.decl_buffer(
                 (128, 2048), data=A_sbuf.data, scope="trn.sbuf", layout=None
@@ -184,6 +206,7 @@ def test_copy_transpose():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             identity = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
@@ -204,7 +227,7 @@ def test_copy_transpose():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(128, annotations={"nki_dim": "F"}):
                         Tx.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[b_loop % 8, p_loop, f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -232,6 +255,7 @@ def test_copy_transpose_2():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             identity = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
@@ -253,7 +277,7 @@ def test_copy_transpose_2():
                     for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                         for f_loop in Tx.serial(128, annotations={"nki_dim": "F"}):
                             Tx.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + i * 4 + b_loop], acc_psum[b_loop, p_loop, f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -278,6 +302,7 @@ def test_copy_different_f():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 256), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 256), scope="trn.sbuf")
@@ -316,6 +341,7 @@ def test_copy_different_shape():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 256), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 16), scope="trn.sbuf")
@@ -357,13 +383,14 @@ def test_copy_irregular_shape():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(
             A_ptr,
             (128, 10000),
             layout=None,
         )
-        A_1 = Tx.decl_buffer((1280000,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((1280000,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             for i, b_loop in Tx.grid(4, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -395,16 +422,17 @@ def test_copy_different_shape_dim():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (32, 128, 512), layout=None)
-        A_1 = Tx.decl_buffer((2097152,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((2097152,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             for i, b_loop in Tx.grid(32, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.load(A_sbuf[p_loop, f_loop], A_1[i * 65536 + p_loop * 128 + f_loop])
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -428,13 +456,14 @@ def test_copy_with_offset():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(
             A_ptr,
             (256, 512),
             layout=None,
         )
-        A_1 = Tx.decl_buffer((131072,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((131072,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in Tx.grid(2, 2):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -468,13 +497,14 @@ def test_large_dma_copy():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(
             A_ptr,
             (512, 4096),
             layout=None,
         )
-        A_1 = Tx.decl_buffer((2097152,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((2097152,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             for i, b_loop in Tx.grid(4, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -508,6 +538,7 @@ def test_copy_with_inst_size_limit():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             B_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
@@ -543,16 +574,17 @@ def test_copy_with_complex_index():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (4096, 4096), layout=None)
-        A_1 = Tx.decl_buffer((16777216,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((16777216,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 32768), scope="trn.sbuf")
             for b_loop in Tx.serial(0, 8):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 2048, annotations={"nki_dim":"F"}):
                         Tx.nki.load(A_sbuf[p_loop, b_loop * 2048 + f_loop + 16384], A_1[b_loop * 524288 + p_loop * 4096 + f_loop + 12584960])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -576,16 +608,17 @@ def test_copy_with_complex_index_2():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (2, 2048, 1024), layout=None)
-        A_1 = Tx.decl_buffer((4194304,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((4194304,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 131072), scope="trn.sbuf")
             for b_loop in Tx.serial(0, 8):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 2048, annotations={"nki_dim":"F"}):
                         Tx.nki.load(A_sbuf[p_loop, b_loop * 4096 + f_loop + 100352], A_1[b_loop * 262144 + p_loop * 2048 + f_loop + 2097152])  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -616,6 +649,7 @@ def test_copy_transpose_with_workspace():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -636,7 +670,7 @@ def test_copy_transpose_with_workspace():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(128, annotations={"nki_dim": "F"}):
                         Tx.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[0, p_loop, f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -662,9 +696,10 @@ def test_copy_with_guard():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (512, 512), layout=None)
-        A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             for j, i, b_loop in Tx.grid(4, 4, 1):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -672,7 +707,7 @@ def test_copy_with_guard():
                     for f_loop in Tx.serial(0, 384, annotations={"nki_dim":"F"}):
                         if f_loop < j * 128:
                             Tx.nki.load(A_sbuf[p_loop, i * 512 + f_loop], A_1[i * 65536 + p_loop * 512 + f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -699,9 +734,10 @@ def test_copy_with_guard_2():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         A = Tx.match_buffer(A_ptr, (512, 512), layout=None)
-        A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
         with Tx.kernel():
+            A_1 = Tx.decl_buffer((262144,), data=A.data, layout=None)
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             for j, i, b_loop in Tx.grid(4, 4, 3):
                 Tx.attr(0, "tensorized_nki_instruction", 1)
@@ -709,7 +745,7 @@ def test_copy_with_guard_2():
                     for f_loop in Tx.serial(0, 384, annotations={"nki_dim":"F"}):
                         if b_loop - j < 0 and f_loop < i * 128:
                             Tx.nki.load(A_sbuf[p_loop, b_loop * 512 + f_loop], A_1[b_loop * 65536 + p_loop * 512 + f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -736,6 +772,7 @@ def test_copy_transpose_with_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             identity = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
@@ -758,7 +795,7 @@ def test_copy_transpose_with_guard():
                     for f_loop in Tx.serial(128, annotations={"nki_dim": "F"}):
                         if b_loop - j < 0:
                             Tx.nki.tensor_copy(B_sbuf[p_loop, i * 512 + f_loop * 4 + b_loop], acc_psum[b_loop, p_loop, f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -784,6 +821,7 @@ def test_copy_with_specified_max_inst_size():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf", layout=None)
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf", layout=None)
@@ -792,7 +830,7 @@ def test_copy_with_specified_max_inst_size():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(128, annotations={"nki_dim": "F"}):
                         Tx.nki.tensor_copy(A_sbuf[p_loop, b_loop * 128 + f_loop], B_sbuf[p_loop, b_loop * 128 + f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -811,6 +849,7 @@ def test_copy_transpose_with_extended_f():
     @Tx.prim_func(tirx=True)
     def expected(A_ptr: Tx.handle):
         Tx.func_attr({"global_symbol": "copy"})
+
         with Tx.kernel():
             identity = Tx.alloc_buffer((128, 128), scope="trn.sbuf")
             acc_psum = Tx.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
@@ -832,7 +871,7 @@ def test_copy_transpose_with_extended_f():
                     for f_loop in Tx.serial(512, annotations={"nki_dim": "F"}):
                         Tx.nki.tensor_copy(B_sbuf[p_loop, b_loop * 512 + f_loop], acc_psum[b_loop, p_loop, f_loop])  # noqa: E501
 
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)

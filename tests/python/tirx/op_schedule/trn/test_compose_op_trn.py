@@ -18,11 +18,29 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.ir import assert_structural_equal
+from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
 from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tir.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def _strip_exec_scope_stmt(stmt):
+    return ir_transform(
+        stmt,
+        preorder=lambda _node: None,
+        postorder=lambda node: node.body,
+        only_enable=["tir.ExecScopeStmt"],
+    )
+
+
+def assert_structural_equal(lhs, rhs, *args, **kwargs):
+    if isinstance(lhs, tvm.tir.PrimFunc):
+        lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
+    if isinstance(rhs, tvm.tir.PrimFunc):
+        rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
+    _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
 
 def test_simple_activation_reduce():
@@ -46,6 +64,7 @@ def test_simple_activation_reduce():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             const_bias = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             with Tx.attr(0, "tensorized_nki_instruction", 1):
@@ -60,7 +79,7 @@ def test_simple_activation_reduce():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.activation_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], "sqrt", "add", bias=const_bias[p_loop, f_loop])  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -89,6 +108,7 @@ def test_activation_reduce_in_loop():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             const_bias = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             with Tx.attr(0, "tensorized_nki_instruction", 1):
@@ -103,7 +123,7 @@ def test_activation_reduce_in_loop():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop % 8 // 2 * 2048 + b_loop // 8 * 1024 + b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add", bias=const_bias[p_loop, f_loop])  # noqa: E501
-    # fmt: off
+        # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -132,6 +152,7 @@ def test_activation_reduce_in_loop2():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             const_bias = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             with Tx.attr(0, "tensorized_nki_instruction", 1):
@@ -146,7 +167,7 @@ def test_activation_reduce_in_loop2():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add", bias=const_bias[p_loop, f_loop])  # noqa: E501
-    # fmt: off
+        # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -175,6 +196,7 @@ def test_activation_reduce_two_stage():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             partial_reduce = Tx.alloc_buffer((128, 8), scope="trn.sbuf")
             const_bias = Tx.alloc_buffer((128, 1024), scope="trn.sbuf")
@@ -195,7 +217,7 @@ def test_activation_reduce_two_stage():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(8, annotations={"nki_dim": "F"}):
                         Tx.nki.tensorreduce(C[p_loop, 0], partial_reduce[p_loop, f_loop], "add", Tx.bool(False), -1)  # noqa: E501
-    # fmt: off
+        # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -227,6 +249,7 @@ def test_activation_reduce_with_bias_scale():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             A = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B = Tx.alloc_buffer((128, 8192), scope="trn.sbuf")
@@ -237,7 +260,7 @@ def test_activation_reduce_with_bias_scale():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add", bias[p_loop, 0], Tx.float32(2.0))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -264,6 +287,7 @@ def test_simple_tensor_scalar_reduce():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "tensor_scalar_reduce"})
+
         with Tx.kernel():
             A = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             B = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -273,7 +297,7 @@ def test_simple_tensor_scalar_reduce():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.tensorscalar_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], Tx.float32(1.0), "add", "add", Tx.bool(False))  # noqa: E501
-    # fmt: off
+        # fmt: off
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -330,6 +354,7 @@ def test_tensor_scalar_reduce_complex():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "tensor_scalar_reduce"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -340,7 +365,7 @@ def test_tensor_scalar_reduce_complex():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
                         Tx.nki.tensorscalar_reduce(D_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], C_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], A_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], B_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], "add", "add", Tx.bool(True))  # noqa: E501
-    # fmt: off
+        # fmt: off
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -367,6 +392,7 @@ def test_tensor_scalar_reduce_two_stage():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "tensor_scalar_reduce"})
+
         with Tx.kernel():
             partial_reduce = Tx.alloc_buffer((128, 4), scope="trn.sbuf")
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
@@ -382,7 +408,7 @@ def test_tensor_scalar_reduce_two_stage():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(4, annotations={"nki_dim": "F"}):
                         Tx.nki.tensorreduce(C_sbuf[p_loop, b_loop], partial_reduce[p_loop, f_loop], "add", Tx.bool(False), -1)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -414,6 +440,7 @@ def test_vector_chain():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -425,7 +452,7 @@ def test_vector_chain():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
                         Tx.nki.scalar_tensor_scalar(E_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], D_sbuf[p_loop, b_loop % 4], "add", "add", Tx.bool(False), Tx.bool(True))  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -457,6 +484,7 @@ def test_vector_chain_2():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
@@ -468,7 +496,7 @@ def test_vector_chain_2():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 32, annotations={"nki_dim":"F"}):
                         Tx.nki.scalar_tensor_tensor(E_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], D_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], "add", "add", Tx.bool(False), Tx.bool(True))  # noqa: E501
-    # fmt: on
+        # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -494,6 +522,7 @@ def test_reduce_negate():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "reduction"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 4), scope="trn.sbuf")
@@ -502,7 +531,7 @@ def test_reduce_negate():
                 for p_loop in Tx.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         Tx.nki.tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", True, -1)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -531,6 +560,7 @@ def test_binary_reduce_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary_reduce"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
@@ -541,7 +571,7 @@ def test_binary_reduce_guard():
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - j < 1 and f_loop < i * 128 + 128:
                             Tx.nki.tensorscalar_reduce(C_sbuf[p_loop, b_loop], B_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], Tx.float32(0.0), "add", "add", Tx.bool(False))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": binary_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -571,6 +601,7 @@ def test_unary_reduce_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "unary_reduce"})
+
         with Tx.kernel():
             const_bias = Tx.alloc_buffer((128, 512), scope="trn.sbuf")
             with Tx.attr(0, "tensorized_nki_instruction", 1):
@@ -587,7 +618,7 @@ def test_unary_reduce_guard():
                         if b_loop - j < 1 and f_loop < i * 128 + 128:
                             Tx.nki.activation_reduce(C_sbuf[p_loop, b_loop], B_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], "sqrt", "add", const_bias[p_loop, f_loop], Tx.float32(1.0))  # noqa: E501
 
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -617,6 +648,7 @@ def test_binary_chain_guard():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "binary_chain"})
+
         with Tx.kernel():
             A_sbuf = Tx.alloc_buffer((128, 2048), scope="trn.sbuf")
             B_sbuf = Tx.alloc_buffer((128, 4), scope="trn.sbuf")
@@ -627,7 +659,7 @@ def test_binary_chain_guard():
                     for f_loop in Tx.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - j < 1 and f_loop < i * 128 + 128:
                             Tx.nki.scalar_tensor_scalar(C_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], B_sbuf[p_loop, b_loop], Tx.float32(1.0), "add", "sub", Tx.bool(False), Tx.bool(True))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": binary_chain})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -657,6 +689,7 @@ def test_activation_reduce_two_stage_workspace():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "activation_reduce"})
+
         with Tx.kernel():
             const_bias = Tx.alloc_buffer((128, 1024), scope="trn.sbuf")
             with Tx.attr(0, "tensorized_nki_instruction", 1):
@@ -678,7 +711,7 @@ def test_activation_reduce_two_stage_workspace():
                     for f_loop in Tx.serial(8, annotations={"nki_dim": "F"}):
                         Tx.nki.tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "add", Tx.bool(False), -1)  # noqa: E501
 
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
@@ -707,6 +740,7 @@ def test_tensor_scalar_reduce_two_stage_workspace():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "tensor_scalar_reduce"})
+
         with Tx.kernel():
             intermediate_buffer = Tx.alloc_buffer((128, 8), scope="trn.sbuf")
             A_sbuf = Tx.alloc_buffer((128, 16384), scope="trn.sbuf")
@@ -722,7 +756,7 @@ def test_tensor_scalar_reduce_two_stage_workspace():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(4, annotations={"nki_dim": "F"}):
                         Tx.nki.tensorreduce(C_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", Tx.bool(False), -1)  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)
@@ -744,6 +778,7 @@ def test_unary_reduce_complex():
     @Tx.prim_func(tirx=True)
     def expected():
         Tx.func_attr({"global_symbol": "unary_reduce"})
+
         with Tx.kernel():
             p = Tx.alloc_buffer((128, 8192), "float16", scope="trn.sbuf")
             rowsum_p = Tx.alloc_buffer((128, 2), scope="trn.sbuf")
@@ -754,7 +789,7 @@ def test_unary_reduce_complex():
                 for p_loop in Tx.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in Tx.serial(8192, annotations={"nki_dim": "F"}):
                         Tx.nki.activation_reduce(rowsum_p[p_loop, i % 2], p[p_loop, f_loop], qk[p_loop, i % 2 * 8192 + f_loop], "exp", "add", running_max[p_loop, i], Tx.float32(1.0))  # noqa: E501
-    # fmt: on
+        # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary_reduce})
         mod = tvm.tir.transform.LowerTIRx()(mod)

@@ -24,50 +24,65 @@
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/transform.h>
+#include <tvm/tirx/stmt.h>
+#include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
 namespace tvm {
 namespace tirx {
 namespace transform {
 
+namespace {
+
+/*!
+ * \brief Strip ExecScopeStmt wrappers from lowered TIRX output.
+ *
+ * ExecScopeStmt is required while lowering TIRX ops and resolving scope IDs/slices.
+ * After those passes finish, the wrappers are no longer needed and should not be
+ * present in the final LowerTIRx output.
+ */
+class ExecScopeStripper : public StmtExprMutator {
+ public:
+  static Stmt Strip(const Stmt& stmt) { return ExecScopeStripper()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const ExecScopeStmtNode* op) final { return VisitStmt(op->body); }
+};
+
+Pass LowerTIRxStripExecScope() {
+  auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
+    auto* n = f.CopyOnWrite();
+    n->body = ExecScopeStripper::Strip(n->body);
+    return f;
+  };
+  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxStripExecScope", {});
+}
+
+}  // namespace
+
 Pass LowerTIRx() {
   std::vector<tvm::transform::Pass> passes = {LowerTIRxResolveScopeIds(), LowerTIRxScheduleOps()};
-  if (const char* env = std::getenv("TVM_PRINT_AFTER_TIRX_SCHEDULE_OPS")) {
+  if (std::getenv("TVM_PRINT_AFTER_TIRX_SCHEDULE_OPS")) {
     passes.push_back(tvm::transform::PrintIR());
   }
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp.cc
-  passes.push_back(LowerTIRpResolveScopeSlices());
-  passes.push_back(LowerTIRpDedupCuTensorMaps());
-  passes.push_back(LowerTIRpCleanup());
-  return tvm::transform::Sequential(passes, "tirx.LowerTIRp");
-========
   passes.push_back(LowerTIRxResolveScopeSlices());
   passes.push_back(LowerTIRxDedupCuTensorMaps());
   passes.push_back(LowerTIRxCleanup());
+  passes.push_back(LowerTIRxStripExecScope());
   return tvm::transform::Sequential(passes, "tirx.LowerTIRx");
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx.cc
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp.cc
-      .def("tirx.transform.LowerTIRpResolveScopeIds", LowerTIRpResolveScopeIds)
-      .def("tirx.transform.LowerTIRpScheduleOps", LowerTIRpScheduleOps)
-      .def("tirx.transform.LowerTIRpResolveScopeSlices", LowerTIRpResolveScopeSlices)
-      .def("tirx.transform.LowerTIRpDedupCuTensorMaps", LowerTIRpDedupCuTensorMaps)
-      .def("tirx.transform.LowerTIRpCleanup", LowerTIRpCleanup)
-      .def("tirx.transform.LowerTIRp", LowerTIRp);
-========
       .def("tirx.transform.LowerTIRxResolveScopeIds", LowerTIRxResolveScopeIds)
       .def("tirx.transform.LowerTIRxScheduleOps", LowerTIRxScheduleOps)
       .def("tirx.transform.LowerTIRxResolveScopeSlices", LowerTIRxResolveScopeSlices)
       .def("tirx.transform.LowerTIRxDedupCuTensorMaps", LowerTIRxDedupCuTensorMaps)
       .def("tirx.transform.LowerTIRxCleanup", LowerTIRxCleanup)
       .def("tirx.transform.LowerTIRx", LowerTIRx);
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx.cc
 }
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxx
 }  // namespace tvm
