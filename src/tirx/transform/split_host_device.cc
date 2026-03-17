@@ -110,6 +110,10 @@ class HostDeviceSplitter : public StmtMutator {
     if (num_inputs.defined()) {
       device_func = WithAttr(std::move(device_func), tvm::attr::kNumInputs, num_inputs);
     }
+    auto persistent = cur_func_->GetAttr<Bool>(tir::attr::kPersistentKernel);
+    if (persistent.defined()) {
+      device_func = WithAttr(std::move(device_func), tir::attr::kPersistentKernel, persistent);
+    }
     GlobalVar kernel_symbol_global = var_supply_();
     (*device_mod_)->Add(kernel_symbol_global, device_func);
     ffi::Array<PrimExpr> args = params.Map([](const Var& var) -> PrimExpr { return var; });

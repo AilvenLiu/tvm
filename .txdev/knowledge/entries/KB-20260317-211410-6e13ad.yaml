@@ -1,0 +1,40 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "Both produce a local scalar buffer via T.local_scalar(dtype=..., name=None).\
+    \ The annotation\nsyntax is parsed in visit_ann_assign (parser/tir/parser.py:548).\
+    \ Equivalences:\n- phase = Tx.local_scalar(\"int32\") <=> phase: Tx.int32\n- wid\
+    \ = Tx.local_scalar(\"int32\", \"wid\") <=> wid: Tx.int32 (auto-named from variable)\n\
+    \nCannot replace in these cases:\n1. Inside @Tx.meta_class __init__: runs as regular\
+    \ Python, not TVMScript-parsed.\n   self.x: Tx.int32 is just a Python type hint\
+    \ (no-op), not an IR builder call.\n2. Dynamic names: Tx.local_scalar(\"uint64\"\
+    , name=prefix + \"sdesc\") — annotation syntax\n   cannot accept computed names.\n"
+  summary: 'var: Tx.int32 annotation and Tx.local_scalar(''int32'') produce identical
+    IR, but annotations only work inside TVMScript-parsed code (not in @Tx.meta_class
+    __init__) and don''t support custom names.'
+created: '2026-03-17'
+id: KB-20260317-211410-6e13ad
+scope:
+  - repo
+tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - local-scalar
+title: 'Tx.local_scalar() vs var: Tx.int32 type annotation equivalence and limits'
+updated: '2026-03-17'

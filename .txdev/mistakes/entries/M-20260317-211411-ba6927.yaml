@@ -1,0 +1,61 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The pipeline.py MBarrier.arrive() method was changed to default cta_id=None,
+    pred=None
+
+    (local arrive) for "simplicity". This worked fine for single-CTA kernels but caused
+    deadlocks
+
+    in multi-CTA cluster kernels (CTA_GROUP=2) like deepgemm and fp8_blockwise_gemm.
+
+
+    Root cause: local arrive (mbarrier.arrive.shared.b64) only signals the calling
+    CTA''s own
+
+    barrier, but multi-CTA kernels need all CTAs to signal CTA 0''s barrier via remote
+    arrive
+
+    (mbarrier.arrive.shared::cluster.b64).
+
+
+    Prevention: when changing defaults for PTX primitives that have different semantics
+    depending
+
+    on cluster configuration, always test with both single-CTA and multi-CTA kernels
+    before
+
+    committing. The lower_tirx pass handles the optimization from remote to local
+    automatically.
+
+    '
+  summary: Changing the default cta_id/pred parameters for MBarrier.arrive() from
+    remote to local arrive caused deadlocks in CTA_GROUP>1 kernels that were not caught
+    until test_deepgemm hung.
+created: '2026-03-17'
+id: M-20260317-211411-ba6927
+scope:
+  - repo
+tags:
+  - pipeline
+  - mbarrier
+  - testing
+  - deadlock
+  - regression
+title: Changing MBarrier.arrive() default without testing multi-CTA kernels
+updated: '2026-03-17'

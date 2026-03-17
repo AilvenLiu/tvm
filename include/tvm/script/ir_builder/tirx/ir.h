@@ -71,7 +71,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
  * \brief The primitive function statement.
  * \return The PrimFuncFrame.
  */
-PrimFuncFrame PrimFunc(bool is_private, bool is_tirx = false);
+PrimFuncFrame PrimFunc(bool is_private, bool is_tirx = false, bool persistent = false);
 
 /*!
  * \brief The PrimFunc variable arguments adding function.

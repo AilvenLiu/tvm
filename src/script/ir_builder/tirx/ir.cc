@@ -71,7 +71,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                 axis_separators.value_or(ffi::Array<IntImm>()), Span(), layout, allocated_addr);
 }
 
-PrimFuncFrame PrimFunc(bool is_private, bool is_tirx) {
+PrimFuncFrame PrimFunc(bool is_private, bool is_tirx, bool persistent) {
   ObjectPtr<PrimFuncFrameNode> n = ffi::make_object<PrimFuncFrameNode>();
   n->name = std::nullopt;
   n->is_private = is_private;
@@ -82,6 +82,7 @@ PrimFuncFrame PrimFunc(bool is_private, bool is_tirx) {
   n->env_threads.clear();
   n->root_alloc_buffers.clear();
   n->is_tirx = is_tirx;
+  n->persistent = persistent;
   return PrimFuncFrame(n);
 }
 

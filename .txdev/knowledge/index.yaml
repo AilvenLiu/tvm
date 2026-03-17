@@ -218,6 +218,57 @@ entries:
       - python
     title: Side-effect-only imports in op_schedule __init__.py for registration
     updated: '2026-03-07'
+  - created: '2026-03-17'
+    id: KB-20260317-211410-3d3076
+    path: entries/KB-20260317-211410-3d3076.yaml
+    scope:
+      - repo
+    tags:
+      - tirx
+      - pipeline
+      - pool-allocator
+      - smem
+      - barrier
+    title: PoolAllocator pattern for replacing manual SMEM layout with barriers
+    updated: '2026-03-17'
+  - created: '2026-03-17'
+    id: KB-20260317-211410-6e13ad
+    path: entries/KB-20260317-211410-6e13ad.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - dsl
+      - syntax
+      - local-scalar
+    title: 'Tx.local_scalar() vs var: Tx.int32 type annotation equivalence and limits'
+    updated: '2026-03-17'
+  - created: '2026-03-17'
+    id: KB-20260317-211410-c51a41
+    path: entries/KB-20260317-211410-c51a41.yaml
+    scope:
+      - repo
+    tags:
+      - tirx
+      - pipeline
+      - mbarrier
+      - ptx
+      - deadlock
+      - gpu
+    title: MBarrier.arrive() local vs remote semantics and CTA_GROUP deadlocks
+    updated: '2026-03-17'
+  - created: '2026-03-17'
+    id: KB-20260317-211410-e366ed
+    path: entries/KB-20260317-211410-e366ed.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - parser
+      - python
+      - pitfall
+    title: TVMScript parser intercepts augmented assignment (+=) inside @Tx.prim_func
+    updated: '2026-03-17'
 tags:
   api:
     - KB-20260301-0002
@@ -241,10 +292,14 @@ tags:
     - KB-20260301-0001
   flaky-tests:
     - KB-20260307-231252-48549d
+  deadlock:
+    - KB-20260317-211410-c51a41
   dsl:
     - KB-20260301-0004
+    - KB-20260317-211410-6e13ad
   gpu:
     - KB-20260307-231252-48549d
+    - KB-20260317-211410-c51a41
   git:
     - KB-20260228-0001
     - KB-20260228-0003
@@ -277,14 +332,31 @@ tags:
     - KB-20260301-0001
   pre-push:
     - KB-20260228-0003
+  barrier:
+    - KB-20260317-211410-3d3076
+  local-scalar:
+    - KB-20260317-211410-6e13ad
+  mbarrier:
+    - KB-20260317-211410-c51a41
+  parser:
+    - KB-20260317-211410-e366ed
+  pipeline:
+    - KB-20260317-211410-3d3076
+    - KB-20260317-211410-c51a41
+  pitfall:
+    - KB-20260317-211410-e366ed
+  pool-allocator:
+    - KB-20260317-211410-3d3076
   ptx:
     - KB-20260227-0002
+    - KB-20260317-211410-c51a41
   pytest:
     - KB-20260228-0002
     - KB-20260306-195314-a33c27
   python:
     - KB-20260301-0005
     - KB-20260307-231252-72bc64
+    - KB-20260317-211410-e366ed
   recovery:
     - KB-20260228-0003
   refactor:
@@ -304,6 +376,10 @@ tags:
     - KB-20260307-231252-48549d
   skip:
     - KB-20260228-0002
+  smem:
+    - KB-20260317-211410-3d3076
+  syntax:
+    - KB-20260317-211410-6e13ad
   testing:
     - KB-20260227-0001
     - KB-20260228-0002
@@ -320,6 +396,8 @@ tags:
     - KB-20260301-0004
     - KB-20260301-0005
     - KB-20260306-195314-a33c27
+    - KB-20260317-211410-3d3076
+    - KB-20260317-211410-c51a41
   triage:
     - KB-20260306-195314-a33c27
   tma:
@@ -330,6 +408,8 @@ tags:
     - KB-20260228-0004
   tvmscript:
     - KB-20260301-0001
+    - KB-20260317-211410-6e13ad
+    - KB-20260317-211410-e366ed
   validation:
     - KB-20260228-0004
   warnings:

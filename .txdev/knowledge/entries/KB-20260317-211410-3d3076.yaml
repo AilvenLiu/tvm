@@ -1,0 +1,79 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The old pattern used a single large Tx.alloc_buffer([SMEM_SIZE], "uint8")
+    and manually computed
+
+    elem_offsets for each barrier and data buffer. Custom Barriers/BarTMA2MMA/BarMMA2LD/etc
+    classes
+
+    wrapped the raw mbarrier operations.
+
+
+    The new pattern:
+
+    ```python
+
+    pool = Tx.PoolAllocator()
+
+    tmem_addr = pool.alloc([1], "uint32", align=4)
+
+    tma2mma = TMABar(pool, PIPELINE_DEPTH, "tma2mma")
+
+    mma2tma = TCGen05Bar(pool, PIPELINE_DEPTH, "mma2tma", phase_offset=1)
+
+    mma2ld = TCGen05Bar(pool, NUM_CONSUMER, "mma2ld")
+
+    ld2mma = MBarrier(pool, NUM_CONSUMER, "ld2mma", phase_offset=1)
+
+    pool.move_base_to(1024)
+
+    A_smem = pool.alloc(...)
+
+    pool.commit()
+
+    ```
+
+
+    Key mappings:
+
+    - is_p2c=True -> phase_offset=0; is_p2c=False -> phase_offset=1
+
+    - 2D barrier (depth, width) with width=NUM_CONSUMER -> 1D barrier with depth=NUM_CONSUMER
+
+    - bar.wait(idx_d, idx_w, phase) -> bar.wait(idx, phase)
+
+    - tma2mma.mbar.ptr_to([0, 0]) -> tma2mma.ptr_to([0])
+
+    - tmem_addr (scalar) -> tmem_addr[0] (buffer element access)
+
+    '
+  summary: Use Tx.PoolAllocator() + TMABar/TCGen05Bar/MBarrier to replace manual Tx.alloc_buffer
+    + Tx.decl_buffer + custom Barrier classes, reducing ~80 lines per kernel to ~10.
+created: '2026-03-17'
+id: KB-20260317-211410-3d3076
+scope:
+  - repo
+tags:
+  - tirx
+  - pipeline
+  - pool-allocator
+  - smem
+  - barrier
+title: PoolAllocator pattern for replacing manual SMEM layout with barriers
+updated: '2026-03-17'

@@ -19,8 +19,11 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from tvm.tirx.warp_role import WarpgroupRole, WarpRole  # noqa: F401
+
 from . import tir as _tir
 from .ir_builder.tir import tirx as _ir_builder_tirx
+from .ir_builder.tir.ir import elected  # noqa: F401
 from .ir_builder.tir.tirx import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import  # noqa: F403
 
 if TYPE_CHECKING:

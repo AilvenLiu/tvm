@@ -1555,5 +1555,221 @@ def test_chained_partition_preserves_root_buffer():
     assert tile3.buffer.same_as(buf), "partition on matched buffer must trace to root"
 
 
+def test_roundtrip_elected():
+    """Tx.elected() should round-trip through printer and parser."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float16", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                A_smem = Tx.alloc_buffer([128], dtype="float16", scope="shared")
+                with Tx.elected():
+                    Tx.copy(A_smem, A)
+    # fmt: on
+
+    code = test.script()
+    assert "Tx.elected()" in code, f"printer should emit Tx.elected(), got:\n{code}"
+    assert "Tx.thread()" not in code, "printer should NOT emit Tx.thread() for elected pattern"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_serial_unroll_false():
+    """Tx.serial(N, unroll=False) should round-trip."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                for _ in Tx.serial(10, unroll=False):
+                    Tx.fill(A[0:32], Tx.float32(0))
+    # fmt: on
+
+    code = test.script()
+    assert "unroll=False" in code, f"printer should emit unroll=False, got:\n{code}"
+    assert "annotations" not in code, "printer should NOT emit annotations dict"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_serial_unroll_false_with_other_annotations():
+    """When other annotations exist alongside disable_unroll, fall back to full dict."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                for _ in Tx.serial(10, annotations={"disable_unroll": True, "custom": 42}):
+                    Tx.fill(A[0:32], Tx.float32(0))
+    # fmt: on
+
+    code = test.script()
+    assert "annotations=" in code, "printer should emit full annotations when multiple keys exist"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_unary_inplace():
+    """Single-arg unary ops (in-place) should round-trip."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                with Tx.warp():
+                    Tx.exp2(A[0:32])
+                    Tx.sqrt(A[32:64])
+                    Tx.reciprocal(A[64:96])
+    # fmt: on
+
+    code = test.script()
+    # Each op should appear with a single arg (no duplicate src, no trailing Nones)
+    assert "Tx.exp2(A[0:32])" in code, f"expected single-arg exp2, got:\n{code}"
+    assert "Tx.sqrt(A[32:64])" in code, f"expected single-arg sqrt, got:\n{code}"
+    assert "Tx.reciprocal(A[64:96])" in code, f"expected single-arg reciprocal, got:\n{code}"
+    assert "None" not in code, f"trailing None args should be trimmed:\n{code}"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_unary_different_dst_src():
+    """Unary ops with different dst and src should keep both args."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        B = Tx.match_buffer(B_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                with Tx.warp():
+                    Tx.exp2(A[0:32], B[0:32])
+    # fmt: on
+
+    code = test.script()
+    assert "Tx.exp2(A[0:32], B[0:32])" in code, f"different dst/src should keep both:\n{code}"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_persistent_decorator():
+    """@Tx.prim_func(persistent=True) should round-trip."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, persistent=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                Tx.fill(A[0:32], Tx.float32(0))
+    # fmt: on
+
+    code = test.script()
+    assert "persistent=True" in code, f"persistent not in decorator:\n{code}"
+    assert "tirx.persistent_kernel" not in code, "should NOT appear as func_attr"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_persistent_not_present():
+    """Without persistent=True, the keyword should not appear."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                Tx.fill(A[0:32], Tx.float32(0))
+    # fmt: on
+
+    code = test.script()
+    assert "persistent" not in code, f"persistent should NOT appear:\n{code}"
+
+
+def test_warp_role():
+    """WarpRole should emit if + warp + setmaxnreg."""
+    from tvm.tirx.warp_role import WarpRole
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([4], parent="cta")
+            warp_id = Tx.warp_id([4], parent="warpgroup")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                with WarpRole(warp_id, 1, regs=48):
+                    Tx.fill(A[0:32], Tx.float32(0))
+                with WarpRole(warp_id, 0, regs=232, increase=True):
+                    Tx.fill(A[32:64], Tx.float32(1))
+    # fmt: on
+
+    code = test.script()
+    assert "warp_id == 1" in code, f"should have warp_id==1 guard:\n{code}"
+    assert "warp_id == 0" in code, f"should have warp_id==0 guard:\n{code}"
+    assert "setmaxnreg" in code, f"should have setmaxnreg:\n{code}"
+    assert "Tx.warp():" in code, f"should have Tx.warp() scope:\n{code}"
+    # The printed code is valid TIR — it should parse back
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_warpgroup_role():
+    """WarpgroupRole should emit if + warpgroup scope + setmaxnreg."""
+    from tvm.tirx.warp_role import WarpgroupRole
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128,), "float32", scope="global")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            wg_id = Tx.warpgroup_id([4], parent="cta")
+            Tx.warp_id([1], parent="warpgroup")
+            Tx.thread_id([32], parent="warp")
+            with Tx.cta():
+                with WarpgroupRole(wg_id, 2, regs=200, increase=True):
+                    Tx.fill(A[0:32], Tx.float32(0))
+    # fmt: on
+
+    code = test.script()
+    assert "wg_id == 2" in code, f"should have wg_id==2 guard:\n{code}"
+    assert "setmaxnreg" in code, f"should have setmaxnreg:\n{code}"
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     tvm.testing.main()

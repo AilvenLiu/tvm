@@ -99,8 +99,27 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           if (bool(dispatch_op_map.get(op, tvm::Bool(false))) ||
               bool(async_op_map.get(op, tvm::Bool(false)))) {
             // Dispatch ops
+            // Trim trailing None args (e.g. optional bias=None, scale=None)
+            size_t n_args = op_call->args.size();
+            while (n_args > 0 &&
+                   op_call->args[n_args - 1].type_index() == ffi::TypeIndex::kTVMFFINone) {
+              --n_args;
+            }
+            // Detect in-place unary ops: after trimming Nones, if exactly 2 args
+            // and args[0]/args[1] refer to the same buffer region, collapse to 1 arg
+            bool inplace_unary = false;
+            if (n_args == 2) {
+              auto dst_opt = op_call->args[0].as<tir::BufferRegion>();
+              auto src_opt = op_call->args[1].as<tir::BufferRegion>();
+              if (dst_opt.has_value() && src_opt.has_value() &&
+                  dst_opt.value()->buffer.same_as(src_opt.value()->buffer) &&
+                  StructuralEqual()(dst_opt.value()->region, src_opt.value()->region)) {
+                inplace_unary = true;
+              }
+            }
             ffi::Array<Doc> args;
-            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+            for (size_t i = 0; i < n_args; ++i) {
+              if (inplace_unary && i == 1) continue;  // skip duplicate src
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
             ffi::Optional<ExprDoc> disp = std::nullopt;

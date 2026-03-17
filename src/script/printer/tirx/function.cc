@@ -119,9 +119,13 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                 func_name->name) {
           keys_to_remove.insert(tvm::attr::kGlobalSymbol);
         }
-        // for TIRx, don't display it
+        // for TIRx, don't display it (shown in decorator)
         if (func->attrs->dict.count(tvm::attr::kIsTIRx)) {
           keys_to_remove.insert(tvm::attr::kIsTIRx);
+        }
+        // for persistent, don't display it (shown in decorator)
+        if (func->attrs->dict.count(tir::attr::kPersistentKernel)) {
+          keys_to_remove.insert(tir::attr::kPersistentKernel);
         }
         ffi::Map<ffi::String, Any> new_attrs;
         for (auto kv : func->attrs->dict) {
@@ -207,6 +211,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       }
       if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRx)) {
         kwargs_keys.push_back("tirx");
+        kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
+      }
+      if (func->attrs.defined() && func->attrs->dict.count(tir::attr::kPersistentKernel)) {
+        kwargs_keys.push_back("persistent");
         kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
       }
       ffi::Array<ExprDoc> pos_args;

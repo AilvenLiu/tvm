@@ -162,6 +162,31 @@ entries:
       - correctness
     title: Copied entire shared memory buffer instead of written subregion in test
     updated: '2026-03-07'
+  - created: '2026-03-17'
+    id: M-20260317-211411-ba6927
+    path: entries/M-20260317-211411-ba6927.yaml
+    scope:
+      - repo
+    tags:
+      - pipeline
+      - mbarrier
+      - testing
+      - deadlock
+      - regression
+    title: Changing MBarrier.arrive() default without testing multi-CTA kernels
+    updated: '2026-03-17'
+  - created: '2026-03-17'
+    id: M-20260317-211411-dfb881
+    path: entries/M-20260317-211411-dfb881.yaml
+    scope:
+      - repo
+    tags:
+      - scope-control
+      - tirx
+      - refactor
+      - thoroughness
+    title: Applying syntax changes to only a few kernels instead of all applicable files
+    updated: '2026-03-17'
 tags:
   api:
     - M-20260301-0002
@@ -170,6 +195,8 @@ tags:
   correctness:
     - M-20260301-0001
     - M-20260307-231252-423c4d
+  deadlock:
+    - M-20260317-211411-ba6927
   debugging:
     - M-20260227-0003
   flaky-tests:
@@ -194,6 +221,8 @@ tags:
   op-schedule:
     - M-20260301-0003
     - M-20260302-015214-5390a0
+  mbarrier:
+    - M-20260317-211411-ba6927
   over-engineering:
     - M-20260301-0002
   pre-commit:
@@ -216,17 +245,23 @@ tags:
     - M-20260227-0002
   rebase:
     - M-20260228-0002
+  pipeline:
+    - M-20260317-211411-ba6927
   refactor:
     - M-20260302-015214-5390a0
+    - M-20260317-211411-dfb881
   registration:
     - M-20260301-0003
   requirements:
     - M-20260227-0001
+  regression:
+    - M-20260317-211411-ba6927
   scope-control:
     - M-20260228-0002
     - M-20260301-0001
     - M-20260301-0002
     - M-20260306-195314-50a55c
+    - M-20260317-211411-dfb881
   shared-memory:
     - M-20260307-231252-423c4d
   shell:
@@ -237,8 +272,12 @@ tags:
     - M-20260227-0003
     - M-20260302-015214-5390a0
     - M-20260307-231252-423c4d
+    - M-20260317-211411-ba6927
+  thoroughness:
+    - M-20260317-211411-dfb881
   tirx:
     - M-20260301-0002
+    - M-20260317-211411-dfb881
   user-intent:
     - M-20260227-0001
   warnings:

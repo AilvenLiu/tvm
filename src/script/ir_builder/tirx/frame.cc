@@ -72,6 +72,9 @@ void PrimFuncFrameNode::ExitWithScope() {
   if (is_tirx) {
     insert_attr(tvm::attr::kIsTIRx, tvm::Bool(true));
   }
+  if (persistent) {
+    insert_attr(tvm::tirx::attr::kPersistentKernel, tvm::Bool(true));
+  }
   tvm::tirx::PrimFunc func(
       /*params=*/args,
       /*body=*/AsStmt(stmts),
@@ -280,7 +283,7 @@ void HintFrameNode::ExitWithScope() {
       tvm::tirx::AttrStmt(full_attrs, "tirx_hint", IntImm(DataType::Int(32), 1), AsStmt(stmts)));
 }
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

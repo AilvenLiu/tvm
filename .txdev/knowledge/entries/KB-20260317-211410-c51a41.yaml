@@ -1,0 +1,62 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'In pipeline.py, MBarrier.arrive() generates different PTX depending on
+    whether cta_id/pred are None:
+
+    - cta_id=None, pred=None -> mbarrier.arrive.shared.b64 (LOCAL arrive, only the
+    calling CTA''s barrier)
+
+    - cta_id=0, pred=True -> mbarrier.arrive.shared::cluster.b64 (REMOTE arrive, targets
+    CTA 0''s barrier)
+
+
+    For CTA_GROUP=2 kernels (e.g. hgemm with 2-CTA clusters), all CTAs must arrive
+    on CTA 0''s barrier.
+
+    Using local arrive causes CTA 1 to arrive on its own barrier (which nobody waits
+    on), while CTA 0''s
+
+    barrier never gets enough arrivals -> deadlock.
+
+
+    The fix was to restore the default to cta_id=0, pred=True (remote arrive). The
+    lower_tirx pass
+
+    (lower_tirx_scope_ids.cc) optimizes away the remote overhead for single-CTA cases
+    by checking
+
+    if cta_id and pred are actually needed.
+
+    '
+  summary: MBarrier.arrive() with cta_id=None uses local arrive (mbarrier.arrive.shared.b64);
+    with cta_id=0 uses remote arrive (mbarrier.arrive.shared::cluster.b64). Multi-CTA
+    kernels (CTA_GROUP>1) require remote arrive to avoid deadlocks.
+created: '2026-03-17'
+id: KB-20260317-211410-c51a41
+scope:
+  - repo
+tags:
+  - tirx
+  - pipeline
+  - mbarrier
+  - ptx
+  - deadlock
+  - gpu
+title: MBarrier.arrive() local vs remote semantics and CTA_GROUP deadlocks
+updated: '2026-03-17'

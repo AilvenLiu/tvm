@@ -297,6 +297,14 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
               return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
             } else {
               auto cond = scope_slice->slices.as<PrimExpr>().value();
+              // Detect thread()[ptx.elect_sync()] and print as elected()
+              if (exec_scope->name == "thread") {
+                if (auto call_node = cond.as<tir::CallNode>()) {
+                  if (call_node->op.same_as(tir::builtin::ptx_elect_sync())) {
+                    return ScopeDoc(std::nullopt, TIR(d, "elected")->Call({}), (*frame)->stmts);
+                  }
+                }
+              }
               auto cond_doc = d->AsDoc<ExprDoc>(cond, scope_p->Attr("select_cond"));
               return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
             }

@@ -54,7 +54,7 @@ f_insert = _ffi_api.OpCall  # pylint: disable=no-member
 
 def zero(
     dst: BufferRegion | Buffer,
-    src: BufferRegion | Buffer,
+    src: BufferRegion | Buffer | None = None,
     workspace: dict[str, Buffer] | None = None,
     dispatch: str | None = None,
     **kwargs,
@@ -65,13 +65,16 @@ def zero(
     ----------
     dst : Union[BufferRegion, Buffer]
         The destination buffer region for zero result.
+        When src is omitted, also used as the source (in-place).
 
-    src : Union[BufferRegion, Buffer]
-        The source buffer region.
+    src : Union[BufferRegion, Buffer], optional
+        The source buffer region. If omitted, dst is used (in-place).
 
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
+    if src is None:
+        src = dst
     if workspace is None:
         workspace = {}
     config = kwargs or {}
@@ -82,7 +85,7 @@ def zero(
 
 def sqrt(
     dst: BufferRegion | Buffer,
-    src: BufferRegion | Buffer,
+    src: BufferRegion | Buffer | None = None,
     bias: BufferRegion | Buffer | FloatImm | None = None,
     scale: FloatImm | None = None,
     workspace: dict[str, Buffer] | None = None,
@@ -97,9 +100,10 @@ def sqrt(
     ----------
     dst : Union[BufferRegion, Buffer]
         The destination buffer region for sqrt result.
+        When src is omitted, also used as the source (in-place).
 
-    src : Union[BufferRegion, Buffer]
-        The source buffer region.
+    src : Union[BufferRegion, Buffer], optional
+        The source buffer region. If omitted, dst is used (in-place).
 
     bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
         The bias of the sqrt src. Only supported on Trn.
@@ -110,6 +114,8 @@ def sqrt(
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
+    if src is None:
+        src = dst
     if workspace is None:
         workspace = {}
     config = kwargs or {}
@@ -642,7 +648,7 @@ def min(
 
 def reciprocal(
     dst: BufferRegion | Buffer,
-    src: BufferRegion | Buffer,
+    src: BufferRegion | Buffer | None = None,
     workspace: dict[str, Buffer] | None = None,
     dispatch: str | None = None,
     **kwargs,
@@ -653,13 +659,16 @@ def reciprocal(
     ----------
     dst : Union[BufferRegion, Buffer]
         The destination buffer region for reciprocal result.
+        When src is omitted, also used as the source (in-place).
 
-    src : Union[BufferRegion, Buffer]
-        The source buffer region.
+    src : Union[BufferRegion, Buffer], optional
+        The source buffer region. If omitted, dst is used (in-place).
 
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
+    if src is None:
+        src = dst
     if workspace is None:
         workspace = {}
     config = kwargs or {}
@@ -775,7 +784,7 @@ def minimum(
 
 def exp(
     dst: BufferRegion | Buffer,
-    src: BufferRegion | Buffer,
+    src: BufferRegion | Buffer | None = None,
     bias: BufferRegion | Buffer | FloatImm | None = None,
     scale: FloatImm | None = None,
     workspace: dict[str, Buffer] | None = None,
@@ -788,9 +797,10 @@ def exp(
     ----------
     dst : Union[BufferRegion, Buffer]
         The destination buffer region for exp result.
+        When src is omitted, also used as the source (in-place).
 
-    src : Union[BufferRegion, Buffer]
-        The source buffer region.
+    src : Union[BufferRegion, Buffer], optional
+        The source buffer region. If omitted, dst is used (in-place).
 
     bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
         The bias of the exp src. Only supported on Trn.
@@ -801,6 +811,8 @@ def exp(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
     """
+    if src is None:
+        src = dst
     if workspace is None:
         workspace = {}
     config = kwargs or {}
@@ -815,7 +827,7 @@ def exp(
 
 def exp2(
     dst: BufferRegion | Buffer,
-    src: BufferRegion | Buffer,
+    src: BufferRegion | Buffer | None = None,
     bias: BufferRegion | Buffer | FloatImm | None = None,
     scale: FloatImm | None = None,
     workspace: dict[str, Buffer] | None = None,
@@ -828,9 +840,10 @@ def exp2(
     ----------
     dst : Union[BufferRegion, Buffer]
         The destination buffer region for exp2 result.
+        When src is omitted, also used as the source (in-place).
 
-    src : Union[BufferRegion, Buffer]
-        The source buffer region.
+    src : Union[BufferRegion, Buffer], optional
+        The source buffer region. If omitted, dst is used (in-place).
 
     bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
         The bias of the exp2 src.
@@ -841,6 +854,8 @@ def exp2(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
     """
+    if src is None:
+        src = dst
     if workspace is None:
         workspace = {}
     config = kwargs or {}

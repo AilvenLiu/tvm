@@ -33,6 +33,7 @@ def prim_func(
     private: bool = False,
     check_well_formed=True,
     tirx: bool = False,
+    persistent: bool = False,
 ) -> PrimFunc | Callable:
     """The parsing method for tirx prim func, by using `@prim_func` as decorator.
 

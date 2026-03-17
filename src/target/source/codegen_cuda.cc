@@ -186,6 +186,11 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
 void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
   ThreadIdxExtractor extractor;
   extractor(f->body);
+  // Also check PrimFunc attrs for persistent kernel (decorator-level)
+  bool is_persistent = extractor.is_persistent_kernel;
+  if (!is_persistent && f->attrs.defined() && f->attrs->dict.count(tir::attr::kPersistentKernel)) {
+    is_persistent = true;
+  }
   arith::Analyzer analyzer;
   PrimExpr threadIdx_ext = analyzer.Simplify(extractor.threadIdx_x_ext * extractor.threadIdx_y_ext *
                                              extractor.threadIdx_z_ext);
@@ -194,7 +199,7 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
       // unable to extract the number of threads per block, hence directly return
       return;
     }
-    if (extractor.is_persistent_kernel) {
+    if (is_persistent) {
       os << " __launch_bounds__(" << threadIdx_ext_int->value << ", 1)";
     } else {
       os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";

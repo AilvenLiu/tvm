@@ -137,9 +137,36 @@ entries:
       - architecture
     title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
     updated: '2026-03-07'
+  - created: '2026-03-17'
+    id: ADR-20260317-211411-5664ea
+    path: entries/ADR-20260317-211411-5664ea.yaml
+    scope:
+      - repo
+    tags:
+      - pipeline
+      - mbarrier
+      - ptx
+      - api-design
+    title: MBarrier.arrive() defaults to remote arrive (cta_id=0, pred=True)
+    updated: '2026-03-17'
+  - created: '2026-03-17'
+    id: ADR-20260317-211411-a47556
+    path: entries/ADR-20260317-211411-a47556.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - dsl
+      - syntax
+      - api-design
+    title: Keep Tx.local_scalar in meta_class __init__, use type annotations elsewhere
+    updated: '2026-03-17'
 tags:
   api:
     - ADR-20260228-0003
+  api-design:
+    - ADR-20260317-211411-5664ea
+    - ADR-20260317-211411-a47556
   api-evolution:
     - ADR-20260228-0002
   assert_structural_equal:
@@ -159,6 +186,16 @@ tags:
     - ADR-20260301-0001
   logging:
     - ADR-20260228-0003
+  dsl:
+    - ADR-20260317-211411-a47556
+  mbarrier:
+    - ADR-20260317-211411-5664ea
+  pipeline:
+    - ADR-20260317-211411-5664ea
+  ptx:
+    - ADR-20260317-211411-5664ea
+  syntax:
+    - ADR-20260317-211411-a47556
   architecture:
     - ADR-20260307-231252-f0561c
   op-schedule:
@@ -203,6 +240,7 @@ tags:
     - ADR-20260228-0003
   tvmscript:
     - ADR-20260228-0002
+    - ADR-20260317-211411-a47556
   upstream-alignment:
     - ADR-20260228-0001
     - ADR-20260301-0001

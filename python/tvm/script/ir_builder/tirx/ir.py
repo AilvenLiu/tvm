@@ -245,25 +245,44 @@ def buffer_decl(*args, **kwargs):
     return buffer(*args, **kwargs)
 
 
-def prim_func(is_private: bool = False, is_tirp=False) -> frame.PrimFuncFrame:
+def prim_func(
+    is_private: bool = False,
+    is_tirp=False,
+    persistent: bool = False,
+    *,
+    private: bool | None = None,
+    tirx: bool | None = None,
+    is_tirx: bool | None = None,
+) -> frame.PrimFuncFrame:
     """The primitive function statement.
 
     Parameters
     ----------
     is_private : bool
-        Whether the PrimFunc is annotated as private
-        (if yes, it does not have a global symbol assigned;
-        otherwise, the global symbol is the PrimFunc's name)
-
+        Whether the PrimFunc is annotated as private.
     is_tirp : bool
-        Whether the PrimFunc is a TIR+ PrimFunc
+        Whether the PrimFunc is a TIR+ PrimFunc.
+    persistent : bool
+        Whether this is a persistent kernel.
+    private : bool
+        Alias for ``is_private`` (used in decorator syntax).
+    tirx : bool
+        Alias for ``is_tirp`` (used in decorator syntax).
+    is_tirx : bool
+        Alias for ``is_tirp``.
 
     Returns
     -------
     res : frame.PrimFuncFrame
         The PrimFuncFrame.
     """
-    return _ffi_api.PrimFunc(is_private, is_tirp)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if private is not None:
+        is_private = private
+    if tirx is not None:
+        is_tirp = tirx
+    if is_tirx is not None:
+        is_tirp = is_tirx
+    return _ffi_api.PrimFunc(is_private, is_tirp, persistent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def arg(name: str, obj: Var | Buffer) -> Var | Buffer:
@@ -564,6 +583,19 @@ def thread(
         The ExecScopeFrame.
     """
     return _ffi_api.Thread(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def elected() -> frame.ExecScopeFrame:
+    """Shorthand for ``thread()[ptx.elect_sync()]``.
+
+    Selects a single elected thread within the current warp.
+
+    Returns
+    -------
+    res : frame.ExecScopeFrame
+        The ExecScopeFrame with elect_sync predicate.
+    """
+    return thread()[ptx.elect_sync()]
 
 
 def scope_id(
@@ -1054,6 +1086,7 @@ def serial(
     *,
     annotations: dict[str, Any] | None = None,
     step: PrimExpr | None = None,
+    unroll: bool | None = None,
 ) -> frame.ForFrame:
     """The serial For statement.
 
@@ -1071,11 +1104,18 @@ def serial(
     step : PrimExpr
         The optional step value of iteration.
 
+    unroll : bool, optional
+        If False, adds ``{"disable_unroll": True}`` annotation.
+        Shorthand for ``annotations={"disable_unroll": True}``.
+
     Returns
     -------
     res : frame.ForFrame
         The ForFrame.
     """
+    if unroll is not None and not unroll:
+        annotations = dict(annotations) if annotations else {}
+        annotations["disable_unroll"] = True
     if stop is None:
         stop = start
         if hasattr(start, "dtype"):

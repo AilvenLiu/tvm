@@ -89,6 +89,8 @@ class PrimFuncFrameNode : public TIRFrameNode {
   // TIR utils
   /*! \brief Whether it is TIRX PrimFunc. */
   bool is_tirx;
+  /*! \brief Whether it is a persistent kernel. */
+  bool persistent;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -101,7 +103,8 @@ class PrimFuncFrameNode : public TIRFrameNode {
         .def_ro("attrs", &PrimFuncFrameNode::attrs)
         .def_ro("env_threads", &PrimFuncFrameNode::env_threads)
         .def_ro("root_alloc_buffers", &PrimFuncFrameNode::root_alloc_buffers)
-        .def_ro("is_tirx", &PrimFuncFrameNode::is_tirx);
+        .def_ro("is_tirx", &PrimFuncFrameNode::is_tirx)
+        .def_ro("persistent", &PrimFuncFrameNode::persistent);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.PrimFuncFrame", PrimFuncFrameNode,
                                     TIRFrameNode);

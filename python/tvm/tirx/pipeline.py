@@ -73,9 +73,10 @@ class MBarrier:
         Descriptive name (unused at runtime, for readability).
     """
 
-    def __init__(self, pool, depth, name="mbar"):
+    def __init__(self, pool, depth, name="mbar", phase_offset=0):
         self.buf = pool.alloc((depth,), "uint64", align=8)
         self.depth = depth
+        self.phase_offset = phase_offset
 
     @Tx.inline
     def init(self, count):
@@ -85,7 +86,7 @@ class MBarrier:
 
     @Tx.inline
     def wait(self, stage, phase):
-        Tx.ptx.mbarrier.try_wait(self.buf.ptr_to([stage]), phase)
+        Tx.ptx.mbarrier.try_wait(self.buf.ptr_to([stage]), phase ^ self.phase_offset)
 
     @Tx.inline
     def arrive(self, stage, cta_id=0, pred=True):
@@ -106,20 +107,35 @@ class MBarrier:
         remote = object.__new__(type(self))
         remote.buf = buf
         remote.depth = self.depth
+        remote.phase_offset = self.phase_offset
         return remote
 
 
 class TMABar(MBarrier):
-    """Barrier signaled by TMA (mbarrier.arrive.expect_tx)."""
+    """Barrier signaled by TMA (mbarrier.arrive.expect_tx).
+
+    When ``tx_count`` is None, falls back to a plain mbarrier.arrive.
+    """
 
     @Tx.inline
-    def arrive(self, stage, tx_count):
-        Tx.ptx.mbarrier.arrive.expect_tx(self.buf.ptr_to([stage]), tx_count)
+    def arrive(self, stage, tx_count=None):
+        if tx_count is not None:
+            Tx.ptx.mbarrier.arrive.expect_tx(self.buf.ptr_to([stage]), tx_count)
+        else:
+            Tx.ptx.mbarrier.arrive(self.buf.ptr_to([stage]))
 
 
 class TCGen05Bar(MBarrier):
-    """Barrier signaled by tcgen05 commit."""
+    """Barrier signaled by tcgen05 commit.
+
+    When ``cta_group`` is 1 (default), the commit is guarded by
+    ``ptx.elect_sync()`` so only one thread issues it.
+    """
 
     @Tx.inline
-    def arrive(self, stage, cta_group, cta_mask):
-        Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)
+    def arrive(self, stage, cta_group=1, cta_mask=None):
+        if cta_mask is None and cta_group == 1:
+            if Tx.ptx.elect_sync():
+                Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]))
+        else:
+            Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)

@@ -596,11 +596,12 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     func_annotation = supplied_annotation.get(node.name, {})
     privacy = find_decorator_annotation(node, "private", default=False)
     tirx = find_decorator_annotation(node, "tirx", default=False)
+    persistent = find_decorator_annotation(node, "persistent", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
         # self.var_table.add("range", range_sugar)
         try:
-            prim_func_ctx = T.prim_func(is_private=privacy, is_tirx=tirx)
+            prim_func_ctx = T.prim_func(is_private=privacy, is_tirx=tirx, persistent=persistent)
         except TypeError:
             # Backward compatibility for older IRBuilder signatures.
             prim_func_ctx = T.prim_func(is_private=privacy, is_tirp=tirx)
