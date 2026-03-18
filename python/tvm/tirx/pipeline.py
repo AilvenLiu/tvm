@@ -114,7 +114,8 @@ class MBarrier:
 class TMABar(MBarrier):
     """Barrier signaled by TMA (mbarrier.arrive.expect_tx).
 
-    When ``tx_count`` is None, falls back to a plain mbarrier.arrive.
+    When ``tx_count`` is None, falls back to a remote mbarrier.arrive
+    (matching MBarrier.arrive defaults).
     """
 
     @Tx.inline
@@ -122,20 +123,20 @@ class TMABar(MBarrier):
         if tx_count is not None:
             Tx.ptx.mbarrier.arrive.expect_tx(self.buf.ptr_to([stage]), tx_count)
         else:
-            Tx.ptx.mbarrier.arrive(self.buf.ptr_to([stage]))
+            Tx.ptx.mbarrier.arrive(self.buf.ptr_to([stage]), cta_id=0, pred=True)
 
 
 class TCGen05Bar(MBarrier):
     """Barrier signaled by tcgen05 commit.
 
-    When ``cta_group`` is 1 (default), the commit is guarded by
-    ``ptx.elect_sync()`` so only one thread issues it.
+    The caller is responsible for ensuring only one thread issues the
+    commit (e.g. by wrapping the call in ``Tx.elected()`` or
+    ``if Tx.ptx.elect_sync():``).
     """
 
     @Tx.inline
     def arrive(self, stage, cta_group=1, cta_mask=None):
         if cta_mask is None and cta_group == 1:
-            if Tx.ptx.elect_sync():
-                Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]))
+            Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]))
         else:
             Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)
