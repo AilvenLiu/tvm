@@ -23,10 +23,18 @@ content:
     \ profiling,\n   then calls proton-viewer to produce a tree output\n4. parse_proton.py\
     \ reads the tree output (depth-1 = impl name, depth-2 = kernel\n   time, take\
     \ slowest child per impl), extracts {impl: avg_time_ms}\n5. Results are inserted\
-    \ into SQLite for the dashboard\n\nKey detail: Proton scopes in the bench output\
-    \ must use known impl names\n(tir, torch-cublas, deepgemm, flashinfer, etc.) matching\
-    \ KNOWN_IMPLS in\nparse_proton.py, or the tirx_soln_* prefix which gets normalized\
-    \ to \"tir\".\n"
+    \ into SQLite for the dashboard\n\nKey details:\n- Proton scopes in the bench\
+    \ output must use known impl names matching KNOWN_IMPLS\n  in parse_proton.py\
+    \ (tirx-bench-ci repo), or the tirx_soln_* prefix which gets\n  normalized to\
+    \ \"tir\".\n- When adding new baselines to run_bench(), the proton_name must also\
+    \ be added to\n  KNOWN_IMPLS in parse_proton.py, otherwise the baseline is silently\
+    \ dropped by the\n  parser and never reaches the dashboard.\n- The bench() utility\
+    \ wraps kernels in proton.scope(proton_name) which creates\n  depth-1 nodes. ProtonContext\
+    \ manages the session but its name does NOT appear\n  in the tree output.\n- L2\
+    \ flush kernels (vectorized_elementwise_kernel) appear at depth-2 but are\n  skipped\
+    \ by parse_proton.py (it takes the slowest depth-2 child, which is the\n  actual\
+    \ compute kernel).\n- Dashboard speedup = baseline_time / tir_time. Green if >1.01,\
+    \ red if <0.99.\n"
   summary: 'kernels.bench uses Proton profiler to produce tree output that parse_proton.py
     consumes; the pipeline is: registry discovery -> bench CLI -> proton-viewer tree
     -> parse_proton.py -> SQLite.'
@@ -39,5 +47,6 @@ content:
     - benchmarking
     - bench-ci
     - profiling
+    - cross-repo
   title: Proton profiler pipeline for bench-ci integration
   updated: '2026-03-19'

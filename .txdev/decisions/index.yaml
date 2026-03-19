@@ -225,6 +225,19 @@ entries:
       - infrastructure
     title: Unified kernel interface across test and bench-ci pipelines
     updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: ADR-20260319-174407-e52e2f
+    path: entries/ADR-20260319-174407-e52e2f.yaml
+    scope:
+      - repo
+    tags:
+      - benchmarking
+      - bench-ci
+      - architecture
+      - baseline
+    title: Baselines run inside ProtonContext with try/except, not as separate bench
+      passes
+    updated: '2026-03-19'
 tags:
   api:
     - ADR-20260228-0003
@@ -240,10 +253,16 @@ tags:
     - ADR-20260319-022448-398b11
     - ADR-20260319-022448-4d7f83
     - ADR-20260319-022448-7cc00e
+    - ADR-20260319-174407-e52e2f
   assert_structural_equal:
     - ADR-20260227-0001
+  baseline:
+    - ADR-20260319-174407-e52e2f
   bench-ci:
     - ADR-20260319-022448-7cc00e
+    - ADR-20260319-174407-e52e2f
+  benchmarking:
+    - ADR-20260319-174407-e52e2f
   buffer-view:
     - ADR-20260227-0002
   ci:

@@ -343,6 +343,18 @@ entries:
       - testing
     title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
     updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: KB-20260319-174406-349680
+    path: entries/KB-20260319-174406-349680.yaml
+    scope:
+      - repo
+    tags:
+      - bench-ci
+      - benchmarking
+      - cross-repo
+      - tirx-kernels
+    title: Cross-repo baseline benchmark coordination pattern
+    updated: '2026-03-19'
 tags:
   api:
     - KB-20260301-0002
@@ -355,9 +367,11 @@ tags:
     - KB-20260317-211410-3d3076
   bench-ci:
     - KB-20260319-022448-393527
+    - KB-20260319-174406-349680
   benchmarking:
     - KB-20260319-022448-393527
     - KB-20260319-022448-901600
+    - KB-20260319-174406-349680
   codegen:
     - KB-20260227-0002
     - KB-20260301-0001
@@ -370,6 +384,9 @@ tags:
     - KB-20260227-0003
   copy_tma_impl:
     - KB-20260227-0001
+  cross-repo:
+    - KB-20260319-022448-393527
+    - KB-20260319-174406-349680
   cuda:
     - KB-20260307-231252-48549d
   deadlock:
@@ -494,6 +511,8 @@ tags:
     - KB-20260319-022448-dec2c4
   tir:
     - KB-20260227-0001
+  tirx-kernels:
+    - KB-20260319-174406-349680
   tirx:
     - KB-20260301-0002
     - KB-20260301-0003

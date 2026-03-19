@@ -247,6 +247,30 @@ entries:
       - design
     title: Not considering xdist parallelism impact when consolidating test files
     updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: M-20260319-174407-01b7d3
+    path: entries/M-20260319-174407-01b7d3.yaml
+    scope:
+      - repo
+    tags:
+      - bench-ci
+      - cross-repo
+      - verification
+      - benchmarking
+    title: Cross-repo KNOWN_IMPLS sync is easy to miss
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: M-20260319-174407-26e7d3
+    path: entries/M-20260319-174407-26e7d3.yaml
+    scope:
+      - repo
+    tags:
+      - benchmarking
+      - verification
+      - gpu
+      - testing
+    title: Must run actual GPU benchmarks to verify baselines, not just py_compile
+    updated: '2026-03-19'
 tags:
   api:
     - M-20260301-0002
@@ -258,6 +282,13 @@ tags:
   correctness:
     - M-20260301-0001
     - M-20260307-231252-423c4d
+  bench-ci:
+    - M-20260319-174407-01b7d3
+  benchmarking:
+    - M-20260319-174407-01b7d3
+    - M-20260319-174407-26e7d3
+  cross-repo:
+    - M-20260319-174407-01b7d3
   deadlock:
     - M-20260317-211411-ba6927
   debugging:
@@ -279,6 +310,7 @@ tags:
   gpu:
     - M-20260307-231252-423c4d
     - M-20260319-022448-b1a13a
+    - M-20260319-174407-26e7d3
   import:
     - M-20260302-015214-5390a0
     - M-20260308-232603-cf510d
@@ -350,6 +382,7 @@ tags:
     - M-20260319-022448-b1a13a
     - M-20260319-022448-da2fb0
     - M-20260319-022448-dbe043
+    - M-20260319-174407-26e7d3
   thoroughness:
     - M-20260317-211411-dfb881
   tirx:
@@ -361,6 +394,8 @@ tags:
   verification:
     - M-20260319-022448-b1a13a
     - M-20260319-022448-da2fb0
+    - M-20260319-174407-01b7d3
+    - M-20260319-174407-26e7d3
   warnings:
     - M-20260306-195314-50a55c
   workflow:
