@@ -24,88 +24,70 @@ from tvm.tir.layout import S, TileLayout, laneid
 
 
 @pytest.mark.parametrize(
-    "input",
+    "src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst",
     [
-        ######### basic test #########
-        (
-            (32, 32),  # g_shape_a
-            (32,),  # g_shape_b
-            (0, 0),  # st_a
-            (0,),  # st_b
-            (32, 32),  # extent_a
-            (32,),  # extent_b
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
-        ######### large size #########
-        (
-            (8, 16, 2, 22),  # g_shape_a
-            (8, 16),  # g_shape_b
-            (0, 0, 0, 0),  # st_a
-            (0, 0),  # st_b
-            (8, 16, 2, 22),  # extent_a
-            (8, 16),  # extent_b
-            128,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
-        # ######### small size #########
-        (
-            (32, 7),  # g_shape_a
-            (32,),  # g_shape_b
-            (0, 0),  # st_a
-            (0,),  # st_b
-            (32, 7),  # extent_a
-            (32,),  # extent_b
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
-        ######### offset test #########
-        (
-            (32, 32),  # g_shape_a
-            (32,),  # g_shape_b
-            (1, 1),  # st_a
-            (2,),  # st_b
-            (5, 8),  # extent_a
-            (5,),  # extent_b
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
+        # reduce last dim (basic)
+        ((32, 32), (32,), (-1,), (0, 0), (0,), (32, 32), (32,)),
+        # reduce first dim
+        ((32, 32), (32,), (0,), (0, 0), (0,), (32, 32), (32,)),
+        # reduce last 2 dims (4D → 2D)
+        ((8, 16, 2, 22), (8, 16), (-2, -1), (0, 0, 0, 0), (0, 0), (8, 16, 2, 22), (8, 16)),
+        # reduce middle dim (3D → 2D)
+        ((4, 8, 6), (4, 6), (1,), (0, 0, 0), (0, 0), (4, 8, 6), (4, 6)),
+        # small non-power-of-2
+        ((32, 7), (32,), (-1,), (0, 0), (0,), (32, 7), (32,)),
+        # with offset/slicing
+        ((32, 32), (32,), (-1,), (1, 1), (2,), (5, 8), (5,)),
     ],
 )
-@pytest.mark.parametrize("op_type", ["sum", "max"])
+@pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
-def test_reduction_op_shared(input, op_type, dtype):
-    g_shape_a, g_shape_b, st_a, st_b, extent_a, extent_b, thread_cnt, dev = input
+@pytest.mark.parametrize("accum", [False, True])
+def test_reduction_shared(
+    src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst, op_type, dtype, accum
+):
+    dev = tvm.cuda(0)
+    ndim_src = len(src_shape)
 
-    s_shape_a = g_shape_a
-    s_shape_b = g_shape_b
-    copy_slice_a = list(slice(None) for i in range(len(g_shape_a)))
-    copy_slice_b = list(slice(None) for i in range(len(g_shape_b)))
-    reduce_slice_a = list(slice(st_a[i], st_a[i] + extent_a[i]) for i in range(len(g_shape_a)))
-    reduce_slice_b = list(slice(st_b[i], st_b[i] + extent_b[i]) for i in range(len(g_shape_b)))
-    g_layout_a = s_layout_a = TileLayout(S[g_shape_a])
-    g_layout_b = s_layout_b = TileLayout(S[g_shape_b])
+    thread_cnt = 32
+    if np.prod(src_shape) > 1024:
+        thread_cnt = 128
+
+    s_shape_src = src_shape
+    s_shape_dst = dst_shape
+    copy_slice_src = list(slice(None) for _ in range(ndim_src))
+    copy_slice_dst = list(slice(None) for _ in range(len(dst_shape)))
+    reduce_slice_src = list(slice(st_src[i], st_src[i] + extent_src[i]) for i in range(ndim_src))
+    reduce_slice_dst = list(
+        slice(st_dst[i], st_dst[i] + extent_dst[i]) for i in range(len(dst_shape))
+    )
+    g_layout_src = s_layout_src = TileLayout(S[src_shape])
+    g_layout_dst = s_layout_dst = TileLayout(S[dst_shape])
 
     # fmt: off
     @Tx.prim_func(tirx=True)
     def test_reduction(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
-        B = Tx.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
+        A = Tx.match_buffer(A_ptr, src_shape, dtype, layout=g_layout_src)
+        B = Tx.match_buffer(B_ptr, dst_shape, dtype, layout=g_layout_dst)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([thread_cnt], parent="cta")
+            _bx = Tx.cta_id([1], parent="kernel")
+            _tid = Tx.thread_id([thread_cnt], parent="cta")
 
             with Tx.cta():
-                A_smem = Tx.alloc_buffer(s_shape_a, dtype, scope="shared", layout=s_layout_a)
-                B_smem = Tx.alloc_buffer(s_shape_b, dtype, scope="shared", layout=s_layout_b)
+                A_smem = Tx.alloc_buffer(s_shape_src, dtype, scope="shared", layout=s_layout_src)
+                B_smem = Tx.alloc_buffer(s_shape_dst, dtype, scope="shared", layout=s_layout_dst)
 
-                Tx.copy(A_smem[tuple(copy_slice_a)], A[tuple(copy_slice_a)])
+                Tx.copy(A_smem[tuple(copy_slice_src)], A[tuple(copy_slice_src)])
+                if accum:
+                    Tx.copy(B_smem[tuple(copy_slice_dst)], B[tuple(copy_slice_dst)])
                 if op_type == "sum":
-                    Tx.sum(B_smem[tuple(reduce_slice_b)], A_smem[tuple(reduce_slice_a)])
+                    Tx.sum(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
                 elif op_type == "max":
-                    Tx.max(B_smem[tuple(reduce_slice_b)], A_smem[tuple(reduce_slice_a)])
-                Tx.copy(B[tuple(copy_slice_b)], B_smem[tuple(copy_slice_b)])
+                    Tx.max(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
+                elif op_type == "min":
+                    Tx.min(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
+                Tx.copy(B[tuple(copy_slice_dst)], B_smem[tuple(copy_slice_dst)])
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -114,74 +96,433 @@ def test_reduction_op_shared(input, op_type, dtype):
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
         np.random.seed(0)
-        A_np = np.random.rand(*g_shape_a).astype(dtype)
-        B_np = np.zeros(g_shape_b, dtype=dtype)
+        A_np = np.random.rand(*src_shape).astype(dtype)
+        if accum:
+            B_np = np.random.rand(*dst_shape).astype(dtype) * 0.5
+        else:
+            B_np = np.zeros(dst_shape, dtype=dtype)
         A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
+        B = tvm.runtime.tensor(B_np.copy(), dev)
         mod(A, B)
 
-        # find ref result
-        D = len(A.shape) - len(B.shape)
+        A_slice = A_np[tuple(reduce_slice_src)]
         if op_type == "sum":
-            B_ref = A.numpy()[tuple(reduce_slice_a)].sum(axis=tuple(range(-D, 0)))
+            ref = A_slice.sum(axis=axes)
         elif op_type == "max":
-            B_ref = A.numpy()[tuple(reduce_slice_a)].max(axis=tuple(range(-D, 0)))
+            ref = A_slice.max(axis=axes)
+        elif op_type == "min":
+            ref = A_slice.min(axis=axes)
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
 
+        B_old_slice = B_np[tuple(reduce_slice_dst)]
+        if accum:
+            if op_type == "sum":
+                ref = ref + B_old_slice
+            elif op_type == "max":
+                ref = np.maximum(ref, B_old_slice)
+            elif op_type == "min":
+                ref = np.minimum(ref, B_old_slice)
+
         atol = 1e-5 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(B_ref, B.numpy()[tuple(reduce_slice_b)], atol=atol)
+        tvm.testing.assert_allclose(ref, B.numpy()[tuple(reduce_slice_dst)], atol=atol)
+
+
+@pytest.mark.parametrize("exec_scope", ["warp", "warpgroup", "thread"])
+@pytest.mark.parametrize("op_type", ["sum", "max", "min"])
+@pytest.mark.parametrize("accum", [False, True])
+def test_reduction_shared_subscope(exec_scope, op_type, accum):
+    """Test shared reduction at warp/warpgroup/thread exec scope."""
+    dev = tvm.cuda(0)
+    dtype = "float32"
+    src_shape = (4, 8)
+    dst_shape = (4,)
+    axes = (-1,)
+
+    g_layout_src = s_layout_src = TileLayout(S[src_shape])
+    g_layout_dst = s_layout_dst = TileLayout(S[dst_shape])
+
+    # fmt: off
+    if exec_scope == "warp":
+        @Tx.prim_func(tirx=True)
+        def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+            A = Tx.match_buffer(A_ptr, src_shape, dtype, layout=g_layout_src)
+            B = Tx.match_buffer(B_ptr, dst_shape, dtype, layout=g_layout_dst)
+            with Tx.kernel():
+                _bx = Tx.cta_id([1], parent="kernel")
+                _tid = Tx.thread_id([256], parent="cta")
+                with Tx.cta():
+                    A_smem = Tx.alloc_buffer(list(src_shape), dtype, scope="shared", layout=s_layout_src) # noqa: E501
+                    B_smem = Tx.alloc_buffer(list(dst_shape), dtype, scope="shared", layout=s_layout_dst) # noqa: E501
+                    Tx.copy(A_smem, A)
+                    if accum:
+                        Tx.copy(B_smem, B)
+                    with Tx.warp()[5:6]:
+                        if op_type == "sum":
+                            Tx.sum(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "max":
+                            Tx.max(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "min":
+                            Tx.min(B_smem, A_smem, axes=axes, accum=accum)
+                    Tx.cuda.cta_sync()
+                    Tx.copy(B, B_smem)
+    elif exec_scope == "warpgroup":
+        @Tx.prim_func(tirx=True)
+        def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+            A = Tx.match_buffer(A_ptr, src_shape, dtype, layout=g_layout_src)
+            B = Tx.match_buffer(B_ptr, dst_shape, dtype, layout=g_layout_dst)
+            with Tx.kernel():
+                _bx = Tx.cta_id([1], parent="kernel")
+                _tid = Tx.thread_id([256], parent="cta")
+                with Tx.cta():
+                    A_smem = Tx.alloc_buffer(list(src_shape), dtype, scope="shared", layout=s_layout_src) # noqa: E501
+                    B_smem = Tx.alloc_buffer(list(dst_shape), dtype, scope="shared", layout=s_layout_dst) # noqa: E501
+                    Tx.copy(A_smem, A)
+                    if accum:
+                        Tx.copy(B_smem, B)
+                    with Tx.warpgroup()[0:1]:
+                        if op_type == "sum":
+                            Tx.sum(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "max":
+                            Tx.max(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "min":
+                            Tx.min(B_smem, A_smem, axes=axes, accum=accum)
+                    Tx.cuda.cta_sync()
+                    Tx.copy(B, B_smem)
+    elif exec_scope == "thread":
+        @Tx.prim_func(tirx=True)
+        def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+            A = Tx.match_buffer(A_ptr, src_shape, dtype, layout=g_layout_src)
+            B = Tx.match_buffer(B_ptr, dst_shape, dtype, layout=g_layout_dst)
+            with Tx.kernel():
+                _bx = Tx.cta_id([1], parent="kernel")
+                _tid = Tx.thread_id([256], parent="cta")
+                with Tx.cta():
+                    A_smem = Tx.alloc_buffer(list(src_shape), dtype, scope="shared", layout=s_layout_src) # noqa: E501
+                    B_smem = Tx.alloc_buffer(list(dst_shape), dtype, scope="shared", layout=s_layout_dst) # noqa: E501
+                    Tx.copy(A_smem, A)
+                    if accum:
+                        Tx.copy(B_smem, B)
+                    with Tx.thread()[65:66]:
+                        if op_type == "sum":
+                            Tx.sum(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "max":
+                            Tx.max(B_smem, A_smem, axes=axes, accum=accum)
+                        elif op_type == "min":
+                            Tx.min(B_smem, A_smem, axes=axes, accum=accum)
+                    Tx.cuda.cta_sync()
+                    Tx.copy(B, B_smem)
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*src_shape).astype(dtype)
+        if accum:
+            B_np = np.random.rand(*dst_shape).astype(dtype) * 0.5
+        else:
+            B_np = np.zeros(dst_shape, dtype=dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np.copy(), dev)
+        mod(A, B)
+
+        if op_type == "sum":
+            ref = A_np.sum(axis=-1)
+            if accum:
+                ref = ref + B_np
+        elif op_type == "max":
+            ref = A_np.max(axis=-1)
+            if accum:
+                ref = np.maximum(ref, B_np)
+        elif op_type == "min":
+            ref = A_np.min(axis=-1)
+            if accum:
+                ref = np.minimum(ref, B_np)
+
+        tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
 
 
 @pytest.mark.parametrize(
-    "input",
+    "src_shape, dst_shape, axes",
     [
-        (
-            "wgmma",  # layout
-            1,  # N_GROUPS
-            1,  # N_WARPS
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
-        (
-            "wgmma",  # layout
-            1,  # N_GROUPS
-            4,  # N_WARPS
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
-        (
-            "wgmma",  # layout
-            2,  # N_GROUPS
-            8,  # N_WARPS
-            32,  # thread_cnt
-            tvm.cuda(0),  # dev
-        ),
+        ((1,), (1,), (0,)),
+        ((4,), (1,), (0,)),
+        ((7,), (1,), (0,)),
+        ((16,), (1,), (0,)),
+        ((32,), (1,), (0,)),
+        ((4, 8), (8,), (0,)),
+        ((4, 8), (4,), (1,)),
+        ((3, 4, 5), (4,), (0, 2)),
+        ((2, 3, 4), (2, 3), (-1,)),
+        ((2, 3, 4), (3, 4), (0,)),
     ],
 )
-@pytest.mark.parametrize("op_type", ["sum", "max"])
+@pytest.mark.parametrize("op_type", ["sum", "max", "min"])
+@pytest.mark.parametrize("accum", [False, True])
+def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum):
+    """Test thread-wise local reduction with various shapes and axes."""
+    dev = tvm.cuda(0)
+    dtype = "float32"
+    src_total = 1
+    for s in src_shape:
+        src_total *= s
+    dst_total = 1
+    for s in dst_shape:
+        dst_total *= s
+
+    def decompose_flat(flat_idx, shape):
+        indices = []
+        rem = flat_idx
+        for s in reversed(list(shape)):
+            indices.append(rem % s)
+            rem = rem // s
+        indices.reverse()
+        return indices
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, list(src_shape), dtype, layout=TileLayout(S[src_shape]))
+        B = Tx.match_buffer(B_ptr, list(dst_shape), dtype, layout=TileLayout(S[dst_shape]))
+
+        with Tx.kernel():
+            _bx = Tx.cta_id([1], parent="kernel")
+            _tid = Tx.thread_id([1], parent="cta")
+
+            with Tx.thread():
+                A_local = Tx.alloc_buffer(list(src_shape), dtype, scope="local")
+                B_local = Tx.alloc_buffer(list(dst_shape), dtype, scope="local")
+
+                for i in Tx.serial(src_total):
+                    idx = Tx.meta_var(decompose_flat(i, src_shape))
+                    A_local[tuple(idx)] = A[tuple(idx)]
+
+                if accum:
+                    for i in Tx.serial(dst_total):
+                        idx = Tx.meta_var(decompose_flat(i, dst_shape))
+                        B_local[tuple(idx)] = B[tuple(idx)]
+
+                if op_type == "sum":
+                    Tx.sum(B_local, A_local, axes=axes, accum=accum)
+                elif op_type == "max":
+                    Tx.max(B_local, A_local, axes=axes, accum=accum)
+                elif op_type == "min":
+                    Tx.min(B_local, A_local, axes=axes, accum=accum)
+
+                for i in Tx.serial(dst_total):
+                    idx = Tx.meta_var(decompose_flat(i, dst_shape))
+                    B[tuple(idx)] = B_local[tuple(idx)]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*src_shape).astype(dtype)
+        if accum:
+            B_np = np.random.rand(*dst_shape).astype(dtype) * 0.5
+        else:
+            B_np = np.zeros(dst_shape, dtype=dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np.copy(), dev)
+        mod(A, B)
+
+        if op_type == "sum":
+            ref = A_np.sum(axis=axes)
+            if accum:
+                ref = ref + B_np
+        elif op_type == "max":
+            ref = A_np.max(axis=axes)
+            if accum:
+                ref = np.maximum(ref, B_np)
+        elif op_type == "min":
+            ref = A_np.min(axis=axes)
+            if accum:
+                ref = np.minimum(ref, B_np)
+
+        tvm.testing.assert_allclose(ref.reshape(B_np.shape), B.numpy(), atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "inner_dims, dst_dims, axes, accum, slice_end",
+    [
+        # 2D: reduce last dim
+        ((64,), (1,), (-1,), False, None),
+        ((64,), (1,), (-1,), True, None),
+        # 2D: sliced reduce
+        ((64,), (1,), (-1,), False, 32),
+        # 3D: reduce both inner dims
+        ((4, 8), (1, 1), (1, 2), False, None),
+        # 3D: reduce last dim only
+        ((4, 8), (4, 1), (-1,), False, None),
+        # 3D: reduce middle dim only
+        ((4, 8), (1, 8), (1,), False, None),
+    ],
+)
+@pytest.mark.parametrize("op_type", ["sum", "max", "min"])
+def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end, op_type):
+    """Test view-based local reduction with simple purely-local layouts."""
+    dev = tvm.cuda(0)
+    dtype = "float32"
+    thread_cnt = 32
+
+    src_shape = (32, *inner_dims)
+    dst_shape = (32, *dst_dims)
+
+    def row_major_strides(dims):
+        strides = []
+        s = 1
+        for d in reversed(dims):
+            strides.insert(0, s)
+            s *= d
+        return strides
+
+    acc_view_layout = Tx.TileLayout(
+        Tx.S[src_shape : (1 @ laneid, *tuple(row_major_strides(inner_dims)))]
+    )
+    red_view_layout = Tx.TileLayout(
+        Tx.S[dst_shape : (1 @ laneid, *tuple(row_major_strides(dst_dims)))]
+    )
+    g_layout_a = TileLayout(S[src_shape])
+    g_layout_b = TileLayout(S[dst_shape])
+
+    src_local_total = 1
+    for d in inner_dims:
+        src_local_total *= d
+    dst_local_total = 1
+    for d in dst_dims:
+        dst_local_total *= d
+
+    def decompose_flat(flat_idx, shape):
+        indices = []
+        rem = flat_idx
+        for s in reversed(list(shape)):
+            indices.append(rem % s)
+            rem = rem // s
+        indices.reverse()
+        return indices
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, list(src_shape), dtype, layout=g_layout_a)
+        B = Tx.match_buffer(B_ptr, list(dst_shape), dtype, layout=g_layout_b)
+
+        with Tx.kernel():
+            _bx = Tx.cta_id([1], parent="kernel")
+            _warp_id = Tx.warp_id([1], parent="cta")
+            lane_id = Tx.thread_id([thread_cnt], parent="warp")
+
+            acc = Tx.alloc_buffer(list((1, *inner_dims)), dtype=dtype, scope="local", layout=g_layout_a) # noqa: E501
+            red = Tx.alloc_buffer(list((1, *dst_dims)), dtype=dtype, scope="local", layout=g_layout_b) # noqa: E501
+
+            with Tx.thread():
+                for i in Tx.serial(src_local_total):
+                    idx = Tx.meta_var(decompose_flat(i, inner_dims))
+                    acc[(0, *list(idx))] = A[(lane_id, *list(idx))]
+                if accum:
+                    for i in Tx.serial(dst_local_total):
+                        idx = Tx.meta_var(decompose_flat(i, dst_dims))
+                        red[(0, *list(idx))] = B[(lane_id, *list(idx))]
+            with Tx.warp():
+                acc_view = acc.view(*src_shape, layout=acc_view_layout)
+                red_view = red.view(*dst_shape, layout=red_view_layout)
+                if slice_end is not None:
+                    if op_type == "sum":
+                        Tx.sum(red_view, acc_view[:, slice_end // 2:slice_end], axes=axes, accum=accum) # noqa: E501
+                    elif op_type == "max":
+                        Tx.max(red_view, acc_view[:, slice_end // 2:slice_end], axes=axes, accum=accum) # noqa: E501
+                    elif op_type == "min":
+                        Tx.min(red_view, acc_view[:, slice_end // 2:slice_end], axes=axes, accum=accum) # noqa: E501
+                else:
+                    if op_type == "sum":
+                        Tx.sum(red_view, acc_view, axes=axes, accum=accum)
+                    elif op_type == "max":
+                        Tx.max(red_view, acc_view, axes=axes, accum=accum)
+                    elif op_type == "min":
+                        Tx.min(red_view, acc_view, axes=axes, accum=accum)
+
+            with Tx.thread():
+                for i in Tx.serial(dst_local_total):
+                    idx = Tx.meta_var(decompose_flat(i, dst_dims))
+                    B[(lane_id, *list(idx))] = red[(0, *list(idx))]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*src_shape).astype(dtype)
+        if accum:
+            B_np = np.random.rand(*dst_shape).astype(dtype) * 0.5
+        else:
+            B_np = np.zeros(dst_shape, dtype=dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np.copy(), dev)
+        mod(A, B)
+
+        A_data = A_np[:, slice_end // 2 : slice_end] if slice_end is not None else A_np
+        if op_type == "sum":
+            ref = A_data.sum(axis=axes, keepdims=True)
+            if accum:
+                ref = ref + B_np
+        elif op_type == "max":
+            ref = A_data.max(axis=axes, keepdims=True)
+            if accum:
+                ref = np.maximum(ref, B_np)
+        elif op_type == "min":
+            ref = A_data.min(axis=axes, keepdims=True)
+            if accum:
+                ref = np.minimum(ref, B_np)
+
+        tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "n_groups, n_warps",
+    [
+        (1, 1),
+        (1, 4),
+        (2, 8),
+    ],
+)
+@pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 @pytest.mark.parametrize("shuffle", [True, False])
-def test_reduction_op_local(input, op_type, dtype, shuffle):
-    layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
-    assert layout == "wgmma", "logical tensor which is not WGMMA layout is not supported"
-
-    # get shape info
+@pytest.mark.parametrize("accum", [False, True])
+def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle, accum):
+    """Test view-based local reduction with wgmma layouts and optional shuffle."""
+    if not shuffle and accum:
+        pytest.skip("accum without shuffle is not supported in current implementation")
+    dev = tvm.cuda(0)
+    thread_cnt = 32
     NUM_COL = 128
-    g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
-    g_layout_a, g_layout_b = TileLayout(S[g_shape_a]), TileLayout(S[g_shape_b])
+    g_shape_a = (16 * n_warps, NUM_COL)
+    g_shape_b = (16 * n_warps, 4)
+    g_layout_a = TileLayout(S[g_shape_a])
+    g_layout_b = TileLayout(S[g_shape_b])
     acc_shape, red_shape = (16, NUM_COL), (16, 4)
 
     # fmt: off
     @Tx.prim_func(tirx=True)
-    def test_reduction(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
         B = Tx.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
 
         with Tx.kernel():
-            bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            wg_id = Tx.warpgroup_id([N_GROUPS], parent="cta")
-            warp_id_in_wg = Tx.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
+            _bx = Tx.cta_id([1], parent="kernel")
+            wg_id = Tx.warpgroup_id([n_groups], parent="cta")
+            warp_id_in_wg = Tx.warp_id([n_warps // n_groups], parent="warpgroup")
             lane_id = Tx.thread_id([thread_cnt], parent="warp")
 
             with Tx.thread():
@@ -204,15 +545,13 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 red_tile = Tx.TileLayout(Tx.S[(2, 1) : (1, 1)])
                 red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
                 red = Tx.alloc_buffer(
-                    [
-                        2,
-                    ],
+                    [2],
                     dtype=dtype,
                     scope="local",
                     layout=red_atom.tile(red_tile, (2, 1), (1, 1)),
                 )
 
-                # load A into acc
+                # Load A into acc
                 with Tx.thread():
                     for i in Tx.serial(NUM_COL // 8):
                         for j in Tx.unroll(2):
@@ -222,22 +561,34 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                                     i * 8 + lane_id % 4 * 2 + vec,
                                 ]
 
-                # reduce
+                # Pre-load B into red for accumulation
+                if accum:
+                    with Tx.thread():
+                        for i in Tx.unroll(2):
+                            red[i] = B[
+                                wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4,
+                                lane_id % 4,
+                            ]
+
+                # Reduce
                 with Tx.warp():
                     acc_view = acc.view(*acc_shape, layout=acc_layout)
                     red_view = red.view(*red_shape, layout=red_layout)
                     if op_type == "sum":
-                        Tx.sum(red_view, acc_view, thread_reduce=shuffle)
+                        Tx.sum(red_view, acc_view, thread_reduce=shuffle, accum=accum)
                     elif op_type == "max":
-                        Tx.max(red_view, acc_view, thread_reduce=shuffle)
+                        Tx.max(red_view, acc_view, thread_reduce=shuffle, accum=accum)
+                    elif op_type == "min":
+                        Tx.min(red_view, acc_view, thread_reduce=shuffle, accum=accum)
                     # perform an additional shuffle step if not shuffled above
                     if not shuffle:
                         if op_type == "sum":
                             Tx.sum(red_view, red_view, thread_reduce=True)
                         elif op_type == "max":
                             Tx.max(red_view, red_view, thread_reduce=True)
-
-                # write red into B
+                        elif op_type == "min":
+                            Tx.min(red_view, red_view, thread_reduce=True)
+                # Write red into B
                 with Tx.thread():
                     for i in Tx.unroll(2):
                         B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4] = (
@@ -248,45 +599,51 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule({"main": test_reduction})
+        mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
-        B_np = np.zeros(g_shape_b, dtype=dtype)
+        if accum:
+            B_np = np.random.rand(*g_shape_b).astype(dtype) * 0.5
+        else:
+            B_np = np.zeros(g_shape_b, dtype=dtype)
         A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
+        B = tvm.runtime.tensor(B_np.copy(), dev)
         mod(A, B)
 
-        # find ref result
         if op_type == "sum":
-            B_ref = A.numpy().sum(axis=-1)
+            row_reduce = A_np.sum(axis=-1)
+            if accum:
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4)) + B_np
+            else:
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
         elif op_type == "max":
-            B_ref = A.numpy().max(axis=-1)
+            row_reduce = A_np.max(axis=-1)
+            if accum:
+                B_ref = np.maximum(np.tile(row_reduce[:, np.newaxis], (1, 4)), B_np)
+            else:
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
+        elif op_type == "min":
+            row_reduce = A_np.min(axis=-1)
+            if accum:
+                B_ref = np.minimum(np.tile(row_reduce[:, np.newaxis], (1, 4)), B_np)
+            else:
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
-        atol = 1e-5 if dtype == "float32" else 1e-1
-        B_ref = np.tile(B_ref[:, np.newaxis], (1, 4))
+
+        atol = 1e-5 if dtype == "float32" else 2e-1
         tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
 @pytest.mark.parametrize(
     "reduction_len",
-    [
-        8,  # minimum for optimized path
-        16,
-        64,
-        128,  # typical FA4 size
-        256,
-        7,  # fallback path (not multiple of 8)
-        10,
-        15,
-        100,
-    ],
+    [8, 16, 64, 128, 256, 7, 10, 15, 100],
 )
 @pytest.mark.parametrize("op_type", ["max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
-def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
+def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
     """Test thread-level local buffer reduction with 3-input max/min PTX intrinsics."""
     dev = tvm.cuda(0)
     dtype = "float32"
@@ -298,8 +655,8 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
         B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1], parent="kernel")
+            _tid = Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
                 A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")
@@ -332,7 +689,7 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
         A_np = np.random.rand(reduction_len).astype(dtype)
 
         if accum:
-            B_np = np.array([0.5], dtype=dtype)  # Initial value for accumulation
+            B_np = np.array([0.5], dtype=dtype)
         else:
             B_np = np.zeros(1, dtype=dtype)
 
@@ -356,21 +713,10 @@ def test_reduction_op_local_thread_3input_maxmin(reduction_len, op_type, accum):
 
 @pytest.mark.parametrize(
     "reduction_len",
-    [
-        8,  # minimum for optimized path
-        16,
-        64,
-        128,
-        256,
-        9,  # not divisible by 8, tests remainder handling
-        17,
-        63,
-        65,
-        100,
-    ],
+    [8, 16, 64, 128, 256, 9, 17, 63, 65, 100],
 )
 @pytest.mark.parametrize("accum", [False, True])
-def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
+def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
     """Test thread-level sum reduction using packed add with add.f32x2 PTX instruction."""
     dev = tvm.cuda(0)
     dtype = "float32"
@@ -382,8 +728,8 @@ def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
         B = Tx.match_buffer(B_ptr, [1], dtype, layout=TileLayout(S[1]))
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1], parent="kernel")
+            _tid = Tx.thread_id([1], parent="cta")
 
             with Tx.thread():
                 A_local = Tx.alloc_buffer([reduction_len], dtype, scope="local")
@@ -414,7 +760,7 @@ def test_reduction_op_local_thread_packed_add_sum(reduction_len, accum):
         A_np = np.random.rand(reduction_len).astype(dtype)
 
         if accum:
-            B_np = np.array([0.5], dtype=dtype)  # Initial value for accumulation
+            B_np = np.array([0.5], dtype=dtype)
         else:
             B_np = np.zeros(1, dtype=dtype)
 

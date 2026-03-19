@@ -43,7 +43,6 @@ from .layout_utils import (
     get_local_region,
     get_sublayout_from_region,
     layout_signature,
-    resolve_thread_var,
     sig_equal,
 )
 
@@ -344,8 +343,6 @@ def unary_shared_impl(
             def impl():
                 tid = get_tid_in_scope()
                 for s in Tx.serial(0, Tx.ceildiv(num_elements, vec_len * thread_cnt)):
-                    # for tid in Tx.thread_binding(
-                    #     thread_st, thread_st + thread_cnt, "threadIdx.x"):
                     for vec in Tx.vectorized(vec_len):
                         fused = Tx.meta_var(s * vec_len * thread_cnt + tid * vec_len + vec)
                         if fused < num_elements:
@@ -364,8 +361,6 @@ def unary_shared_impl(
             def impl():
                 tid = get_tid_in_scope()
                 for s in Tx.serial(0, Tx.ceildiv(num_elements, vec_len * thread_cnt)):
-                    # for tid in Tx.thread_binding(
-                    #     thread_st, thread_st + thread_cnt, "threadIdx.x"):
                     for vec in Tx.vectorized(vec_len):
                         fused = Tx.meta_var(s * vec_len * thread_cnt + tid * vec_len + vec)
                         if fused < num_elements:
@@ -467,27 +462,18 @@ def validate_unary_local(
         return False, "cannot validate bias and dst layout signatures for local unary op"
 
     # Validate launch-thread consistency against dst layout thread partition.
-    thread_vars_list = []
     thr_extents = []
     for it in dst_sliced.shard:
         if it.axis.is_thread():
-            var = resolve_thread_var(it.axis, sctx)
-            if var is None:
-                return False, "cannot resolve thread variable"
-            thread_vars_list.append(var)
             thr_extents.append(it.extent)
 
-    if thread_vars_list and "threadIdx.x" in sctx.launch_params:
-        expected = functools.reduce(operator.mul, thr_extents, 1)
-        actual = get_thread_cnt(sctx)
-        if len(set(id(v) for v in thread_vars_list)) == 1:
-            if thread_vars_list[0] is sctx.launch_params["threadIdx.x"].var:
-                if not analyzer.can_prove_equal(actual, expected):
-                    return (
-                        False,
-                        f"thread count mismatch for local unary op;"
-                        f" expected {expected} but got {actual}",
-                    )
+    expected = functools.reduce(operator.mul, thr_extents, 1)
+    actual = get_thread_cnt(sctx)
+    if thr_extents and not analyzer.can_prove_equal(expected, actual):
+        return (
+            False,
+            f"thread count mismatch for local unary op; expected {expected} but got {actual}",
+        )
     return True, None
 
 

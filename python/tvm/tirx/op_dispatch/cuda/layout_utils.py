@@ -125,7 +125,8 @@ def get_local_region(orig_layout: TileLayout, buffer_shape, region_st, region_ex
         region_extent: Region extent in shape space.
 
     Returns:
-        (local_shape, local_st, local_ext) or None if no local dims / invalid region.
+        (local_shape, local_st, local_ext), or ([1], [0], [1]) if no local dims.
+        Returns None if the region is invalid (non-contiguous slicing).
         - local_shape: full storage extents per local dim.
         - local_st: region start per local dim.
         - local_ext: region extent per local dim.
@@ -214,7 +215,7 @@ def get_local_region(orig_layout: TileLayout, buffer_shape, region_st, region_ex
             local_ext.append(cur_local_end - cur_local_st + 1)
 
     if not local_shape:
-        return None
+        return [1], [0], [1]  # treat no local dim case as 1D local shape with 1 element
     return local_shape, local_st, local_ext
 
 
