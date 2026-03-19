@@ -1,0 +1,65 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Context: Some kernels like ep_dispatch_combine require multi-GPU nvshmem
+    setup
+
+    that isn''t available in standard test environments. Others like fused_moe depend
+
+    on JIT-compiled libraries that may be on read-only filesystems.
+
+
+    Decision: The thin test wrapper only runs kernels that have non-empty CONFIGS.
+
+    Kernels that can''t run in standard environments set CONFIGS = [] to opt out.
+
+    Within run_test(), kernels can also call pytest.skip() for runtime conditions
+
+    (e.g., read-only flashinfer data directory).
+
+
+    This keeps the registry complete (all kernels are discoverable) while allowing
+
+    graceful opt-out from automated testing without special-casing in the test
+
+    framework.
+
+
+    Consequences:
+
+    - No hardcoded skip lists in test_kernels.py
+
+    - Each kernel module is responsible for its own skip conditions
+
+    - bench-ci can still list all kernels via registry even if some aren''t testable
+
+    '
+  summary: Each kernel module owns its run_test() implementation; kernels requiring
+    special environments (multi-GPU, nvshmem) set CONFIGS=[] to opt out of automated
+    testing.
+  created: '2026-03-19'
+  id: ADR-20260319-022448-4d7f83
+  scope:
+    - repo
+  tags:
+    - testing
+    - architecture
+    - kernel
+    - design-pattern
+  title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent kernels
+  updated: '2026-03-19'

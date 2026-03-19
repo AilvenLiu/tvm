@@ -1,0 +1,54 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'When flash_attention4 tests appeared to hang, the agent claimed it was
+    due to
+
+    "slow compilation" without evidence. The user called this out explicitly:
+
+    "What nonsense about slow compilation? Compilation is NOT slow, don''t fool me."
+
+
+    The actual issue was that the bash timeout was too large and the test output
+
+    was being piped through tail, making it look like nothing was happening.
+
+    fa4 actually compiles and runs correctly in ~8s per test case.
+
+
+    Lesson: Never fabricate explanations for observed behavior. If a test appears
+
+    to hang, check nvidia-smi for GPU contention, check the actual process state,
+
+    and report factual observations rather than speculative causes.
+
+    '
+  summary: Claimed flash_attention4 was stuck due to slow compilation without actually
+    verifying; the kernel compiles and runs fine (~8s per test). Always verify claims
+    before reporting them.
+  created: '2026-03-19'
+  id: M-20260319-022448-b1a13a
+  scope:
+    - repo
+  tags:
+    - testing
+    - verification
+    - gpu
+    - assumptions
+  title: Claiming kernel compilation was slow without verifying
+  updated: '2026-03-19'

@@ -25,7 +25,8 @@ entries:
       - testing
       - requirements
       - user-intent
-    title: Counting ops instead of structural comparison when user explicitly asked for assert_structural_equal
+    title: Counting ops instead of structural comparison when user explicitly asked
+      for assert_structural_equal
     updated: '2026-02-27'
   - created: '2026-02-27'
     id: M-20260227-0002
@@ -162,6 +163,29 @@ entries:
       - correctness
     title: Copied entire shared memory buffer instead of written subregion in test
     updated: '2026-03-07'
+  - created: '2026-03-08'
+    id: M-20260308-232603-9a9463
+    path: entries/M-20260308-232603-9a9463.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - tirx
+      - scope-control
+    title: Ran op_schedule/ subtree tests instead of full tirx/ test suite
+    updated: '2026-03-08'
+  - created: '2026-03-08'
+    id: M-20260308-232603-cf510d
+    path: entries/M-20260308-232603-cf510d.yaml
+    scope:
+      - repo
+    tags:
+      - refactor
+      - import
+      - python
+      - code-review
+    title: Used `as _alias` imports when extracting to a public utility module
+    updated: '2026-03-08'
   - created: '2026-03-17'
     id: M-20260317-211411-ba6927
     path: entries/M-20260317-211411-ba6927.yaml
@@ -187,11 +211,50 @@ entries:
       - thoroughness
     title: Applying syntax changes to only a few kernels instead of all applicable files
     updated: '2026-03-17'
+  - created: '2026-03-19'
+    id: M-20260319-022448-b1a13a
+    path: entries/M-20260319-022448-b1a13a.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - verification
+      - gpu
+      - assumptions
+    title: Claiming kernel compilation was slow without verifying
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: M-20260319-022448-da2fb0
+    path: entries/M-20260319-022448-da2fb0.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - verification
+      - workflow
+    title: Not running tests before claiming they pass
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: M-20260319-022448-dbe043
+    path: entries/M-20260319-022448-dbe043.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - xdist
+      - parallelism
+      - testing
+      - design
+    title: Not considering xdist parallelism impact when consolidating test files
+    updated: '2026-03-19'
 tags:
   api:
     - M-20260301-0002
+  assumptions:
+    - M-20260319-022448-b1a13a
   code-review:
     - M-20260301-0003
+    - M-20260308-232603-cf510d
   correctness:
     - M-20260301-0001
     - M-20260307-231252-423c4d
@@ -199,11 +262,11 @@ tags:
     - M-20260317-211411-ba6927
   debugging:
     - M-20260227-0003
-  flaky-tests:
-    - M-20260307-231252-423c4d
+  design:
+    - M-20260319-022448-dbe043
   duplication:
     - M-20260301-0003
-  gpu:
+  flaky-tests:
     - M-20260307-231252-423c4d
   gh:
     - M-20260228-0003
@@ -213,30 +276,40 @@ tags:
   golden:
     - M-20260227-0002
     - M-20260227-0003
+  gpu:
+    - M-20260307-231252-423c4d
+    - M-20260319-022448-b1a13a
   import:
     - M-20260302-015214-5390a0
+    - M-20260308-232603-cf510d
   lint:
     - M-20260228-0002
     - M-20260301-0001
+  mbarrier:
+    - M-20260317-211411-ba6927
   op-schedule:
     - M-20260301-0003
     - M-20260302-015214-5390a0
-  mbarrier:
-    - M-20260317-211411-ba6927
   over-engineering:
     - M-20260301-0002
+  parallelism:
+    - M-20260319-022448-dbe043
+  pipeline:
+    - M-20260317-211411-ba6927
   pre-commit:
     - M-20260228-0001
     - M-20260301-0001
   process:
     - M-20260228-0001
     - M-20260228-0003
-  python:
-    - M-20260228-0002
   pyproject:
     - M-20260306-195314-50a55c
   pytest:
     - M-20260306-195314-50a55c
+    - M-20260319-022448-dbe043
+  python:
+    - M-20260228-0002
+    - M-20260308-232603-cf510d
   quality:
     - M-20260228-0001
   quoting:
@@ -245,22 +318,22 @@ tags:
     - M-20260227-0002
   rebase:
     - M-20260228-0002
-  pipeline:
-    - M-20260317-211411-ba6927
   refactor:
     - M-20260302-015214-5390a0
+    - M-20260308-232603-cf510d
     - M-20260317-211411-dfb881
   registration:
     - M-20260301-0003
-  requirements:
-    - M-20260227-0001
   regression:
     - M-20260317-211411-ba6927
+  requirements:
+    - M-20260227-0001
   scope-control:
     - M-20260228-0002
     - M-20260301-0001
     - M-20260301-0002
     - M-20260306-195314-50a55c
+    - M-20260308-232603-9a9463
     - M-20260317-211411-dfb881
   shared-memory:
     - M-20260307-231252-423c4d
@@ -272,17 +345,28 @@ tags:
     - M-20260227-0003
     - M-20260302-015214-5390a0
     - M-20260307-231252-423c4d
+    - M-20260308-232603-9a9463
     - M-20260317-211411-ba6927
+    - M-20260319-022448-b1a13a
+    - M-20260319-022448-da2fb0
+    - M-20260319-022448-dbe043
   thoroughness:
     - M-20260317-211411-dfb881
   tirx:
     - M-20260301-0002
+    - M-20260308-232603-9a9463
     - M-20260317-211411-dfb881
   user-intent:
     - M-20260227-0001
+  verification:
+    - M-20260319-022448-b1a13a
+    - M-20260319-022448-da2fb0
   warnings:
     - M-20260306-195314-50a55c
   workflow:
     - M-20260228-0002
     - M-20260301-0001
     - M-20260306-195314-50a55c
+    - M-20260319-022448-da2fb0
+  xdist:
+    - M-20260319-022448-dbe043

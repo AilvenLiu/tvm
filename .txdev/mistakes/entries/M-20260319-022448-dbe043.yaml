@@ -1,0 +1,55 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The initial implementation replaced 35 individual test_*.py files with
+    a single
+
+    test_kernels.py containing all ~247 parametrized cases. This was functionally
+
+    correct but broke the existing -n 16 parallelism because pytest-xdist''s default
+
+    loadfile strategy sends all tests from one file to one worker.
+
+
+    The user noticed immediately: "test changed to test_kernels can''t parallelize
+
+    anymore, only runs one at a time, figure it out."
+
+
+    Fix was a conftest.py that switches distribution to ''load''. This should have
+
+    been anticipated at design time -- when consolidating many files into one,
+
+    always consider the impact on parallel test distribution.
+
+    '
+  summary: Consolidating 35 test files into one without considering pytest-xdist's
+    loadfile distribution broke parallelism; tests serialized on one worker instead
+    of distributing across 16.
+  created: '2026-03-19'
+  id: M-20260319-022448-dbe043
+  scope:
+    - repo
+  tags:
+    - pytest
+    - xdist
+    - parallelism
+    - testing
+    - design
+  title: Not considering xdist parallelism impact when consolidating test files
+  updated: '2026-03-19'

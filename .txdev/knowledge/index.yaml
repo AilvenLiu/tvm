@@ -191,7 +191,8 @@ entries:
       - triage
       - tirx
       - testing
-    title: Pytest warning triage should separate repository-owned and external sources first
+    title: Pytest warning triage should separate repository-owned and external sources
+      first
     updated: '2026-03-06'
   - created: '2026-03-07'
     id: KB-20260307-231252-48549d
@@ -218,6 +219,42 @@ entries:
       - python
     title: Side-effect-only imports in op_schedule __init__.py for registration
     updated: '2026-03-07'
+  - created: '2026-03-08'
+    id: KB-20260308-232603-18dfc3
+    path: entries/KB-20260308-232603-18dfc3.yaml
+    scope:
+      - repo
+    tags:
+      - tma
+      - import
+      - op-schedule
+      - refactor
+    title: Canonical import paths for TMA utilities in op_schedule/cuda
+    updated: '2026-03-08'
+  - created: '2026-03-08'
+    id: KB-20260308-232603-205e85
+    path: entries/KB-20260308-232603-205e85.yaml
+    scope:
+      - repo
+    tags:
+      - ruff
+      - import
+      - python
+      - lint
+    title: Ruff import sorter splits aliased imports into separate statements
+    updated: '2026-03-08'
+  - created: '2026-03-08'
+    id: KB-20260308-232603-d83e44
+    path: entries/KB-20260308-232603-d83e44.yaml
+    scope:
+      - repo
+    tags:
+      - op-schedule
+      - import
+      - refactor
+      - architecture
+    title: 'op_schedule/cuda module split: canonical import paths'
+    updated: '2026-03-08'
   - created: '2026-03-17'
     id: KB-20260317-211410-3d3076
     path: entries/KB-20260317-211410-3d3076.yaml
@@ -269,11 +306,58 @@ entries:
       - pitfall
     title: TVMScript parser intercepts augmented assignment (+=) inside @Tx.prim_func
     updated: '2026-03-17'
+  - created: '2026-03-19'
+    id: KB-20260319-022448-393527
+    path: entries/KB-20260319-022448-393527.yaml
+    scope:
+      - repo
+    tags:
+      - proton
+      - benchmarking
+      - bench-ci
+      - profiling
+    title: Proton profiler pipeline for bench-ci integration
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: KB-20260319-022448-901600
+    path: entries/KB-20260319-022448-901600.yaml
+    scope:
+      - repo
+    tags:
+      - kernel
+      - registry
+      - testing
+      - benchmarking
+      - architecture
+    title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: KB-20260319-022448-dec2c4
+    path: entries/KB-20260319-022448-dec2c4.yaml
+    scope:
+      - repo
+    tags:
+      - pytest
+      - xdist
+      - parallelism
+      - testing
+    title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
+    updated: '2026-03-19'
 tags:
   api:
     - KB-20260301-0002
+  architecture:
+    - KB-20260308-232603-d83e44
+    - KB-20260319-022448-901600
   assert_structural_equal:
     - KB-20260227-0001
+  barrier:
+    - KB-20260317-211410-3d3076
+  bench-ci:
+    - KB-20260319-022448-393527
+  benchmarking:
+    - KB-20260319-022448-393527
+    - KB-20260319-022448-901600
   codegen:
     - KB-20260227-0002
     - KB-20260301-0001
@@ -281,36 +365,40 @@ tags:
     - KB-20260301-0005
   copy:
     - KB-20260301-0002
-  cuda:
-    - KB-20260307-231252-48549d
   copy_async:
     - KB-20260227-0002
     - KB-20260227-0003
   copy_tma_impl:
     - KB-20260227-0001
-  debugging:
-    - KB-20260301-0001
-  flaky-tests:
+  cuda:
     - KB-20260307-231252-48549d
   deadlock:
     - KB-20260317-211410-c51a41
+  debugging:
+    - KB-20260301-0001
   dsl:
     - KB-20260301-0004
     - KB-20260317-211410-6e13ad
-  gpu:
+  flaky-tests:
     - KB-20260307-231252-48549d
-    - KB-20260317-211410-c51a41
   git:
     - KB-20260228-0001
     - KB-20260228-0003
+  gpu:
+    - KB-20260307-231252-48549d
+    - KB-20260317-211410-c51a41
   import:
     - KB-20260227-0003
     - KB-20260302-015214-9e29ce
     - KB-20260307-231252-72bc64
+    - KB-20260308-232603-18dfc3
+    - KB-20260308-232603-205e85
+    - KB-20260308-232603-d83e44
   ir:
     - KB-20260301-0001
   kernel:
     - KB-20260301-0001
+    - KB-20260319-022448-901600
   kwargs:
     - KB-20260301-0002
   layout:
@@ -318,26 +406,23 @@ tags:
   lint:
     - KB-20260228-0001
     - KB-20260301-0003
+    - KB-20260308-232603-205e85
+  local-scalar:
+    - KB-20260317-211410-6e13ad
   logging:
     - KB-20260228-0004
+  mbarrier:
+    - KB-20260317-211410-c51a41
   noqa:
     - KB-20260301-0003
   op-schedule:
     - KB-20260301-0002
     - KB-20260302-015214-9e29ce
     - KB-20260307-231252-72bc64
-  pre-commit:
-    - KB-20260228-0001
-    - KB-20260228-0003
-    - KB-20260301-0001
-  pre-push:
-    - KB-20260228-0003
-  barrier:
-    - KB-20260317-211410-3d3076
-  local-scalar:
-    - KB-20260317-211410-6e13ad
-  mbarrier:
-    - KB-20260317-211410-c51a41
+    - KB-20260308-232603-18dfc3
+    - KB-20260308-232603-d83e44
+  parallelism:
+    - KB-20260319-022448-dec2c4
   parser:
     - KB-20260317-211410-e366ed
   pipeline:
@@ -347,15 +432,27 @@ tags:
     - KB-20260317-211410-e366ed
   pool-allocator:
     - KB-20260317-211410-3d3076
+  pre-commit:
+    - KB-20260228-0001
+    - KB-20260228-0003
+    - KB-20260301-0001
+  pre-push:
+    - KB-20260228-0003
+  profiling:
+    - KB-20260319-022448-393527
+  proton:
+    - KB-20260319-022448-393527
   ptx:
     - KB-20260227-0002
     - KB-20260317-211410-c51a41
   pytest:
     - KB-20260228-0002
     - KB-20260306-195314-a33c27
+    - KB-20260319-022448-dec2c4
   python:
     - KB-20260301-0005
     - KB-20260307-231252-72bc64
+    - KB-20260308-232603-205e85
     - KB-20260317-211410-e366ed
   recovery:
     - KB-20260228-0003
@@ -363,13 +460,18 @@ tags:
     - KB-20260227-0003
     - KB-20260228-0004
     - KB-20260302-015214-9e29ce
+    - KB-20260308-232603-18dfc3
+    - KB-20260308-232603-d83e44
   registration:
     - KB-20260307-231252-72bc64
+  registry:
+    - KB-20260319-022448-901600
   rg:
     - KB-20260228-0004
   ruff:
     - KB-20260301-0003
     - KB-20260301-0005
+    - KB-20260308-232603-205e85
   scoping:
     - KB-20260301-0004
   shared-memory:
@@ -388,6 +490,8 @@ tags:
     - KB-20260301-0005
     - KB-20260306-195314-a33c27
     - KB-20260307-231252-48549d
+    - KB-20260319-022448-901600
+    - KB-20260319-022448-dec2c4
   tir:
     - KB-20260227-0001
   tirx:
@@ -398,12 +502,13 @@ tags:
     - KB-20260306-195314-a33c27
     - KB-20260317-211410-3d3076
     - KB-20260317-211410-c51a41
-  triage:
-    - KB-20260306-195314-a33c27
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
     - KB-20260302-015214-9e29ce
+    - KB-20260308-232603-18dfc3
+  triage:
+    - KB-20260306-195314-a33c27
   tvm-ffi:
     - KB-20260228-0004
   tvmscript:
@@ -419,3 +524,4 @@ tags:
     - KB-20260228-0003
   xdist:
     - KB-20260228-0002
+    - KB-20260319-022448-dec2c4

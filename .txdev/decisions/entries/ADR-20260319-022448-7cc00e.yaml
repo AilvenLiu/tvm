@@ -1,0 +1,47 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "Context: Kernel test logic was duplicated in three places -- 35 test files\
+    \ in tir,\n700-line bench_kernel.py in bench-ci with 25 hand-written run_* functions,\
+    \ and\nad-hoc scripts in tirx-kernels. Changes to a kernel's test setup had to\
+    \ be\nreplicated in all three places.\n\nDecision: Define a standard kernel interface\
+    \ in tirx-kernels:\n- KERNEL_META: dict with name, category, compute_capability\n\
+    - CONFIGS: list of dicts with label + kernel parameters\n- get_kernel(**kwargs):\
+    \ returns compiled kernel\n- run_test(kernel_name, config, registry): correctness\
+    \ check\n- run_bench(kernel_name, config, registry): proton-profiled benchmark\n\
+    \ntir consumes this via test_kernels.py (pytest parametrize over registry).\n\
+    bench-ci consumes this via python -m kernels.bench (proton output -> parse_proton.py).\n\
+    \nConsequences:\n- Single source of truth for kernel test/bench logic\n- Adding\
+    \ a kernel to tirx-kernels automatically adds it to both tir tests and\n  bench-ci\
+    \ benchmarks\n- tir repo only needs tirx-kernels installed as pip package (pip\
+    \ install -e)\n- bench-ci deletes 700-line bench_kernel.py, bench-run.sh uses\
+    \ registry output\n"
+  summary: Standardize on KERNEL_META + CONFIGS + run_test() + run_bench() as the
+    kernel interface consumed by both tir pytest and bench-ci pipeline.
+  created: '2026-03-19'
+  id: ADR-20260319-022448-7cc00e
+  scope:
+    - repo
+  tags:
+    - architecture
+    - kernel
+    - bench-ci
+    - testing
+    - infrastructure
+  title: Unified kernel interface across test and bench-ci pipelines
+  updated: '2026-03-19'

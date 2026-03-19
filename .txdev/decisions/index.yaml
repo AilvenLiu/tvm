@@ -49,7 +49,8 @@ entries:
       - upstream-alignment
       - tooling
       - ci
-    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing checks
+    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing
+      checks
     updated: '2026-02-28'
   - created: '2026-02-28'
     id: ADR-20260228-0002
@@ -75,7 +76,8 @@ entries:
       - compatibility
       - tvm-ffi
       - refactor
-    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check APIs
+    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check
+      APIs
     updated: '2026-02-28'
   - created: '2026-03-01'
     id: ADR-20260301-0001
@@ -137,6 +139,29 @@ entries:
       - architecture
     title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
     updated: '2026-03-07'
+  - created: '2026-03-08'
+    id: ADR-20260308-232603-16186a
+    path: entries/ADR-20260308-232603-16186a.yaml
+    scope:
+      - repo
+    tags:
+      - op-schedule
+      - refactor
+      - architecture
+      - module-split
+    title: Split cuda/common.py and trn/common.py by functional domain, not by size
+    updated: '2026-03-08'
+  - created: '2026-03-08'
+    id: ADR-20260308-232603-d77714
+    path: entries/ADR-20260308-232603-d77714.yaml
+    scope:
+      - repo
+    tags:
+      - op-schedule
+      - refactor
+      - architecture
+    title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
+    updated: '2026-03-08'
   - created: '2026-03-17'
     id: ADR-20260317-211411-5664ea
     path: entries/ADR-20260317-211411-5664ea.yaml
@@ -161,6 +186,45 @@ entries:
       - api-design
     title: Keep Tx.local_scalar in meta_class __init__, use type annotations elsewhere
     updated: '2026-03-17'
+  - created: '2026-03-19'
+    id: ADR-20260319-022448-398b11
+    path: entries/ADR-20260319-022448-398b11.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - architecture
+      - kernel
+      - pytest
+      - xdist
+    title: Single test_kernels.py thin wrapper with conftest.py for xdist distribution
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: ADR-20260319-022448-4d7f83
+    path: entries/ADR-20260319-022448-4d7f83.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - architecture
+      - kernel
+      - design-pattern
+    title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent
+      kernels
+    updated: '2026-03-19'
+  - created: '2026-03-19'
+    id: ADR-20260319-022448-7cc00e
+    path: entries/ADR-20260319-022448-7cc00e.yaml
+    scope:
+      - repo
+    tags:
+      - architecture
+      - kernel
+      - bench-ci
+      - testing
+      - infrastructure
+    title: Unified kernel interface across test and bench-ci pipelines
+    updated: '2026-03-19'
 tags:
   api:
     - ADR-20260228-0003
@@ -169,8 +233,17 @@ tags:
     - ADR-20260317-211411-a47556
   api-evolution:
     - ADR-20260228-0002
+  architecture:
+    - ADR-20260307-231252-f0561c
+    - ADR-20260308-232603-16186a
+    - ADR-20260308-232603-d77714
+    - ADR-20260319-022448-398b11
+    - ADR-20260319-022448-4d7f83
+    - ADR-20260319-022448-7cc00e
   assert_structural_equal:
     - ADR-20260227-0001
+  bench-ci:
+    - ADR-20260319-022448-7cc00e
   buffer-view:
     - ADR-20260227-0002
   ci:
@@ -180,43 +253,55 @@ tags:
   compatibility:
     - ADR-20260228-0002
     - ADR-20260228-0003
-  golden:
-    - ADR-20260227-0001
-  kernel:
-    - ADR-20260301-0001
-  logging:
-    - ADR-20260228-0003
+  design-pattern:
+    - ADR-20260319-022448-4d7f83
   dsl:
     - ADR-20260317-211411-a47556
+  golden:
+    - ADR-20260227-0001
+  infrastructure:
+    - ADR-20260319-022448-7cc00e
+  kernel:
+    - ADR-20260301-0001
+    - ADR-20260319-022448-398b11
+    - ADR-20260319-022448-4d7f83
+    - ADR-20260319-022448-7cc00e
+  logging:
+    - ADR-20260228-0003
   mbarrier:
     - ADR-20260317-211411-5664ea
-  pipeline:
-    - ADR-20260317-211411-5664ea
-  ptx:
-    - ADR-20260317-211411-5664ea
-  syntax:
-    - ADR-20260317-211411-a47556
-  architecture:
-    - ADR-20260307-231252-f0561c
+  module-split:
+    - ADR-20260308-232603-16186a
   op-schedule:
     - ADR-20260301-0002
     - ADR-20260301-0003
     - ADR-20260307-231252-f0561c
-  policy:
-    - ADR-20260306-195314-450625
+    - ADR-20260308-232603-16186a
+    - ADR-20260308-232603-d77714
   parser:
     - ADR-20260228-0002
+  pipeline:
+    - ADR-20260317-211411-5664ea
+  policy:
+    - ADR-20260306-195314-450625
   pre-commit:
     - ADR-20260228-0001
     - ADR-20260301-0001
+  ptx:
+    - ADR-20260317-211411-5664ea
   pytest:
     - ADR-20260306-195314-450625
+    - ADR-20260319-022448-398b11
   rebase:
     - ADR-20260228-0002
     - ADR-20260301-0001
   refactor:
     - ADR-20260228-0003
     - ADR-20260307-231252-f0561c
+    - ADR-20260308-232603-16186a
+    - ADR-20260308-232603-d77714
+  syntax:
+    - ADR-20260317-211411-a47556
   test-organization:
     - ADR-20260301-0002
   testing:
@@ -226,6 +311,9 @@ tags:
     - ADR-20260301-0002
     - ADR-20260301-0003
     - ADR-20260306-195314-450625
+    - ADR-20260319-022448-398b11
+    - ADR-20260319-022448-4d7f83
+    - ADR-20260319-022448-7cc00e
   third-party:
     - ADR-20260306-195314-450625
   tir:
@@ -246,3 +334,5 @@ tags:
     - ADR-20260301-0001
   warnings:
     - ADR-20260306-195314-450625
+  xdist:
+    - ADR-20260319-022448-398b11

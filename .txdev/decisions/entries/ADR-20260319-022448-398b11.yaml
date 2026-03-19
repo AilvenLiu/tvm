@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: |
+    Context: 35 individual test_*.py files in tests/python/tirx/kernels/cuda/sm100a/
+    each contained 50-200 lines of boilerplate for compiling and testing one kernel.
+    Adding a new kernel required creating a new test file with mostly duplicated code.
+
+    Decision: Replace all 35 files with a single test_kernels.py (~45 lines) that
+    calls discover_kernels(min_compute_capability=10) from tirx-kernels registry
+    and generates pytest.mark.parametrize cases. Each test case delegates to
+    run_kernel_test() in the kernel module.
+
+    A companion conftest.py switches pytest-xdist distribution from 'loadfile' to
+    'load' so -n 16 distributes individual parametrized cases across workers.
+
+    Consequences:
+      - Adding a new kernel test requires only adding KERNEL_META + CONFIGS + run_test()
+      to the kernel module in tirx-kernels; no changes needed in tir repo
+    - 6100+ lines deleted, replaced by ~75 lines (test_kernels.py + conftest.py)
+    - sm80, sm90a, and megakernel tests are unaffected (they use inline kernels)
+    - Test count preserved: 245 passed, 1 skipped (same as before)
+  summary: Replace 35 individual test files with one parametrized test_kernels.py that auto-discovers kernels via registry, plus conftest.py to fix xdist parallelism.
+  created: '2026-03-19'
+  id: ADR-20260319-022448-398b11
+  scope:
+    - repo
+  tags:
+    - testing
+    - architecture
+    - kernel
+    - pytest
+    - xdist
+  title: Single test_kernels.py thin wrapper with conftest.py for xdist distribution
+  updated: '2026-03-19'

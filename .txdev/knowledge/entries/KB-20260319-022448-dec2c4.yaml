@@ -1,0 +1,56 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'pytest-xdist distributes tests across workers using a distribution strategy.
+
+    The default ''loadfile'' strategy sends all tests from the same file to one worker,
+
+    which is fine when tests are spread across many files. When consolidating 35 test
+
+    files into a single test_kernels.py with ~247 parametrized cases, ''loadfile''
+    causes
+
+    all cases to run on one worker, defeating -n 16 parallelism entirely.
+
+
+    Fix: add a conftest.py that overrides the distribution strategy to ''load'', which
+
+    distributes individual test cases round-robin across workers. The hook
+
+    pytest_configure(config) checks for xdist and sets config.option.dist = "load"
+
+    only when the current strategy would serialize (None, "no", or "loadfile").
+
+
+    File: tests/python/tirx/kernels/cuda/sm100a/conftest.py
+
+    '
+  summary: When consolidating many test files into one parametrized file, pytest-xdist's
+    default 'loadfile' strategy serializes all tests on one worker; switch to 'load'
+    via conftest.py.
+  created: '2026-03-19'
+  id: KB-20260319-022448-dec2c4
+  scope:
+    - repo
+  tags:
+    - pytest
+    - xdist
+    - parallelism
+    - testing
+  title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
+  updated: '2026-03-19'

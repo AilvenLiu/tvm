@@ -1,0 +1,43 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The kernel registry pattern (kernels.registry.discover_kernels) scans\
+    \ category\nsubdirectories (gemm, attention, activation, ssm, loss, moe) using\n\
+    pkgutil.iter_modules, imports each module, and checks for a KERNEL_META dict\n\
+    with a \"name\" key. This returns {name: module} for all registered kernels.\n\
+    \nStandard kernel interface: each module exports KERNEL_META (dict with name,\n\
+    category, compute_capability), CONFIGS (list of dicts with label + params),\n\
+    get_kernel(), run_test(), run_bench().\n\nThis enables:\n1. Single test_kernels.py\
+    \ (~45 lines) replacing 35 individual test files (6100+ lines)\n2. Unified bench\
+    \ CLI: python -m kernels.bench --kernel X --config Y\n3. bench-ci integration:\
+    \ python -m kernels.registry --format=benchrun generates\n   KERNEL|SIZE|COMMAND\
+    \ lines consumed by bench-run.sh\n"
+  summary: Auto-discover kernel modules via KERNEL_META attribute + pkgutil.iter_modules,
+    enabling a single thin test wrapper and unified bench CLI.
+  created: '2026-03-19'
+  id: KB-20260319-022448-901600
+  scope:
+    - repo
+  tags:
+    - kernel
+    - registry
+    - testing
+    - benchmarking
+    - architecture
+  title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+  updated: '2026-03-19'

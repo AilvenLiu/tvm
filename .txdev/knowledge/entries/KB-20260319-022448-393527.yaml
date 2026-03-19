@@ -1,0 +1,43 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The bench-ci pipeline works as follows:\n1. bench-run.sh calls `python\
+    \ -m kernels.registry --format=benchrun --cc 10` to\n   get KERNEL|SIZE|COMMAND\
+    \ lines\n2. Each COMMAND is `python -m kernels.bench --kernel <name> --config\
+    \ <label>`\n3. kernels.bench starts a Proton session, runs the kernel with proton\
+    \ profiling,\n   then calls proton-viewer to produce a tree output\n4. parse_proton.py\
+    \ reads the tree output (depth-1 = impl name, depth-2 = kernel\n   time, take\
+    \ slowest child per impl), extracts {impl: avg_time_ms}\n5. Results are inserted\
+    \ into SQLite for the dashboard\n\nKey detail: Proton scopes in the bench output\
+    \ must use known impl names\n(tir, torch-cublas, deepgemm, flashinfer, etc.) matching\
+    \ KNOWN_IMPLS in\nparse_proton.py, or the tirx_soln_* prefix which gets normalized\
+    \ to \"tir\".\n"
+  summary: 'kernels.bench uses Proton profiler to produce tree output that parse_proton.py
+    consumes; the pipeline is: registry discovery -> bench CLI -> proton-viewer tree
+    -> parse_proton.py -> SQLite.'
+  created: '2026-03-19'
+  id: KB-20260319-022448-393527
+  scope:
+    - repo
+  tags:
+    - proton
+    - benchmarking
+    - bench-ci
+    - profiling
+  title: Proton profiler pipeline for bench-ci integration
+  updated: '2026-03-19'

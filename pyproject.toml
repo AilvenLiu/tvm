@@ -232,7 +232,12 @@ unfixable = []
 "__init__.py" = ["E402", "F401", "F403", "F405"]
 "python/tvm/tirx/megakernel/kernels/fp8_gemm_sm100.py" = ["E501"]
 "tests/python/tirx/kernels/cuda/megakernel/*.py" = ["E501", "F821"]
-"tests/python/tirx/kernels/cuda/sm100a/*.py" = ["E501", "F403", "F405", "F821"]
+"tests/python/tirx/kernels/cuda/sm100a/qwen3_*.py" = [
+  "E501",
+  "F403",
+  "F405",
+  "F821",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["tvm"]
