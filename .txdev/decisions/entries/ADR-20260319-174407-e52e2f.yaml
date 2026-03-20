@@ -27,7 +27,7 @@ content:
     \nBenefits of chosen approach:\n- All impls appear in the same Proton tree, enabling\
     \ direct comparison\n- try/except ensures missing deps (flashinfer, deep_gemm,\
     \ cutlass)\n  never break the tir benchmark\n- No changes needed to bench-ci infrastructure\
-    \ (bench-run.sh, kernels.bench)\n- return value unchanged ({\"tir_ms\": ...}),\
+    \ (bench-run.sh, tirx_kernels.bench)\n- return value unchanged ({\"tir_ms\": ...}),\
     \ backward compatible\n- Each baseline is self-contained and independently failable\n"
   summary: Baseline benchmarks are additive code inside the existing run_bench() ProtonContext
     block, wrapped in try/except, rather than separate benchmark functions or scripts.

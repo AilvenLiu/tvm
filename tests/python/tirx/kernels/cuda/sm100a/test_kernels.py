@@ -16,14 +16,14 @@
 # under the License.
 """Unified sm100a kernel tests — thin wrapper over tirx-kernels registry.
 
-Discovers all kernels registered in the ``kernels`` package (installed
+Discovers all kernels registered in the ``tirx_kernels`` package (installed
 via ``pip install -e /path/to/tirx-kernels``) and generates pytest
 parametrized test cases from their ``CONFIGS``.
 """
 
 import pytest
-from kernels.registry import discover_kernels
-from kernels.runner import run_kernel_test
+from tirx_kernels.registry import discover_kernels
+from tirx_kernels.runner import run_kernel_test
 
 import tvm.testing
 

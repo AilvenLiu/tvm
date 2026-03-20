@@ -238,6 +238,17 @@ entries:
     title: Baselines run inside ProtonContext with try/except, not as separate bench
       passes
     updated: '2026-03-19'
+  - created: '2026-03-20'
+    id: ADR-20260320-002326-d2fa6d
+    path: entries/ADR-20260320-002326-d2fa6d.yaml
+    scope:
+      - repo
+    tags:
+      - packaging
+      - tirx-kernels
+      - module-rename
+    title: Rename importable module from kernels to tirx_kernels for namespace clarity
+    updated: '2026-03-20'
 tags:
   api:
     - ADR-20260228-0003

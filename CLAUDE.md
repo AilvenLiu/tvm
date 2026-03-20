@@ -99,7 +99,7 @@ pytest tests/python/tirx/ -n 16
 git clone git@github.com:mlc-ai/tirx-kernels.git ~/tirx-kernels
 pip install -e ~/tirx-kernels
 ```
-SM100a kernel tests use the unified `kernels` package registry — the single `test_kernels.py` file discovers and runs all registered kernels via `kernels.registry.discover_kernels()`.
+SM100a kernel tests use the unified `tirx_kernels` package registry — the single `test_kernels.py` file discovers and runs all registered kernels via `tirx_kernels.registry.discover_kernels()`.
 
 **Kernel performance**: When modifying anything that affects code generation (kernels, op dispatches, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 

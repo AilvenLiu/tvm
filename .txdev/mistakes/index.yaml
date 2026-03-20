@@ -271,6 +271,18 @@ entries:
       - testing
     title: Must run actual GPU benchmarks to verify baselines, not just py_compile
     updated: '2026-03-19'
+  - created: '2026-03-20'
+    id: M-20260320-002326-7c92c5
+    path: entries/M-20260320-002326-7c92c5.yaml
+    scope:
+      - repo
+    tags:
+      - packaging
+      - pip
+      - editable-install
+      - testing
+    title: Editable pip install finder caches old module mapping after directory rename
+    updated: '2026-03-20'
 tags:
   api:
     - M-20260301-0002

@@ -25,7 +25,7 @@ content:
     \ returns compiled kernel\n- run_test(kernel_name, config, registry): correctness\
     \ check\n- run_bench(kernel_name, config, registry): proton-profiled benchmark\n\
     \ntir consumes this via test_kernels.py (pytest parametrize over registry).\n\
-    bench-ci consumes this via python -m kernels.bench (proton output -> parse_proton.py).\n\
+    bench-ci consumes this via python -m tirx_kernels.bench (proton output -> parse_proton.py).\n\
     \nConsequences:\n- Single source of truth for kernel test/bench logic\n- Adding\
     \ a kernel to tirx-kernels automatically adds it to both tir tests and\n  bench-ci\
     \ benchmarks\n- tir repo only needs tirx-kernels installed as pip package (pip\

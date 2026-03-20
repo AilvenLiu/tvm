@@ -17,9 +17,9 @@
 
 content:
   details: "The bench-ci pipeline works as follows:\n1. bench-run.sh calls `python\
-    \ -m kernels.registry --format=benchrun --cc 10` to\n   get KERNEL|SIZE|COMMAND\
-    \ lines\n2. Each COMMAND is `python -m kernels.bench --kernel <name> --config\
-    \ <label>`\n3. kernels.bench starts a Proton session, runs the kernel with proton\
+    \ -m tirx_kernels.registry --format=benchrun --cc 10` to\n   get KERNEL|SIZE|COMMAND\
+    \ lines\n2. Each COMMAND is `python -m tirx_kernels.bench --kernel <name> --config\
+    \ <label>`\n3. tirx_kernels.bench starts a Proton session, runs the kernel with proton\
     \ profiling,\n   then calls proton-viewer to produce a tree output\n4. parse_proton.py\
     \ reads the tree output (depth-1 = impl name, depth-2 = kernel\n   time, take\
     \ slowest child per impl), extracts {impl: avg_time_ms}\n5. Results are inserted\
@@ -35,7 +35,7 @@ content:
     \ by parse_proton.py (it takes the slowest depth-2 child, which is the\n  actual\
     \ compute kernel).\n- Dashboard speedup = baseline_time / tir_time. Green if >1.01,\
     \ red if <0.99.\n"
-  summary: 'kernels.bench uses Proton profiler to produce tree output that parse_proton.py
+  summary: 'tirx_kernels.bench uses Proton profiler to produce tree output that parse_proton.py
     consumes; the pipeline is: registry discovery -> bench CLI -> proton-viewer tree
     -> parse_proton.py -> SQLite.'
   created: '2026-03-19'

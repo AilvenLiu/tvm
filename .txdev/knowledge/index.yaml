@@ -355,6 +355,18 @@ entries:
       - tirx-kernels
     title: Cross-repo baseline benchmark coordination pattern
     updated: '2026-03-19'
+  - created: '2026-03-20'
+    id: KB-20260320-002326-24c511
+    path: entries/KB-20260320-002326-24c511.yaml
+    scope:
+      - repo
+    tags:
+      - packaging
+      - pip
+      - python
+      - tirx-kernels
+    title: Python pip package name vs importable module name are independent
+    updated: '2026-03-20'
 tags:
   api:
     - KB-20260301-0002
