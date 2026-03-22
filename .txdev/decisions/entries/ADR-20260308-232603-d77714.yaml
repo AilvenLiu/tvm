@@ -14,48 +14,39 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'maps.py (CUDA 54 lines, TRN 64 lines) was a pure routing layer that called
 
-    register_unary_binary_schedule() to bind op names to schedule candidates from
-    unary.py
+    register_unary_binary_schedule() to bind op names to schedule candidates from unary.py
 
-    and binary.py. It contained zero unique logic — every schedule implementation
-    lived in
+    and binary.py. It contained zero unique logic — every schedule implementation lived in
 
     the target modules already.
 
 
-    Decision: delete maps.py and move the registration calls to the bottom of unary.py
-    and
+    Decision: delete maps.py and move the registration calls to the bottom of unary.py and
 
-    binary.py respectively. This reduces indirection without changing any runtime
-    behavior.
+    binary.py respectively. This reduces indirection without changing any runtime behavior.
 
 
-    In the subsequent op-schedule-refactor PR, the indirect registration system was
-    fully
+    In the subsequent op-schedule-refactor PR, the indirect registration system was fully
 
-    removed: UnaryBinaryScheduleCandidate and register_unary_binary_schedule were
-    deleted
+    removed: UnaryBinaryScheduleCandidate and register_unary_binary_schedule were deleted
 
-    from op_schedule/common.py, and all unary/binary ops now use @register_dispatch
-    directly
+    from op_schedule/common.py, and all unary/binary ops now use @register_dispatch directly
 
     with closures to capture the MapOpType. This completed the unification to a single
 
     registration pattern across all op schedules.
 
 
-    MapOpType enum was kept as-is (not renamed to ElementwiseOpType) to minimize diff
-    size.
+    MapOpType enum was kept as-is (not renamed to ElementwiseOpType) to minimize diff size.
 
     It remains used in 60+ places as the op table key and can be renamed in a follow-up.
 
     '
-  summary: Eliminated the maps.py pure-dispatcher module by inlining its registration
-    calls directly into unary.py and binary.py for both CUDA and TRN targets.
+  summary: Eliminated the maps.py pure-dispatcher module by inlining its registration calls directly into unary.py and binary.py
+    for both CUDA and TRN targets.
 created: '2026-03-08'
 id: ADR-20260308-232603-d77714
 scope:

@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'An intermediate approach serialized all 35 test cases'' expected IR into a 597KB JSON file
 

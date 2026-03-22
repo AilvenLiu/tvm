@@ -14,25 +14,21 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'When renaming a pip package''s import module, the directory must be renamed
-    (git mv) and all imports updated across every consuming repo. The pip package
-    name in pyproject.toml can stay the same. For tirx-kernels: pip name is ''tirx-kernels''
-    (with hyphen), importable module is ''tirx_kernels'' (with underscore, matching
-    the directory name). After renaming, run `pip install -e .` to regenerate the
-    editable finder (.pth file) — stale finders will still map the old module name.'
-  summary: In Python packaging (setuptools), the pip package name (pyproject.toml
-    [project].name) and the importable module name (the directory) are independent
-    — changing one does not require changing the other.
-  created: '2026-03-20'
-  id: KB-20260320-002326-24c511
-  scope:
-    - repo
-  tags:
-    - packaging
-    - pip
-    - python
-    - tirx-kernels
-  title: Python pip package name vs importable module name are independent
-  updated: '2026-03-20'
+  details: 'When renaming a pip package''s import module, the directory must be renamed (git mv) and all imports updated across
+    every consuming repo. The pip package name in pyproject.toml can stay the same. For tirx-kernels: pip name is ''tirx-kernels''
+    (with hyphen), importable module is ''tirx_kernels'' (with underscore, matching the directory name). After renaming, run
+    `pip install -e .` to regenerate the editable finder (.pth file) — stale finders will still map the old module name.'
+  summary: In Python packaging (setuptools), the pip package name (pyproject.toml [project].name) and the importable module
+    name (the directory) are independent — changing one does not require changing the other.
+created: '2026-03-20'
+id: KB-20260320-002326-24c511
+scope:
+  - repo
+tags:
+  - packaging
+  - pip
+  - python
+  - tirx-kernels
+title: Python pip package name vs importable module name are independent
+updated: '2026-03-20'

@@ -14,19 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    In TIRX DSL test code, buffer indexing with star unpacking like A_smem[*r_smem_A_in] causes a
-    ruff invalid-syntax error because the project's ruff target is py310, and star expressions in
-    subscripts (PEP 646) are only valid from Python 3.11+. Fix: replace [*iterable] with
-    [tuple(iterable)] in index expressions. Example: A_smem[*r_smem_A_in] -> A_smem[tuple(r_smem_A_in)].
-    This commonly appears in TIRX test code where multi-dimensional buffer regions are constructed
-    from range tuples. The tuple() form is compatible with all Python versions and produces identical
-    behavior.
-  summary: >-
-    The syntax A[*iterable] requires Python 3.11+; use A[tuple(iterable)] instead when ruff target
-    is py310.
+  details: 'In TIRX DSL test code, buffer indexing with star unpacking like A_smem[*r_smem_A_in] causes a ruff invalid-syntax
+    error because the project''s ruff target is py310, and star expressions in subscripts (PEP 646) are only valid from Python
+    3.11+. Fix: replace [*iterable] with [tuple(iterable)] in index expressions. Example: A_smem[*r_smem_A_in] -> A_smem[tuple(r_smem_A_in)].
+    This commonly appears in TIRX test code where multi-dimensional buffer regions are constructed from range tuples. The
+    tuple() form is compatible with all Python versions and produces identical behavior.'
+  summary: The syntax A[*iterable] requires Python 3.11+; use A[tuple(iterable)] instead when ruff target is py310.
 created: '2026-03-01'
 id: KB-20260301-0005
 scope:

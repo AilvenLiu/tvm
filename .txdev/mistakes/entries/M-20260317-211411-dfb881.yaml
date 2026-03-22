@@ -14,34 +14,27 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'Initial plan only applied Tx.elected() to a handful of kernels. User feedback
-    was blunt:
+  details: 'Initial plan only applied Tx.elected() to a handful of kernels. User feedback was blunt:
 
-    "S1-S10 so many syntax changes, so many kernels in tirx-kernels, and you only
-    pick a few
+    "S1-S10 so many syntax changes, so many kernels in tirx-kernels, and you only pick a few
 
     kernels to change one elect? Are you kidding?" followed by "What about pipeline/barrier?
 
     local_scalar printer/parser? Cutting corners?"
 
 
-    The lesson: when a syntax improvement is mechanical and applies broadly, enumerate
-    ALL
+    The lesson: when a syntax improvement is mechanical and applies broadly, enumerate ALL
 
-    files that match the pattern (using grep), transform ALL of them, and verify ALL
-    of them.
+    files that match the pattern (using grep), transform ALL of them, and verify ALL of them.
 
-    Doing partial application creates inconsistency and signals laziness. The overhead
-    of
+    Doing partial application creates inconsistency and signals laziness. The overhead of
 
-    transforming 28 files vs 5 files is marginal compared to the cost of being asked
-    to redo it.
+    transforming 28 files vs 5 files is marginal compared to the cost of being asked to redo it.
 
     '
-  summary: When introducing syntax sugar or refactoring patterns, apply them exhaustively
-    across ALL kernel files in one pass, not just a few examples.
+  summary: When introducing syntax sugar or refactoring patterns, apply them exhaustively across ALL kernel files in one pass,
+    not just a few examples.
 created: '2026-03-17'
 id: M-20260317-211411-dfb881
 scope:

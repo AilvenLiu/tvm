@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'When using `from .module import (name_a as _name_a, name_b as _name_b)`,
 
@@ -43,9 +42,8 @@ content:
     one clean import block per file.
 
     '
-  summary: Ruff's import sorter (I001) splits `from X import (a as _a, b as _b)` into
-    separate `from X import (a as _a,)` statements; avoid `as` aliases to keep imports
-    grouped.
+  summary: Ruff's import sorter (I001) splits `from X import (a as _a, b as _b)` into separate `from X import (a as _a,)`
+    statements; avoid `as` aliases to keep imports grouped.
 created: '2026-03-08'
 id: KB-20260308-232603-205e85
 scope:

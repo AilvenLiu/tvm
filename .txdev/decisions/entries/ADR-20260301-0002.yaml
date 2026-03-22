@@ -14,22 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    Op schedule test files exist to verify that the dispatch mechanism correctly routes ops to the
-    right schedule, the schedule generates correct lowered code, and the generated kernel produces
-    correct results. Tests using raw PTX intrinsics (Tx.ptx.tcgen05.cp()) bypass the dispatch
-    entirely and should live in codegen test files (e.g., test_codegen_blackwell.py) instead. This
-    distinction matters because op schedule tests catch dispatch routing bugs and schedule generation
-    bugs, while PTX codegen tests catch instruction encoding and register allocation bugs. Mixing
-    them in the same file makes it unclear what is being tested and can give false confidence that
-    dispatch paths are covered. When adding new tests to op schedule files, always verify the test
-    calls Tx.copy/Tx.copy_async/Tx.gemm_async (the DSL-level ops) rather than their lowered PTX
-    equivalents.
-  summary: >-
-    Tests in op_schedule/cuda/test_copy_*.py should use Tx.copy()/Tx.copy_async() to exercise the
-    dispatch path, not raw PTX intrinsics.
+  details: Op schedule test files exist to verify that the dispatch mechanism correctly routes ops to the right schedule,
+    the schedule generates correct lowered code, and the generated kernel produces correct results. Tests using raw PTX intrinsics
+    (Tx.ptx.tcgen05.cp()) bypass the dispatch entirely and should live in codegen test files (e.g., test_codegen_blackwell.py)
+    instead. This distinction matters because op schedule tests catch dispatch routing bugs and schedule generation bugs,
+    while PTX codegen tests catch instruction encoding and register allocation bugs. Mixing them in the same file makes it
+    unclear what is being tested and can give false confidence that dispatch paths are covered. When adding new tests to op
+    schedule files, always verify the test calls Tx.copy/Tx.copy_async/Tx.gemm_async (the DSL-level ops) rather than their
+    lowered PTX equivalents.
+  summary: Tests in op_schedule/cuda/test_copy_*.py should use Tx.copy()/Tx.copy_async() to exercise the dispatch path, not
+    raw PTX intrinsics.
 created: '2026-03-01'
 id: ADR-20260301-0002
 scope:

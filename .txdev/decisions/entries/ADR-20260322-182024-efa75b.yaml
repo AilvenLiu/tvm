@@ -1,0 +1,44 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+content:
+  details: "Extended the original scalar-only annotation (x: Tx.int32 -> local_scalar) with:\n1. Vector/tensor annotation:\
+    \ x: Tx.f32[N] or x: Tx.f32[M,N] -> alloc_local(shape, dtype)\n   returning a Buffer. Implemented via DtypeConstructor.__getitem__\
+    \ -> LocalVectorAnnotation,\n   detected in visit_ann_assign before the LetAnnotation check.\n\n2. Shorthand dtype aliases:\
+    \ f16, f32, f64, bf16, i8-i64, u8-u64 as DtypeConstructor instances.\n3. Memory allocation aliases: Tx.smem = Tx.alloc_shared,\
+    \ Tx.tmem = partial(alloc_buffer, scope=\"tmem\").\nUnconvertible cases (retained as explicit calls): - Dynamic dtype:\
+    \ Tx.alloc_local([N], buf.dtype) or Tx.alloc_local((N,), a_type) - Extra kwargs: align=0, align=16, name=\"state_o\" -\
+    \ @Tx.meta_class __init__: not parsed by TVMScript - alloc_buffer with scope=\"local\" and align= kwargs\nMigration scope:\
+    \ ~200 call sites across 36+ kernel files in tirx-kernels. Test results: 1855 passed, 0 failed, 0 regressions. Zero perf\
+    \ degradation on GEMM benchmarks.\n"
+  summary: 'Type annotation syntax replaces alloc_local in prim_func bodies: Tx.f32 for scalar, Tx.f32[N] for vector/tensor
+    Buffer. Tx.smem replaces alloc_shared, Tx.tmem for tmem scope. Retained: alloc_local with dynamic dtype/align/name kwargs,
+    alloc_local in meta_class __init__.'
+created: '2026-03-22'
+id: ADR-20260322-182024-efa75b
+scope:
+  - repo
+tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - api-design
+  - vector-annotation
+  - alloc-local
+  - smem
+  - tmem
+title: 'Tensor alloc annotation syntax: scalar (Tx.f32), vector (Tx.f32[N]), smem/tmem aliases'
+updated: '2026-03-22'

@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: The compatibility block introduced in include/tvm/runtime/logging.h masked legacy CHECK/ICHECK/DCHECK
-    usage and allowed old callsites to keep compiling silently. We decided to remove that block entirely
-    and migrate callsites to TVM_FFI_ICHECK*/TVM_FFI_DCHECK* (or TVM_FFI_CHECK with explicit ErrorKind
-    where required). This intentionally turns future legacy usage into compile-time breakage, making
-    API drift visible immediately and keeping runtime/error semantics aligned with tvm-ffi contracts.
-  summary: The repo now enforces explicit TVM_FFI logging/check macros by removing legacy compatibility
-    adapters from logging.h.
+  details: The compatibility block introduced in include/tvm/runtime/logging.h masked legacy CHECK/ICHECK/DCHECK usage and
+    allowed old callsites to keep compiling silently. We decided to remove that block entirely and migrate callsites to TVM_FFI_ICHECK*/TVM_FFI_DCHECK*
+    (or TVM_FFI_CHECK with explicit ErrorKind where required). This intentionally turns future legacy usage into compile-time
+    breakage, making API drift visible immediately and keeping runtime/error semantics aligned with tvm-ffi contracts.
+  summary: The repo now enforces explicit TVM_FFI logging/check macros by removing legacy compatibility adapters from logging.h.
 created: '2026-02-28'
 id: ADR-20260228-0003
 scope:

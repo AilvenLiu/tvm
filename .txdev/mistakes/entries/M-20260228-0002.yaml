@@ -14,15 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  summary: Editing `python/tvm/script/ir_builder/tir/ir.py` for a tiny compatibility issue triggered
-    broad lint churn and rework.
-  details: A narrow compatibility bug (`T.prim_func` keyword mismatch) was first fixed in a large,
-    lint-sensitive file, which caused pre-commit to attempt extensive rewrites and introduced avoidable
-    overhead. A better approach was to make a parser-side compatibility fallback in a smaller file.
-    For future work, prefer the smallest stable integration point for compatibility patches, especially
-    during rebase stabilization where hook noise can derail delivery.
+  details: A narrow compatibility bug (`T.prim_func` keyword mismatch) was first fixed in a large, lint-sensitive file, which
+    caused pre-commit to attempt extensive rewrites and introduced avoidable overhead. A better approach was to make a parser-side
+    compatibility fallback in a smaller file. For future work, prefer the smallest stable integration point for compatibility
+    patches, especially during rebase stabilization where hook noise can derail delivery.
+  summary: Editing `python/tvm/script/ir_builder/tir/ir.py` for a tiny compatibility issue triggered broad lint churn and
+    rework.
 created: '2026-02-28'
 id: M-20260228-0002
 scope:

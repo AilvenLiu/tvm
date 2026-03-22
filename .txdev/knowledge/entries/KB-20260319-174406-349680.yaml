@@ -14,32 +14,27 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "When adding baseline benchmarks to kernel run_bench() functions:\n1. tirx-kernels:\
-    \ Add baseline inside the ProtonContext block using\n   bench(..., proton_name=\"\
-    <name>\"), wrapped in try/except\n2. tirx-bench-ci: Add the same proton_name string\
-    \ to KNOWN_IMPLS in\n   parse_proton.py, otherwise the baseline is silently dropped\n\
-    \nThe baseline pattern:\n- Must run inside the same ProtonContext block as tir\n\
-    - Must use bench() with a unique proton_name (appears as depth-1 in Proton tree)\n\
-    - Must be wrapped in try/except so missing deps don't break tir benchmarking\n\
-    - Should print BASELINE_ERROR to stderr on failure\n- Must NOT modify the return\
-    \ value (still returns {\"tir_ms\": ...})\n\nCurrent baselines by category:\n\
-    - Activation kernels: flashinfer (rmsnorm, fused_add_rms_norm,\n  fused_split_silu_multiply,\
-    \ rope)\n- GEMM kernels: cublas via torch.mm/matmul (hgemm variants),\n  deep_gemm\
-    \ (deepgemm, bhr_hdr_bhd, bmk_bnk_mn, fp8_bhr_hdr_bhd,\n  tf32_hc_prenorm_gemm)\n\
-    - Attention kernels: flashinfer (batch_attention, batch_prefill,\n  batch_decode,\
-    \ batch_decode_tensor_cores), cutedsl_fa4,\n  flashattn_sm100 (flash_attention4)\n"
-  summary: Adding baselines to run_bench() in tirx-kernels requires coordinated changes
-    in tirx-bench-ci's parse_proton.py KNOWN_IMPLS set.
-  created: '2026-03-19'
-  id: KB-20260319-174406-349680
-  scope:
-    - repo
-  tags:
-    - bench-ci
-    - benchmarking
-    - cross-repo
-    - tirx-kernels
-  title: Cross-repo baseline benchmark coordination pattern
-  updated: '2026-03-19'
+  details: "When adding baseline benchmarks to kernel run_bench() functions:\n1. tirx-kernels: Add baseline inside the ProtonContext\
+    \ block using\n   bench(..., proton_name=\"<name>\"), wrapped in try/except\n2. tirx-bench-ci: Add the same proton_name\
+    \ string to KNOWN_IMPLS in\n   parse_proton.py, otherwise the baseline is silently dropped\n\nThe baseline pattern:\n\
+    - Must run inside the same ProtonContext block as tir\n- Must use bench() with a unique proton_name (appears as depth-1\
+    \ in Proton tree)\n- Must be wrapped in try/except so missing deps don't break tir benchmarking\n- Should print BASELINE_ERROR\
+    \ to stderr on failure\n- Must NOT modify the return value (still returns {\"tir_ms\": ...})\n\nCurrent baselines by category:\n\
+    - Activation kernels: flashinfer (rmsnorm, fused_add_rms_norm,\n  fused_split_silu_multiply, rope)\n- GEMM kernels: cublas\
+    \ via torch.mm/matmul (hgemm variants),\n  deep_gemm (deepgemm, bhr_hdr_bhd, bmk_bnk_mn, fp8_bhr_hdr_bhd,\n  tf32_hc_prenorm_gemm)\n\
+    - Attention kernels: flashinfer (batch_attention, batch_prefill,\n  batch_decode, batch_decode_tensor_cores), cutedsl_fa4,\n\
+    \  flashattn_sm100 (flash_attention4)\n"
+  summary: Adding baselines to run_bench() in tirx-kernels requires coordinated changes in tirx-bench-ci's parse_proton.py
+    KNOWN_IMPLS set.
+created: '2026-03-19'
+id: KB-20260319-174406-349680
+scope:
+  - repo
+tags:
+  - bench-ci
+  - benchmarking
+  - cross-repo
+  - tirx-kernels
+title: Cross-repo baseline benchmark coordination pattern
+updated: '2026-03-19'

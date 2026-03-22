@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'The user had to ask "Did you run it?" after the agent described how the
-    test
+  details: 'The user had to ask "Did you run it?" after the agent described how the test
 
     infrastructure would work without actually executing any tests. Several kernel
 
@@ -35,15 +33,15 @@ content:
     the results."
 
     '
-  summary: Multiple times during this feature, tests were claimed to work without
-    actually running them; always run tests and show output before claiming success.
-  created: '2026-03-19'
-  id: M-20260319-022448-da2fb0
-  scope:
-    - repo
-  tags:
-    - testing
-    - verification
-    - workflow
-  title: Not running tests before claiming they pass
-  updated: '2026-03-19'
+  summary: Multiple times during this feature, tests were claimed to work without actually running them; always run tests
+    and show output before claiming success.
+created: '2026-03-19'
+id: M-20260319-022448-da2fb0
+scope:
+  - repo
+tags:
+  - testing
+  - verification
+  - workflow
+title: Not running tests before claiming they pass
+updated: '2026-03-19'

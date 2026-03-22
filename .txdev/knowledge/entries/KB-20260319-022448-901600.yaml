@@ -14,30 +14,25 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "The kernel registry pattern (tirx_kernels.registry.discover_kernels) scans\
-    \ category\nsubdirectories (gemm, attention, activation, ssm, loss, moe) using\n\
-    pkgutil.iter_modules, imports each module, and checks for a KERNEL_META dict\n\
-    with a \"name\" key. This returns {name: module} for all registered kernels.\n\
-    \nStandard kernel interface: each module exports KERNEL_META (dict with name,\n\
-    category, compute_capability), CONFIGS (list of dicts with label + params),\n\
-    get_kernel(), run_test(), run_bench().\n\nThis enables:\n1. Single test_kernels.py\
-    \ (~45 lines) replacing 35 individual test files (6100+ lines)\n2. Unified bench\
-    \ CLI: python -m tirx_kernels.bench --kernel X --config Y\n3. bench-ci integration:\
-    \ python -m tirx_kernels.registry --format=benchrun generates\n   KERNEL|SIZE|COMMAND\
-    \ lines consumed by bench-run.sh\n"
-  summary: Auto-discover kernel modules via KERNEL_META attribute + pkgutil.iter_modules,
-    enabling a single thin test wrapper and unified bench CLI.
-  created: '2026-03-19'
-  id: KB-20260319-022448-901600
-  scope:
-    - repo
-  tags:
-    - kernel
-    - registry
-    - testing
-    - benchmarking
-    - architecture
-  title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
-  updated: '2026-03-19'
+  details: "The kernel registry pattern (tirx_kernels.registry.discover_kernels) scans category\nsubdirectories (gemm, attention,\
+    \ activation, ssm, loss, moe) using\npkgutil.iter_modules, imports each module, and checks for a KERNEL_META dict\nwith\
+    \ a \"name\" key. This returns {name: module} for all registered kernels.\n\nStandard kernel interface: each module exports\
+    \ KERNEL_META (dict with name,\ncategory, compute_capability), CONFIGS (list of dicts with label + params),\nget_kernel(),\
+    \ run_test(), run_bench().\n\nThis enables:\n1. Single test_kernels.py (~45 lines) replacing 35 individual test files\
+    \ (6100+ lines)\n2. Unified bench CLI: python -m tirx_kernels.bench --kernel X --config Y\n3. bench-ci integration: python\
+    \ -m tirx_kernels.registry --format=benchrun generates\n   KERNEL|SIZE|COMMAND lines consumed by bench-run.sh\n"
+  summary: Auto-discover kernel modules via KERNEL_META attribute + pkgutil.iter_modules, enabling a single thin test wrapper
+    and unified bench CLI.
+created: '2026-03-19'
+id: KB-20260319-022448-901600
+scope:
+  - repo
+tags:
+  - kernel
+  - registry
+  - testing
+  - benchmarking
+  - architecture
+title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+updated: '2026-03-19'

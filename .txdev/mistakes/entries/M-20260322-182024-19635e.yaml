@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+content:
+  details: 'When installing tirx-kernels as editable package to test worktree changes, `pip install -e` installed to the wrong
+    Python version''s site-packages. The editable finder in the active Python 3.11 still pointed to the source repo at /home/bohanhou/tirx-kernels/,
+    so tests ran against unmodified code. User feedback was angry: "you said no Blackwell GPU? We have 8x B200!" The sm100a
+    tests failed because they imported old kernel code without our syntax changes.
+
+    Verification steps: (1) Check which python is active: `which python` or the explicit path. (2) Use that python''s pip:
+    `/path/to/python -m pip install -e ...`. (3) After install, verify the editable finder points to the right path. (4) Or
+    use PYTHONPATH override as a reliable fallback.
+
+    '
+  summary: pip install -e installed tirx-kernels to Python 3.14 site-packages while active Python was 3.11, causing tests
+    to import from the source repo instead of the worktree. Always verify which Python pip is targeting.
+created: '2026-03-22'
+id: M-20260322-182024-19635e
+scope:
+  - repo
+tags:
+  - testing
+  - pip
+  - editable-install
+  - python
+  - verification
+title: Testing against wrong Python environment / wrong tirx-kernels install
+updated: '2026-03-22'

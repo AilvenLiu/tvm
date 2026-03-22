@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  summary: Use a parser fallback that supports both `is_tirx` and legacy `is_tirp` when entering
-    `T.prim_func`.
-  details: After rebasing onto newer upstream parser behavior, mixed code paths referenced different
-    `T.prim_func` keyword names. The chosen design is to keep parser behavior backward-compatible
-    by first calling `T.prim_func(is_tirx=...)` and, on `TypeError`, falling back to `T.prim_func(is_tirp=...)`.
-    This localizes migration handling, preserves existing semantics, and avoids broader edits in
-    large IRBuilder modules during stabilization.
+  details: After rebasing onto newer upstream parser behavior, mixed code paths referenced different `T.prim_func` keyword
+    names. The chosen design is to keep parser behavior backward-compatible by first calling `T.prim_func(is_tirx=...)` and,
+    on `TypeError`, falling back to `T.prim_func(is_tirp=...)`. This localizes migration handling, preserves existing semantics,
+    and avoids broader edits in large IRBuilder modules during stabilization.
+  summary: Use a parser fallback that supports both `is_tirx` and legacy `is_tirp` when entering `T.prim_func`.
 created: '2026-02-28'
 id: ADR-20260228-0002
 scope:

@@ -14,16 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    I temporarily added `filterwarnings` in `pyproject.toml` to quiet external warnings, then had
-    to revert it after review direction clarified the expected strategy. Human feedback was
-    explicit: "If this is done through pyproject.toml, do not fix it that way" and "Leave those
-    third-party warnings unfixed". The correct approach is to confirm warning-policy constraints
-    first, then implement code-level fixes only for repository-owned warnings.
-  summary: >-
-    A global `pyproject.toml` warning filter was a reversible but unnecessary detour.
+  details: 'I temporarily added `filterwarnings` in `pyproject.toml` to quiet external warnings, then had to revert it after
+    review direction clarified the expected strategy. Human feedback was explicit: "If this is done through pyproject.toml,
+    do not fix it that way" and "Leave those third-party warnings unfixed". The correct approach is to confirm warning-policy
+    constraints first, then implement code-level fixes only for repository-owned warnings.'
+  summary: A global `pyproject.toml` warning filter was a reversible but unnecessary detour.
 created: '2026-03-06'
 id: M-20260306-195314-50a55c
 scope:

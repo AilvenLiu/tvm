@@ -14,12 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'The branch initially used `git commit --no-verify`/`git push --no-verify` while hooks were
-    failing. The correct approach was to fix enforced blockers first (ASF headers, ruff/format issues
-    in touched files), then commit/push normally with hooks enabled. Future workflow: only use bypass
-    with explicit user approval and after documenting why fixes are impossible in-scope.'
+  details: 'The branch initially used `git commit --no-verify`/`git push --no-verify` while hooks were failing. The correct
+    approach was to fix enforced blockers first (ASF headers, ruff/format issues in touched files), then commit/push normally
+    with hooks enabled. Future workflow: only use bypass with explicit user approval and after documenting why fixes are impossible
+    in-scope.'
   summary: Using `--no-verify` prematurely caused avoidable rework and reduced confidence in branch health.
 created: '2026-02-28'
 id: M-20260228-0001

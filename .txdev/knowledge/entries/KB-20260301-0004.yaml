@@ -14,19 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    Unlike regular Python, TIRX DSL (@Tx.prim_func) processes if-blocks as IR constructs. A
-    variable like cbx = Tx.cluster_cta_id("x") defined inside if is_cluster: is not accessible
-    after the if-block ends. This means you cannot have a single kernel function that conditionally
-    sets up cluster scope and then uses cluster variables later. Solution for tests requiring both
-    cluster and non-cluster variants: define two separate kernel functions and select between them at
-    the Python level. Also note: TIRX DSL if-conditions must be boolean expressions, not None
-    checks.
-  summary: >-
-    In TIRX DSL, variables defined inside if/else blocks are NOT visible in subsequent code blocks —
-    use separate kernel functions for different execution paths.
+  details: 'Unlike regular Python, TIRX DSL (@Tx.prim_func) processes if-blocks as IR constructs. A variable like cbx = Tx.cluster_cta_id("x")
+    defined inside if is_cluster: is not accessible after the if-block ends. This means you cannot have a single kernel function
+    that conditionally sets up cluster scope and then uses cluster variables later. Solution for tests requiring both cluster
+    and non-cluster variants: define two separate kernel functions and select between them at the Python level. Also note:
+    TIRX DSL if-conditions must be boolean expressions, not None checks.'
+  summary: In TIRX DSL, variables defined inside if/else blocks are NOT visible in subsequent code blocks — use separate kernel
+    functions for different execution paths.
 created: '2026-03-01'
 id: KB-20260301-0004
 scope:

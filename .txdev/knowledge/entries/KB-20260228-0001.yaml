@@ -14,11 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: When pre-commit config must match upstream, use `git checkout <upstream-branch> -- .pre-commit-config.yaml`
-    instead of manual edits. This guarantees byte-for-byte alignment, then validate with `pre-commit run
-    check-yaml --files .pre-commit-config.yaml` and a normal `pre-commit run` on staged changes.
+  details: When pre-commit config must match upstream, use `git checkout <upstream-branch> -- .pre-commit-config.yaml` instead
+    of manual edits. This guarantees byte-for-byte alignment, then validate with `pre-commit run check-yaml --files .pre-commit-config.yaml`
+    and a normal `pre-commit run` on staged changes.
   summary: Use upstream checkout to sync pre-commit config exactly and avoid manual drift.
 created: '2026-02-28'
 id: KB-20260228-0001

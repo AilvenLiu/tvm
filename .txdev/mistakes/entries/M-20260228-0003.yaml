@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: I attempted to run gh pr create with --body "...`path`..." in a single shell command. Bash
-    interpreted backticks as command substitution, which produced unrelated execution errors and prevented
-    PR creation. The safer pattern is to write the PR body via heredoc into a temporary file and pass
-    --body-file, or use quoting that fully disables command substitution. For any markdown-rich CLI payload,
-    body-file should be the default to avoid this class of failure.
-  summary: Passing a markdown body with backticks directly in gh pr create command can trigger unintended
-    shell command substitution.
+  details: I attempted to run gh pr create with --body "...`path`..." in a single shell command. Bash interpreted backticks
+    as command substitution, which produced unrelated execution errors and prevented PR creation. The safer pattern is to
+    write the PR body via heredoc into a temporary file and pass --body-file, or use quoting that fully disables command substitution.
+    For any markdown-rich CLI payload, body-file should be the default to avoid this class of failure.
+  summary: Passing a markdown body with backticks directly in gh pr create command can trigger unintended shell command substitution.
 created: '2026-02-28'
 id: M-20260228-0003
 scope:

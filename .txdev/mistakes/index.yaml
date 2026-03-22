@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 entries:
   - created: '2026-02-27'
     id: M-20260227-0001
@@ -25,8 +24,7 @@ entries:
       - testing
       - requirements
       - user-intent
-    title: Counting ops instead of structural comparison when user explicitly asked
-      for assert_structural_equal
+    title: Counting ops instead of structural comparison when user explicitly asked for assert_structural_equal
     updated: '2026-02-27'
   - created: '2026-02-27'
     id: M-20260227-0002
@@ -283,22 +281,53 @@ entries:
       - testing
     title: Editable pip install finder caches old module mapping after directory rename
     updated: '2026-03-20'
+  - created: '2026-03-22'
+    id: M-20260322-182024-19635e
+    path: entries/M-20260322-182024-19635e.yaml
+    scope:
+      - repo
+    tags:
+      - testing
+      - pip
+      - editable-install
+      - python
+      - verification
+    title: Testing against wrong Python environment / wrong tirx-kernels install
+    updated: '2026-03-22'
+  - created: '2026-03-22'
+    id: M-20260322-182024-631109
+    path: entries/M-20260322-182024-631109.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - annotation
+      - buffer
+      - correctness
+      - migration
+    title: Confused scalar PrimExpr with Buffer when migrating size-1 alloc_local to annotation syntax
+    updated: '2026-03-22'
 tags:
+  annotation:
+    - M-20260322-182024-631109
   api:
     - M-20260301-0002
   assumptions:
     - M-20260319-022448-b1a13a
+  bench-ci:
+    - M-20260319-174407-01b7d3
+  benchmarking:
+    - M-20260319-174407-01b7d3
+    - M-20260319-174407-26e7d3
+  buffer:
+    - M-20260322-182024-631109
   code-review:
     - M-20260301-0003
     - M-20260308-232603-cf510d
   correctness:
     - M-20260301-0001
     - M-20260307-231252-423c4d
-  bench-ci:
-    - M-20260319-174407-01b7d3
-  benchmarking:
-    - M-20260319-174407-01b7d3
-    - M-20260319-174407-26e7d3
+    - M-20260322-182024-631109
   cross-repo:
     - M-20260319-174407-01b7d3
   deadlock:
@@ -309,6 +338,9 @@ tags:
     - M-20260319-022448-dbe043
   duplication:
     - M-20260301-0003
+  editable-install:
+    - M-20260320-002326-7c92c5
+    - M-20260322-182024-19635e
   flaky-tests:
     - M-20260307-231252-423c4d
   gh:
@@ -331,13 +363,20 @@ tags:
     - M-20260301-0001
   mbarrier:
     - M-20260317-211411-ba6927
+  migration:
+    - M-20260322-182024-631109
   op-schedule:
     - M-20260301-0003
     - M-20260302-015214-5390a0
   over-engineering:
     - M-20260301-0002
+  packaging:
+    - M-20260320-002326-7c92c5
   parallelism:
     - M-20260319-022448-dbe043
+  pip:
+    - M-20260320-002326-7c92c5
+    - M-20260322-182024-19635e
   pipeline:
     - M-20260317-211411-ba6927
   pre-commit:
@@ -354,6 +393,7 @@ tags:
   python:
     - M-20260228-0002
     - M-20260308-232603-cf510d
+    - M-20260322-182024-19635e
   quality:
     - M-20260228-0001
   quoting:
@@ -395,12 +435,16 @@ tags:
     - M-20260319-022448-da2fb0
     - M-20260319-022448-dbe043
     - M-20260319-174407-26e7d3
+    - M-20260320-002326-7c92c5
+    - M-20260322-182024-19635e
   thoroughness:
     - M-20260317-211411-dfb881
   tirx:
     - M-20260301-0002
     - M-20260308-232603-9a9463
     - M-20260317-211411-dfb881
+  tvmscript:
+    - M-20260322-182024-631109
   user-intent:
     - M-20260227-0001
   verification:
@@ -408,6 +452,7 @@ tags:
     - M-20260319-022448-da2fb0
     - M-20260319-174407-01b7d3
     - M-20260319-174407-26e7d3
+    - M-20260322-182024-19635e
   warnings:
     - M-20260306-195314-50a55c
   workflow:

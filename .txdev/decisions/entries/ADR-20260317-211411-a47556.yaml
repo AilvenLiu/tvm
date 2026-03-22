@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'Two execution contexts exist in TIRX kernel code:
 
@@ -23,31 +22,25 @@ content:
     2. @Tx.meta_class __init__ — runs as regular Python during prim_func parsing
 
 
-    In context 1, `phase: Tx.int32` is shorter and idiomatic. Both forms produce identical
-    IR.
+    In context 1, `phase: Tx.int32` is shorter and idiomatic. Both forms produce identical IR.
 
-    In context 2, `self.x: Tx.int32` is just a Python type hint (no-op) and does NOT
-    create
+    In context 2, `self.x: Tx.int32` is just a Python type hint (no-op) and does NOT create
 
-    an IR buffer. Tx.local_scalar() must be used here because it''s an imperative
-    IR builder call.
+    an IR buffer. Tx.local_scalar() must be used here because it''s an imperative IR builder call.
 
 
-    Additionally, dynamic names like `Tx.local_scalar("uint64", name=prefix + "sdesc")`
-    cannot
+    Additionally, dynamic names like `Tx.local_scalar("uint64", name=prefix + "sdesc")` cannot
 
     be expressed with annotations since the name is computed at runtime.
 
 
-    This creates a consistent rule: use type annotations in prim_func bodies, keep
-    local_scalar
+    This creates a consistent rule: use type annotations in prim_func bodies, keep local_scalar
 
     in meta_class constructors and for dynamic names.
 
     '
-  summary: 'Type annotation syntax (var: Tx.int32) replaces Tx.local_scalar() in prim_func
-    bodies, but Tx.local_scalar() is retained in @Tx.meta_class __init__ where TVMScript
-    parsing is not active.'
+  summary: 'Type annotation syntax (var: Tx.int32) replaces Tx.local_scalar() in prim_func bodies, but Tx.local_scalar() is
+    retained in @Tx.meta_class __init__ where TVMScript parsing is not active.'
 created: '2026-03-17'
 id: ADR-20260317-211411-a47556
 scope:

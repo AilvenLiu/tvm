@@ -14,20 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "Alternatives considered:\n1. Default to local arrive (cta_id=None) — simpler\
-    \ API for single-CTA, but silently deadlocks\n   CTA_GROUP>1 kernels with no error\
-    \ message. Rejected.\n2. Default to remote arrive (cta_id=0, pred=True) — always\
-    \ correct, lowering pass\n   (lower_tirx_scope_ids.cc) strips the unnecessary\
-    \ remote overhead for single-CTA cases.\n   Chosen because safety > convenience.\n\
-    3. Require explicit cta_id on every call — too verbose, every kernel would need\
-    \ boilerplate.\n\nThe remote-arrive default is a \"safe by default\" choice. The\
-    \ lower_tirx pass checks whether\ncta_id and pred are actually needed and removes\
-    \ them when they aren't, so there is zero\nruntime cost for single-CTA kernels.\n"
-  summary: MBarrier.arrive() defaults to remote arrive (cta_id=0, pred=True) because
-    local arrive silently deadlocks multi-CTA kernels, while the lowering pass optimizes
-    remote to local for single-CTA cases.
+  details: "Alternatives considered:\n1. Default to local arrive (cta_id=None) — simpler API for single-CTA, but silently\
+    \ deadlocks\n   CTA_GROUP>1 kernels with no error message. Rejected.\n2. Default to remote arrive (cta_id=0, pred=True)\
+    \ — always correct, lowering pass\n   (lower_tirx_scope_ids.cc) strips the unnecessary remote overhead for single-CTA\
+    \ cases.\n   Chosen because safety > convenience.\n3. Require explicit cta_id on every call — too verbose, every kernel\
+    \ would need boilerplate.\n\nThe remote-arrive default is a \"safe by default\" choice. The lower_tirx pass checks whether\n\
+    cta_id and pred are actually needed and removes them when they aren't, so there is zero\nruntime cost for single-CTA kernels.\n"
+  summary: MBarrier.arrive() defaults to remote arrive (cta_id=0, pred=True) because local arrive silently deadlocks multi-CTA
+    kernels, while the lowering pass optimizes remote to local for single-CTA cases.
 created: '2026-03-17'
 id: ADR-20260317-211411-5664ea
 scope:

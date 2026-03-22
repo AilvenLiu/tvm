@@ -14,31 +14,26 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "Design choice: baselines are added directly inside each kernel's run_bench()\n\
-    function, within the same ProtonContext block as the tir benchmark.\n\nAlternatives\
-    \ considered:\n- Separate benchmark scripts per baseline: rejected because it\
-    \ would\n  require separate Proton sessions and complicate the bench-ci pipeline\n\
-    - Baseline-specific run_bench_<name>() functions: rejected because the\n  bench-ci\
-    \ infrastructure calls a single run_bench() per kernel\n- Baselines in tirx-bench-ci\
-    \ (old approach): rejected because baselines\n  were deleted when bench_kernel.py\
-    \ was removed; keeping them co-located\n  with the kernel makes maintenance easier\n\
-    \nBenefits of chosen approach:\n- All impls appear in the same Proton tree, enabling\
-    \ direct comparison\n- try/except ensures missing deps (flashinfer, deep_gemm,\
-    \ cutlass)\n  never break the tir benchmark\n- No changes needed to bench-ci infrastructure\
-    \ (bench-run.sh, tirx_kernels.bench)\n- return value unchanged ({\"tir_ms\": ...}),\
-    \ backward compatible\n- Each baseline is self-contained and independently failable\n"
-  summary: Baseline benchmarks are additive code inside the existing run_bench() ProtonContext
-    block, wrapped in try/except, rather than separate benchmark functions or scripts.
-  created: '2026-03-19'
-  id: ADR-20260319-174407-e52e2f
-  scope:
-    - repo
-  tags:
-    - benchmarking
-    - bench-ci
-    - architecture
-    - baseline
-  title: Baselines run inside ProtonContext with try/except, not as separate bench passes
-  updated: '2026-03-19'
+  details: "Design choice: baselines are added directly inside each kernel's run_bench()\nfunction, within the same ProtonContext\
+    \ block as the tir benchmark.\n\nAlternatives considered:\n- Separate benchmark scripts per baseline: rejected because\
+    \ it would\n  require separate Proton sessions and complicate the bench-ci pipeline\n- Baseline-specific run_bench_<name>()\
+    \ functions: rejected because the\n  bench-ci infrastructure calls a single run_bench() per kernel\n- Baselines in tirx-bench-ci\
+    \ (old approach): rejected because baselines\n  were deleted when bench_kernel.py was removed; keeping them co-located\n\
+    \  with the kernel makes maintenance easier\n\nBenefits of chosen approach:\n- All impls appear in the same Proton tree,\
+    \ enabling direct comparison\n- try/except ensures missing deps (flashinfer, deep_gemm, cutlass)\n  never break the tir\
+    \ benchmark\n- No changes needed to bench-ci infrastructure (bench-run.sh, tirx_kernels.bench)\n- return value unchanged\
+    \ ({\"tir_ms\": ...}), backward compatible\n- Each baseline is self-contained and independently failable\n"
+  summary: Baseline benchmarks are additive code inside the existing run_bench() ProtonContext block, wrapped in try/except,
+    rather than separate benchmark functions or scripts.
+created: '2026-03-19'
+id: ADR-20260319-174407-e52e2f
+scope:
+  - repo
+tags:
+  - benchmarking
+  - bench-ci
+  - architecture
+  - baseline
+title: Baselines run inside ProtonContext with try/except, not as separate bench passes
+updated: '2026-03-19'

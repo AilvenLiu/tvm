@@ -1,0 +1,37 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+content:
+  details: 'When using the new vector annotation syntax `v: Tx.float32[8]`, ruff''s static analysis sees that `v` is annotated
+    but never assigned (no `= ...` on the RHS), so subsequent uses like `Tx.evaluate(v[0])` get flagged as F821 "undefined
+    name". The fix is adding `# noqa: F821` to the lines that reference the annotated variable. This is the same pattern as
+    F841 for TVMScript scope declarations but with a different error code.
+
+    '
+  summary: 'TVMScript vector annotation like `v: Tx.f32[8]` followed by `v[0]` triggers ruff F821 (undefined name) because
+    ruff does not understand TVMScript''s visit_ann_assign binding. Add `# noqa: F821` to the usage line.'
+created: '2026-03-22'
+id: KB-20260322-182024-1738c4
+scope:
+  - repo
+tags:
+  - tvmscript
+  - ruff
+  - lint
+  - noqa
+  - annotation
+title: Ruff F821 for TVMScript annotation variables
+updated: '2026-03-22'

@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'The user asked to run "tirx standard tests" and the CLAUDE.md clearly
-    states:
+  details: 'The user asked to run "tirx standard tests" and the CLAUDE.md clearly states:
 
     `pytest tests/python/tirx/ -n 16` as the standard command. Instead, only
 
@@ -26,12 +24,10 @@ content:
     tests in the full suite (1514 total).
 
 
-    The user''s feedback was blunt: "Do you understand what ''tirx standard test''
-    means?"
+    The user''s feedback was blunt: "Do you understand what ''tirx standard test'' means?"
 
 
-    For a refactor touching imports across cuda/ and trn/ subdirectories, the full
-    test
+    For a refactor touching imports across cuda/ and trn/ subdirectories, the full test
 
     suite is essential because changes to shared utilities could break lowering passes,
 
@@ -43,9 +39,8 @@ content:
     run the broader scope, not the narrower one.
 
     '
-  summary: CLAUDE.md specifies `pytest tests/python/tirx/ -n 16` as the standard TIRX
-    test command, but initially ran only `tests/python/tirx/op_schedule/` — a strict
-    subset that misses lowering, codegen, kernel, and transform tests.
+  summary: CLAUDE.md specifies `pytest tests/python/tirx/ -n 16` as the standard TIRX test command, but initially ran only
+    `tests/python/tirx/op_schedule/` — a strict subset that misses lowering, codegen, kernel, and transform tests.
 created: '2026-03-08'
 id: M-20260308-232603-9a9463
 scope:

@@ -14,17 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  summary: >-
-    When lint-related kernel regressions appear, compare IR and generated CUDA against upstream
-    before running full suites.
-  details: >-
-    For TIRX kernel failures introduced during style/lint fixes, first run a minimal script
-    that only constructs/parses the kernel and prints IR (`IRModule.show()`) plus generated
-    CUDA source (`mod.mod.imported_modules[0].get_source()`). This is much faster than full
-    build+runtime tests and quickly distinguishes parser/hang issues from real semantic/codegen
+  details: For TIRX kernel failures introduced during style/lint fixes, first run a minimal script that only constructs/parses
+    the kernel and prints IR (`IRModule.show()`) plus generated CUDA source (`mod.mod.imported_modules[0].get_source()`).
+    This is much faster than full build+runtime tests and quickly distinguishes parser/hang issues from real semantic/codegen
     drift. Use this diff-first step before expensive end-to-end reruns.
+  summary: When lint-related kernel regressions appear, compare IR and generated CUDA against upstream before running full
+    suites.
 created: '2026-03-01'
 id: KB-20260301-0001
 scope:

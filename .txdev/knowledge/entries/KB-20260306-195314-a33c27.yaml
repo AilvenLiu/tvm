@@ -14,17 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    For `pytest tests/python/tirx/ -n 16`, the reliable flow was: run with no global filters,
-    capture warning summary, then group warnings into repository-owned code vs external sources
-    (SWIG runtime, vendored `3rdparty/cutlass`, installed `nvidia_cutlass_dsl`). This made it
-    clear which warnings should be fixed in-repo and which should be documented as out-of-scope.
-    The approach avoided unnecessary edits to third-party code and reduced back-and-forth during
-    review.
-  summary: >-
-    Classifying warnings by ownership before coding prevents wasted fixes and keeps scope aligned.
+  details: 'For `pytest tests/python/tirx/ -n 16`, the reliable flow was: run with no global filters, capture warning summary,
+    then group warnings into repository-owned code vs external sources (SWIG runtime, vendored `3rdparty/cutlass`, installed
+    `nvidia_cutlass_dsl`). This made it clear which warnings should be fixed in-repo and which should be documented as out-of-scope.
+    The approach avoided unnecessary edits to third-party code and reduced back-and-forth during review.'
+  summary: Classifying warnings by ownership before coding prevents wasted fixes and keeps scope aligned.
 created: '2026-03-06'
 id: KB-20260306-195314-a33c27
 scope:

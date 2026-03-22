@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'pytest-xdist distributes tests across workers using a distribution strategy.
 
@@ -22,8 +21,7 @@ content:
 
     which is fine when tests are spread across many files. When consolidating 35 test
 
-    files into a single test_kernels.py with ~247 parametrized cases, ''loadfile''
-    causes
+    files into a single test_kernels.py with ~247 parametrized cases, ''loadfile'' causes
 
     all cases to run on one worker, defeating -n 16 parallelism entirely.
 
@@ -40,17 +38,16 @@ content:
     File: tests/python/tirx/kernels/cuda/sm100a/conftest.py
 
     '
-  summary: When consolidating many test files into one parametrized file, pytest-xdist's
-    default 'loadfile' strategy serializes all tests on one worker; switch to 'load'
-    via conftest.py.
-  created: '2026-03-19'
-  id: KB-20260319-022448-dec2c4
-  scope:
-    - repo
-  tags:
-    - pytest
-    - xdist
-    - parallelism
-    - testing
-  title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
-  updated: '2026-03-19'
+  summary: When consolidating many test files into one parametrized file, pytest-xdist's default 'loadfile' strategy serializes
+    all tests on one worker; switch to 'load' via conftest.py.
+created: '2026-03-19'
+id: KB-20260319-022448-dec2c4
+scope:
+  - repo
+tags:
+  - pytest
+  - xdist
+  - parallelism
+  - testing
+title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
+updated: '2026-03-19'

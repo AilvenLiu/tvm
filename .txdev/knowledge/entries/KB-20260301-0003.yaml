@@ -14,18 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    In TIRX DSL (@Tx.prim_func), scope entry calls like bx = Tx.cta_id("x"), wg_id =
-    Tx.warpgroup_id(), warp_id = Tx.warp_id(), lane_id = Tx.lane_id() are executed for their side
-    effects (they set up the execution scope hierarchy), but ruff flags F841 (local variable
-    assigned but never used) because the Python variables themselves are often unused in the function
-    body. The correct fix is # noqa: F841 on each line, NOT renaming to _ (which would break DSL
-    semantics). In # fmt: off blocks where lines are also long, combine: # noqa: F841, E501.
-  summary: >-
-    TIRX DSL scope declarations like bx = Tx.cta_id() are side-effect calls whose return values are
-    unused in Python — add # noqa: F841 to suppress ruff warnings.
+  details: 'In TIRX DSL (@Tx.prim_func), scope entry calls like bx = Tx.cta_id("x"), wg_id = Tx.warpgroup_id(), warp_id =
+    Tx.warp_id(), lane_id = Tx.lane_id() are executed for their side effects (they set up the execution scope hierarchy),
+    but ruff flags F841 (local variable assigned but never used) because the Python variables themselves are often unused
+    in the function body. The correct fix is # noqa: F841 on each line, NOT renaming to _ (which would break DSL semantics).
+    In # fmt: off blocks where lines are also long, combine: # noqa: F841, E501.'
+  summary: 'TIRX DSL scope declarations like bx = Tx.cta_id() are side-effect calls whose return values are unused in Python
+    — add # noqa: F841 to suppress ruff warnings.'
 created: '2026-03-01'
 id: KB-20260301-0003
 scope:

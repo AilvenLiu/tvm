@@ -1,0 +1,44 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+content:
+  details: 'During the tensor-alloc-syntax migration, variables like `row_max`, `row_sum`, `tile_max` in flash_attention4.py
+    were converted from `Tx.alloc_local([1], "float32")` to `x: Tx.f32` (scalar). But these variables are passed to `Tx.max(tile_max,
+    s_chunk_buf)` and `Tx.sum(row_sum, ...)`, which expect Buffer arguments. The scalar annotation returns a PrimExpr (BufferLoad),
+    causing "Expected ir.PrimExpr but got tir.Buffer" errors.
+
+    The fix was using `x: Tx.f32[1]` (vector annotation returning Buffer) instead. The same mistake was repeated in cross_entropy.py
+    before the pattern was recognized.
+
+    Rule: before converting any `alloc_local([1], dtype)` to scalar annotation, check whether the variable is used as a Buffer
+    argument anywhere (passed to Tx.max, Tx.sum, Tx.address_of, used with .view(), or passed to functions expecting Buffer).
+    If yes, use Tx.f32[1] not Tx.f32.
+
+    '
+  summary: Migrated size-1 alloc_local calls used by Tx.max()/Tx.sum() to scalar annotation (Tx.f32) instead of vector annotation
+    (Tx.f32[1]), breaking the Buffer expectation. This happened twice (flash_attention4 and cross_entropy).
+created: '2026-03-22'
+id: M-20260322-182024-631109
+scope:
+  - repo
+tags:
+  - tvmscript
+  - annotation
+  - buffer
+  - correctness
+  - migration
+title: Confused scalar PrimExpr with Buffer when migrating size-1 alloc_local to annotation syntax
+updated: '2026-03-22'

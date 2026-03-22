@@ -14,20 +14,32 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "In test_unary_op_shared and test_unary_op_shared_with_bias_scale, the cross-dtype\n\
-    (out-of-place) code path allocated B_smem at full buffer size, wrote only to\n\
-    B_smem[map_slice_res] via the unary op, then copied back B[copy_slice] from\n\
-    B_smem[copy_slice] \u2014 i.e., the entire buffer including unwritten regions.\n\n\
-    This was a pre-existing bug that caused 10 flaky test failures. The fix was trivial:\n\
-    change the copy-back to use map_slice_res instead of copy_slice. The in-place code path\n\
-    was unaffected because it reused A_smem (already fully initialized by the initial copy-in).\n\
-    \nPrevention: when writing smem-based tests, ensure the copy-back region matches the\n\
-    region actually written, not the full buffer allocation. Review all Tx.copy() calls\n\
-    in test teardown to verify source region was fully initialized.\n"
-  summary: Test used copy_slice (full buffer) for copy-back instead of map_slice_res
-    (written subregion), reading uninitialized GPU shared memory.
+  details: 'In test_unary_op_shared and test_unary_op_shared_with_bias_scale, the cross-dtype
+
+    (out-of-place) code path allocated B_smem at full buffer size, wrote only to
+
+    B_smem[map_slice_res] via the unary op, then copied back B[copy_slice] from
+
+    B_smem[copy_slice] — i.e., the entire buffer including unwritten regions.
+
+
+    This was a pre-existing bug that caused 10 flaky test failures. The fix was trivial:
+
+    change the copy-back to use map_slice_res instead of copy_slice. The in-place code path
+
+    was unaffected because it reused A_smem (already fully initialized by the initial copy-in).
+
+
+    Prevention: when writing smem-based tests, ensure the copy-back region matches the
+
+    region actually written, not the full buffer allocation. Review all Tx.copy() calls
+
+    in test teardown to verify source region was fully initialized.
+
+    '
+  summary: Test used copy_slice (full buffer) for copy-back instead of map_slice_res (written subregion), reading uninitialized
+    GPU shared memory.
 created: '2026-03-07'
 id: M-20260307-231252-423c4d
 scope:

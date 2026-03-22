@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'The initial implementation replaced 35 individual test_*.py files with
-    a single
+  details: 'The initial implementation replaced 35 individual test_*.py files with a single
 
     test_kernels.py containing all ~247 parametrized cases. This was functionally
 
@@ -38,18 +36,17 @@ content:
     always consider the impact on parallel test distribution.
 
     '
-  summary: Consolidating 35 test files into one without considering pytest-xdist's
-    loadfile distribution broke parallelism; tests serialized on one worker instead
-    of distributing across 16.
-  created: '2026-03-19'
-  id: M-20260319-022448-dbe043
-  scope:
-    - repo
-  tags:
-    - pytest
-    - xdist
-    - parallelism
-    - testing
-    - design
-  title: Not considering xdist parallelism impact when consolidating test files
-  updated: '2026-03-19'
+  summary: Consolidating 35 test files into one without considering pytest-xdist's loadfile distribution broke parallelism;
+    tests serialized on one worker instead of distributing across 16.
+created: '2026-03-19'
+id: M-20260319-022448-dbe043
+scope:
+  - repo
+tags:
+  - pytest
+  - xdist
+  - parallelism
+  - testing
+  - design
+title: Not considering xdist parallelism impact when consolidating test files
+updated: '2026-03-19'

@@ -14,25 +14,21 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'When git mv kernels/ tirx_kernels/ was done in the worktree, the existing
-    editable install''s __editable___tirx_kernels_0_1_0_finder.py still had MAPPING
-    = {''kernels'': ''/old/path/kernels''}. This caused pytest (via xdist workers)
-    to fail with ''No module named tirx_kernels''. The fix is to re-run pip install
-    -e . (or uv pip install -e .) after any module directory rename. When testing
-    in a worktree where site-packages is read-only, use PYTHONPATH as a workaround.'
-  summary: After renaming a Python module directory, the setuptools editable install
-    finder (.pth file) still maps the old module name until reinstalled — causing
-    ModuleNotFoundError in tests.
-  created: '2026-03-20'
-  id: M-20260320-002326-7c92c5
-  scope:
-    - repo
-  tags:
-    - packaging
-    - pip
-    - editable-install
-    - testing
-  title: Editable pip install finder caches old module mapping after directory rename
-  updated: '2026-03-20'
+  details: 'When git mv kernels/ tirx_kernels/ was done in the worktree, the existing editable install''s __editable___tirx_kernels_0_1_0_finder.py
+    still had MAPPING = {''kernels'': ''/old/path/kernels''}. This caused pytest (via xdist workers) to fail with ''No module
+    named tirx_kernels''. The fix is to re-run pip install -e . (or uv pip install -e .) after any module directory rename.
+    When testing in a worktree where site-packages is read-only, use PYTHONPATH as a workaround.'
+  summary: After renaming a Python module directory, the setuptools editable install finder (.pth file) still maps the old
+    module name until reinstalled — causing ModuleNotFoundError in tests.
+created: '2026-03-20'
+id: M-20260320-002326-7c92c5
+scope:
+  - repo
+tags:
+  - packaging
+  - pip
+  - editable-install
+  - testing
+title: Editable pip install finder caches old module mapping after directory rename
+updated: '2026-03-20'

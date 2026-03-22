@@ -14,46 +14,37 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'CUDA op_schedule module structure after refactor:
 
-    - cuda/common.py: next_power_of_2, get_st_extent, get_indices, CopyInstType, validate_copy_op,
-    get_vec_len, copy_vec_load_impl
+    - cuda/common.py: next_power_of_2, get_st_extent, get_indices, CopyInstType, validate_copy_op, get_vec_len, copy_vec_load_impl
 
-    - cuda/tma_utils.py: SwizzleMode, tma_atom_layout, tma_atom_shape, tma_shared_layout,
-    tma_atom_compatible, get_swizzle_mode_from_layout
+    - cuda/tma_utils.py: SwizzleMode, tma_atom_layout, tma_atom_shape, tma_shared_layout, tma_atom_compatible, get_swizzle_mode_from_layout
 
-    - cuda/exec_scope_utils.py: macro_or_prim_func, thread_selector, single_thread,
-    exec_scope_ok
+    - cuda/exec_scope_utils.py: macro_or_prim_func, thread_selector, single_thread, exec_scope_ok
 
     - cuda/gemm_utils.py: validate_gemm_op, SmemDescriptor
 
-    - cuda/layout_utils.py: get_sublayout_from_region, get_layout_thread_local_partition,
-    get_local_region, cast_layout_supported_for_local, compute_linear_offset, layout_signature,
-    sig_equal, resolve_thread_var
+    - cuda/layout_utils.py: get_sublayout_from_region, get_layout_thread_local_partition, get_local_region, cast_layout_supported_for_local,
+    compute_linear_offset, layout_signature, sig_equal, resolve_thread_var
 
 
     TRN op_schedule module structure after refactor:
 
     - trn/common.py: nki_dim, init_analyzer (~45 lines)
 
-    - trn/dim_utils.py: RangeInfo, normalize_and_group, get_ewise_dim_map, get_reduction_dim_map,
-    DimensionMapper
+    - trn/dim_utils.py: RangeInfo, normalize_and_group, get_ewise_dim_map, get_reduction_dim_map, DimensionMapper
 
-    - trn/instruction_generator.py: LogicalIterDim, LogicalIterList, to_int_list,
-    VarReplacer, InstructionRepr, InstructionGenerator
+    - trn/instruction_generator.py: LogicalIterDim, LogicalIterList, to_int_list, VarReplacer, InstructionRepr, InstructionGenerator
 
     - trn/workspace_utils.py: largest_psum_per_bank, max_psum_banks, check_workspace_buffer
 
 
-    External consumers (kernels/sm100/, megakernel/, tests/) import TMA utils from
-    cuda/tma_utils.py.
+    External consumers (kernels/sm100/, megakernel/, tests/) import TMA utils from cuda/tma_utils.py.
 
     '
-  summary: After the Phase 1+3 refactor, cuda/common.py utilities live in tma_utils.py,
-    exec_scope_utils.py, gemm_utils.py, and layout_utils.py; TRN common.py utilities
-    live in dim_utils.py, instruction_generator.py, and workspace_utils.py.
+  summary: After the Phase 1+3 refactor, cuda/common.py utilities live in tma_utils.py, exec_scope_utils.py, gemm_utils.py,
+    and layout_utils.py; TRN common.py utilities live in dim_utils.py, instruction_generator.py, and workspace_utils.py.
 created: '2026-03-08'
 id: KB-20260308-232603-d83e44
 scope:

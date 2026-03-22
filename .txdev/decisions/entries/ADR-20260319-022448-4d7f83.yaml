@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'Context: Some kernels like ep_dispatch_combine require multi-GPU nvshmem
-    setup
+  details: 'Context: Some kernels like ep_dispatch_combine require multi-GPU nvshmem setup
 
     that isn''t available in standard test environments. Others like fused_moe depend
 
@@ -49,17 +47,16 @@ content:
     - bench-ci can still list all kernels via registry even if some aren''t testable
 
     '
-  summary: Each kernel module owns its run_test() implementation; kernels requiring
-    special environments (multi-GPU, nvshmem) set CONFIGS=[] to opt out of automated
-    testing.
-  created: '2026-03-19'
-  id: ADR-20260319-022448-4d7f83
-  scope:
-    - repo
-  tags:
-    - testing
-    - architecture
-    - kernel
-    - design-pattern
-  title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent kernels
-  updated: '2026-03-19'
+  summary: Each kernel module owns its run_test() implementation; kernels requiring special environments (multi-GPU, nvshmem)
+    set CONFIGS=[] to opt out of automated testing.
+created: '2026-03-19'
+id: ADR-20260319-022448-4d7f83
+scope:
+  - repo
+tags:
+  - testing
+  - architecture
+  - kernel
+  - design-pattern
+title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent kernels
+updated: '2026-03-19'

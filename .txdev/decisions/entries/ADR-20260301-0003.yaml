@@ -14,20 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    For smem->tmem copy tests, some configurations require cta_group=2 (cluster mode) while others
-    use cta_group=1 (non-cluster). Due to TIRX DSL scoping constraints (variables from if-blocks
-    not visible outside), a single @Tx.prim_func cannot conditionally set up cluster scope and
-    non-cluster scope. Solution: define two @Tx.prim_func kernels (one with cluster scope, one
-    without) and select between them with a Python-level conditional before lowering/building. The
-    parametrized test generates (config, is_cluster) tuples and picks the right kernel based on
-    is_cluster. This pattern should be used whenever test configurations span cluster and
-    non-cluster modes in TIRX DSL tests.
-  summary: >-
-    Use separate kernel functions for cluster and non-cluster test variants instead of runtime
-    branching within a single TIRX kernel.
+  details: 'For smem->tmem copy tests, some configurations require cta_group=2 (cluster mode) while others use cta_group=1
+    (non-cluster). Due to TIRX DSL scoping constraints (variables from if-blocks not visible outside), a single @Tx.prim_func
+    cannot conditionally set up cluster scope and non-cluster scope. Solution: define two @Tx.prim_func kernels (one with
+    cluster scope, one without) and select between them with a Python-level conditional before lowering/building. The parametrized
+    test generates (config, is_cluster) tuples and picks the right kernel based on is_cluster. This pattern should be used
+    whenever test configurations span cluster and non-cluster modes in TIRX DSL tests.'
+  summary: Use separate kernel functions for cluster and non-cluster test variants instead of runtime branching within a single
+    TIRX kernel.
 created: '2026-03-01'
 id: ADR-20260301-0003
 scope:

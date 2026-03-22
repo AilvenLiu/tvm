@@ -14,19 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    When deleting backward-compatible adapters from include/tvm/runtime/logging.h, treat migration
-    as complete only after a zero-residual audit: scan for CHECK/ICHECK/DCHECK callsites with word-boundary
-    regex (excluding build artifacts), verify logging.h no longer defines compatibility selectors or
-    legacy aliases, then scan for TVM_FFI_CHECK* callsites that still rely on implicit compatibility
-    behavior and convert them to TVM_FFI_ICHECK* or explicit ErrorKind forms. This audit pattern catches
-    hidden leftovers across C++, CUDA, ObjC++, and embedded code strings before running build/test
-    validation.
-  summary: >-
-    After removing logging compatibility macros, run regex audits to prove no legacy CHECK APIs
-    remain callable.
+  details: 'When deleting backward-compatible adapters from include/tvm/runtime/logging.h, treat migration as complete only
+    after a zero-residual audit: scan for CHECK/ICHECK/DCHECK callsites with word-boundary regex (excluding build artifacts),
+    verify logging.h no longer defines compatibility selectors or legacy aliases, then scan for TVM_FFI_CHECK* callsites that
+    still rely on implicit compatibility behavior and convert them to TVM_FFI_ICHECK* or explicit ErrorKind forms. This audit
+    pattern catches hidden leftovers across C++, CUDA, ObjC++, and embedded code strings before running build/test validation.'
+  summary: After removing logging compatibility macros, run regex audits to prove no legacy CHECK APIs remain callable.
 created: '2026-02-28'
 id: KB-20260228-0004
 scope:

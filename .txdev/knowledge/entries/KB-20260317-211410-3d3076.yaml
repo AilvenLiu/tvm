@@ -14,13 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'The old pattern used a single large Tx.alloc_buffer([SMEM_SIZE], "uint8")
-    and manually computed
+  details: 'The old pattern used a single large Tx.alloc_buffer([SMEM_SIZE], "uint8") and manually computed
 
-    elem_offsets for each barrier and data buffer. Custom Barriers/BarTMA2MMA/BarMMA2LD/etc
-    classes
+    elem_offsets for each barrier and data buffer. Custom Barriers/BarTMA2MMA/BarMMA2LD/etc classes
 
     wrapped the raw mbarrier operations.
 
@@ -63,8 +60,8 @@ content:
     - tmem_addr (scalar) -> tmem_addr[0] (buffer element access)
 
     '
-  summary: Use Tx.PoolAllocator() + TMABar/TCGen05Bar/MBarrier to replace manual Tx.alloc_buffer
-    + Tx.decl_buffer + custom Barrier classes, reducing ~80 lines per kernel to ~10.
+  summary: Use Tx.PoolAllocator() + TMABar/TCGen05Bar/MBarrier to replace manual Tx.alloc_buffer + Tx.decl_buffer + custom
+    Barrier classes, reducing ~80 lines per kernel to ~10.
 created: '2026-03-17'
 id: KB-20260317-211410-3d3076
 scope:

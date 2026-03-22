@@ -14,12 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: With `pytest -n`, console output can be hard to audit for full skip lists. Running `pytest
-    ... --junitxml=/tmp/report.xml` and extracting testcase nodes with `<skipped>` gives a precise skip
-    inventory (including parametrized cases) plus reasons. This is reliable for explaining skip totals
-    and reconciling pass/skip counts.
+  details: With `pytest -n`, console output can be hard to audit for full skip lists. Running `pytest ... --junitxml=/tmp/report.xml`
+    and extracting testcase nodes with `<skipped>` gives a precise skip inventory (including parametrized cases) plus reasons.
+    This is reliable for explaining skip totals and reconciling pass/skip counts.
   summary: Generate junitxml and parse `<skipped>` entries to get exact skipped test IDs and reasons.
 created: '2026-02-28'
 id: KB-20260228-0002

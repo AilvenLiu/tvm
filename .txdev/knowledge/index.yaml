@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 entries:
   - created: '2026-02-27'
     id: KB-20260227-0001
@@ -191,8 +190,7 @@ entries:
       - triage
       - tirx
       - testing
-    title: Pytest warning triage should separate repository-owned and external sources
-      first
+    title: Pytest warning triage should separate repository-owned and external sources first
     updated: '2026-03-06'
   - created: '2026-03-07'
     id: KB-20260307-231252-48549d
@@ -316,6 +314,7 @@ entries:
       - benchmarking
       - bench-ci
       - profiling
+      - cross-repo
     title: Proton profiler pipeline for bench-ci integration
     updated: '2026-03-19'
   - created: '2026-03-19'
@@ -367,7 +366,39 @@ entries:
       - tirx-kernels
     title: Python pip package name vs importable module name are independent
     updated: '2026-03-20'
+  - created: '2026-03-22'
+    id: KB-20260322-182024-1738c4
+    path: entries/KB-20260322-182024-1738c4.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - ruff
+      - lint
+      - noqa
+      - annotation
+    title: Ruff F821 for TVMScript annotation variables
+    updated: '2026-03-22'
+  - created: '2026-03-22'
+    id: KB-20260322-182024-e7c4c2
+    path: entries/KB-20260322-182024-e7c4c2.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - dsl
+      - syntax
+      - local-scalar
+      - alloc-local
+      - vector-annotation
+      - buffer
+    title: 'TVMScript type annotation syntax: scalar (x: Tx.f32) vs vector (x: Tx.f32[N]) semantics'
+    updated: '2026-03-22'
 tags:
+  alloc-local:
+    - KB-20260322-182024-e7c4c2
+  annotation:
+    - KB-20260322-182024-1738c4
   api:
     - KB-20260301-0002
   architecture:
@@ -384,6 +415,8 @@ tags:
     - KB-20260319-022448-393527
     - KB-20260319-022448-901600
     - KB-20260319-174406-349680
+  buffer:
+    - KB-20260322-182024-e7c4c2
   codegen:
     - KB-20260227-0002
     - KB-20260301-0001
@@ -408,6 +441,7 @@ tags:
   dsl:
     - KB-20260301-0004
     - KB-20260317-211410-6e13ad
+    - KB-20260322-182024-e7c4c2
   flaky-tests:
     - KB-20260307-231252-48549d
   git:
@@ -436,24 +470,31 @@ tags:
     - KB-20260228-0001
     - KB-20260301-0003
     - KB-20260308-232603-205e85
+    - KB-20260322-182024-1738c4
   local-scalar:
     - KB-20260317-211410-6e13ad
+    - KB-20260322-182024-e7c4c2
   logging:
     - KB-20260228-0004
   mbarrier:
     - KB-20260317-211410-c51a41
   noqa:
     - KB-20260301-0003
+    - KB-20260322-182024-1738c4
   op-schedule:
     - KB-20260301-0002
     - KB-20260302-015214-9e29ce
     - KB-20260307-231252-72bc64
     - KB-20260308-232603-18dfc3
     - KB-20260308-232603-d83e44
+  packaging:
+    - KB-20260320-002326-24c511
   parallelism:
     - KB-20260319-022448-dec2c4
   parser:
     - KB-20260317-211410-e366ed
+  pip:
+    - KB-20260320-002326-24c511
   pipeline:
     - KB-20260317-211410-3d3076
     - KB-20260317-211410-c51a41
@@ -483,6 +524,7 @@ tags:
     - KB-20260307-231252-72bc64
     - KB-20260308-232603-205e85
     - KB-20260317-211410-e366ed
+    - KB-20260320-002326-24c511
   recovery:
     - KB-20260228-0003
   refactor:
@@ -501,6 +543,7 @@ tags:
     - KB-20260301-0003
     - KB-20260301-0005
     - KB-20260308-232603-205e85
+    - KB-20260322-182024-1738c4
   scoping:
     - KB-20260301-0004
   shared-memory:
@@ -511,6 +554,7 @@ tags:
     - KB-20260317-211410-3d3076
   syntax:
     - KB-20260317-211410-6e13ad
+    - KB-20260322-182024-e7c4c2
   testing:
     - KB-20260227-0001
     - KB-20260228-0002
@@ -523,8 +567,6 @@ tags:
     - KB-20260319-022448-dec2c4
   tir:
     - KB-20260227-0001
-  tirx-kernels:
-    - KB-20260319-174406-349680
   tirx:
     - KB-20260301-0002
     - KB-20260301-0003
@@ -533,6 +575,9 @@ tags:
     - KB-20260306-195314-a33c27
     - KB-20260317-211410-3d3076
     - KB-20260317-211410-c51a41
+  tirx-kernels:
+    - KB-20260319-174406-349680
+    - KB-20260320-002326-24c511
   tma:
     - KB-20260227-0002
     - KB-20260227-0003
@@ -546,8 +591,12 @@ tags:
     - KB-20260301-0001
     - KB-20260317-211410-6e13ad
     - KB-20260317-211410-e366ed
+    - KB-20260322-182024-1738c4
+    - KB-20260322-182024-e7c4c2
   validation:
     - KB-20260228-0004
+  vector-annotation:
+    - KB-20260322-182024-e7c4c2
   warnings:
     - KB-20260306-195314-a33c27
   workflow:

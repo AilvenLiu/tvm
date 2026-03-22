@@ -14,14 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: After syncing `.pre-commit-config.yaml` with `apache/main`, the branch accepted stricter hook
-    behavior and fixed resulting blockers in the changed scope (header and formatting/lint issues) so
-    commits pass without bypass. This keeps local behavior consistent with upstream expectations and reduces
-    CI surprises after merge.
-  summary: The feature aligned to upstream hook policy and resolved local violations rather than weakening
-    enforcement.
+  details: After syncing `.pre-commit-config.yaml` with `apache/main`, the branch accepted stricter hook behavior and fixed
+    resulting blockers in the changed scope (header and formatting/lint issues) so commits pass without bypass. This keeps
+    local behavior consistent with upstream expectations and reduces CI surprises after merge.
+  summary: The feature aligned to upstream hook policy and resolved local violations rather than weakening enforcement.
 created: '2026-02-28'
 id: ADR-20260228-0001
 scope:

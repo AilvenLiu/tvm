@@ -14,17 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  summary: >-
-    For conflicted kernel tests, take upstream implementations first, then apply minimal
-    non-semantic lint fixes.
-  details: >-
-    In this feature, kernel-heavy test conflicts were resolved by first accepting upstream
-    `origin/tirx` implementations wholesale, then making the smallest possible lint/style edits
-    needed for pre-commit. This decision minimized semantic divergence from upstream, reduced
-    debugging complexity, and improved confidence that test behavior remained correct while meeting
-    formatting policy.
+  details: In this feature, kernel-heavy test conflicts were resolved by first accepting upstream `origin/tirx` implementations
+    wholesale, then making the smallest possible lint/style edits needed for pre-commit. This decision minimized semantic
+    divergence from upstream, reduced debugging complexity, and improved confidence that test behavior remained correct while
+    meeting formatting policy.
+  summary: For conflicted kernel tests, take upstream implementations first, then apply minimal non-semantic lint fixes.
 created: '2026-03-01'
 id: ADR-20260301-0001
 scope:

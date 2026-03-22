@@ -513,7 +513,13 @@ def visit_ann_assign(self: Parser, node: doc.AnnAssign) -> None:
     rhs = self.eval_expr(node.value) if node.value is not None else None
     raw_ann = self.eval_expr(node.annotation)
 
-    if isinstance(raw_ann, T.LetAnnotation):
+    if isinstance(raw_ann, T.LocalVectorAnnotation):
+        # x: T.float32[N] or x: T.f32[M, N] -> local buffer allocation
+        if rhs is not None:
+            self.report_error(node, "Vector annotation does not support initial value")
+        buf = T.alloc_local(shape=raw_ann.shape, dtype=raw_ann.dtype)
+        self.eval_assign(target=lhs, source=buf, bind_value=bind_assign_value)
+    elif isinstance(raw_ann, T.LetAnnotation):
         # T.let or T.let[type] -> immutable Bind var
         if rhs is None:
             self.report_error(node, "T.let annotation requires a value")

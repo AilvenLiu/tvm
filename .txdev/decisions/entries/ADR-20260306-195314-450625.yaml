@@ -14,18 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    For this warning-cleanup feature, we decided not to rely on persistent global suppression in
-    test config. Repository-controlled warnings were fixed in code paths under `python/tvm/...`,
-    while warnings emitted by external components (SWIG runtime, vendored CUTLASS examples, and
-    installed CUTLASS DSL package) were kept visible and documented. This preserves signal for
-    dependency/runtime changes and avoids hiding third-party behavior behind repository-wide
-    filters.
-  summary: >-
-    The feature adopted code-level fixes only and intentionally left external warning sources
-    unfiltered.
+  details: For this warning-cleanup feature, we decided not to rely on persistent global suppression in test config. Repository-controlled
+    warnings were fixed in code paths under `python/tvm/...`, while warnings emitted by external components (SWIG runtime,
+    vendored CUTLASS examples, and installed CUTLASS DSL package) were kept visible and documented. This preserves signal
+    for dependency/runtime changes and avoids hiding third-party behavior behind repository-wide filters.
+  summary: The feature adopted code-level fixes only and intentionally left external warning sources unfiltered.
 created: '2026-03-06'
 id: ADR-20260306-195314-450625
 scope:

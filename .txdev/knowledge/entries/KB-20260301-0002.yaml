@@ -14,19 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: >-
-    The copy/copy_async DSL functions in tirx.py accept **kwargs which get collected into a config
-    dict internally: `config = kwargs or {}`. If you pass config={"mbar": mbar, "cta_group": 1},
-    kwargs becomes {"config": {"mbar": mbar, "cta_group": 1}}, wrapping it in an extra layer that
-    breaks downstream access (schedule code expects config["mbar"], not config["config"]["mbar"]).
-    Correct usage: Tx.copy(dst, src, mbar=mbar, cta_group=1). Wrong usage: Tx.copy(dst, src,
-    config={"mbar": mbar, "cta_group": 1}). This pattern applies to any TIRX DSL function that
-    uses **kwargs for configuration.
-  summary: >-
-    Tx.copy() and Tx.copy_async() use **kwargs for config; pass mbar=, cta_group= etc. as direct
-    keyword arguments, not as a config dict.
+  details: 'The copy/copy_async DSL functions in tirx.py accept **kwargs which get collected into a config dict internally:
+    `config = kwargs or {}`. If you pass config={"mbar": mbar, "cta_group": 1}, kwargs becomes {"config": {"mbar": mbar, "cta_group":
+    1}}, wrapping it in an extra layer that breaks downstream access (schedule code expects config["mbar"], not config["config"]["mbar"]).
+    Correct usage: Tx.copy(dst, src, mbar=mbar, cta_group=1). Wrong usage: Tx.copy(dst, src, config={"mbar": mbar, "cta_group":
+    1}). This pattern applies to any TIRX DSL function that uses **kwargs for configuration.'
+  summary: Tx.copy() and Tx.copy_async() use **kwargs for config; pass mbar=, cta_group= etc. as direct keyword arguments,
+    not as a config dict.
 created: '2026-03-01'
 id: KB-20260301-0002
 scope:

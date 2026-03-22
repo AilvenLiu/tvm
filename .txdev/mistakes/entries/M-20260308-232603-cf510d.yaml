@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'During Phase 1.1, functions like `_get_local_region` were extracted from
-    cast.py
+  details: 'During Phase 1.1, functions like `_get_local_region` were extracted from cast.py
 
     (where the underscore prefix made sense as module-private) into layout_utils.py
 
@@ -30,18 +28,14 @@ content:
 
     This created two problems:
 
-    1. ruff''s import sorter split each `as` alias into its own import block (5 functions
-    × 3 files = 15 separate import statements)
+    1. ruff''s import sorter split each `as` alias into its own import block (5 functions × 3 files = 15 separate import statements)
 
-    2. The underscore prefix was semantically wrong — these are now public functions
-    in their own module
+    2. The underscore prefix was semantically wrong — these are now public functions in their own module
 
 
-    The user noticed this and asked "why are these written this way, is there a special
-    reason?"
+    The user noticed this and asked "why are these written this way, is there a special reason?"
 
-    There was no good reason. The fix was to remove all aliases and use the public
-    names directly.
+    There was no good reason. The fix was to remove all aliases and use the public names directly.
 
 
     Lesson: When extracting functions to a new module, rename call sites to use
@@ -51,9 +45,8 @@ content:
     the original location via import aliases.
 
     '
-  summary: When moving functions from a private location (cast.py internals) to a
-    public utility module (layout_utils.py), kept unnecessary underscore-prefix aliases
-    at import sites, causing ruff to split them into ugly per-import blocks.
+  summary: When moving functions from a private location (cast.py internals) to a public utility module (layout_utils.py),
+    kept unnecessary underscore-prefix aliases at import sites, causing ruff to split them into ugly per-import blocks.
 created: '2026-03-08'
 id: M-20260308-232603-cf510d
 scope:

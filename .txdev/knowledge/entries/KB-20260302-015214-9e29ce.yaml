@@ -14,16 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: |-
-    As of the tcgen05 UTCCP copy refactor (commit 29e6d5dfb5), shared TMA utilities were extracted from copy_async.py into common.py for reuse across multiple op schedules. The canonical import is:
-
-      from tvm.tirx.op_schedule.cuda.common import SwizzleMode, tma_shared_layout, tma_atom_layout, tma_atom_shape
-
-    copy_async.py imports some symbols from common.py for its own internal use (e.g. SwizzleMode, tma_atom_shape) but does NOT re-export tma_shared_layout. Importing tma_shared_layout from copy_async will raise ImportError.
-
-    When refactoring shared utilities out of a module, always grep for all import sites and update them in the same PR.
+  details: "As of the tcgen05 UTCCP copy refactor (commit 29e6d5dfb5), shared TMA utilities were extracted from copy_async.py\
+    \ into common.py for reuse across multiple op schedules. The canonical import is:\n\n  from tvm.tirx.op_schedule.cuda.common\
+    \ import SwizzleMode, tma_shared_layout, tma_atom_layout, tma_atom_shape\n\ncopy_async.py imports some symbols from common.py\
+    \ for its own internal use (e.g. SwizzleMode, tma_atom_shape) but does NOT re-export tma_shared_layout. Importing tma_shared_layout\
+    \ from copy_async will raise ImportError.\n\nWhen refactoring shared utilities out of a module, always grep for all import\
+    \ sites and update them in the same PR."
   summary: TMA utilities (SwizzleMode, tma_atom_layout, tma_atom_shape, tma_shared_layout) live in op_schedule/cuda/common.py,
     not copy_async.py.
 created: '2026-03-02'

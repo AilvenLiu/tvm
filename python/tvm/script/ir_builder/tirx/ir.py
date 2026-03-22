@@ -1424,6 +1424,55 @@ class LetAnnotation:
 let = LetAnnotation()  # Singleton for T.let (no subscript)
 
 
+class LocalVectorAnnotation:
+    """Marker for local vector/tensor allocation via type annotation subscript.
+
+    Created when a DtypeConstructor is subscripted, e.g. ``Tx.float32[N]`` or
+    ``Tx.float32[M, N]``.  The parser's ``visit_ann_assign`` recognises this
+    object and lowers it to ``T.alloc_local(shape=..., dtype=...)``.
+    """
+
+    __slots__ = ("dtype", "shape")
+
+    def __init__(self, dtype: str, shape: tuple):
+        self.dtype = dtype
+        self.shape = shape
+
+
+class DtypeConstructor:
+    """Callable + subscriptable dtype object.
+
+    Replaces the plain functions previously returned by ``func_gen``.
+
+    * ``Tx.float32()``        — same FFI call as before (returns ``Var``).
+    * ``Tx.float32[N]``       — returns ``LocalVectorAnnotation("float32", (N,))``.
+    * ``Tx.float32[M, N]``    — returns ``LocalVectorAnnotation("float32", (M, N))``.
+    * ``x: Tx.float32``       — parser calls this object, gets a ``Var``.
+    """
+
+    def __init__(self, ffi_name: str, dtype_str: str):
+        self._ffi_name = ffi_name
+        self._dtype_str = dtype_str
+
+    def __call__(
+        self,
+        expr: "None | PrimExpr | Literal['inf', '-inf', 'nan'] | int | float" = None,
+        *,
+        is_size_var: bool = False,
+    ) -> "PrimExpr":
+        if isinstance(expr, str):
+            expr = float(expr)
+        return getattr(_ffi_api, self._ffi_name)(expr, is_size_var)
+
+    def __getitem__(self, shape):
+        if isinstance(shape, tuple):
+            return LocalVectorAnnotation(self._dtype_str, shape)
+        return LocalVectorAnnotation(self._dtype_str, (shape,))
+
+    def __repr__(self):
+        return f"DtypeConstructor({self._dtype_str!r})"
+
+
 def allocate(
     extents: list[PrimExpr],
     dtype: str,
@@ -1699,6 +1748,8 @@ def decl_buffer(
 
 alloc_shared = functools.partial(alloc_buffer, scope="shared")
 alloc_local = functools.partial(alloc_buffer, scope="local")
+smem = alloc_shared
+tmem = functools.partial(alloc_buffer, scope="tmem")
 
 
 if TYPE_CHECKING:
@@ -1890,25 +1941,28 @@ def evaluate(value: PrimExpr) -> None:
     return _ffi_api.Evaluate(value)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def _ffi_name_to_dtype(name: str) -> str:
+    """Convert an FFI type name to its TVM dtype string.
+
+    Examples: "Float32" -> "float32", "Int8x4" -> "int8x4",
+    "Float8E4M3" -> "float8_e4m3", "Float8E4M3B11FNUZ" -> "float8_e4m3b11fnuz".
+    """
+    import re
+
+    # Insert underscore before E-notation in float8 names (E3M4, E4M3, etc.)
+    s = re.sub(r"(?<=[a-z0-9])E(\d)", r"_e\1", name, flags=re.IGNORECASE)
+    return s.lower()
+
+
 def func_gen(name: str):
-    """Generate a function for each PrimExpr dtype.
+    """Generate a DtypeConstructor for each PrimExpr dtype.
 
     Parameters
     ----------
     name: str
-        The ffi function name to call.
+        The ffi function name to call, e.g. "Float32", "Int32".
     """
-
-    def func(
-        expr: None | PrimExpr | Literal["inf", "-inf", "nan"] | int | float = None,
-        *,
-        is_size_var: bool = False,
-    ) -> PrimExpr:
-        if isinstance(expr, str):
-            expr = float(expr)
-        return getattr(_ffi_api, name)(expr, is_size_var)
-
-    return func
+    return DtypeConstructor(name, _ffi_name_to_dtype(name))
 
 
 def static_assert(x: Any, message: str = ""):
@@ -2093,6 +2147,20 @@ float4_e2m1fnx32 = func_gen("Float4E2M1FNx32")
 float4_e2m1fnx64 = func_gen("Float4E2M1FNx64")
 
 bfloat16 = func_gen("BFloat16")
+
+# Shorthand aliases
+f16 = float16
+f32 = float32
+f64 = float64
+bf16 = bfloat16
+i8 = int8
+i16 = int16
+i32 = int32
+i64 = int64
+u8 = uint8
+u16 = uint16
+u32 = uint32
+u64 = uint64
 # pylint: enable=invalid-name
 
 
@@ -3340,6 +3408,8 @@ __all__ = [
     "Bind",
     "bind",
     "LetAnnotation",
+    "LocalVectorAnnotation",
+    "DtypeConstructor",
     "Let",
     "IterVar",
     "CommReducer",
@@ -3385,12 +3455,30 @@ __all__ += [
     "scalar_wrapper",
     "scope_id",
     "shared_scalar",
+    "smem",
     "static_assert",
     "thread",
     "thread_id",
+    "tmem",
     "warp",
     "warp_id",
     "warpgroup",
     "warpgroup_id",
     "world",
+]
+
+# Shorthand dtype aliases
+__all__ += [
+    "bf16",
+    "f16",
+    "f32",
+    "f64",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
 ]

@@ -14,17 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "After the op-schedule-refactor, TMA utilities were extracted from cuda/common.py\n\
-    into a dedicated cuda/tma_utils.py module. The canonical import is now:\n\n  from\
-    \ tvm.tirx.op_schedule.cuda.tma_utils import SwizzleMode, tma_shared_layout, tma_atom_layout,\
-    \ tma_atom_shape\n\nAll external consumers (kernels/sm100/*.py, megakernel/kernels/gemm.py,\n\
-    tests/python/tirx/test_layout.py, op_schedule test files) have been updated.\n\
-    \nWhen refactoring shared utilities out of a module, always grep for all import\n\
-    sites and update them in the same PR.\n"
-  summary: TMA utilities (SwizzleMode, tma_atom_layout, tma_atom_shape, tma_shared_layout)
-    live in op_schedule/cuda/tma_utils.py after the Phase 1.6 refactor.
+  details: "After the op-schedule-refactor, TMA utilities were extracted from cuda/common.py\ninto a dedicated cuda/tma_utils.py\
+    \ module. The canonical import is now:\n\n  from tvm.tirx.op_schedule.cuda.tma_utils import SwizzleMode, tma_shared_layout,\
+    \ tma_atom_layout, tma_atom_shape\n\nAll external consumers (kernels/sm100/*.py, megakernel/kernels/gemm.py,\ntests/python/tirx/test_layout.py,\
+    \ op_schedule test files) have been updated.\n\nWhen refactoring shared utilities out of a module, always grep for all\
+    \ import\nsites and update them in the same PR.\n"
+  summary: TMA utilities (SwizzleMode, tma_atom_layout, tma_atom_shape, tma_shared_layout) live in op_schedule/cuda/tma_utils.py
+    after the Phase 1.6 refactor.
 created: '2026-03-08'
 id: KB-20260308-232603-18dfc3
 scope:

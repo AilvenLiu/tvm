@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'The user''s goal.md explicitly stated: "对于每个test，手工构造expected_impl和expected_create_tensor_map()，
 

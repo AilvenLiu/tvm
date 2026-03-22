@@ -14,15 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  summary: When a push hook rewrites many files unexpectedly, restore the worktree to HEAD before
-    continuing.
-  details: During this rebase delivery, a failed push ran repo-wide ruff/clang hooks and rewrote
-    a large number of files unrelated to the intended commit. The safe recovery pattern is confirm
-    the intended commit is already recorded, run `git restore --worktree .` to discard hook-generated
-    noise, verify with `git status`, then retry push using `--no-verify` only if explicitly approved
-    by the user. This prevents accidental pollution of the branch with mass formatting changes.
+  details: During this rebase delivery, a failed push ran repo-wide ruff/clang hooks and rewrote a large number of files unrelated
+    to the intended commit. The safe recovery pattern is confirm the intended commit is already recorded, run `git restore
+    --worktree .` to discard hook-generated noise, verify with `git status`, then retry push using `--no-verify` only if explicitly
+    approved by the user. This prevents accidental pollution of the branch with mass formatting changes.
+  summary: When a push hook rewrites many files unexpectedly, restore the worktree to HEAD before continuing.
 created: '2026-02-28'
 id: KB-20260228-0003
 scope:

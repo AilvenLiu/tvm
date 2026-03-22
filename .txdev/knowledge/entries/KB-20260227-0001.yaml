@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: "TVMScript round-trip does NOT work for testing copy_tma_impl output because:\n(a) host_init LetStmt has free variables\
     \ that can't be parsed as standalone PrimFunc\n(b) parser adds extra default args to g2c call that copy_tma_impl doesn't\

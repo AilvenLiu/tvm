@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 entries:
   - created: '2026-02-27'
     id: ADR-20260227-0001
@@ -49,8 +48,7 @@ entries:
       - upstream-alignment
       - tooling
       - ci
-    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing
-      checks
+    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing checks
     updated: '2026-02-28'
   - created: '2026-02-28'
     id: ADR-20260228-0002
@@ -76,8 +74,7 @@ entries:
       - compatibility
       - tvm-ffi
       - refactor
-    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check
-      APIs
+    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check APIs
     updated: '2026-02-28'
   - created: '2026-03-01'
     id: ADR-20260301-0001
@@ -209,8 +206,7 @@ entries:
       - architecture
       - kernel
       - design-pattern
-    title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent
-      kernels
+    title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent kernels
     updated: '2026-03-19'
   - created: '2026-03-19'
     id: ADR-20260319-022448-7cc00e
@@ -235,8 +231,7 @@ entries:
       - bench-ci
       - architecture
       - baseline
-    title: Baselines run inside ProtonContext with try/except, not as separate bench
-      passes
+    title: Baselines run inside ProtonContext with try/except, not as separate bench passes
     updated: '2026-03-19'
   - created: '2026-03-20'
     id: ADR-20260320-002326-d2fa6d
@@ -249,12 +244,44 @@ entries:
       - module-rename
     title: Rename importable module from kernels to tirx_kernels for namespace clarity
     updated: '2026-03-20'
+  - created: '2026-03-22'
+    id: ADR-20260322-182024-3e7d62
+    path: entries/ADR-20260322-182024-3e7d62.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - parser
+      - api-design
+      - architecture
+    title: DtypeConstructor replaces func_gen for dual callable+subscriptable dtype objects
+    updated: '2026-03-22'
+  - created: '2026-03-22'
+    id: ADR-20260322-182024-efa75b
+    path: entries/ADR-20260322-182024-efa75b.yaml
+    scope:
+      - repo
+    tags:
+      - tvmscript
+      - dsl
+      - syntax
+      - api-design
+      - vector-annotation
+      - alloc-local
+      - smem
+      - tmem
+    title: 'Tensor alloc annotation syntax: scalar (Tx.f32), vector (Tx.f32[N]), smem/tmem aliases'
+    updated: '2026-03-22'
 tags:
+  alloc-local:
+    - ADR-20260322-182024-efa75b
   api:
     - ADR-20260228-0003
   api-design:
     - ADR-20260317-211411-5664ea
     - ADR-20260317-211411-a47556
+    - ADR-20260322-182024-3e7d62
+    - ADR-20260322-182024-efa75b
   api-evolution:
     - ADR-20260228-0002
   architecture:
@@ -265,6 +292,7 @@ tags:
     - ADR-20260319-022448-4d7f83
     - ADR-20260319-022448-7cc00e
     - ADR-20260319-174407-e52e2f
+    - ADR-20260322-182024-3e7d62
   assert_structural_equal:
     - ADR-20260227-0001
   baseline:
@@ -287,6 +315,7 @@ tags:
     - ADR-20260319-022448-4d7f83
   dsl:
     - ADR-20260317-211411-a47556
+    - ADR-20260322-182024-efa75b
   golden:
     - ADR-20260227-0001
   infrastructure:
@@ -300,6 +329,8 @@ tags:
     - ADR-20260228-0003
   mbarrier:
     - ADR-20260317-211411-5664ea
+  module-rename:
+    - ADR-20260320-002326-d2fa6d
   module-split:
     - ADR-20260308-232603-16186a
   op-schedule:
@@ -308,8 +339,11 @@ tags:
     - ADR-20260307-231252-f0561c
     - ADR-20260308-232603-16186a
     - ADR-20260308-232603-d77714
+  packaging:
+    - ADR-20260320-002326-d2fa6d
   parser:
     - ADR-20260228-0002
+    - ADR-20260322-182024-3e7d62
   pipeline:
     - ADR-20260317-211411-5664ea
   policy:
@@ -330,8 +364,11 @@ tags:
     - ADR-20260307-231252-f0561c
     - ADR-20260308-232603-16186a
     - ADR-20260308-232603-d77714
+  smem:
+    - ADR-20260322-182024-efa75b
   syntax:
     - ADR-20260317-211411-a47556
+    - ADR-20260322-182024-efa75b
   test-organization:
     - ADR-20260301-0002
   testing:
@@ -350,8 +387,12 @@ tags:
     - ADR-20260227-0001
   tirx:
     - ADR-20260301-0003
+  tirx-kernels:
+    - ADR-20260320-002326-d2fa6d
   tma:
     - ADR-20260227-0002
+  tmem:
+    - ADR-20260322-182024-efa75b
   tooling:
     - ADR-20260228-0001
   tvm-ffi:
@@ -359,9 +400,13 @@ tags:
   tvmscript:
     - ADR-20260228-0002
     - ADR-20260317-211411-a47556
+    - ADR-20260322-182024-3e7d62
+    - ADR-20260322-182024-efa75b
   upstream-alignment:
     - ADR-20260228-0001
     - ADR-20260301-0001
+  vector-annotation:
+    - ADR-20260322-182024-efa75b
   warnings:
     - ADR-20260306-195314-450625
   xdist:

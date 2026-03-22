@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: "Three approaches were evaluated for golden IR comparison in TMA codegen tests:\n\n1. TVMScript round-trip (@T.prim_func\
     \ strings): REJECTED — parser/printer asymmetry,\n   free variables in host_init LetStmt, extra default args added by\

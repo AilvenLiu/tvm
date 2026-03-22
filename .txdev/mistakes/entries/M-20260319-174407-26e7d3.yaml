@@ -14,29 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "When adding benchmark baselines, the verification must include:\n1. Actually\
-    \ running run_bench() on a GPU and confirming the Proton tree\n   shows both tir\
-    \ and baseline impl names at depth-1\n2. Confirming the baseline produces non-zero\
-    \ timing numbers\n3. Checking that the proton_name strings match what KNOWN_IMPLS\
-    \ expects\n\npy_compile only catches syntax errors. It cannot catch:\n- Wrong\
-    \ API calls (e.g., wrong argument names/order for flashinfer/deep_gemm)\n- Missing\
-    \ data preparation (e.g., not cloning tensors for in-place ops)\n- Import issues\
-    \ at runtime (modules that exist but have different APIs)\n- Shape mismatches\
-    \ between prepared data and baseline expectations\n\nUser feedback was direct:\
+  details: "When adding benchmark baselines, the verification must include:\n1. Actually running run_bench() on a GPU and\
+    \ confirming the Proton tree\n   shows both tir and baseline impl names at depth-1\n2. Confirming the baseline produces\
+    \ non-zero timing numbers\n3. Checking that the proton_name strings match what KNOWN_IMPLS expects\n\npy_compile only\
+    \ catches syntax errors. It cannot catch:\n- Wrong API calls (e.g., wrong argument names/order for flashinfer/deep_gemm)\n\
+    - Missing data preparation (e.g., not cloning tensors for in-place ops)\n- Import issues at runtime (modules that exist\
+    \ but have different APIs)\n- Shape mismatches between prepared data and baseline expectations\n\nUser feedback was direct:\
     \ \"py_compile is useless for verifying benchmarks\nactually work.\"\n"
-  summary: py_compile only checks syntax. Baseline benchmarks must be verified by
-    running actual GPU execution and checking Proton tree output shows the expected
-    impl names with valid timing numbers.
-  created: '2026-03-19'
-  id: M-20260319-174407-26e7d3
-  scope:
-    - repo
-  tags:
-    - benchmarking
-    - verification
-    - gpu
-    - testing
-  title: Must run actual GPU benchmarks to verify baselines, not just py_compile
-  updated: '2026-03-19'
+  summary: py_compile only checks syntax. Baseline benchmarks must be verified by running actual GPU execution and checking
+    Proton tree output shows the expected impl names with valid timing numbers.
+created: '2026-03-19'
+id: M-20260319-174407-26e7d3
+scope:
+  - repo
+tags:
+  - benchmarking
+  - verification
+  - gpu
+  - testing
+title: Must run actual GPU benchmarks to verify baselines, not just py_compile
+updated: '2026-03-19'

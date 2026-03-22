@@ -14,29 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: "parse_proton.py in tirx-bench-ci has a hardcoded KNOWN_IMPLS set that\n\
-    filters which depth-1 impl names from the Proton tree are recognized.\nIf a new\
-    \ baseline's proton_name is not in this set, the parser silently\nskips it --\
-    \ no error message, no warning, just missing data in the\ndashboard.\n\nThis is\
-    \ particularly dangerous because:\n- The baseline code runs fine and produces\
-    \ correct Proton output\n- The parser just ignores unrecognized names without\
-    \ any indication\n- The failure mode is \"data never appears in dashboard\" which\
-    \ may not\n  be noticed for days\n\nAlways check KNOWN_IMPLS when adding new baselines.\
-    \ Consider adding a\nCI check that validates all proton_names used in tirx-kernels\
-    \ are\npresent in KNOWN_IMPLS.\n"
-  summary: New proton_name values in tirx-kernels baselines are silently dropped if
-    not added to KNOWN_IMPLS in tirx-bench-ci parse_proton.py -- no error, just missing
-    data.
-  created: '2026-03-19'
-  id: M-20260319-174407-01b7d3
-  scope:
-    - repo
-  tags:
-    - bench-ci
-    - cross-repo
-    - verification
-    - benchmarking
-  title: Cross-repo KNOWN_IMPLS sync is easy to miss
-  updated: '2026-03-19'
+  details: "parse_proton.py in tirx-bench-ci has a hardcoded KNOWN_IMPLS set that\nfilters which depth-1 impl names from the\
+    \ Proton tree are recognized.\nIf a new baseline's proton_name is not in this set, the parser silently\nskips it -- no\
+    \ error message, no warning, just missing data in the\ndashboard.\n\nThis is particularly dangerous because:\n- The baseline\
+    \ code runs fine and produces correct Proton output\n- The parser just ignores unrecognized names without any indication\n\
+    - The failure mode is \"data never appears in dashboard\" which may not\n  be noticed for days\n\nAlways check KNOWN_IMPLS\
+    \ when adding new baselines. Consider adding a\nCI check that validates all proton_names used in tirx-kernels are\npresent\
+    \ in KNOWN_IMPLS.\n"
+  summary: New proton_name values in tirx-kernels baselines are silently dropped if not added to KNOWN_IMPLS in tirx-bench-ci
+    parse_proton.py -- no error, just missing data.
+created: '2026-03-19'
+id: M-20260319-174407-01b7d3
+scope:
+  - repo
+tags:
+  - bench-ci
+  - cross-repo
+  - verification
+  - benchmarking
+title: Cross-repo KNOWN_IMPLS sync is easy to miss
+updated: '2026-03-19'

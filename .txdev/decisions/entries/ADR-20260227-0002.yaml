@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
   details: 'test_copy_tma_3d_with_view tests the interaction between buffer.view() and TMA copy dispatch.
 

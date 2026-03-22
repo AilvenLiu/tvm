@@ -14,10 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'When flash_attention4 tests appeared to hang, the agent claimed it was
-    due to
+  details: 'When flash_attention4 tests appeared to hang, the agent claimed it was due to
 
     "slow compilation" without evidence. The user called this out explicitly:
 
@@ -38,17 +36,16 @@ content:
     and report factual observations rather than speculative causes.
 
     '
-  summary: Claimed flash_attention4 was stuck due to slow compilation without actually
-    verifying; the kernel compiles and runs fine (~8s per test). Always verify claims
-    before reporting them.
-  created: '2026-03-19'
-  id: M-20260319-022448-b1a13a
-  scope:
-    - repo
-  tags:
-    - testing
-    - verification
-    - gpu
-    - assumptions
-  title: Claiming kernel compilation was slow without verifying
-  updated: '2026-03-19'
+  summary: Claimed flash_attention4 was stuck due to slow compilation without actually verifying; the kernel compiles and
+    runs fine (~8s per test). Always verify claims before reporting them.
+created: '2026-03-19'
+id: M-20260319-022448-b1a13a
+scope:
+  - repo
+tags:
+  - testing
+  - verification
+  - gpu
+  - assumptions
+title: Claiming kernel compilation was slow without verifying
+updated: '2026-03-19'

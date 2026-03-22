@@ -14,32 +14,25 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 content:
-  details: 'In hgemm_rs_multimem_dynamic_scheduler.py, `pool.offset += 16` inside
-    the @Tx.prim_func body
+  details: 'In hgemm_rs_multimem_dynamic_scheduler.py, `pool.offset += 16` inside the @Tx.prim_func body
 
-    caused "name ''pool'' is not defined" because the TVMScript parser''s visit_aug_assign
-    tried to
+    caused "name ''pool'' is not defined" because the TVMScript parser''s visit_aug_assign tried to
 
-    resolve pool.offset as a TIR variable. Reading pool.offset (a plain Python int
-    attribute) works
+    resolve pool.offset as a TIR variable. Reading pool.offset (a plain Python int attribute) works
 
-    fine since it''s evaluated at Python level during parsing, but the augmented assignment
-    syntax
+    fine since it''s evaluated at Python level during parsing, but the augmented assignment syntax
 
     triggers TIR-level processing.
 
 
-    Fix: Replace `pool.offset += N` with `pool.move_base_to(pool.offset + N)` which
-    is a regular
+    Fix: Replace `pool.offset += N` with `pool.move_base_to(pool.offset + N)` which is a regular
 
     method call and works correctly at Python level during TVMScript parsing.
 
     '
-  summary: Python augmented assignment (x += y) inside TVMScript-parsed functions
-    is intercepted by visit_aug_assign and resolved as TIR, not Python. Use method
-    calls (e.g. pool.move_base_to()) instead of += on Python-level objects.
+  summary: Python augmented assignment (x += y) inside TVMScript-parsed functions is intercepted by visit_aug_assign and resolved
+    as TIR, not Python. Use method calls (e.g. pool.move_base_to()) instead of += on Python-level objects.
 created: '2026-03-17'
 id: KB-20260317-211410-e366ed
 scope:
