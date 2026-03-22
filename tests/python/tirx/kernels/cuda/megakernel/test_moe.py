@@ -16,11 +16,14 @@
 # under the License.
 
 import argparse
-import os
-import sys
 
 import numpy as np
 import pytest
+from tirx_kernels.megakernel.moe import (
+    MegaKernelMOE,
+    fused_moe_sglang,
+    prepare_data,
+)
 
 import tvm
 import tvm.testing
@@ -29,19 +32,6 @@ from tvm.tirx.megakernel.utils.config import (
     event_type_names,
 )
 from tvm.tirx.megakernel.utils.utils import get_source
-
-sys.path.insert(
-    0,
-    os.path.join(
-        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
-        "megakernel",
-    ),
-)
-from moe import (
-    MegaKernelMOE,
-    fused_moe_sglang,
-    prepare_data,
-)
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)

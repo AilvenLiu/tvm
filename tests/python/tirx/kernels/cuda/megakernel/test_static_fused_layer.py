@@ -16,11 +16,14 @@
 # under the License.
 
 import argparse
-import os
-import sys
 
 import numpy as np
 import pytest
+from tirx_kernels.megakernel.static_fused_layer import (
+    MegaKernel,
+    get_packed_info,
+    prepare_data,
+)
 
 import tvm
 import tvm.testing
@@ -28,19 +31,6 @@ from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirx.megakernel.utils import static_scheduler
 from tvm.tirx.megakernel.utils.config import (
     event_type_names,
-)
-
-sys.path.insert(
-    0,
-    os.path.join(
-        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
-        "megakernel",
-    ),
-)
-from static_fused_layer import (
-    MegaKernel,
-    get_packed_info,
-    prepare_data,
 )
 
 

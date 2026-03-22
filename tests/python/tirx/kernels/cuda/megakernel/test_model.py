@@ -29,9 +29,6 @@ pytest.skip(
     allow_module_level=True,
 )
 
-import os
-import sys
-
 import numpy as np
 from mlc_llm.compiler_pass.attach_support_info import (
     AttachMemoryPlanAttr,
@@ -45,6 +42,9 @@ from mlc_llm.model.llama.llama_model import LlamaConfig, LlamaForCausalLM
 from mlc_llm.model.qwen3.qwen3_model import Qwen3Config, Qwen3LMHeadModel
 from mlc_llm.model.qwen3_moe.qwen3_moe_model import Qwen3MoeConfig, Qwen3MoeForCausalLM
 from mlc_llm.nn.kv_cache import PagedKVCache
+from tirx_kernels.megakernel.layer import MegaKernelDenseLayer
+from tirx_kernels.megakernel.lm_head import LMHeadLayer
+from tirx_kernels.megakernel.moe_full_layer import MegaKernelMOEFullLayer
 from tqdm import tqdm
 
 import tvm
@@ -64,17 +64,6 @@ from tvm.tirx.megakernel.utils.config import (
 
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
-
-sys.path.insert(
-    0,
-    os.path.join(
-        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
-        "megakernel",
-    ),
-)
-from layer import MegaKernelDenseLayer
-from lm_head import LMHeadLayer
-from moe_full_layer import MegaKernelMOEFullLayer
 
 # pyright: reportInvalidTypeForm=false
 

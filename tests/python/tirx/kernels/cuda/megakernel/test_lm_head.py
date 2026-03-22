@@ -16,24 +16,14 @@
 # under the License.
 
 import argparse
-import os
-import sys
 
 import numpy as np
 import torch
+from tirx_kernels.megakernel.lm_head import LMHeadLayer, prepare_data
 
 import tvm
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.utils.utils import get_source_func
-
-sys.path.insert(
-    0,
-    os.path.join(
-        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
-        "megakernel",
-    ),
-)
-from lm_head import LMHeadLayer, prepare_data
 
 
 def test(batch_size, N, K, mod):

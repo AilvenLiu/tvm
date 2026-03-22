@@ -1,0 +1,38 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: Eight test files previously used sys.path.insert(0, os.path.join(os.environ.get('TIRX_KERNELS_PATH',
+    '~/tirx-kernels/kernels'), 'megakernel')) to import modules like layer, moe, lm_head,
+    static_fused_layer, gemm_search_config, and moe_full_layer. These are now imported
+    as from tirx_kernels.megakernel.<module> import ... since tirx-kernels is a pip-installable
+    package. The TIRX_KERNELS_PATH and TIRX_KERNELS_DIR env vars are fully deprecated
+    across all three repos (tir, tirx-kernels, tirx-bench-ci).
+  summary: All megakernel test files under tests/python/tirx/kernels/cuda/megakernel/
+    and sm100a/ now import from tirx_kernels.megakernel.* directly — no sys.path hacks
+    or TIRX_KERNELS_PATH env var usage remains.
+created: '2026-03-22'
+id: KB-20260322-201254-ba181e
+scope:
+  - repo
+tags:
+  - megakernel
+  - tirx-kernels
+  - imports
+  - testing
+title: Megakernel test files import from tirx_kernels package directly
+updated: '2026-03-22'

@@ -16,8 +16,6 @@
 # under the License.
 
 import json
-import os
-import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -32,6 +30,12 @@ from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
 from mlc_llm.compiler_pass.pipeline import _DebugDump
 from mlc_llm.model.qwen3.qwen3_model import Qwen3Config, Qwen3LMHeadModel
 from mlc_llm.nn.kv_cache import PagedKVCache
+from tirx_kernels.megakernel.layer import (
+    MAX_NUM_KV_SPLITS,
+    MAX_TOTAL_NUM_WORKERS,
+    PROFILER_BUFFER_SIZE,
+)
+from tirx_kernels.megakernel.static_fused_layer import get_qwen3_layer
 from tqdm import tqdm
 
 import tvm
@@ -43,16 +47,6 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as Tx
-
-sys.path.insert(
-    0,
-    os.path.join(
-        os.environ.get("TIRX_KERNELS_PATH", os.path.expanduser("~/tirx-kernels/kernels")),
-        "megakernel",
-    ),
-)
-from layer import MAX_NUM_KV_SPLITS, MAX_TOTAL_NUM_WORKERS, PROFILER_BUFFER_SIZE
-from static_fused_layer import get_qwen3_layer
 
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
