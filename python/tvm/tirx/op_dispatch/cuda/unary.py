@@ -17,7 +17,7 @@
 
 """Implementation of unary operator dispatchs for CUDA targets.
 
-Registered ops: zero, fill, reciprocal, exp, exp2, sqrt.
+Registered ops: zero, fill, reciprocal, exp, exp2, sqrt, silu.
 Each op gets two dispatch variants: "shared" and "local" (both priority=10).
 See the registration block at the bottom of this file for detailed dispatch
 documentation with before/after IR examples.
@@ -53,6 +53,8 @@ unary_op_table = {
     MapOpType.RECIPROCAL: lambda x, s, b: Tx.FloatImm(x.dtype, 1.0) / x,
     MapOpType.EXP: lambda x, s, b: Tx.exp(x * s + b) if b is not None else Tx.exp(x * s),
     MapOpType.EXP2: lambda x, s, b: Tx.exp2(x * s + b) if b is not None else Tx.exp2(x * s),
+    MapOpType.SILU: lambda x, s, b: x
+    / (Tx.FloatImm(x.dtype, 1.0) + Tx.exp(Tx.FloatImm(x.dtype, 0.0) - x)),
 }
 
 
@@ -393,6 +395,31 @@ def validate_unary_local(
     if local_case is None:
         return False, f"unsupported exec_scope {sctx.exec_scope.name} for local unary op"
 
+    # For thread-wise path, allow layout=None (flat local buffers).
+    # Only require scope="local" and basic dtype checks.
+    if local_case == _LOCAL_CASE_THREAD_WISE:
+        if not (
+            _dst.buffer.scope() == "local"
+            and (_src.buffer.scope() == "local" if isinstance(_src, BufferRegion) else True)
+            and (_bias.buffer.scope() == "local" if isinstance(_bias, BufferRegion) else True)
+        ):
+            return False, "invalid storage scope for thread-wise local unary op"
+        compute_dtype = _src.buffer.dtype if isinstance(_src, BufferRegion) else _src.dtype
+        if _scale is not None and _scale.dtype != compute_dtype:
+            return (
+                False,
+                f"dtype mismatch for scale in local unary op;"
+                f" expected {compute_dtype} but got {_scale.dtype}",
+            )
+        if isinstance(_bias, BufferRegion) and _bias.buffer.dtype != compute_dtype:
+            return (
+                False,
+                f"dtype mismatch for bias in local unary op;"
+                f" expected {compute_dtype} but got {_bias.buffer.dtype}",
+            )
+        return True, None
+
+    # For view_full / view_sliced paths: require layout on all buffers.
     if not (
         _dst.buffer.scope() == "local"
         and _dst.buffer.layout is not None
@@ -848,6 +875,7 @@ for _op_name, _op_type in {
     "exp": MapOpType.EXP,
     "exp2": MapOpType.EXP2,
     "sqrt": MapOpType.SQRT,
+    "silu": MapOpType.SILU,
 }.items():
 
     @register_dispatch(

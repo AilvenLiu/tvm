@@ -34,6 +34,7 @@ class MapOpType(Enum):
     MIN = 9
     EXP = 10
     EXP2 = 11
+    SILU = 12
 
 
 class ReduceOpType(Enum):

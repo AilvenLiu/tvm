@@ -114,7 +114,11 @@ def get_vec_len(
 
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
-    if not (src.layout.is_trivial() and dst.layout.is_trivial()):
+    # layout=None (flat local buffer) is treated as trivial for vectorization purposes
+    if not (
+        (dst.layout is None or dst.layout.is_trivial())
+        and (src.layout is None or src.layout.is_trivial())
+    ):
         return None
 
     # Extract regions and validate dimensions

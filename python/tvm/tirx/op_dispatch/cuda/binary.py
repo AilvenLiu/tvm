@@ -32,7 +32,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, OpCall, PrimFunc
+from tvm.tir import BufferRegion, OpCall, PrimExpr, PrimFunc
 from tvm.tir.expr import FloatImm
 from tvm.tir.layout import TileLayout, laneid
 from tvm.tirx.op_dispatch import DispatchContext, fail
@@ -121,7 +121,7 @@ def _dtype_ok(op: OpCall, sctx: DispatchContext, expected_dtype: str):
     for i, src in enumerate([src1, src2], 1):
         if isinstance(src, BufferRegion) and src.buffer.dtype != expected_dtype:
             return (False, f"src{i} dtype {src.buffer.dtype} != {expected_dtype}")
-        elif isinstance(src, FloatImm) and src.dtype != expected_dtype:
+        elif isinstance(src, PrimExpr) and src.dtype != expected_dtype:
             return (False, f"src{i} dtype {src.dtype} != {expected_dtype}")
     return (True, None)
 
@@ -177,23 +177,28 @@ class _BinaryMapInfo(NamedTuple):
     src2_extent: list | None
 
 
+def _is_scalar(x) -> bool:
+    """Check if x is a scalar (non-BufferRegion PrimExpr, including FloatImm)."""
+    return not isinstance(x, BufferRegion)
+
+
 def _normalize_binary_args(
-    _src1: BufferRegion | FloatImm,
-    _src2: BufferRegion | FloatImm,
+    _src1: BufferRegion | PrimExpr,
+    _src2: BufferRegion | PrimExpr,
     op_type: MapOpType,
-) -> tuple[BufferRegion | FloatImm, BufferRegion | FloatImm, FloatImm | None, str | None]:
+) -> tuple[BufferRegion | PrimExpr, BufferRegion | PrimExpr, PrimExpr | None, str | None]:
     """Normalize binary args: move const to rhs and ensure rhs is broadcastable to lhs if needed."""
-    # Ensure at least one source is not a constant.
-    if isinstance(_src1, FloatImm) and isinstance(_src2, FloatImm):
+    # Ensure at least one source is not a scalar constant.
+    if _is_scalar(_src1) and _is_scalar(_src2):
         return _src1, _src2, None, "both inputs are constants; unsupported for binary map"
 
-    # If src1 is constant, swap (only allowed for commutative ops).
-    if isinstance(_src1, FloatImm):
+    # If src1 is scalar, swap (only allowed for commutative ops).
+    if _is_scalar(_src1):
         if op_type not in (MapOpType.ADD, MapOpType.MUL):
             return _src1, _src2, None, "commutativity required to swap constant as lhs"
         _src1, _src2 = _src2, _src1
 
-    const = _src2 if isinstance(_src2, FloatImm) else None
+    const = _src2 if _is_scalar(_src2) else None
     if const is not None:
         return _src1, _src2, const, None
 
@@ -211,6 +216,7 @@ def _try_prepare_binary_map(
     op_call: OpCall,
     op_type: MapOpType,
     require_trivial_layout: bool,
+    allow_no_layout: bool = False,
 ) -> tuple[_BinaryMapInfo | None, str | None]:
     _dst: BufferRegion = op_call.args[0]
     _src1: BufferRegion | FloatImm = op_call.args[1]
@@ -225,18 +231,19 @@ def _try_prepare_binary_map(
     src2_br = _src2 if const is None else None
     src2 = src2_br.buffer if src2_br is not None else None
     dtype = dst.dtype
-    if not (
-        dst.layout
-        and src1.layout
-        and (src2.layout if src2 else True)
-        and src1.dtype == dtype
-        and ((src2.dtype == dtype) if src2 else (const.dtype == dtype))
-    ):
+    has_layout = dst.layout and src1.layout and (src2.layout if src2 else True)
+    if not has_layout and not allow_no_layout:
         return None, "unsupported layout/dtype for binary map"
-    if require_trivial_layout and not (
-        dst.layout.is_trivial()
-        and src1.layout.is_trivial()
-        and (src2.layout.is_trivial() if src2 else True)
+    if not (src1.dtype == dtype and ((src2.dtype == dtype) if src2 else (const.dtype == dtype))):
+        return None, "unsupported dtype for binary map"
+    if (
+        has_layout
+        and require_trivial_layout
+        and not (
+            dst.layout.is_trivial()
+            and src1.layout.is_trivial()
+            and (src2.layout.is_trivial() if src2 else True)
+        )
     ):
         return None, "unsupported non-trivial layout for binary map"
 
@@ -559,7 +566,9 @@ def _classify_binary_local_case(
             return _BINARY_LOCAL_CASE_SUBCTA, None
         return None, msg
     elif scope == "thread":
-        _, msg = _try_prepare_binary_map(op_call, op_type, require_trivial_layout=True)
+        _, msg = _try_prepare_binary_map(
+            op_call, op_type, require_trivial_layout=True, allow_no_layout=True
+        )
         if msg is not None:
             return None, msg
         return _BINARY_LOCAL_CASE_THREAD, None
@@ -662,7 +671,9 @@ def _emit_binary_local_trivial_layout(
     if sctx.exec_scope.name != "thread":
         fail(f"unsupported exec_scope {sctx.exec_scope.name} for local thread-trivial binary op")
 
-    info, msg = _try_prepare_binary_map(op, binary_op, require_trivial_layout=True)
+    info, msg = _try_prepare_binary_map(
+        op, binary_op, require_trivial_layout=True, allow_no_layout=True
+    )
     if msg is not None:
         fail(msg)
     assert info is not None
@@ -1071,6 +1082,8 @@ def _emit_binary_local_packed_f32x2(
         if vec_len != 2:
             fail("vec_len must be 2 for f32x2 vectorization")
 
+    rounding_mode = op.config.get("rounding_mode", "rz")
+
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def impl():
         for s in Tx.serial(0, n_elements // 2):
@@ -1084,6 +1097,7 @@ def _emit_binary_local_packed_f32x2(
                     CONST,
                     CONST,
                     Tx.address_of(dst[tuple(dst_indices)]),
+                    rounding_mode=rounding_mode,
                 )
             else:
                 src2_indices_1 = Tx.meta_var(
@@ -1102,6 +1116,7 @@ def _emit_binary_local_packed_f32x2(
                     src2[tuple(src2_indices_1)],
                     src2[tuple(src2_indices_2)],
                     Tx.address_of(dst[tuple(dst_indices)]),
+                    rounding_mode=rounding_mode,
                 )
 
     return impl

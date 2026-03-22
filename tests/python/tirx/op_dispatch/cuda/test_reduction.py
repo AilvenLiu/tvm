@@ -20,7 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TileLayout, laneid
+from tvm.tir.layout import R, S, TileLayout, laneid
 
 
 @pytest.mark.parametrize(
@@ -775,6 +775,151 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
 
         # Use larger tolerance due to rounding differences from packed add (add.rz.ftz.f32x2)
         tvm.testing.assert_allclose(B_ref, B.numpy()[0], atol=1e-4)
+
+
+@pytest.mark.parametrize("op_type", ["sum", "max"])
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_reduction_op_warp_shuffle(op_type, dtype):
+    """Test warp-scope shuffle reduce with laneid shard→replica layout pattern.
+
+    Case A: full warp reduce (32 lanes → 1 value, replicated to all lanes).
+    """
+    dev = tvm.cuda(0)
+    N = 32
+    g_shape = (N,)
+    g_layout = TileLayout(S[N])
+
+    # src layout: 32 elements sharded across 32 lanes
+    src_layout = TileLayout(S[N : 1 @ laneid])
+    # dst layout: 1 element replicated across 32 lanes
+    dst_layout = TileLayout(S[1:1] + R[N : 1 @ laneid])
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=g_layout)
+        B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=g_layout)
+
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+
+            with Tx.thread():
+                src_local = Tx.alloc_buffer([1], dtype, scope="local")
+                dst_local = Tx.alloc_buffer([1], dtype, scope="local")
+
+                with Tx.thread():
+                    src_local[0] = A[lane_id]
+
+                with Tx.warp():
+                    src_view = src_local.view(N, layout=src_layout)
+                    dst_view = dst_local.view(1, layout=dst_layout)
+                    if op_type == "sum":
+                        Tx.sum(dst_view, src_view)
+                    elif op_type == "max":
+                        Tx.max(dst_view, src_view)
+
+                with Tx.thread():
+                    B[lane_id] = dst_local[0]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = np.random.rand(N).astype(dtype)
+        B_np = np.zeros(N, dtype=dtype)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        if op_type == "sum":
+            ref_val = A_np.astype("float64").sum()
+        elif op_type == "max":
+            ref_val = A_np.max()
+
+        B_ref = np.full(N, ref_val, dtype=dtype)
+        atol = 1e-4 if dtype == "float32" else 1e-1
+        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+
+@pytest.mark.parametrize("op_type", ["sum", "max"])
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
+    """Test warp-scope shuffle reduce with multiple elements per thread.
+
+    Each thread holds 4 elements, reduce across 32 lanes for each element group.
+    """
+    dev = tvm.cuda(0)
+    ELEMS_PER_THREAD = 4
+    N_LANES = 32
+    TOTAL = ELEMS_PER_THREAD * N_LANES  # 128
+    g_shape = (TOTAL,)
+    g_layout = TileLayout(S[TOTAL])
+
+    # src: 32 lanes with 4 elements each; layout S[(32, 4) : (1@laneid, 1)]
+    # element (i, j) → lane i, local j → thread k holds [4k, 4k+1, 4k+2, 4k+3]
+    src_layout = TileLayout(S[(N_LANES, ELEMS_PER_THREAD) : (1 @ laneid, 1)])
+    # dst: 4 elements per thread, replicated across 32 lanes
+    dst_layout = TileLayout(S[ELEMS_PER_THREAD:1] + R[N_LANES : 1 @ laneid])
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=g_layout)
+        dst_lay = TileLayout(S[ELEMS_PER_THREAD])
+        B = Tx.match_buffer(B_ptr, [ELEMS_PER_THREAD], dtype, layout=dst_lay)
+
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warp_id([1], parent="cta")
+            lane_id = Tx.thread_id([32], parent="warp")
+
+            with Tx.thread():
+                src_local = Tx.alloc_buffer([ELEMS_PER_THREAD], dtype, scope="local")
+                dst_local = Tx.alloc_buffer([ELEMS_PER_THREAD], dtype, scope="local")
+
+                with Tx.thread():
+                    for i in Tx.serial(ELEMS_PER_THREAD):
+                        src_local[i] = A[lane_id * ELEMS_PER_THREAD + i]
+
+                with Tx.warp():
+                    src_view = src_local.view(TOTAL, layout=src_layout)
+                    dst_view = dst_local.view(ELEMS_PER_THREAD, layout=dst_layout)
+                    if op_type == "sum":
+                        Tx.sum(dst_view, src_view)
+                    elif op_type == "max":
+                        Tx.max(dst_view, src_view)
+
+                with Tx.thread():
+                    for i in Tx.serial(ELEMS_PER_THREAD):
+                        B[i] = dst_local[i]
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = np.random.rand(TOTAL).astype(dtype)
+        B_np = np.zeros(ELEMS_PER_THREAD, dtype=dtype)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        # Each group of 4 elements: element j is sum/max of A[j], A[j+4], A[j+8], ..., A[j+124]
+        A_reshaped = A_np.reshape(N_LANES, ELEMS_PER_THREAD)
+        if op_type == "sum":
+            B_ref = A_reshaped.astype("float64").sum(axis=0).astype(dtype)
+        elif op_type == "max":
+            B_ref = A_reshaped.max(axis=0)
+
+        atol = 1e-4 if dtype == "float32" else 1e-1
+        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
 if __name__ == "__main__":

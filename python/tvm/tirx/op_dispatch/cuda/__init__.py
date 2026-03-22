@@ -17,5 +17,6 @@
 
 from .binary import *
 from .copy import *
+from .fma import *
 from .reduction import *
 from .unary import *

@@ -275,6 +275,48 @@ def fdiv(
     )
 
 
+def fma(
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    scale: BufferRegion | Buffer | PrimExpr,
+    bias: BufferRegion | Buffer | PrimExpr,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
+    **kwargs,
+):
+    """Fused multiply-add: dst = src * scale + bias.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region.
+
+    src : Union[BufferRegion, Buffer]
+        The input buffer region.
+
+    scale : Union[BufferRegion, Buffer, PrimExpr]
+        The scale factor (buffer region or scalar).
+
+    bias : Union[BufferRegion, Buffer, PrimExpr]
+        The bias term (buffer region or scalar).
+
+    workspace : Optional[Dict[str, Buffer]]
+        The workspace of the operator.
+    """
+    if workspace is None:
+        workspace = {}
+    config = kwargs or {}
+    dst = _to_region(dst)
+    src = _to_region(src)
+    if isinstance(scale, Buffer):
+        scale = _to_region(scale)
+    if isinstance(bias, Buffer):
+        bias = _to_region(bias)
+    return f_insert(
+        tirx_op.FMA(dst, src, scale, bias, workspace=workspace, config=config, dispatch=dispatch)
+    )
+
+
 def cast(
     dst: BufferRegion | Buffer,
     src: BufferRegion | Buffer,
@@ -677,6 +719,34 @@ def reciprocal(
     return f_insert(
         tirx_op.Reciprocal(dst, src, workspace=workspace, config=config, dispatch=dispatch)
     )
+
+
+def silu(
+    dst: BufferRegion | Buffer,
+    src: BufferRegion | Buffer,
+    workspace: dict[str, Buffer] | None = None,
+    dispatch: str | None = None,
+    **kwargs,
+):
+    """Compute SiLU (x * sigmoid(x)) for all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for SiLU result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    workspace : Optional[Dict[str, Buffer]]
+        The workspace of the operator.
+    """
+    if workspace is None:
+        workspace = {}
+    config = kwargs or {}
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return f_insert(tirx_op.SiLU(dst, src, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def memset(

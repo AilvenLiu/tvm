@@ -757,7 +757,7 @@ def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
         tvm.testing.assert_allclose(A.numpy(), np.full(shape, value.value), atol=1e-2)
 
 
-@pytest.mark.parametrize("op_type", ["zero", "sqrt", "reciprocal", "exp"])
+@pytest.mark.parametrize("op_type", ["zero", "sqrt", "reciprocal", "exp", "silu"])
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_unary_op_local_thread_wise(op_type, dtype):
     """Test unary ops in thread scope with local buffers (trivial layout)."""
@@ -784,6 +784,8 @@ def test_unary_op_local_thread_wise(op_type, dtype):
                     Tx.reciprocal(a_local, a_local)
                 elif op_type == "exp":
                     Tx.exp(a_local, a_local)
+                elif op_type == "silu":
+                    Tx.silu(a_local, a_local)
                 Tx.copy(A[tid], a_local)
 
     target = tvm.target.Target("cuda")
@@ -802,6 +804,8 @@ def test_unary_op_local_thread_wise(op_type, dtype):
             A_ref = (1.0 / A_np).astype(dtype)
         elif op_type == "exp":
             A_ref = np.exp(A_np)
+        elif op_type == "silu":
+            A_ref = (A_np / (1.0 + np.exp(-A_np.astype("float32")))).astype(dtype)
         tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-2, rtol=1e-2)
 
 

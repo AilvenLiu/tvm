@@ -123,8 +123,8 @@ class BinaryOp(OpCall):
         assert isinstance(self.dsts[0], BufferRegion), (
             f"{self} expects BufferRegion as output, got {self.dsts[0]}"
         )
-        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
-            f"{self} expects BufferRegion or FloatImm arguments as inputs, got {self.srcs}"
+        assert all(isinstance(arg, (BufferRegion, FloatImm, PrimExpr)) for arg in self.srcs), (  # noqa: UP038
+            f"{self} expects BufferRegion/FloatImm/PrimExpr inputs, got {self.srcs}"
         )
 
 
@@ -208,6 +208,48 @@ class FDiv(BinaryOp):
     """Divide src1 by src2 element-wise using floating point division and store to dst."""
 
     op = get_tirx_op("fdiv")
+
+
+class FMA(OpCall):
+    """Fused multiply-add: output = input * scale + bias.
+
+    fma(output, input, scale, bias)
+
+    scale and bias can each be either a BufferRegion or a PrimExpr scalar.
+    """
+
+    op = get_tirx_op("fma")
+
+    output = ArgProperty(0)
+    input = ArgProperty(1)
+    scale = ArgProperty(2)
+    bias = ArgProperty(3)
+
+    @property
+    def srcs(self) -> list[PrimExpr]:
+        """Get the source expressions (inputs) of the operator."""
+        return [self.input, self.scale, self.bias]
+
+    @property
+    def dsts(self) -> list[PrimExpr]:
+        """Get the destination expression (output) of the operator."""
+        return [self.output]
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
+        assert isinstance(self.output, BufferRegion), (
+            f"{self} expects BufferRegion as output, got {self.output}"
+        )
+        assert isinstance(self.input, BufferRegion), (
+            f"{self} expects BufferRegion as input, got {self.input}"
+        )
+        assert isinstance(self.scale, (BufferRegion, FloatImm, PrimExpr)), (  # noqa: UP038
+            f"{self} expects BufferRegion or PrimExpr as scale, got {self.scale}"
+        )
+        assert isinstance(self.bias, (BufferRegion, FloatImm, PrimExpr)), (  # noqa: UP038
+            f"{self} expects BufferRegion or PrimExpr as bias, got {self.bias}"
+        )
 
 
 class Cast(UnaryOp):
@@ -415,6 +457,12 @@ class Reciprocal(UnaryOp):
     """Compute reciprocal (1/x) for all elements in src and store to dst."""
 
     op = get_tirx_op("reciprocal")
+
+
+class SiLU(UnaryOp):
+    """Compute SiLU (x * sigmoid(x)) for all elements in src and store to dst."""
+
+    op = get_tirx_op("silu")
 
 
 class Memset(UnaryOp):

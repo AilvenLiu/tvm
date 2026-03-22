@@ -156,6 +156,8 @@ TIRX_DEFINE_DISPATCH_OP(unary_reduce);
 TIRX_DEFINE_DISPATCH_OP(binary_chain);
 TIRX_DEFINE_DISPATCH_OP(select);
 TIRX_DEFINE_DISPATCH_OP(cast);
+TIRX_DEFINE_DISPATCH_OP(fma);
+TIRX_DEFINE_DISPATCH_OP(silu);
 TIRX_DEFINE_DISPATCH_OP(permute_dims);
 
 /********************* Compose Ops **********************/

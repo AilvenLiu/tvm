@@ -33,7 +33,7 @@ from typing import Any
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tir import BufferRegion, PrimFunc
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, laneid
 from tvm.tir.stmt import OpCall
 from tvm.tirx.op_dispatch import DispatchContext, fail
 from tvm.tirx.op_dispatch.dispatcher import predicate, register_dispatch
@@ -256,6 +256,72 @@ def validate_reduction_shared(
     return True, None
 
 
+def _analyze_shuffle_reduce(src_layout, dst_layout):
+    """Analyze src/dst layouts for laneid shard→replica reduce pattern.
+
+    Returns (reduce_width, local_elems) if the pattern matches, or None.
+    - reduce_width: number of lanes participating in each group's reduction
+    - local_elems: per-thread element count (product of non-laneid shard extents)
+    """
+    if src_layout.is_swizzle() or dst_layout.is_swizzle():
+        return None
+
+    src_canon = src_layout.canonicalize()
+    dst_canon = dst_layout.canonicalize()
+
+    # Extract laneid iters from shard and replica
+    src_laneid_shard = [it for it in src_canon.shard if it.axis == laneid]
+    dst_laneid_replica = [it for it in dst_canon.replica if it.axis == laneid]
+
+    # src shard must contain laneid (data distributed across lanes)
+    if not src_laneid_shard:
+        return None
+    # dst replica must contain laneid (result broadcast to lanes)
+    if not dst_laneid_replica:
+        return None
+
+    # laneid span must be 32 (full warp)
+    src_laneid_span = 1 + sum(abs(int(it.stride)) * (int(it.extent) - 1) for it in src_laneid_shard)
+    if src_laneid_span != 32:
+        return None
+
+    reduce_width = functools.reduce(operator.mul, [int(it.extent) for it in dst_laneid_replica], 1)
+    if reduce_width <= 0 or reduce_width > 32 or (reduce_width & (reduce_width - 1)) != 0:
+        return None  # must be power of 2
+
+    # local_elems = product of non-laneid shard extents in src
+    src_non_laneid = [it for it in src_canon.shard if it.axis != laneid]
+    local_elems = functools.reduce(operator.mul, [int(it.extent) for it in src_non_laneid], 1)
+
+    return reduce_width, local_elems
+
+
+def _gen_warp_shuffle_reduce(src, dst, reduce_width, local_elems, accum, op_func, init_value):
+    """Generate warp shuffle reduce codegen for laneid shard→replica pattern.
+
+    Unified for both full warp (reduce_width=32) and partial warp (e.g. reduce_width=8).
+    """
+    num_steps = int(math.log2(reduce_width))
+    is_same_buffer = src.same_as(dst)
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with Tx.thread():
+            src_local = src.local(local_elems)
+            dst_local = dst.local(local_elems)
+            for k in Tx.serial(local_elems):
+                if not is_same_buffer:
+                    dst_local[k] = src_local[k]
+                row_var = Tx.meta_var(dst_local[k])
+                for step in Tx.unroll(num_steps):
+                    xor_mask = Tx.meta_var(reduce_width >> (step + 1))
+                    dst_local[k] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, xor_mask, 32, 32))  # noqa: E501
+    # fmt: on
+
+    return impl
+
+
 def validate_reduction_local(
     op: OpCall,
     sctx: DispatchContext,
@@ -286,6 +352,13 @@ def validate_reduction_local(
         # Validate get_local_region succeeds for both
         src_st, src_extent = get_st_extent(src_br)
         dst_st, dst_extent = get_st_extent(dst_br)
+
+        # Check for laneid shard→replica shuffle reduce pattern first.
+        # This pattern has laneid in dst replica (broadcast), which the
+        # general validation below would reject.
+        shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
+        if shuffle_info is not None:
+            return True, None
 
         for layout, buf, st, ext, name in [
             (src.layout, src, src_st, src_extent, "src"),
@@ -823,6 +896,21 @@ def reduction_local_impl(
     elif sctx.exec_scope.name == "warp":
         src = src_br.buffer
         dst = dst_br.buffer
+
+        # --- Try laneid shard→replica shuffle reduce ---
+        shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
+        if shuffle_info is not None:
+            reduce_width, local_elems = shuffle_info
+            op_func = reduce_op_table.get(op_type)
+            if op_func is None:
+                fail(f"unsupported reduce op: {op_type}")
+            dtype = src.dtype
+            init_value = reduce_default_value_table(dtype).get(op_type)
+            return _gen_warp_shuffle_reduce(
+                src, dst, reduce_width, local_elems, accum, op_func, init_value
+            )
+
+        # --- Existing WGMMA layout path below ---
         src_st, src_extent = get_st_extent(src_br)
         dst_st, dst_extent = get_st_extent(dst_br)
 
