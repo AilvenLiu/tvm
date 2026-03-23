@@ -17,13 +17,15 @@
 
 import argparse
 import os
+import re
 import subprocess
+import sys
+import time
 from enum import Enum
 
 import numpy as np
 import torch
 import triton.profiler as proton
-import triton.testing
 import tvm_ffi
 
 import tvm
@@ -89,19 +91,79 @@ def bench(
             flush_l2_size=flush_l2_size,
             nsight=nsight,
         )
-        return triton.testing.do_bench(func, warmup=warmup, rep=repeat) if not nsight else 1.0
-    else:
-        return 1.0
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _parse_proton_tree(text):
+    """Parse proton-viewer tree output into {impl: time_ms}.
+
+    Accepts ALL depth-1 nodes (no KNOWN_IMPLS filter). For each depth-1 impl,
+    takes the slowest depth-2 child kernel time.
+
+    Returns (impl_times, baseline_errors) where:
+      impl_times: {str: float} — impl name to avg time in ms
+      baseline_errors: {str: str} — impl name to error message
+    """
+    impl = None
+    results = {}
+    baseline_errors = {}
+    for raw in text.splitlines():
+        line = _ANSI_RE.sub("", raw).rstrip()
+        if not line:
+            continue
+        if line.startswith("BASELINE_ERROR:"):
+            parts = line.split(":", 2)
+            if len(parts) >= 3:
+                baseline_errors[parts[1].strip()] = parts[2].strip()
+            continue
+        # Depth-1 impl header: starts with tree drawing chars
+        if line and line[0] in "\u251c\u2514":  # ├ └
+            parts = line.split("\u2500", 1)[-1].split()  # split on ─
+            if len(parts) >= 2:
+                impl = parts[1]
+            else:
+                impl = None
+            continue
+        # Depth-2 kernel: contains tree drawing chars at deeper indent
+        if impl and ("\u251c\u2500" in line or "\u2514\u2500" in line):  # ├─ └─
+            parts = line.split("\u2500", 1)[-1].split()
+            if len(parts) >= 2:
+                name = parts[1]
+                if (
+                    "vectorized_elementwise_kernel" in name
+                    or "elementwise_kernel_with_index" in name
+                ):
+                    continue
+                try:
+                    t = float(parts[0])
+                    results[impl] = max(results.get(impl, 0), t)
+                except ValueError:
+                    pass
+    return results, baseline_errors
 
 
 class ProtonContext:
-    """Context manager for Proton profiling sessions."""
+    """Context manager for Proton profiling sessions.
+
+    Always captures proton-viewer output and parses impl times so that
+    get_impl_times() / get_baseline_errors() work after exiting the context.
+
+    The proton tree is printed to **stdout** by default (visible on screen
+    when running kernels interactively).  When the environment variable
+    ``TIRX_BENCH_JSON=1`` is set (done automatically by ``--json`` mode),
+    the tree goes to **stderr** instead so it does not corrupt the JSON on
+    stdout.
+    """
 
     def __init__(self, name="kernel", hook="triton", debug=False, nsight=False):
         self.name = name
         self.hook = hook
         self.debug = debug
         self.nsight = nsight
+        self._impl_times = {}
+        self._baseline_errors = {}
 
     def __enter__(self):
         if not is_running_under_pytest() and not self.debug and not self.nsight:
@@ -113,10 +175,152 @@ class ProtonContext:
         if not is_running_under_pytest() and not self.debug and not self.nsight:
             proton.finalize()
 
-            subprocess.run(
-                ["proton-viewer", "-m", "avg_time/ms", f"{self.name}.hatchet"], check=True
+            hatchet = f"{self.name}.hatchet"
+            result = subprocess.run(
+                ["proton-viewer", "-m", "avg_time/ms", hatchet],
+                capture_output=True,
+                text=True,
+                check=False,
             )
-            os.remove(f"{self.name}.hatchet")
+            if result.returncode == 0:
+                self._impl_times, self._baseline_errors = _parse_proton_tree(result.stdout)
+                out = sys.stderr if os.environ.get("TIRX_BENCH_JSON") else sys.stdout
+                print(result.stdout, file=out, end="")
+            else:
+                print(
+                    f"proton-viewer failed (rc={result.returncode}): {result.stderr}",
+                    file=sys.stderr,
+                )
+
+            if os.path.exists(hatchet):
+                os.remove(hatchet)
+
+    def get_impl_times(self):
+        """Return {impl_name: avg_time_ms} parsed from proton-viewer output."""
+        return dict(self._impl_times)
+
+    def get_baseline_errors(self):
+        """Return {impl_name: error_message} from BASELINE_ERROR lines."""
+        return dict(self._baseline_errors)
+
+
+def _get_l2_cache_bytes():
+    """Query L2 cache size from the current CUDA device, fallback to 128MB."""
+    try:
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        if hasattr(props, "l2_cache_size") and props.l2_cache_size > 0:
+            return props.l2_cache_size
+    except Exception:
+        pass
+    return 128 * 1024 * 1024  # 128MB default (B200)
+
+
+def _tensor_bytes(args):
+    """Sum the byte size of all torch/tvm tensors in a (possibly nested) tuple."""
+    total = 0
+    if isinstance(args, list | tuple):
+        for a in args:
+            total += _tensor_bytes(a)
+    elif isinstance(args, torch.Tensor):
+        total += args.nelement() * args.element_size()
+    elif hasattr(args, "numpy"):  # tvm.runtime.NDArray
+        total += args.numpy().nbytes
+    return total
+
+
+def _compute_groups(sample_input, l2_bytes=None):
+    """Return the number of input groups for L2 cache eviction.
+
+    Matches the ThunderKittens formula::
+
+        num_groups = 1                              if input >= 3*L2
+                   = floor(3*L2 / input) + 1        otherwise
+
+    Uses 3x L2 to guarantee reliable eviction.
+    """
+    if l2_bytes is None:
+        l2_bytes = _get_l2_cache_bytes()
+    input_bytes = _tensor_bytes(sample_input)
+    if input_bytes <= 0:
+        return 1
+    threshold = l2_bytes * 3
+    if input_bytes >= threshold:
+        return 1
+    return int(threshold // input_bytes) + 1
+
+
+def bench_tk(
+    funcs,
+    inputs,
+    warmup=500,
+    repeat=100,
+    cooldown_s=1.0,
+):
+    """ThunderKittens-style benchmarking with CUDA events.
+
+    Implements the benchmarking methodology from the ThunderKittens 2.0 paper
+    for more accurate GPU kernel measurement.
+
+    Parameters
+    ----------
+    funcs : dict[str, callable]
+        Map of impl name to callable, e.g. {"tir": fn1, "flashinfer": fn2}.
+        Each callable receives ``*inputs[i]`` as arguments.
+    inputs : list[tuple] | callable
+        If **list**: pre-built input groups used directly.
+        If **callable**: a factory ``() -> tuple`` that creates one input group.
+        ``bench_tk`` auto-computes the number of groups needed for L2 eviction
+        (via ``_compute_groups``) and calls the factory that many times.
+    warmup : int
+        Number of warmup iterations (default 500 for power-steady state).
+    repeat : int
+        Number of timed iterations.
+    cooldown_s : float
+        Seconds to sleep between impls for thermal cooldown.
+
+    Returns
+    -------
+    dict[str, float]
+        Map of impl name to average time in milliseconds.
+    """
+    if callable(inputs):
+        make_inputs = inputs
+        sample = make_inputs()
+        num_groups = _compute_groups(sample)
+        inputs = [sample] + [make_inputs() for _ in range(num_groups - 1)]
+
+    num_groups = len(inputs)
+    if num_groups == 0:
+        return {}
+
+    results = {}
+
+    for idx, (name, func) in enumerate(funcs.items()):
+        # Thermal cooldown between impls (skip for first)
+        if idx > 0:
+            time.sleep(cooldown_s)
+
+        # Warmup
+        for i in range(warmup):
+            func(*inputs[i % num_groups])
+
+        # Pure CUDA event timing — no proton overhead
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+
+        start_event.record()
+        for i in range(repeat):
+            func(*inputs[i % num_groups])
+        end_event.record()
+
+        torch.cuda.synchronize()
+        results[name] = start_event.elapsed_time(end_event) / repeat
+
+        # Post-measurement cooldown (matches TK)
+        time.sleep(cooldown_s)
+
+    return results
 
 
 # utils for tg4perfetto profiler, adapted from https://github.com/flashinfer-ai/flashinfer

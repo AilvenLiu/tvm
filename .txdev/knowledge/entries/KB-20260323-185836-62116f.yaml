@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The flashinfer nvfp4 API changed from nvfp4_batch_gemm to flashinfer.gemm.mm_fp4.
+
+    Key requirement: B_fp4 and B_sf must be passed as .T (transpose view) for column-major
+
+    layout. Using .T.contiguous() converts back to row-major and produces wrong results.
+
+    The .T without .contiguous() is a zero-cost view that just changes the stride
+    metadata.
+
+    '
+  summary: flashinfer.mm_fp4 (replacing nvfp4_batch_gemm) expects B in column-major
+    layout -- use B.T as a view, NOT B.T.contiguous().
+created: '2026-03-23'
+id: KB-20260323-185836-62116f
+scope:
+  - repo
+tags:
+  - flashinfer
+  - nvfp4
+  - baseline
+  - API
+title: 'flashinfer nvfp4 API: mm_fp4 requires column-major B via .T view'
+updated: '2026-03-23'

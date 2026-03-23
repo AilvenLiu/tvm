@@ -1,0 +1,57 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'When bench_tk funcs are closures that capture their own data (e.g.,
+
+    lambda: ex(A, B, C)), the natural instinct is to pass [()] as inputs
+
+    so func(*()) calls with no args. This creates exactly 1 input group,
+
+    completely bypassing L2 cache eviction.
+
+
+    The correct approach is to make funcs accept tensor args as positional
+
+    parameters, and pass a callable factory that creates fresh tensors.
+
+    bench_tk then auto-computes num_groups via _compute_groups and calls
+
+    the factory that many times.
+
+
+    Wrong:  bench_tk({"tir": lambda: ex(A, B, C)}, [()])
+
+    Right:  bench_tk({"tir": lambda a, b, c: ex(a, b, c)}, make_inputs)
+
+
+    The user caught this immediately -- "did you let it choose num_groups?"
+
+    '
+  summary: Passing [()] as inputs to bench_tk means only 1 group with empty args --
+    no L2 cache eviction happens, defeating the purpose of TK-style benchmarking.
+created: '2026-03-23'
+id: M-20260323-185836-4c16ff
+scope:
+  - repo
+tags:
+  - bench
+  - bench_tk
+  - L2-eviction
+  - testing
+title: bench_tk with [()] bypasses L2 eviction entirely
+updated: '2026-03-23'

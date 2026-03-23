@@ -1,0 +1,44 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "bench_tk supports two input modes:\n1. list[tuple] -- pre-built input\
+    \ groups, used as-is\n2. callable -- a factory () -> tuple that creates one input\
+    \ group\n\nWhen a callable is passed, bench_tk calls _compute_groups(sample) to\
+    \ determine\nhow many input groups are needed for L2 cache eviction, then calls\
+    \ the factory\nthat many times. The formula matches ThunderKittens exactly:\n\
+    \  num_groups = 1 if input >= 3*L2 else floor(3*L2/input) + 1\n\nThe factory pattern\
+    \ is important because the funcs dict receives *inputs[i] as\npositional args.\
+    \ If funcs are closures capturing their own data (lambda: fn()),\npassing [()]\
+    \ bypasses L2 eviction entirely (only 1 group). Instead, funcs should\naccept\
+    \ the tensor args and the factory should produce fresh tensors each call.\n\n\
+    Example auto-computed num_groups on B200 (L2=128MB):\n- 1024x1024 bf16 GEMM: 65\
+    \ groups\n- 4096x4096 bf16 GEMM: 5 groups\n- 8192x8192 bf16 GEMM: 1 group (input\
+    \ exceeds 3*L2)\n"
+  summary: bench_tk accepts a callable factory that auto-computes num_groups for L2
+    eviction via _compute_groups, matching the ThunderKittens formula.
+created: '2026-03-23'
+id: KB-20260323-185836-2fe7e7
+scope:
+  - repo
+tags:
+  - bench
+  - bench_tk
+  - L2-eviction
+  - thunderkittens
+title: bench_tk callable factory pattern for L2 cache eviction
+updated: '2026-03-23'

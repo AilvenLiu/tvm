@@ -1,0 +1,57 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'First implementation: max(2, ceil(L2/input) + 1) -- uses 1x L2 cache size,
+
+    always returns at least 2 groups.
+
+
+    ThunderKittens formula: 1 if input >= 3*L2 else floor(3*L2/input) + 1 --
+
+    uses 3x L2 to guarantee reliable eviction, allows 1 group when input is
+
+    already large enough to naturally evict.
+
+
+    The 3x multiplier is deliberate in TK to ensure reliable L2 eviction even
+
+    with associativity effects. The min-1 (not min-2) is also correct since
+
+    if your input is already 3x the L2 cache, cycling through groups adds no
+
+    eviction benefit.
+
+
+    Always verify numerical formulas against the reference implementation
+
+    character-by-character rather than reimplementing from description.
+
+    '
+  summary: Initial _compute_groups used 1x L2 with min 2 groups; TK uses 3x L2 and
+    allows 1 group when input exceeds threshold.
+created: '2026-03-23'
+id: M-20260323-185836-967c0e
+scope:
+  - repo
+tags:
+  - bench
+  - bench_tk
+  - thunderkittens
+  - formula
+title: _compute_groups formula must match ThunderKittens exactly
+updated: '2026-03-23'
