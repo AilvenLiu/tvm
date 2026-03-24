@@ -1,0 +1,47 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The user asked to run ''tirx standard test''. Instead of checking CLAUDE.md
+    for the canonical test command, I inferred the test from library entries about
+    the kernel registry pattern and ran only the sm100a test_kernels.py file. The
+    correct command (pytest tests/python/tirx/ -n 16) was explicitly written in CLAUDE.md
+    under ''## Testing''.
+
+
+    Root cause: Did not consult CLAUDE.md before acting on a project-convention question.
+    Library entries described the kernel test infrastructure but not the standard
+    developer workflow.
+
+
+    Fix: Always check CLAUDE.md (or the relevant slash command) for canonical project
+    commands before guessing from codebase knowledge. This was later addressed by
+    creating /tir-test as a slash command.'
+  summary: When user said 'run tirx standard test', ran only test_kernels.py (sm100a
+    subset) instead of the full suite (pytest tests/python/tirx/ -n 16) documented
+    in CLAUDE.md.
+created: '2026-03-24'
+id: M-20260324-171756-5d4c5e
+scope:
+- repo
+tags:
+- testing
+- user-intent
+- claude-md
+title: Ran sm100a kernel tests instead of full tirx test suite when asked for 'standard
+  test'
+updated: '2026-03-24'

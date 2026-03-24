@@ -70,7 +70,7 @@ repos:
         args:
           - --config-file
           - .yamllint.yaml
-        exclude: ^\.github/
+        exclude: ^(\.github/|\.txdev/)
 
   # ---------- TOML format ----------
   - repo: https://github.com/ComPWA/taplo-pre-commit

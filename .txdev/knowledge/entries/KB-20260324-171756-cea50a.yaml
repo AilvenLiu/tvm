@@ -1,0 +1,70 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The bench-ci pipeline now works as follows:
+
+    1. bench-run.sh calls `python -m tirx_kernels.registry --format=benchrun --cc
+    10` to get KERNEL|SIZE|COMMAND lines
+
+    2. Each COMMAND includes `--json-file {json_file}` placeholder
+
+    3. bench-run.sh creates a tempfile, substitutes {json_file} in the command template
+
+    4. tirx_kernels.bench runs the kernel and writes JSON results directly to the
+    file
+
+    5. All stdout/stderr goes to the log file (kernel print() output cannot corrupt
+    JSON)
+
+    6. store_results.py reads the JSON file and inserts impl times into SQLite
+
+
+    Key changes from old pipeline:
+
+    - No more stdout capture for JSON (was: eval "$CMD --json" >$OUT_FILE)
+
+    - No more parse_proton.py / KNOWN_IMPLS coupling
+
+    - run_bench() returns {impls: ctx.get_impl_times()} with all baseline times
+
+    - Adding a new baseline requires zero changes in bench-ci
+
+
+    Worker architecture: poller only polls tir commits. Worker calls
+
+    ensure_deps_uptodate() before each dequeue to pull tirx-kernels
+
+    and bench-ci to latest. bench-ci self-updates via os.execv restart.
+
+    '
+  summary: 'bench-ci pipeline: registry -> bench CLI (--json-file writes to tempfile)
+    -> store_results.py reads file -> SQLite. JSON no longer goes through stdout.'
+created: '2026-03-24'
+id: KB-20260324-171756-cea50a
+scope:
+- repo
+tags:
+- proton
+- benchmarking
+- bench-ci
+- profiling
+- cross-repo
+- json-file
+- worker
+title: Proton profiler pipeline for bench-ci integration
+updated: '2026-03-24'

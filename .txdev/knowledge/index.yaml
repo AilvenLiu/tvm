@@ -14,594 +14,712 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 entries:
-  - created: '2026-02-27'
-    id: KB-20260227-0001
-    path: entries/KB-20260227-0001.yaml
-    scope:
-      - repo
-    tags:
-      - tir
-      - testing
-      - assert_structural_equal
-      - copy_tma_impl
-    title: Programmatic TIR construction for golden IR tests
-    updated: '2026-02-27'
-  - created: '2026-02-27'
-    id: KB-20260227-0002
-    path: entries/KB-20260227-0002.yaml
-    scope:
-      - repo
-    tags:
-      - tma
-      - ptx
-      - copy_async
-      - codegen
-    title: TMA PTX call argument structure
-    updated: '2026-02-27'
-  - created: '2026-02-27'
-    id: KB-20260227-0003
-    path: entries/KB-20260227-0003.yaml
-    scope:
-      - repo
-    tags:
-      - tma
-      - layout
-      - copy_async
-      - import
-      - refactor
-    title: tma_shared_layout return type varies
-    updated: '2026-03-02'
-  - created: '2026-02-28'
-    id: KB-20260228-0001
-    path: entries/KB-20260228-0001.yaml
-    scope:
-      - repo
-    tags:
-      - pre-commit
-      - lint
-      - git
-      - workflow
-    title: Align .pre-commit-config.yaml from upstream with direct checkout
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: KB-20260228-0002
-    path: entries/KB-20260228-0002.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - xdist
-      - skip
-      - testing
-    title: Use junitxml to enumerate exact skipped tests under xdist
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: KB-20260228-0003
-    path: entries/KB-20260228-0003.yaml
-    scope:
-      - repo
-    tags:
-      - git
-      - pre-push
-      - pre-commit
-      - workflow
-      - recovery
-    title: Recover cleanly after pre-push hooks auto-rewrite the worktree
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: KB-20260228-0004
-    path: entries/KB-20260228-0004.yaml
-    scope:
-      - repo
-    tags:
-      - logging
-      - refactor
-      - tvm-ffi
-      - rg
-      - validation
-    title: Zero-residual audit pattern for logging macro migration
-    updated: '2026-02-28'
-  - created: '2026-03-01'
-    id: KB-20260301-0001
-    path: entries/KB-20260301-0001.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - kernel
-      - debugging
-      - ir
-      - codegen
-      - pre-commit
-    title: Fast semantic triage for TVMScript kernel regressions
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: KB-20260301-0002
-    path: entries/KB-20260301-0002.yaml
-    scope:
-      - repo
-    tags:
-      - tirx
-      - op-schedule
-      - copy
-      - kwargs
-      - api
-    title: TIRX DSL kwargs pattern for copy op config parameters
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: KB-20260301-0003
-    path: entries/KB-20260301-0003.yaml
-    scope:
-      - repo
-    tags:
-      - tirx
-      - lint
-      - ruff
-      - noqa
-      - testing
-    title: TIRX DSL scope declarations require noqa F841 for ruff
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: KB-20260301-0004
-    path: entries/KB-20260301-0004.yaml
-    scope:
-      - repo
-    tags:
-      - tirx
-      - dsl
-      - scoping
-      - testing
-    title: TIRX DSL scoping — variables defined in if-blocks are not visible outside
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: KB-20260301-0005
-    path: entries/KB-20260301-0005.yaml
-    scope:
-      - repo
-    tags:
-      - python
-      - ruff
-      - compatibility
-      - tirx
-      - testing
-    title: Python 3.10 star unpacking not allowed in index expressions
-    updated: '2026-03-01'
-  - created: '2026-03-02'
-    id: KB-20260302-015214-9e29ce
-    path: entries/KB-20260302-015214-9e29ce.yaml
-    scope:
-      - repo
-    tags:
-      - tma
-      - import
-      - op-schedule
-      - refactor
-    title: Canonical import paths for TMA utilities in op_schedule/cuda
-    updated: '2026-03-02'
-  - created: '2026-03-06'
-    id: KB-20260306-195314-a33c27
-    path: entries/KB-20260306-195314-a33c27.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - warnings
-      - triage
-      - tirx
-      - testing
-    title: Pytest warning triage should separate repository-owned and external sources first
-    updated: '2026-03-06'
-  - created: '2026-03-07'
-    id: KB-20260307-231252-48549d
-    path: entries/KB-20260307-231252-48549d.yaml
-    scope:
-      - repo
-    tags:
-      - gpu
-      - shared-memory
-      - testing
-      - flaky-tests
-      - cuda
-    title: GPU shared memory is uninitialized and contains stale data from prior kernels
-    updated: '2026-03-07'
-  - created: '2026-03-07'
-    id: KB-20260307-231252-72bc64
-    path: entries/KB-20260307-231252-72bc64.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - import
-      - registration
-      - python
-    title: Side-effect-only imports in op_schedule __init__.py for registration
-    updated: '2026-03-07'
-  - created: '2026-03-08'
-    id: KB-20260308-232603-18dfc3
-    path: entries/KB-20260308-232603-18dfc3.yaml
-    scope:
-      - repo
-    tags:
-      - tma
-      - import
-      - op-schedule
-      - refactor
-    title: Canonical import paths for TMA utilities in op_schedule/cuda
-    updated: '2026-03-08'
-  - created: '2026-03-08'
-    id: KB-20260308-232603-205e85
-    path: entries/KB-20260308-232603-205e85.yaml
-    scope:
-      - repo
-    tags:
-      - ruff
-      - import
-      - python
-      - lint
-    title: Ruff import sorter splits aliased imports into separate statements
-    updated: '2026-03-08'
-  - created: '2026-03-08'
-    id: KB-20260308-232603-d83e44
-    path: entries/KB-20260308-232603-d83e44.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - import
-      - refactor
-      - architecture
-    title: 'op_schedule/cuda module split: canonical import paths'
-    updated: '2026-03-08'
-  - created: '2026-03-17'
-    id: KB-20260317-211410-3d3076
-    path: entries/KB-20260317-211410-3d3076.yaml
-    scope:
-      - repo
-    tags:
-      - tirx
-      - pipeline
-      - pool-allocator
-      - smem
-      - barrier
-    title: PoolAllocator pattern for replacing manual SMEM layout with barriers
-    updated: '2026-03-17'
-  - created: '2026-03-17'
-    id: KB-20260317-211410-6e13ad
-    path: entries/KB-20260317-211410-6e13ad.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - dsl
-      - syntax
-      - local-scalar
-    title: 'Tx.local_scalar() vs var: Tx.int32 type annotation equivalence and limits'
-    updated: '2026-03-17'
-  - created: '2026-03-17'
-    id: KB-20260317-211410-c51a41
-    path: entries/KB-20260317-211410-c51a41.yaml
-    scope:
-      - repo
-    tags:
-      - tirx
-      - pipeline
-      - mbarrier
-      - ptx
-      - deadlock
-      - gpu
-    title: MBarrier.arrive() local vs remote semantics and CTA_GROUP deadlocks
-    updated: '2026-03-17'
-  - created: '2026-03-17'
-    id: KB-20260317-211410-e366ed
-    path: entries/KB-20260317-211410-e366ed.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - parser
-      - python
-      - pitfall
-    title: TVMScript parser intercepts augmented assignment (+=) inside @Tx.prim_func
-    updated: '2026-03-17'
-  - created: '2026-03-19'
-    id: KB-20260319-022448-393527
-    path: entries/KB-20260319-022448-393527.yaml
-    scope:
-      - repo
-    tags:
-      - proton
-      - benchmarking
-      - bench-ci
-      - profiling
-      - cross-repo
-    title: Proton profiler pipeline for bench-ci integration
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: KB-20260319-022448-901600
-    path: entries/KB-20260319-022448-901600.yaml
-    scope:
-      - repo
-    tags:
-      - kernel
-      - registry
-      - testing
-      - benchmarking
-      - architecture
-    title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: KB-20260319-022448-dec2c4
-    path: entries/KB-20260319-022448-dec2c4.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - xdist
-      - parallelism
-      - testing
-    title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: KB-20260319-174406-349680
-    path: entries/KB-20260319-174406-349680.yaml
-    scope:
-      - repo
-    tags:
-      - bench-ci
-      - benchmarking
-      - cross-repo
-      - tirx-kernels
-    title: Cross-repo baseline benchmark coordination pattern
-    updated: '2026-03-19'
-  - created: '2026-03-20'
-    id: KB-20260320-002326-24c511
-    path: entries/KB-20260320-002326-24c511.yaml
-    scope:
-      - repo
-    tags:
-      - packaging
-      - pip
-      - python
-      - tirx-kernels
-    title: Python pip package name vs importable module name are independent
-    updated: '2026-03-20'
-  - created: '2026-03-22'
-    id: KB-20260322-182024-1738c4
-    path: entries/KB-20260322-182024-1738c4.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - ruff
-      - lint
-      - noqa
-      - annotation
-    title: Ruff F821 for TVMScript annotation variables
-    updated: '2026-03-22'
-  - created: '2026-03-22'
-    id: KB-20260322-182024-e7c4c2
-    path: entries/KB-20260322-182024-e7c4c2.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - dsl
-      - syntax
-      - local-scalar
-      - alloc-local
-      - vector-annotation
-      - buffer
-    title: 'TVMScript type annotation syntax: scalar (x: Tx.f32) vs vector (x: Tx.f32[N]) semantics'
-    updated: '2026-03-22'
+- created: '2026-02-27'
+  id: KB-20260227-0001
+  path: entries/KB-20260227-0001.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - testing
+  - assert_structural_equal
+  - copy_tma_impl
+  title: Programmatic TIR construction for golden IR tests
+  updated: '2026-02-27'
+- created: '2026-02-27'
+  id: KB-20260227-0002
+  path: entries/KB-20260227-0002.yaml
+  scope:
+  - repo
+  tags:
+  - tma
+  - ptx
+  - copy_async
+  - codegen
+  title: TMA PTX call argument structure
+  updated: '2026-02-27'
+- created: '2026-02-27'
+  id: KB-20260227-0003
+  path: entries/KB-20260227-0003.yaml
+  scope:
+  - repo
+  tags:
+  - tma
+  - layout
+  - copy_async
+  - import
+  - refactor
+  title: tma_shared_layout return type varies
+  updated: '2026-03-02'
+- created: '2026-02-28'
+  id: KB-20260228-0001
+  path: entries/KB-20260228-0001.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - lint
+  - git
+  - workflow
+  title: Align .pre-commit-config.yaml from upstream with direct checkout
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: KB-20260228-0002
+  path: entries/KB-20260228-0002.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - xdist
+  - skip
+  - testing
+  title: Use junitxml to enumerate exact skipped tests under xdist
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: KB-20260228-0003
+  path: entries/KB-20260228-0003.yaml
+  scope:
+  - repo
+  tags:
+  - git
+  - pre-push
+  - pre-commit
+  - workflow
+  - recovery
+  title: Recover cleanly after pre-push hooks auto-rewrite the worktree
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: KB-20260228-0004
+  path: entries/KB-20260228-0004.yaml
+  scope:
+  - repo
+  tags:
+  - logging
+  - refactor
+  - tvm-ffi
+  - rg
+  - validation
+  title: Zero-residual audit pattern for logging macro migration
+  updated: '2026-02-28'
+- created: '2026-03-01'
+  id: KB-20260301-0001
+  path: entries/KB-20260301-0001.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - kernel
+  - debugging
+  - ir
+  - codegen
+  - pre-commit
+  title: Fast semantic triage for TVMScript kernel regressions
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: KB-20260301-0002
+  path: entries/KB-20260301-0002.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - op-schedule
+  - copy
+  - kwargs
+  - api
+  title: TIRX DSL kwargs pattern for copy op config parameters
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: KB-20260301-0003
+  path: entries/KB-20260301-0003.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - lint
+  - ruff
+  - noqa
+  - testing
+  title: TIRX DSL scope declarations require noqa F841 for ruff
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: KB-20260301-0004
+  path: entries/KB-20260301-0004.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - dsl
+  - scoping
+  - testing
+  title: TIRX DSL scoping — variables defined in if-blocks are not visible outside
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: KB-20260301-0005
+  path: entries/KB-20260301-0005.yaml
+  scope:
+  - repo
+  tags:
+  - python
+  - ruff
+  - compatibility
+  - tirx
+  - testing
+  title: Python 3.10 star unpacking not allowed in index expressions
+  updated: '2026-03-01'
+- created: '2026-03-02'
+  id: KB-20260302-015214-9e29ce
+  path: entries/KB-20260302-015214-9e29ce.yaml
+  scope:
+  - repo
+  tags:
+  - tma
+  - import
+  - op-schedule
+  - refactor
+  title: Canonical import paths for TMA utilities in op_schedule/cuda
+  updated: '2026-03-02'
+- created: '2026-03-06'
+  id: KB-20260306-195314-a33c27
+  path: entries/KB-20260306-195314-a33c27.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - warnings
+  - triage
+  - tirx
+  - testing
+  title: Pytest warning triage should separate repository-owned and external sources
+    first
+  updated: '2026-03-06'
+- created: '2026-03-07'
+  id: KB-20260307-231252-48549d
+  path: entries/KB-20260307-231252-48549d.yaml
+  scope:
+  - repo
+  tags:
+  - gpu
+  - shared-memory
+  - testing
+  - flaky-tests
+  - cuda
+  title: GPU shared memory is uninitialized and contains stale data from prior kernels
+  updated: '2026-03-07'
+- created: '2026-03-07'
+  id: KB-20260307-231252-72bc64
+  path: entries/KB-20260307-231252-72bc64.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - import
+  - registration
+  - python
+  title: Side-effect-only imports in op_schedule __init__.py for registration
+  updated: '2026-03-07'
+- created: '2026-03-08'
+  id: KB-20260308-232603-18dfc3
+  path: entries/KB-20260308-232603-18dfc3.yaml
+  scope:
+  - repo
+  tags:
+  - tma
+  - import
+  - op-schedule
+  - refactor
+  title: Canonical import paths for TMA utilities in op_schedule/cuda
+  updated: '2026-03-08'
+- created: '2026-03-08'
+  id: KB-20260308-232603-205e85
+  path: entries/KB-20260308-232603-205e85.yaml
+  scope:
+  - repo
+  tags:
+  - ruff
+  - import
+  - python
+  - lint
+  title: Ruff import sorter splits aliased imports into separate statements
+  updated: '2026-03-08'
+- created: '2026-03-08'
+  id: KB-20260308-232603-d83e44
+  path: entries/KB-20260308-232603-d83e44.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - import
+  - refactor
+  - architecture
+  title: 'op_schedule/cuda module split: canonical import paths'
+  updated: '2026-03-08'
+- created: '2026-03-17'
+  id: KB-20260317-211410-3d3076
+  path: entries/KB-20260317-211410-3d3076.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - pipeline
+  - pool-allocator
+  - smem
+  - barrier
+  title: PoolAllocator pattern for replacing manual SMEM layout with barriers
+  updated: '2026-03-17'
+- created: '2026-03-17'
+  id: KB-20260317-211410-6e13ad
+  path: entries/KB-20260317-211410-6e13ad.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - local-scalar
+  title: 'Tx.local_scalar() vs var: Tx.int32 type annotation equivalence and limits'
+  updated: '2026-03-17'
+- created: '2026-03-17'
+  id: KB-20260317-211410-c51a41
+  path: entries/KB-20260317-211410-c51a41.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - pipeline
+  - mbarrier
+  - ptx
+  - deadlock
+  - gpu
+  title: MBarrier.arrive() local vs remote semantics and CTA_GROUP deadlocks
+  updated: '2026-03-17'
+- created: '2026-03-17'
+  id: KB-20260317-211410-e366ed
+  path: entries/KB-20260317-211410-e366ed.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - parser
+  - python
+  - pitfall
+  title: TVMScript parser intercepts augmented assignment (+=) inside @Tx.prim_func
+  updated: '2026-03-17'
+- created: '2026-03-19'
+  id: KB-20260319-022448-393527
+  path: entries/KB-20260319-022448-393527.yaml
+  scope:
+  - repo
+  tags:
+  - proton
+  - benchmarking
+  - bench-ci
+  - profiling
+  - cross-repo
+  title: Proton profiler pipeline for bench-ci integration
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: KB-20260319-022448-901600
+  path: entries/KB-20260319-022448-901600.yaml
+  scope:
+  - repo
+  tags:
+  - kernel
+  - registry
+  - testing
+  - benchmarking
+  - architecture
+  title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: KB-20260319-022448-dec2c4
+  path: entries/KB-20260319-022448-dec2c4.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - xdist
+  - parallelism
+  - testing
+  title: pytest-xdist load vs loadfile distribution for single-file parametrized tests
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: KB-20260319-174406-349680
+  path: entries/KB-20260319-174406-349680.yaml
+  scope:
+  - repo
+  tags:
+  - bench-ci
+  - benchmarking
+  - cross-repo
+  - tirx-kernels
+  title: Cross-repo baseline benchmark coordination pattern
+  updated: '2026-03-19'
+- created: '2026-03-20'
+  id: KB-20260320-002326-24c511
+  path: entries/KB-20260320-002326-24c511.yaml
+  scope:
+  - repo
+  tags:
+  - packaging
+  - pip
+  - python
+  - tirx-kernels
+  title: Python pip package name vs importable module name are independent
+  updated: '2026-03-20'
+- created: '2026-03-22'
+  id: KB-20260322-182024-1738c4
+  path: entries/KB-20260322-182024-1738c4.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - ruff
+  - lint
+  - noqa
+  - annotation
+  title: Ruff F821 for TVMScript annotation variables
+  updated: '2026-03-22'
+- created: '2026-03-22'
+  id: KB-20260322-182024-e7c4c2
+  path: entries/KB-20260322-182024-e7c4c2.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - local-scalar
+  - alloc-local
+  - vector-annotation
+  - buffer
+  title: 'TVMScript type annotation syntax: scalar (x: Tx.f32) vs vector (x: Tx.f32[N])
+    semantics'
+  updated: '2026-03-22'
+- created: '2026-03-22'
+  id: KB-20260322-201254-ba181e
+  path: entries/KB-20260322-201254-ba181e.yaml
+  scope:
+  - repo
+  tags:
+  - megakernel
+  - tirx-kernels
+  - imports
+  - testing
+  title: Megakernel test files import from tirx_kernels package directly
+  updated: '2026-03-22'
+- created: '2026-03-23'
+  id: KB-20260323-185836-2fe7e7
+  path: entries/KB-20260323-185836-2fe7e7.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - bench_tk
+  - L2-eviction
+  - thunderkittens
+  title: bench_tk callable factory pattern for L2 cache eviction
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: KB-20260323-185836-570267
+  path: entries/KB-20260323-185836-570267.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - proton
+  - bench_tk
+  - measurement-gap
+  title: Proton reports single-kernel GPU time vs bench_tk end-to-end time
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: KB-20260323-185836-62116f
+  path: entries/KB-20260323-185836-62116f.yaml
+  scope:
+  - repo
+  tags:
+  - flashinfer
+  - nvfp4
+  - baseline
+  - API
+  title: 'flashinfer nvfp4 API: mm_fp4 requires column-major B via .T view'
+  updated: '2026-03-23'
+- created: '2026-03-24'
+  id: KB-20260324-171756-7ab04c
+  path: entries/KB-20260324-171756-7ab04c.yaml
+  scope:
+  - repo
+  tags:
+  - bench-ci
+  - benchmarking
+  - cross-repo
+  - tirx-kernels
+  title: Cross-repo baseline benchmark coordination pattern
+  updated: '2026-03-24'
+- created: '2026-03-24'
+  id: KB-20260324-171756-cea50a
+  path: entries/KB-20260324-171756-cea50a.yaml
+  scope:
+  - repo
+  tags:
+  - proton
+  - benchmarking
+  - bench-ci
+  - profiling
+  - cross-repo
+  - json-file
+  - worker
+  title: Proton profiler pipeline for bench-ci integration
+  updated: '2026-03-24'
 tags:
+  API:
+  - KB-20260323-185836-62116f
+  L2-eviction:
+  - KB-20260323-185836-2fe7e7
   alloc-local:
-    - KB-20260322-182024-e7c4c2
+  - KB-20260322-182024-e7c4c2
   annotation:
-    - KB-20260322-182024-1738c4
+  - KB-20260322-182024-1738c4
   api:
-    - KB-20260301-0002
+  - KB-20260301-0002
   architecture:
-    - KB-20260308-232603-d83e44
-    - KB-20260319-022448-901600
+  - KB-20260308-232603-d83e44
+  - KB-20260319-022448-901600
   assert_structural_equal:
-    - KB-20260227-0001
+  - KB-20260227-0001
   barrier:
-    - KB-20260317-211410-3d3076
+  - KB-20260317-211410-3d3076
+  baseline:
+  - KB-20260323-185836-62116f
+  bench:
+  - KB-20260323-185836-2fe7e7
+  - KB-20260323-185836-570267
   bench-ci:
-    - KB-20260319-022448-393527
-    - KB-20260319-174406-349680
+  - KB-20260319-022448-393527
+  - KB-20260319-174406-349680
+  - KB-20260324-171756-7ab04c
+  - KB-20260324-171756-cea50a
+  bench_tk:
+  - KB-20260323-185836-2fe7e7
+  - KB-20260323-185836-570267
   benchmarking:
-    - KB-20260319-022448-393527
-    - KB-20260319-022448-901600
-    - KB-20260319-174406-349680
+  - KB-20260319-022448-393527
+  - KB-20260319-022448-901600
+  - KB-20260319-174406-349680
+  - KB-20260324-171756-7ab04c
+  - KB-20260324-171756-cea50a
   buffer:
-    - KB-20260322-182024-e7c4c2
+  - KB-20260322-182024-e7c4c2
   codegen:
-    - KB-20260227-0002
-    - KB-20260301-0001
+  - KB-20260227-0002
+  - KB-20260301-0001
   compatibility:
-    - KB-20260301-0005
+  - KB-20260301-0005
   copy:
-    - KB-20260301-0002
+  - KB-20260301-0002
   copy_async:
-    - KB-20260227-0002
-    - KB-20260227-0003
+  - KB-20260227-0002
+  - KB-20260227-0003
   copy_tma_impl:
-    - KB-20260227-0001
+  - KB-20260227-0001
   cross-repo:
-    - KB-20260319-022448-393527
-    - KB-20260319-174406-349680
+  - KB-20260319-022448-393527
+  - KB-20260319-174406-349680
+  - KB-20260324-171756-7ab04c
+  - KB-20260324-171756-cea50a
   cuda:
-    - KB-20260307-231252-48549d
+  - KB-20260307-231252-48549d
   deadlock:
-    - KB-20260317-211410-c51a41
+  - KB-20260317-211410-c51a41
   debugging:
-    - KB-20260301-0001
+  - KB-20260301-0001
   dsl:
-    - KB-20260301-0004
-    - KB-20260317-211410-6e13ad
-    - KB-20260322-182024-e7c4c2
+  - KB-20260301-0004
+  - KB-20260317-211410-6e13ad
+  - KB-20260322-182024-e7c4c2
   flaky-tests:
-    - KB-20260307-231252-48549d
+  - KB-20260307-231252-48549d
+  flashinfer:
+  - KB-20260323-185836-62116f
   git:
-    - KB-20260228-0001
-    - KB-20260228-0003
+  - KB-20260228-0001
+  - KB-20260228-0003
   gpu:
-    - KB-20260307-231252-48549d
-    - KB-20260317-211410-c51a41
+  - KB-20260307-231252-48549d
+  - KB-20260317-211410-c51a41
   import:
-    - KB-20260227-0003
-    - KB-20260302-015214-9e29ce
-    - KB-20260307-231252-72bc64
-    - KB-20260308-232603-18dfc3
-    - KB-20260308-232603-205e85
-    - KB-20260308-232603-d83e44
+  - KB-20260227-0003
+  - KB-20260302-015214-9e29ce
+  - KB-20260307-231252-72bc64
+  - KB-20260308-232603-18dfc3
+  - KB-20260308-232603-205e85
+  - KB-20260308-232603-d83e44
+  imports:
+  - KB-20260322-201254-ba181e
   ir:
-    - KB-20260301-0001
+  - KB-20260301-0001
+  json-file:
+  - KB-20260324-171756-cea50a
   kernel:
-    - KB-20260301-0001
-    - KB-20260319-022448-901600
+  - KB-20260301-0001
+  - KB-20260319-022448-901600
   kwargs:
-    - KB-20260301-0002
+  - KB-20260301-0002
   layout:
-    - KB-20260227-0003
+  - KB-20260227-0003
   lint:
-    - KB-20260228-0001
-    - KB-20260301-0003
-    - KB-20260308-232603-205e85
-    - KB-20260322-182024-1738c4
+  - KB-20260228-0001
+  - KB-20260301-0003
+  - KB-20260308-232603-205e85
+  - KB-20260322-182024-1738c4
   local-scalar:
-    - KB-20260317-211410-6e13ad
-    - KB-20260322-182024-e7c4c2
+  - KB-20260317-211410-6e13ad
+  - KB-20260322-182024-e7c4c2
   logging:
-    - KB-20260228-0004
+  - KB-20260228-0004
   mbarrier:
-    - KB-20260317-211410-c51a41
+  - KB-20260317-211410-c51a41
+  measurement-gap:
+  - KB-20260323-185836-570267
+  megakernel:
+  - KB-20260322-201254-ba181e
   noqa:
-    - KB-20260301-0003
-    - KB-20260322-182024-1738c4
+  - KB-20260301-0003
+  - KB-20260322-182024-1738c4
+  nvfp4:
+  - KB-20260323-185836-62116f
   op-schedule:
-    - KB-20260301-0002
-    - KB-20260302-015214-9e29ce
-    - KB-20260307-231252-72bc64
-    - KB-20260308-232603-18dfc3
-    - KB-20260308-232603-d83e44
+  - KB-20260301-0002
+  - KB-20260302-015214-9e29ce
+  - KB-20260307-231252-72bc64
+  - KB-20260308-232603-18dfc3
+  - KB-20260308-232603-d83e44
   packaging:
-    - KB-20260320-002326-24c511
+  - KB-20260320-002326-24c511
   parallelism:
-    - KB-20260319-022448-dec2c4
+  - KB-20260319-022448-dec2c4
   parser:
-    - KB-20260317-211410-e366ed
+  - KB-20260317-211410-e366ed
   pip:
-    - KB-20260320-002326-24c511
+  - KB-20260320-002326-24c511
   pipeline:
-    - KB-20260317-211410-3d3076
-    - KB-20260317-211410-c51a41
+  - KB-20260317-211410-3d3076
+  - KB-20260317-211410-c51a41
   pitfall:
-    - KB-20260317-211410-e366ed
+  - KB-20260317-211410-e366ed
   pool-allocator:
-    - KB-20260317-211410-3d3076
+  - KB-20260317-211410-3d3076
   pre-commit:
-    - KB-20260228-0001
-    - KB-20260228-0003
-    - KB-20260301-0001
+  - KB-20260228-0001
+  - KB-20260228-0003
+  - KB-20260301-0001
   pre-push:
-    - KB-20260228-0003
+  - KB-20260228-0003
   profiling:
-    - KB-20260319-022448-393527
+  - KB-20260319-022448-393527
+  - KB-20260324-171756-cea50a
   proton:
-    - KB-20260319-022448-393527
+  - KB-20260319-022448-393527
+  - KB-20260323-185836-570267
+  - KB-20260324-171756-cea50a
   ptx:
-    - KB-20260227-0002
-    - KB-20260317-211410-c51a41
+  - KB-20260227-0002
+  - KB-20260317-211410-c51a41
   pytest:
-    - KB-20260228-0002
-    - KB-20260306-195314-a33c27
-    - KB-20260319-022448-dec2c4
+  - KB-20260228-0002
+  - KB-20260306-195314-a33c27
+  - KB-20260319-022448-dec2c4
   python:
-    - KB-20260301-0005
-    - KB-20260307-231252-72bc64
-    - KB-20260308-232603-205e85
-    - KB-20260317-211410-e366ed
-    - KB-20260320-002326-24c511
+  - KB-20260301-0005
+  - KB-20260307-231252-72bc64
+  - KB-20260308-232603-205e85
+  - KB-20260317-211410-e366ed
+  - KB-20260320-002326-24c511
   recovery:
-    - KB-20260228-0003
+  - KB-20260228-0003
   refactor:
-    - KB-20260227-0003
-    - KB-20260228-0004
-    - KB-20260302-015214-9e29ce
-    - KB-20260308-232603-18dfc3
-    - KB-20260308-232603-d83e44
+  - KB-20260227-0003
+  - KB-20260228-0004
+  - KB-20260302-015214-9e29ce
+  - KB-20260308-232603-18dfc3
+  - KB-20260308-232603-d83e44
   registration:
-    - KB-20260307-231252-72bc64
+  - KB-20260307-231252-72bc64
   registry:
-    - KB-20260319-022448-901600
+  - KB-20260319-022448-901600
   rg:
-    - KB-20260228-0004
+  - KB-20260228-0004
   ruff:
-    - KB-20260301-0003
-    - KB-20260301-0005
-    - KB-20260308-232603-205e85
-    - KB-20260322-182024-1738c4
+  - KB-20260301-0003
+  - KB-20260301-0005
+  - KB-20260308-232603-205e85
+  - KB-20260322-182024-1738c4
   scoping:
-    - KB-20260301-0004
+  - KB-20260301-0004
   shared-memory:
-    - KB-20260307-231252-48549d
+  - KB-20260307-231252-48549d
   skip:
-    - KB-20260228-0002
+  - KB-20260228-0002
   smem:
-    - KB-20260317-211410-3d3076
+  - KB-20260317-211410-3d3076
   syntax:
-    - KB-20260317-211410-6e13ad
-    - KB-20260322-182024-e7c4c2
+  - KB-20260317-211410-6e13ad
+  - KB-20260322-182024-e7c4c2
   testing:
-    - KB-20260227-0001
-    - KB-20260228-0002
-    - KB-20260301-0003
-    - KB-20260301-0004
-    - KB-20260301-0005
-    - KB-20260306-195314-a33c27
-    - KB-20260307-231252-48549d
-    - KB-20260319-022448-901600
-    - KB-20260319-022448-dec2c4
+  - KB-20260227-0001
+  - KB-20260228-0002
+  - KB-20260301-0003
+  - KB-20260301-0004
+  - KB-20260301-0005
+  - KB-20260306-195314-a33c27
+  - KB-20260307-231252-48549d
+  - KB-20260319-022448-901600
+  - KB-20260319-022448-dec2c4
+  - KB-20260322-201254-ba181e
+  thunderkittens:
+  - KB-20260323-185836-2fe7e7
   tir:
-    - KB-20260227-0001
+  - KB-20260227-0001
   tirx:
-    - KB-20260301-0002
-    - KB-20260301-0003
-    - KB-20260301-0004
-    - KB-20260301-0005
-    - KB-20260306-195314-a33c27
-    - KB-20260317-211410-3d3076
-    - KB-20260317-211410-c51a41
+  - KB-20260301-0002
+  - KB-20260301-0003
+  - KB-20260301-0004
+  - KB-20260301-0005
+  - KB-20260306-195314-a33c27
+  - KB-20260317-211410-3d3076
+  - KB-20260317-211410-c51a41
   tirx-kernels:
-    - KB-20260319-174406-349680
-    - KB-20260320-002326-24c511
+  - KB-20260319-174406-349680
+  - KB-20260320-002326-24c511
+  - KB-20260322-201254-ba181e
+  - KB-20260324-171756-7ab04c
   tma:
-    - KB-20260227-0002
-    - KB-20260227-0003
-    - KB-20260302-015214-9e29ce
-    - KB-20260308-232603-18dfc3
+  - KB-20260227-0002
+  - KB-20260227-0003
+  - KB-20260302-015214-9e29ce
+  - KB-20260308-232603-18dfc3
   triage:
-    - KB-20260306-195314-a33c27
+  - KB-20260306-195314-a33c27
   tvm-ffi:
-    - KB-20260228-0004
+  - KB-20260228-0004
   tvmscript:
-    - KB-20260301-0001
-    - KB-20260317-211410-6e13ad
-    - KB-20260317-211410-e366ed
-    - KB-20260322-182024-1738c4
-    - KB-20260322-182024-e7c4c2
+  - KB-20260301-0001
+  - KB-20260317-211410-6e13ad
+  - KB-20260317-211410-e366ed
+  - KB-20260322-182024-1738c4
+  - KB-20260322-182024-e7c4c2
   validation:
-    - KB-20260228-0004
+  - KB-20260228-0004
   vector-annotation:
-    - KB-20260322-182024-e7c4c2
+  - KB-20260322-182024-e7c4c2
   warnings:
-    - KB-20260306-195314-a33c27
+  - KB-20260306-195314-a33c27
+  worker:
+  - KB-20260324-171756-cea50a
   workflow:
-    - KB-20260228-0001
-    - KB-20260228-0003
+  - KB-20260228-0001
+  - KB-20260228-0003
   xdist:
-    - KB-20260228-0002
-    - KB-20260319-022448-dec2c4
+  - KB-20260228-0002
+  - KB-20260319-022448-dec2c4

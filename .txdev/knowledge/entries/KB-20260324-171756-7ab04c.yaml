@@ -1,0 +1,42 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "When adding baseline benchmarks to kernel run_bench() functions:\n1. tirx-kernels:\
+    \ Add baseline inside the ProtonContext block using\n   bench(..., proton_name=\"\
+    <name>\"), wrapped in try/except\n2. No bench-ci changes needed -- KNOWN_IMPLS\
+    \ and parse_proton.py are deprecated\n\nThe baseline pattern:\n- Must run inside\
+    \ the same ProtonContext block as tir\n- Must use bench() with a unique proton_name\
+    \ (appears as depth-1 in Proton tree)\n- Must be wrapped in try/except so missing\
+    \ deps don't break tir benchmarking\n- Should print BASELINE_ERROR to stderr on\
+    \ failure\n- Return format: {impls: ctx.get_impl_times()} (all impl names auto-discovered)\n\
+    \nJSON results are written to a file via --json-file, not stdout.\nKernel print()\
+    \ output goes to stdout/log and cannot corrupt JSON.\n"
+  summary: 'Adding baselines to run_bench() in tirx-kernels no longer requires any
+    changes in bench-ci. Structured JSON output with {impls: ctx.get_impl_times()}
+    is self-describing.'
+created: '2026-03-24'
+id: KB-20260324-171756-7ab04c
+scope:
+- repo
+tags:
+- bench-ci
+- benchmarking
+- cross-repo
+- tirx-kernels
+title: Cross-repo baseline benchmark coordination pattern
+updated: '2026-03-24'

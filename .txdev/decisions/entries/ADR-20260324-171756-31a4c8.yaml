@@ -1,0 +1,59 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Problem: Three independent poll loops (poll_repo, poll_kernels, poll_bench_ci)
+    with no coordination. tirx-kernels updates triggered re-queuing even without new
+    tir commits. bench-ci updates triggered os.execv restart from the poller. Jobs
+    could start with stale dependencies.
+
+
+    Decision: Poller only polls tir origin/tirx. Worker uses peek_pending() + ensure_deps_uptodate()
+    + dequeue_job() pattern:
+
+    1. peek_pending() checks if work exists without claiming it
+
+    2. ensure_deps_uptodate() pulls tirx-kernels (fetch + ff-only + pip install -e)
+    and bench-ci (fetch + ff-only + os.execv if changed)
+
+    3. dequeue_job() claims the job only after deps are fresh
+
+
+    Key guarantees:
+
+    - Jobs never run with stale dependencies (deps updated before dequeue)
+
+    - bench-ci restart does not lose jobs (job is still pending at restart time)
+
+    - tirx-kernels updates no longer trigger spurious re-benchmarks
+
+    - update-kernels.sh deleted (functionality absorbed into worker)'
+  summary: Worker pulls tirx-kernels and bench-ci before each job dequeue; poller
+    only enqueues new tir commits. Eliminates three independent poll loops.
+created: '2026-03-24'
+id: ADR-20260324-171756-31a4c8
+scope:
+- repo
+tags:
+- bench-ci
+- worker
+- poller
+- architecture
+- cross-repo
+title: 'Simplify poll/worker: worker ensures deps fresh before dequeue, poller only
+  polls tir'
+updated: '2026-03-24'

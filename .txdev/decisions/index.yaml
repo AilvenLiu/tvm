@@ -14,400 +14,524 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 entries:
-  - created: '2026-02-27'
-    id: ADR-20260227-0001
-    path: entries/ADR-20260227-0001.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - tir
-      - golden
-      - assert_structural_equal
-    title: Programmatic TIR construction over TVMScript round-trip for golden IR tests
-    updated: '2026-02-27'
-  - created: '2026-02-27'
-    id: ADR-20260227-0002
-    path: entries/ADR-20260227-0002.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - tma
-      - buffer-view
-    title: Keep test_copy_tma_3d_with_view as separate special-case test
-    updated: '2026-02-27'
-  - created: '2026-02-28'
-    id: ADR-20260228-0001
-    path: entries/ADR-20260228-0001.yaml
-    scope:
-      - repo
-    tags:
-      - pre-commit
-      - upstream-alignment
-      - tooling
-      - ci
-    title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing checks
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: ADR-20260228-0002
-    path: entries/ADR-20260228-0002.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - parser
-      - compatibility
-      - api-evolution
-      - rebase
-    title: Adopt parser-level fallback for `T.prim_func` keyword migration
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: ADR-20260228-0003
-    path: entries/ADR-20260228-0003.yaml
-    scope:
-      - repo
-    tags:
-      - logging
-      - api
-      - compatibility
-      - tvm-ffi
-      - refactor
-    title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check APIs
-    updated: '2026-02-28'
-  - created: '2026-03-01'
-    id: ADR-20260301-0001
-    path: entries/ADR-20260301-0001.yaml
-    scope:
-      - repo
-    tags:
-      - rebase
-      - kernel
-      - upstream-alignment
-      - pre-commit
-      - testing
-    title: Prefer upstream-first conflict resolution for kernel test files
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: ADR-20260301-0002
-    path: entries/ADR-20260301-0002.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - op-schedule
-      - test-organization
-    title: Op schedule tests should only contain tests that exercise the dispatch path
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: ADR-20260301-0003
-    path: entries/ADR-20260301-0003.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - tirx
-      - cluster
-      - op-schedule
-    title: Dual-kernel pattern for cluster vs non-cluster test variants
-    updated: '2026-03-01'
-  - created: '2026-03-06'
-    id: ADR-20260306-195314-450625
-    path: entries/ADR-20260306-195314-450625.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - warnings
-      - testing
-      - third-party
-      - policy
-    title: Use code-level warning remediation and keep third-party warnings visible
-    updated: '2026-03-06'
-  - created: '2026-03-07'
-    id: ADR-20260307-231252-f0561c
-    path: entries/ADR-20260307-231252-f0561c.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - refactor
-      - architecture
-    title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
-    updated: '2026-03-07'
-  - created: '2026-03-08'
-    id: ADR-20260308-232603-16186a
-    path: entries/ADR-20260308-232603-16186a.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - refactor
-      - architecture
-      - module-split
-    title: Split cuda/common.py and trn/common.py by functional domain, not by size
-    updated: '2026-03-08'
-  - created: '2026-03-08'
-    id: ADR-20260308-232603-d77714
-    path: entries/ADR-20260308-232603-d77714.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - refactor
-      - architecture
-    title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
-    updated: '2026-03-08'
-  - created: '2026-03-17'
-    id: ADR-20260317-211411-5664ea
-    path: entries/ADR-20260317-211411-5664ea.yaml
-    scope:
-      - repo
-    tags:
-      - pipeline
-      - mbarrier
-      - ptx
-      - api-design
-    title: MBarrier.arrive() defaults to remote arrive (cta_id=0, pred=True)
-    updated: '2026-03-17'
-  - created: '2026-03-17'
-    id: ADR-20260317-211411-a47556
-    path: entries/ADR-20260317-211411-a47556.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - dsl
-      - syntax
-      - api-design
-    title: Keep Tx.local_scalar in meta_class __init__, use type annotations elsewhere
-    updated: '2026-03-17'
-  - created: '2026-03-19'
-    id: ADR-20260319-022448-398b11
-    path: entries/ADR-20260319-022448-398b11.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - architecture
-      - kernel
-      - pytest
-      - xdist
-    title: Single test_kernels.py thin wrapper with conftest.py for xdist distribution
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: ADR-20260319-022448-4d7f83
-    path: entries/ADR-20260319-022448-4d7f83.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - architecture
-      - kernel
-      - design-pattern
-    title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent kernels
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: ADR-20260319-022448-7cc00e
-    path: entries/ADR-20260319-022448-7cc00e.yaml
-    scope:
-      - repo
-    tags:
-      - architecture
-      - kernel
-      - bench-ci
-      - testing
-      - infrastructure
-    title: Unified kernel interface across test and bench-ci pipelines
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: ADR-20260319-174407-e52e2f
-    path: entries/ADR-20260319-174407-e52e2f.yaml
-    scope:
-      - repo
-    tags:
-      - benchmarking
-      - bench-ci
-      - architecture
-      - baseline
-    title: Baselines run inside ProtonContext with try/except, not as separate bench passes
-    updated: '2026-03-19'
-  - created: '2026-03-20'
-    id: ADR-20260320-002326-d2fa6d
-    path: entries/ADR-20260320-002326-d2fa6d.yaml
-    scope:
-      - repo
-    tags:
-      - packaging
-      - tirx-kernels
-      - module-rename
-    title: Rename importable module from kernels to tirx_kernels for namespace clarity
-    updated: '2026-03-20'
-  - created: '2026-03-22'
-    id: ADR-20260322-182024-3e7d62
-    path: entries/ADR-20260322-182024-3e7d62.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - parser
-      - api-design
-      - architecture
-    title: DtypeConstructor replaces func_gen for dual callable+subscriptable dtype objects
-    updated: '2026-03-22'
-  - created: '2026-03-22'
-    id: ADR-20260322-182024-efa75b
-    path: entries/ADR-20260322-182024-efa75b.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - dsl
-      - syntax
-      - api-design
-      - vector-annotation
-      - alloc-local
-      - smem
-      - tmem
-    title: 'Tensor alloc annotation syntax: scalar (Tx.f32), vector (Tx.f32[N]), smem/tmem aliases'
-    updated: '2026-03-22'
+- created: '2026-02-27'
+  id: ADR-20260227-0001
+  path: entries/ADR-20260227-0001.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - tir
+  - golden
+  - assert_structural_equal
+  title: Programmatic TIR construction over TVMScript round-trip for golden IR tests
+  updated: '2026-02-27'
+- created: '2026-02-27'
+  id: ADR-20260227-0002
+  path: entries/ADR-20260227-0002.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - tma
+  - buffer-view
+  title: Keep test_copy_tma_3d_with_view as separate special-case test
+  updated: '2026-02-27'
+- created: '2026-02-28'
+  id: ADR-20260228-0001
+  path: entries/ADR-20260228-0001.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - upstream-alignment
+  - tooling
+  - ci
+  title: Adopt upstream pre-commit policy and fix local blockers instead of relaxing
+    checks
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: ADR-20260228-0002
+  path: entries/ADR-20260228-0002.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - parser
+  - compatibility
+  - api-evolution
+  - rebase
+  title: Adopt parser-level fallback for `T.prim_func` keyword migration
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: ADR-20260228-0003
+  path: entries/ADR-20260228-0003.yaml
+  scope:
+  - repo
+  tags:
+  - logging
+  - api
+  - compatibility
+  - tvm-ffi
+  - refactor
+  title: Remove logging backward-compatibility adapters and enforce new TVM_FFI check
+    APIs
+  updated: '2026-02-28'
+- created: '2026-03-01'
+  id: ADR-20260301-0001
+  path: entries/ADR-20260301-0001.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - kernel
+  - upstream-alignment
+  - pre-commit
+  - testing
+  title: Prefer upstream-first conflict resolution for kernel test files
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: ADR-20260301-0002
+  path: entries/ADR-20260301-0002.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - op-schedule
+  - test-organization
+  title: Op schedule tests should only contain tests that exercise the dispatch path
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: ADR-20260301-0003
+  path: entries/ADR-20260301-0003.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - tirx
+  - cluster
+  - op-schedule
+  title: Dual-kernel pattern for cluster vs non-cluster test variants
+  updated: '2026-03-01'
+- created: '2026-03-06'
+  id: ADR-20260306-195314-450625
+  path: entries/ADR-20260306-195314-450625.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - warnings
+  - testing
+  - third-party
+  - policy
+  title: Use code-level warning remediation and keep third-party warnings visible
+  updated: '2026-03-06'
+- created: '2026-03-07'
+  id: ADR-20260307-231252-f0561c
+  path: entries/ADR-20260307-231252-f0561c.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - refactor
+  - architecture
+  title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
+  updated: '2026-03-07'
+- created: '2026-03-08'
+  id: ADR-20260308-232603-16186a
+  path: entries/ADR-20260308-232603-16186a.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - refactor
+  - architecture
+  - module-split
+  title: Split cuda/common.py and trn/common.py by functional domain, not by size
+  updated: '2026-03-08'
+- created: '2026-03-08'
+  id: ADR-20260308-232603-d77714
+  path: entries/ADR-20260308-232603-d77714.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - refactor
+  - architecture
+  title: Remove maps.py dispatcher layer, inline registrations into unary.py and binary.py
+  updated: '2026-03-08'
+- created: '2026-03-17'
+  id: ADR-20260317-211411-5664ea
+  path: entries/ADR-20260317-211411-5664ea.yaml
+  scope:
+  - repo
+  tags:
+  - pipeline
+  - mbarrier
+  - ptx
+  - api-design
+  title: MBarrier.arrive() defaults to remote arrive (cta_id=0, pred=True)
+  updated: '2026-03-17'
+- created: '2026-03-17'
+  id: ADR-20260317-211411-a47556
+  path: entries/ADR-20260317-211411-a47556.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - api-design
+  title: Keep Tx.local_scalar in meta_class __init__, use type annotations elsewhere
+  updated: '2026-03-17'
+- created: '2026-03-19'
+  id: ADR-20260319-022448-398b11
+  path: entries/ADR-20260319-022448-398b11.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - architecture
+  - kernel
+  - pytest
+  - xdist
+  title: Single test_kernels.py thin wrapper with conftest.py for xdist distribution
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: ADR-20260319-022448-4d7f83
+  path: entries/ADR-20260319-022448-4d7f83.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - architecture
+  - kernel
+  - design-pattern
+  title: Delegate-to-module pattern for run_test with CONFIGS=[] for env-dependent
+    kernels
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: ADR-20260319-022448-7cc00e
+  path: entries/ADR-20260319-022448-7cc00e.yaml
+  scope:
+  - repo
+  tags:
+  - architecture
+  - kernel
+  - bench-ci
+  - testing
+  - infrastructure
+  title: Unified kernel interface across test and bench-ci pipelines
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: ADR-20260319-174407-e52e2f
+  path: entries/ADR-20260319-174407-e52e2f.yaml
+  scope:
+  - repo
+  tags:
+  - benchmarking
+  - bench-ci
+  - architecture
+  - baseline
+  title: Baselines run inside ProtonContext with try/except, not as separate bench
+    passes
+  updated: '2026-03-19'
+- created: '2026-03-20'
+  id: ADR-20260320-002326-d2fa6d
+  path: entries/ADR-20260320-002326-d2fa6d.yaml
+  scope:
+  - repo
+  tags:
+  - packaging
+  - tirx-kernels
+  - module-rename
+  title: Rename importable module from kernels to tirx_kernels for namespace clarity
+  updated: '2026-03-20'
+- created: '2026-03-22'
+  id: ADR-20260322-182024-3e7d62
+  path: entries/ADR-20260322-182024-3e7d62.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - parser
+  - api-design
+  - architecture
+  title: DtypeConstructor replaces func_gen for dual callable+subscriptable dtype
+    objects
+  updated: '2026-03-22'
+- created: '2026-03-22'
+  id: ADR-20260322-182024-efa75b
+  path: entries/ADR-20260322-182024-efa75b.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - dsl
+  - syntax
+  - api-design
+  - vector-annotation
+  - alloc-local
+  - smem
+  - tmem
+  title: 'Tensor alloc annotation syntax: scalar (Tx.f32), vector (Tx.f32[N]), smem/tmem
+    aliases'
+  updated: '2026-03-22'
+- created: '2026-03-23'
+  id: ADR-20260323-185836-4f44fc
+  path: entries/ADR-20260323-185836-4f44fc.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - bench_tk
+  - proton
+  - architecture
+  title: bench_tk is additive alongside proton bench, not a replacement
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: ADR-20260323-185836-77eb2c
+  path: entries/ADR-20260323-185836-77eb2c.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - bench_tk
+  - thunderkittens
+  - thermal
+  title: Post-measurement cooldown in bench_tk matches ThunderKittens pattern
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: ADR-20260323-185836-cff692
+  path: entries/ADR-20260323-185836-cff692.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - proton
+  - run_bench
+  - API
+  title: 'run_bench returns {impls: ctx.get_impl_times()} instead of wall-clock'
+  updated: '2026-03-23'
+- created: '2026-03-24'
+  id: ADR-20260324-171756-31a4c8
+  path: entries/ADR-20260324-171756-31a4c8.yaml
+  scope:
+  - repo
+  tags:
+  - bench-ci
+  - worker
+  - poller
+  - architecture
+  - cross-repo
+  title: 'Simplify poll/worker: worker ensures deps fresh before dequeue, poller only
+    polls tir'
+  updated: '2026-03-24'
+- created: '2026-03-24'
+  id: ADR-20260324-171756-41723a
+  path: entries/ADR-20260324-171756-41723a.yaml
+  scope:
+  - repo
+  tags:
+  - bench-ci
+  - json
+  - stdout
+  - architecture
+  - cross-repo
+  title: JSON results via file instead of stdout to avoid kernel print corruption
+  updated: '2026-03-24'
+- created: '2026-03-24'
+  id: ADR-20260324-171756-b03f0f
+  path: entries/ADR-20260324-171756-b03f0f.yaml
+  scope:
+  - repo
+  tags:
+  - tooling
+  - claude-code
+  - commands
+  - testing
+  - benchmarking
+  title: Claude Code slash commands over CLAUDE.md for standard operations
+  updated: '2026-03-24'
 tags:
+  API:
+  - ADR-20260323-185836-cff692
   alloc-local:
-    - ADR-20260322-182024-efa75b
+  - ADR-20260322-182024-efa75b
   api:
-    - ADR-20260228-0003
+  - ADR-20260228-0003
   api-design:
-    - ADR-20260317-211411-5664ea
-    - ADR-20260317-211411-a47556
-    - ADR-20260322-182024-3e7d62
-    - ADR-20260322-182024-efa75b
+  - ADR-20260317-211411-5664ea
+  - ADR-20260317-211411-a47556
+  - ADR-20260322-182024-3e7d62
+  - ADR-20260322-182024-efa75b
   api-evolution:
-    - ADR-20260228-0002
+  - ADR-20260228-0002
   architecture:
-    - ADR-20260307-231252-f0561c
-    - ADR-20260308-232603-16186a
-    - ADR-20260308-232603-d77714
-    - ADR-20260319-022448-398b11
-    - ADR-20260319-022448-4d7f83
-    - ADR-20260319-022448-7cc00e
-    - ADR-20260319-174407-e52e2f
-    - ADR-20260322-182024-3e7d62
+  - ADR-20260307-231252-f0561c
+  - ADR-20260308-232603-16186a
+  - ADR-20260308-232603-d77714
+  - ADR-20260319-022448-398b11
+  - ADR-20260319-022448-4d7f83
+  - ADR-20260319-022448-7cc00e
+  - ADR-20260319-174407-e52e2f
+  - ADR-20260322-182024-3e7d62
+  - ADR-20260323-185836-4f44fc
+  - ADR-20260324-171756-31a4c8
+  - ADR-20260324-171756-41723a
   assert_structural_equal:
-    - ADR-20260227-0001
+  - ADR-20260227-0001
   baseline:
-    - ADR-20260319-174407-e52e2f
+  - ADR-20260319-174407-e52e2f
+  bench:
+  - ADR-20260323-185836-4f44fc
+  - ADR-20260323-185836-77eb2c
+  - ADR-20260323-185836-cff692
   bench-ci:
-    - ADR-20260319-022448-7cc00e
-    - ADR-20260319-174407-e52e2f
+  - ADR-20260319-022448-7cc00e
+  - ADR-20260319-174407-e52e2f
+  - ADR-20260324-171756-31a4c8
+  - ADR-20260324-171756-41723a
+  bench_tk:
+  - ADR-20260323-185836-4f44fc
+  - ADR-20260323-185836-77eb2c
   benchmarking:
-    - ADR-20260319-174407-e52e2f
+  - ADR-20260319-174407-e52e2f
+  - ADR-20260324-171756-b03f0f
   buffer-view:
-    - ADR-20260227-0002
+  - ADR-20260227-0002
   ci:
-    - ADR-20260228-0001
+  - ADR-20260228-0001
+  claude-code:
+  - ADR-20260324-171756-b03f0f
   cluster:
-    - ADR-20260301-0003
+  - ADR-20260301-0003
+  commands:
+  - ADR-20260324-171756-b03f0f
   compatibility:
-    - ADR-20260228-0002
-    - ADR-20260228-0003
+  - ADR-20260228-0002
+  - ADR-20260228-0003
+  cross-repo:
+  - ADR-20260324-171756-31a4c8
+  - ADR-20260324-171756-41723a
   design-pattern:
-    - ADR-20260319-022448-4d7f83
+  - ADR-20260319-022448-4d7f83
   dsl:
-    - ADR-20260317-211411-a47556
-    - ADR-20260322-182024-efa75b
+  - ADR-20260317-211411-a47556
+  - ADR-20260322-182024-efa75b
   golden:
-    - ADR-20260227-0001
+  - ADR-20260227-0001
   infrastructure:
-    - ADR-20260319-022448-7cc00e
+  - ADR-20260319-022448-7cc00e
+  json:
+  - ADR-20260324-171756-41723a
   kernel:
-    - ADR-20260301-0001
-    - ADR-20260319-022448-398b11
-    - ADR-20260319-022448-4d7f83
-    - ADR-20260319-022448-7cc00e
+  - ADR-20260301-0001
+  - ADR-20260319-022448-398b11
+  - ADR-20260319-022448-4d7f83
+  - ADR-20260319-022448-7cc00e
   logging:
-    - ADR-20260228-0003
+  - ADR-20260228-0003
   mbarrier:
-    - ADR-20260317-211411-5664ea
+  - ADR-20260317-211411-5664ea
   module-rename:
-    - ADR-20260320-002326-d2fa6d
+  - ADR-20260320-002326-d2fa6d
   module-split:
-    - ADR-20260308-232603-16186a
+  - ADR-20260308-232603-16186a
   op-schedule:
-    - ADR-20260301-0002
-    - ADR-20260301-0003
-    - ADR-20260307-231252-f0561c
-    - ADR-20260308-232603-16186a
-    - ADR-20260308-232603-d77714
+  - ADR-20260301-0002
+  - ADR-20260301-0003
+  - ADR-20260307-231252-f0561c
+  - ADR-20260308-232603-16186a
+  - ADR-20260308-232603-d77714
   packaging:
-    - ADR-20260320-002326-d2fa6d
+  - ADR-20260320-002326-d2fa6d
   parser:
-    - ADR-20260228-0002
-    - ADR-20260322-182024-3e7d62
+  - ADR-20260228-0002
+  - ADR-20260322-182024-3e7d62
   pipeline:
-    - ADR-20260317-211411-5664ea
+  - ADR-20260317-211411-5664ea
   policy:
-    - ADR-20260306-195314-450625
+  - ADR-20260306-195314-450625
+  poller:
+  - ADR-20260324-171756-31a4c8
   pre-commit:
-    - ADR-20260228-0001
-    - ADR-20260301-0001
+  - ADR-20260228-0001
+  - ADR-20260301-0001
+  proton:
+  - ADR-20260323-185836-4f44fc
+  - ADR-20260323-185836-cff692
   ptx:
-    - ADR-20260317-211411-5664ea
+  - ADR-20260317-211411-5664ea
   pytest:
-    - ADR-20260306-195314-450625
-    - ADR-20260319-022448-398b11
+  - ADR-20260306-195314-450625
+  - ADR-20260319-022448-398b11
   rebase:
-    - ADR-20260228-0002
-    - ADR-20260301-0001
+  - ADR-20260228-0002
+  - ADR-20260301-0001
   refactor:
-    - ADR-20260228-0003
-    - ADR-20260307-231252-f0561c
-    - ADR-20260308-232603-16186a
-    - ADR-20260308-232603-d77714
+  - ADR-20260228-0003
+  - ADR-20260307-231252-f0561c
+  - ADR-20260308-232603-16186a
+  - ADR-20260308-232603-d77714
+  run_bench:
+  - ADR-20260323-185836-cff692
   smem:
-    - ADR-20260322-182024-efa75b
+  - ADR-20260322-182024-efa75b
+  stdout:
+  - ADR-20260324-171756-41723a
   syntax:
-    - ADR-20260317-211411-a47556
-    - ADR-20260322-182024-efa75b
+  - ADR-20260317-211411-a47556
+  - ADR-20260322-182024-efa75b
   test-organization:
-    - ADR-20260301-0002
+  - ADR-20260301-0002
   testing:
-    - ADR-20260227-0001
-    - ADR-20260227-0002
-    - ADR-20260301-0001
-    - ADR-20260301-0002
-    - ADR-20260301-0003
-    - ADR-20260306-195314-450625
-    - ADR-20260319-022448-398b11
-    - ADR-20260319-022448-4d7f83
-    - ADR-20260319-022448-7cc00e
+  - ADR-20260227-0001
+  - ADR-20260227-0002
+  - ADR-20260301-0001
+  - ADR-20260301-0002
+  - ADR-20260301-0003
+  - ADR-20260306-195314-450625
+  - ADR-20260319-022448-398b11
+  - ADR-20260319-022448-4d7f83
+  - ADR-20260319-022448-7cc00e
+  - ADR-20260324-171756-b03f0f
+  thermal:
+  - ADR-20260323-185836-77eb2c
   third-party:
-    - ADR-20260306-195314-450625
+  - ADR-20260306-195314-450625
+  thunderkittens:
+  - ADR-20260323-185836-77eb2c
   tir:
-    - ADR-20260227-0001
+  - ADR-20260227-0001
   tirx:
-    - ADR-20260301-0003
+  - ADR-20260301-0003
   tirx-kernels:
-    - ADR-20260320-002326-d2fa6d
+  - ADR-20260320-002326-d2fa6d
   tma:
-    - ADR-20260227-0002
+  - ADR-20260227-0002
   tmem:
-    - ADR-20260322-182024-efa75b
+  - ADR-20260322-182024-efa75b
   tooling:
-    - ADR-20260228-0001
+  - ADR-20260228-0001
+  - ADR-20260324-171756-b03f0f
   tvm-ffi:
-    - ADR-20260228-0003
+  - ADR-20260228-0003
   tvmscript:
-    - ADR-20260228-0002
-    - ADR-20260317-211411-a47556
-    - ADR-20260322-182024-3e7d62
-    - ADR-20260322-182024-efa75b
+  - ADR-20260228-0002
+  - ADR-20260317-211411-a47556
+  - ADR-20260322-182024-3e7d62
+  - ADR-20260322-182024-efa75b
   upstream-alignment:
-    - ADR-20260228-0001
-    - ADR-20260301-0001
+  - ADR-20260228-0001
+  - ADR-20260301-0001
   vector-annotation:
-    - ADR-20260322-182024-efa75b
+  - ADR-20260322-182024-efa75b
   warnings:
-    - ADR-20260306-195314-450625
+  - ADR-20260306-195314-450625
+  worker:
+  - ADR-20260324-171756-31a4c8
   xdist:
-    - ADR-20260319-022448-398b11
+  - ADR-20260319-022448-398b11

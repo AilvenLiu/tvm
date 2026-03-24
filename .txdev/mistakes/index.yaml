@@ -14,451 +14,525 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 entries:
-  - created: '2026-02-27'
-    id: M-20260227-0001
-    path: entries/M-20260227-0001.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - requirements
-      - user-intent
-    title: Counting ops instead of structural comparison when user explicitly asked for assert_structural_equal
-    updated: '2026-02-27'
-  - created: '2026-02-27'
-    id: M-20260227-0002
-    path: entries/M-20260227-0002.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - golden
-      - readability
-    title: JSON golden blobs are not readable golden tests
-    updated: '2026-02-27'
-  - created: '2026-02-27'
-    id: M-20260227-0003
-    path: entries/M-20260227-0003.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - golden
-      - debugging
-    title: Verify actual IR output before writing expected values
-    updated: '2026-02-27'
-  - created: '2026-02-28'
-    id: M-20260228-0001
-    path: entries/M-20260228-0001.yaml
-    scope:
-      - repo
-    tags:
-      - pre-commit
-      - git
-      - process
-      - quality
-    title: Bypassing hooks with --no-verify before resolving blockers
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: M-20260228-0002
-    path: entries/M-20260228-0002.yaml
-    scope:
-      - repo
-    tags:
-      - rebase
-      - lint
-      - python
-      - scope-control
-      - workflow
-    title: Fixing a small API mismatch in a high-churn file caused avoidable lint fallout
-    updated: '2026-02-28'
-  - created: '2026-02-28'
-    id: M-20260228-0003
-    path: entries/M-20260228-0003.yaml
-    scope:
-      - repo
-    tags:
-      - shell
-      - gh
-      - git
-      - process
-      - quoting
-    title: Using inline PR body with backticks in shell command
-    updated: '2026-02-28'
-  - created: '2026-03-01'
-    id: M-20260301-0001
-    path: entries/M-20260301-0001.yaml
-    scope:
-      - repo
-    tags:
-      - pre-commit
-      - lint
-      - correctness
-      - workflow
-      - scope-control
-    title: Using broad lint exemptions instead of per-error fixes
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: M-20260301-0002
-    path: entries/M-20260301-0002.yaml
-    scope:
-      - repo
-    tags:
-      - api
-      - tirx
-      - scope-control
-      - over-engineering
-    title: Modifying framework API instead of fixing call sites
-    updated: '2026-03-01'
-  - created: '2026-03-01'
-    id: M-20260301-0003
-    path: entries/M-20260301-0003.yaml
-    scope:
-      - repo
-    tags:
-      - op-schedule
-      - registration
-      - code-review
-      - duplication
-    title: Missing duplicate registration across files
-    updated: '2026-03-01'
-  - created: '2026-03-02'
-    id: M-20260302-015214-5390a0
-    path: entries/M-20260302-015214-5390a0.yaml
-    scope:
-      - repo
-    tags:
-      - refactor
-      - import
-      - op-schedule
-      - testing
-    title: Incomplete import path updates after moving symbols between modules
-    updated: '2026-03-02'
-  - created: '2026-03-06'
-    id: M-20260306-195314-50a55c
-    path: entries/M-20260306-195314-50a55c.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - warnings
-      - pyproject
-      - scope-control
-      - workflow
-    title: Applying global pytest warning filters before confirming accepted mitigation
-    updated: '2026-03-06'
-  - created: '2026-03-07'
-    id: M-20260307-231252-423c4d
-    path: entries/M-20260307-231252-423c4d.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - shared-memory
-      - gpu
-      - flaky-tests
-      - correctness
-    title: Copied entire shared memory buffer instead of written subregion in test
-    updated: '2026-03-07'
-  - created: '2026-03-08'
-    id: M-20260308-232603-9a9463
-    path: entries/M-20260308-232603-9a9463.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - tirx
-      - scope-control
-    title: Ran op_schedule/ subtree tests instead of full tirx/ test suite
-    updated: '2026-03-08'
-  - created: '2026-03-08'
-    id: M-20260308-232603-cf510d
-    path: entries/M-20260308-232603-cf510d.yaml
-    scope:
-      - repo
-    tags:
-      - refactor
-      - import
-      - python
-      - code-review
-    title: Used `as _alias` imports when extracting to a public utility module
-    updated: '2026-03-08'
-  - created: '2026-03-17'
-    id: M-20260317-211411-ba6927
-    path: entries/M-20260317-211411-ba6927.yaml
-    scope:
-      - repo
-    tags:
-      - pipeline
-      - mbarrier
-      - testing
-      - deadlock
-      - regression
-    title: Changing MBarrier.arrive() default without testing multi-CTA kernels
-    updated: '2026-03-17'
-  - created: '2026-03-17'
-    id: M-20260317-211411-dfb881
-    path: entries/M-20260317-211411-dfb881.yaml
-    scope:
-      - repo
-    tags:
-      - scope-control
-      - tirx
-      - refactor
-      - thoroughness
-    title: Applying syntax changes to only a few kernels instead of all applicable files
-    updated: '2026-03-17'
-  - created: '2026-03-19'
-    id: M-20260319-022448-b1a13a
-    path: entries/M-20260319-022448-b1a13a.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - verification
-      - gpu
-      - assumptions
-    title: Claiming kernel compilation was slow without verifying
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: M-20260319-022448-da2fb0
-    path: entries/M-20260319-022448-da2fb0.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - verification
-      - workflow
-    title: Not running tests before claiming they pass
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: M-20260319-022448-dbe043
-    path: entries/M-20260319-022448-dbe043.yaml
-    scope:
-      - repo
-    tags:
-      - pytest
-      - xdist
-      - parallelism
-      - testing
-      - design
-    title: Not considering xdist parallelism impact when consolidating test files
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: M-20260319-174407-01b7d3
-    path: entries/M-20260319-174407-01b7d3.yaml
-    scope:
-      - repo
-    tags:
-      - bench-ci
-      - cross-repo
-      - verification
-      - benchmarking
-    title: Cross-repo KNOWN_IMPLS sync is easy to miss
-    updated: '2026-03-19'
-  - created: '2026-03-19'
-    id: M-20260319-174407-26e7d3
-    path: entries/M-20260319-174407-26e7d3.yaml
-    scope:
-      - repo
-    tags:
-      - benchmarking
-      - verification
-      - gpu
-      - testing
-    title: Must run actual GPU benchmarks to verify baselines, not just py_compile
-    updated: '2026-03-19'
-  - created: '2026-03-20'
-    id: M-20260320-002326-7c92c5
-    path: entries/M-20260320-002326-7c92c5.yaml
-    scope:
-      - repo
-    tags:
-      - packaging
-      - pip
-      - editable-install
-      - testing
-    title: Editable pip install finder caches old module mapping after directory rename
-    updated: '2026-03-20'
-  - created: '2026-03-22'
-    id: M-20260322-182024-19635e
-    path: entries/M-20260322-182024-19635e.yaml
-    scope:
-      - repo
-    tags:
-      - testing
-      - pip
-      - editable-install
-      - python
-      - verification
-    title: Testing against wrong Python environment / wrong tirx-kernels install
-    updated: '2026-03-22'
-  - created: '2026-03-22'
-    id: M-20260322-182024-631109
-    path: entries/M-20260322-182024-631109.yaml
-    scope:
-      - repo
-    tags:
-      - tvmscript
-      - annotation
-      - buffer
-      - correctness
-      - migration
-    title: Confused scalar PrimExpr with Buffer when migrating size-1 alloc_local to annotation syntax
-    updated: '2026-03-22'
+- created: '2026-02-27'
+  id: M-20260227-0001
+  path: entries/M-20260227-0001.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - requirements
+  - user-intent
+  title: Counting ops instead of structural comparison when user explicitly asked
+    for assert_structural_equal
+  updated: '2026-02-27'
+- created: '2026-02-27'
+  id: M-20260227-0002
+  path: entries/M-20260227-0002.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - golden
+  - readability
+  title: JSON golden blobs are not readable golden tests
+  updated: '2026-02-27'
+- created: '2026-02-27'
+  id: M-20260227-0003
+  path: entries/M-20260227-0003.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - golden
+  - debugging
+  title: Verify actual IR output before writing expected values
+  updated: '2026-02-27'
+- created: '2026-02-28'
+  id: M-20260228-0001
+  path: entries/M-20260228-0001.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - git
+  - process
+  - quality
+  title: Bypassing hooks with --no-verify before resolving blockers
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: M-20260228-0002
+  path: entries/M-20260228-0002.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - lint
+  - python
+  - scope-control
+  - workflow
+  title: Fixing a small API mismatch in a high-churn file caused avoidable lint fallout
+  updated: '2026-02-28'
+- created: '2026-02-28'
+  id: M-20260228-0003
+  path: entries/M-20260228-0003.yaml
+  scope:
+  - repo
+  tags:
+  - shell
+  - gh
+  - git
+  - process
+  - quoting
+  title: Using inline PR body with backticks in shell command
+  updated: '2026-02-28'
+- created: '2026-03-01'
+  id: M-20260301-0001
+  path: entries/M-20260301-0001.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - lint
+  - correctness
+  - workflow
+  - scope-control
+  title: Using broad lint exemptions instead of per-error fixes
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: M-20260301-0002
+  path: entries/M-20260301-0002.yaml
+  scope:
+  - repo
+  tags:
+  - api
+  - tirx
+  - scope-control
+  - over-engineering
+  title: Modifying framework API instead of fixing call sites
+  updated: '2026-03-01'
+- created: '2026-03-01'
+  id: M-20260301-0003
+  path: entries/M-20260301-0003.yaml
+  scope:
+  - repo
+  tags:
+  - op-schedule
+  - registration
+  - code-review
+  - duplication
+  title: Missing duplicate registration across files
+  updated: '2026-03-01'
+- created: '2026-03-02'
+  id: M-20260302-015214-5390a0
+  path: entries/M-20260302-015214-5390a0.yaml
+  scope:
+  - repo
+  tags:
+  - refactor
+  - import
+  - op-schedule
+  - testing
+  title: Incomplete import path updates after moving symbols between modules
+  updated: '2026-03-02'
+- created: '2026-03-06'
+  id: M-20260306-195314-50a55c
+  path: entries/M-20260306-195314-50a55c.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - warnings
+  - pyproject
+  - scope-control
+  - workflow
+  title: Applying global pytest warning filters before confirming accepted mitigation
+  updated: '2026-03-06'
+- created: '2026-03-07'
+  id: M-20260307-231252-423c4d
+  path: entries/M-20260307-231252-423c4d.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - shared-memory
+  - gpu
+  - flaky-tests
+  - correctness
+  title: Copied entire shared memory buffer instead of written subregion in test
+  updated: '2026-03-07'
+- created: '2026-03-08'
+  id: M-20260308-232603-9a9463
+  path: entries/M-20260308-232603-9a9463.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - tirx
+  - scope-control
+  title: Ran op_schedule/ subtree tests instead of full tirx/ test suite
+  updated: '2026-03-08'
+- created: '2026-03-08'
+  id: M-20260308-232603-cf510d
+  path: entries/M-20260308-232603-cf510d.yaml
+  scope:
+  - repo
+  tags:
+  - refactor
+  - import
+  - python
+  - code-review
+  title: Used `as _alias` imports when extracting to a public utility module
+  updated: '2026-03-08'
+- created: '2026-03-17'
+  id: M-20260317-211411-ba6927
+  path: entries/M-20260317-211411-ba6927.yaml
+  scope:
+  - repo
+  tags:
+  - pipeline
+  - mbarrier
+  - testing
+  - deadlock
+  - regression
+  title: Changing MBarrier.arrive() default without testing multi-CTA kernels
+  updated: '2026-03-17'
+- created: '2026-03-17'
+  id: M-20260317-211411-dfb881
+  path: entries/M-20260317-211411-dfb881.yaml
+  scope:
+  - repo
+  tags:
+  - scope-control
+  - tirx
+  - refactor
+  - thoroughness
+  title: Applying syntax changes to only a few kernels instead of all applicable files
+  updated: '2026-03-17'
+- created: '2026-03-19'
+  id: M-20260319-022448-b1a13a
+  path: entries/M-20260319-022448-b1a13a.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - verification
+  - gpu
+  - assumptions
+  title: Claiming kernel compilation was slow without verifying
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: M-20260319-022448-da2fb0
+  path: entries/M-20260319-022448-da2fb0.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - verification
+  - workflow
+  title: Not running tests before claiming they pass
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: M-20260319-022448-dbe043
+  path: entries/M-20260319-022448-dbe043.yaml
+  scope:
+  - repo
+  tags:
+  - pytest
+  - xdist
+  - parallelism
+  - testing
+  - design
+  title: Not considering xdist parallelism impact when consolidating test files
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: M-20260319-174407-01b7d3
+  path: entries/M-20260319-174407-01b7d3.yaml
+  scope:
+  - repo
+  tags:
+  - bench-ci
+  - cross-repo
+  - verification
+  - benchmarking
+  title: Cross-repo KNOWN_IMPLS sync is easy to miss
+  updated: '2026-03-19'
+- created: '2026-03-19'
+  id: M-20260319-174407-26e7d3
+  path: entries/M-20260319-174407-26e7d3.yaml
+  scope:
+  - repo
+  tags:
+  - benchmarking
+  - verification
+  - gpu
+  - testing
+  title: Must run actual GPU benchmarks to verify baselines, not just py_compile
+  updated: '2026-03-19'
+- created: '2026-03-20'
+  id: M-20260320-002326-7c92c5
+  path: entries/M-20260320-002326-7c92c5.yaml
+  scope:
+  - repo
+  tags:
+  - packaging
+  - pip
+  - editable-install
+  - testing
+  title: Editable pip install finder caches old module mapping after directory rename
+  updated: '2026-03-20'
+- created: '2026-03-22'
+  id: M-20260322-182024-19635e
+  path: entries/M-20260322-182024-19635e.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - pip
+  - editable-install
+  - python
+  - verification
+  title: Testing against wrong Python environment / wrong tirx-kernels install
+  updated: '2026-03-22'
+- created: '2026-03-22'
+  id: M-20260322-182024-631109
+  path: entries/M-20260322-182024-631109.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - annotation
+  - buffer
+  - correctness
+  - migration
+  title: Confused scalar PrimExpr with Buffer when migrating size-1 alloc_local to
+    annotation syntax
+  updated: '2026-03-22'
+- created: '2026-03-23'
+  id: M-20260323-185836-374105
+  path: entries/M-20260323-185836-374105.yaml
+  scope:
+  - repo
+  tags:
+  - python
+  - lambda
+  - closure
+  - benchmarking
+  title: Python lambda closure captures variable by reference in loops
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: M-20260323-185836-4c16ff
+  path: entries/M-20260323-185836-4c16ff.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - bench_tk
+  - L2-eviction
+  - testing
+  title: bench_tk with [()] bypasses L2 eviction entirely
+  updated: '2026-03-23'
+- created: '2026-03-23'
+  id: M-20260323-185836-967c0e
+  path: entries/M-20260323-185836-967c0e.yaml
+  scope:
+  - repo
+  tags:
+  - bench
+  - bench_tk
+  - thunderkittens
+  - formula
+  title: _compute_groups formula must match ThunderKittens exactly
+  updated: '2026-03-23'
+- created: '2026-03-24'
+  id: M-20260324-171756-5d4c5e
+  path: entries/M-20260324-171756-5d4c5e.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - user-intent
+  - claude-md
+  title: Ran sm100a kernel tests instead of full tirx test suite when asked for 'standard
+    test'
+  updated: '2026-03-24'
 tags:
+  L2-eviction:
+  - M-20260323-185836-4c16ff
   annotation:
-    - M-20260322-182024-631109
+  - M-20260322-182024-631109
   api:
-    - M-20260301-0002
+  - M-20260301-0002
   assumptions:
-    - M-20260319-022448-b1a13a
+  - M-20260319-022448-b1a13a
+  bench:
+  - M-20260323-185836-4c16ff
+  - M-20260323-185836-967c0e
   bench-ci:
-    - M-20260319-174407-01b7d3
+  - M-20260319-174407-01b7d3
+  bench_tk:
+  - M-20260323-185836-4c16ff
+  - M-20260323-185836-967c0e
   benchmarking:
-    - M-20260319-174407-01b7d3
-    - M-20260319-174407-26e7d3
+  - M-20260319-174407-01b7d3
+  - M-20260319-174407-26e7d3
+  - M-20260323-185836-374105
   buffer:
-    - M-20260322-182024-631109
+  - M-20260322-182024-631109
+  claude-md:
+  - M-20260324-171756-5d4c5e
+  closure:
+  - M-20260323-185836-374105
   code-review:
-    - M-20260301-0003
-    - M-20260308-232603-cf510d
+  - M-20260301-0003
+  - M-20260308-232603-cf510d
   correctness:
-    - M-20260301-0001
-    - M-20260307-231252-423c4d
-    - M-20260322-182024-631109
+  - M-20260301-0001
+  - M-20260307-231252-423c4d
+  - M-20260322-182024-631109
   cross-repo:
-    - M-20260319-174407-01b7d3
+  - M-20260319-174407-01b7d3
   deadlock:
-    - M-20260317-211411-ba6927
+  - M-20260317-211411-ba6927
   debugging:
-    - M-20260227-0003
+  - M-20260227-0003
   design:
-    - M-20260319-022448-dbe043
+  - M-20260319-022448-dbe043
   duplication:
-    - M-20260301-0003
+  - M-20260301-0003
   editable-install:
-    - M-20260320-002326-7c92c5
-    - M-20260322-182024-19635e
+  - M-20260320-002326-7c92c5
+  - M-20260322-182024-19635e
   flaky-tests:
-    - M-20260307-231252-423c4d
+  - M-20260307-231252-423c4d
+  formula:
+  - M-20260323-185836-967c0e
   gh:
-    - M-20260228-0003
+  - M-20260228-0003
   git:
-    - M-20260228-0001
-    - M-20260228-0003
+  - M-20260228-0001
+  - M-20260228-0003
   golden:
-    - M-20260227-0002
-    - M-20260227-0003
+  - M-20260227-0002
+  - M-20260227-0003
   gpu:
-    - M-20260307-231252-423c4d
-    - M-20260319-022448-b1a13a
-    - M-20260319-174407-26e7d3
+  - M-20260307-231252-423c4d
+  - M-20260319-022448-b1a13a
+  - M-20260319-174407-26e7d3
   import:
-    - M-20260302-015214-5390a0
-    - M-20260308-232603-cf510d
+  - M-20260302-015214-5390a0
+  - M-20260308-232603-cf510d
+  lambda:
+  - M-20260323-185836-374105
   lint:
-    - M-20260228-0002
-    - M-20260301-0001
+  - M-20260228-0002
+  - M-20260301-0001
   mbarrier:
-    - M-20260317-211411-ba6927
+  - M-20260317-211411-ba6927
   migration:
-    - M-20260322-182024-631109
+  - M-20260322-182024-631109
   op-schedule:
-    - M-20260301-0003
-    - M-20260302-015214-5390a0
+  - M-20260301-0003
+  - M-20260302-015214-5390a0
   over-engineering:
-    - M-20260301-0002
+  - M-20260301-0002
   packaging:
-    - M-20260320-002326-7c92c5
+  - M-20260320-002326-7c92c5
   parallelism:
-    - M-20260319-022448-dbe043
+  - M-20260319-022448-dbe043
   pip:
-    - M-20260320-002326-7c92c5
-    - M-20260322-182024-19635e
+  - M-20260320-002326-7c92c5
+  - M-20260322-182024-19635e
   pipeline:
-    - M-20260317-211411-ba6927
+  - M-20260317-211411-ba6927
   pre-commit:
-    - M-20260228-0001
-    - M-20260301-0001
+  - M-20260228-0001
+  - M-20260301-0001
   process:
-    - M-20260228-0001
-    - M-20260228-0003
+  - M-20260228-0001
+  - M-20260228-0003
   pyproject:
-    - M-20260306-195314-50a55c
+  - M-20260306-195314-50a55c
   pytest:
-    - M-20260306-195314-50a55c
-    - M-20260319-022448-dbe043
+  - M-20260306-195314-50a55c
+  - M-20260319-022448-dbe043
   python:
-    - M-20260228-0002
-    - M-20260308-232603-cf510d
-    - M-20260322-182024-19635e
+  - M-20260228-0002
+  - M-20260308-232603-cf510d
+  - M-20260322-182024-19635e
+  - M-20260323-185836-374105
   quality:
-    - M-20260228-0001
+  - M-20260228-0001
   quoting:
-    - M-20260228-0003
+  - M-20260228-0003
   readability:
-    - M-20260227-0002
+  - M-20260227-0002
   rebase:
-    - M-20260228-0002
+  - M-20260228-0002
   refactor:
-    - M-20260302-015214-5390a0
-    - M-20260308-232603-cf510d
-    - M-20260317-211411-dfb881
+  - M-20260302-015214-5390a0
+  - M-20260308-232603-cf510d
+  - M-20260317-211411-dfb881
   registration:
-    - M-20260301-0003
+  - M-20260301-0003
   regression:
-    - M-20260317-211411-ba6927
+  - M-20260317-211411-ba6927
   requirements:
-    - M-20260227-0001
+  - M-20260227-0001
   scope-control:
-    - M-20260228-0002
-    - M-20260301-0001
-    - M-20260301-0002
-    - M-20260306-195314-50a55c
-    - M-20260308-232603-9a9463
-    - M-20260317-211411-dfb881
+  - M-20260228-0002
+  - M-20260301-0001
+  - M-20260301-0002
+  - M-20260306-195314-50a55c
+  - M-20260308-232603-9a9463
+  - M-20260317-211411-dfb881
   shared-memory:
-    - M-20260307-231252-423c4d
+  - M-20260307-231252-423c4d
   shell:
-    - M-20260228-0003
+  - M-20260228-0003
   testing:
-    - M-20260227-0001
-    - M-20260227-0002
-    - M-20260227-0003
-    - M-20260302-015214-5390a0
-    - M-20260307-231252-423c4d
-    - M-20260308-232603-9a9463
-    - M-20260317-211411-ba6927
-    - M-20260319-022448-b1a13a
-    - M-20260319-022448-da2fb0
-    - M-20260319-022448-dbe043
-    - M-20260319-174407-26e7d3
-    - M-20260320-002326-7c92c5
-    - M-20260322-182024-19635e
+  - M-20260227-0001
+  - M-20260227-0002
+  - M-20260227-0003
+  - M-20260302-015214-5390a0
+  - M-20260307-231252-423c4d
+  - M-20260308-232603-9a9463
+  - M-20260317-211411-ba6927
+  - M-20260319-022448-b1a13a
+  - M-20260319-022448-da2fb0
+  - M-20260319-022448-dbe043
+  - M-20260319-174407-26e7d3
+  - M-20260320-002326-7c92c5
+  - M-20260322-182024-19635e
+  - M-20260323-185836-4c16ff
+  - M-20260324-171756-5d4c5e
   thoroughness:
-    - M-20260317-211411-dfb881
+  - M-20260317-211411-dfb881
+  thunderkittens:
+  - M-20260323-185836-967c0e
   tirx:
-    - M-20260301-0002
-    - M-20260308-232603-9a9463
-    - M-20260317-211411-dfb881
+  - M-20260301-0002
+  - M-20260308-232603-9a9463
+  - M-20260317-211411-dfb881
   tvmscript:
-    - M-20260322-182024-631109
+  - M-20260322-182024-631109
   user-intent:
-    - M-20260227-0001
+  - M-20260227-0001
+  - M-20260324-171756-5d4c5e
   verification:
-    - M-20260319-022448-b1a13a
-    - M-20260319-022448-da2fb0
-    - M-20260319-174407-01b7d3
-    - M-20260319-174407-26e7d3
-    - M-20260322-182024-19635e
+  - M-20260319-022448-b1a13a
+  - M-20260319-022448-da2fb0
+  - M-20260319-174407-01b7d3
+  - M-20260319-174407-26e7d3
+  - M-20260322-182024-19635e
   warnings:
-    - M-20260306-195314-50a55c
+  - M-20260306-195314-50a55c
   workflow:
-    - M-20260228-0002
-    - M-20260301-0001
-    - M-20260306-195314-50a55c
-    - M-20260319-022448-da2fb0
+  - M-20260228-0002
+  - M-20260301-0001
+  - M-20260306-195314-50a55c
+  - M-20260319-022448-da2fb0
   xdist:
-    - M-20260319-022448-dbe043
+  - M-20260319-022448-dbe043

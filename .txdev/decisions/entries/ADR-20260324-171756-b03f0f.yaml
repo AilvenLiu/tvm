@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Problem: Build/test/bench instructions in CLAUDE.md were not reliably
+    followed. The agent forgot the exact test command (pytest tests/python/tirx/ -n
+    16) and ran only a subset instead.
+
+
+    Decision: Create .claude/commands/tir-build.md, tir-test.md, tir-bench.md as slash
+    commands. CLAUDE.md now references the commands instead of inlining the instructions.
+
+
+    Why this works better: CLAUDE.md is loaded at conversation start and can be pushed
+    out of attention by context compression. Slash commands are injected into the
+    current turn when invoked (/tir-test), so the instructions appear at the strongest
+    attention position.
+
+
+    Trade-off: Requires user to explicitly invoke the command rather than relying
+    on the agent to follow CLAUDE.md. But for standard operations that must be done
+    correctly, this is the right trade-off.'
+  summary: Standard operations (build, test, bench) moved from CLAUDE.md inline instructions
+    to .claude/commands/ slash commands for reliability.
+created: '2026-03-24'
+id: ADR-20260324-171756-b03f0f
+scope:
+- repo
+tags:
+- tooling
+- claude-code
+- commands
+- testing
+- benchmarking
+title: Claude Code slash commands over CLAUDE.md for standard operations
+updated: '2026-03-24'

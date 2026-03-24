@@ -69,30 +69,13 @@ Key files:
 - C++ implementation: `src/tir/ir/layout/`
 - Tests: `tests/python/tirx/test_layout.py`
 
-## Building
+## Building, Testing, and Benchmarking
 
-Build TVM (from project root):
-```bash
-mkdir -p build && cd build && cmake .. && make -j$(nproc)
-```
+Use the following skills (slash commands) for standard operations:
 
-## Testing
-
-**Build first (mandatory)**: Before running any tests, ensure TVM is built and `build/` is up to date (you do not need to recreate the directory each time):
-```bash
-cmake --build build -j$(nproc)
-```
-If `build/` does not exist yet, run the commands in `## Building` first.
-
-**GPU selection**: Before running GPU tests, check if this is a multi-GPU machine (`nvidia-smi --query-gpu=index --format=csv,noheader | wc -l`). If so, select the least busy GPU to avoid conflicts:
-```bash
-export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | sort -t',' -k2 -n | head -1 | cut -d',' -f1 | tr -d ' ')
-```
-
-Run TIRX tests:
-```bash
-pytest tests/python/tirx/ -n 16
-```
+- `/tir-build` — Build TVM (initial or incremental)
+- `/tir-test` — Run the full TIRX test suite (`pytest tests/python/tirx/ -n 16`)
+- `/tir-bench` — Run GEMM performance benchmarks (fp16, fp8, nvfp4)
 
 **SM100a and megakernel tests** require the [tirx-kernels](https://github.com/mlc-ai/tirx-kernels) repo (kernel definitions are maintained separately). Install it as an editable pip package:
 ```bash
@@ -100,8 +83,6 @@ git clone git@github.com:mlc-ai/tirx-kernels.git ~/tirx-kernels
 pip install -e ~/tirx-kernels
 ```
 SM100a kernel tests use the unified `tirx_kernels` package registry — the single `test_kernels.py` file discovers and runs all registered kernels via `tirx_kernels.registry.discover_kernels()`.
-
-**Kernel performance**: When modifying anything that affects code generation (kernels, op dispatches, lowering passes, codegen, device ops), verify performance by running square GEMM benchmarks at M=N=K in {1024, 2048, 4096, 8192, 16384} for the three GEMM variants (fp16, fp8, nvfp4). The kernel scripts have built-in benchmarking — just run them and record the output.
 
 ## Code Style
 
