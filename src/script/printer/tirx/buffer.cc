@@ -94,18 +94,25 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
     kwargs.Set("dtype", LiteralDoc::DataType(buffer->dtype, buffer_p->Attr("dtype")));
   }
   // Step 3. Handle `buffer.data`
-  bool is_inline_data = false;
-  if (is_new_var(buffer->data)) {
-    if (var_definitions >= BufferVarDefinition::DataPointer) {
-      is_inline_data = try_inline_def(buffer->data, buffer_p->Attr("data"), [=]() {
-        return d->AsDoc<ExprDoc>(buffer, buffer_p)->Attr("data");
-      });
-    } else {
-      add_out_of_line_var_def(buffer->data, buffer_p->Attr("data"));
-    }
+  // For tmem scope, DeclBuffer does not accept `data` (it auto-creates the data var).
+  bool is_tmem_scope = false;
+  if (auto* ptr_type = buffer->data->type_annotation.as<PointerTypeNode>()) {
+    is_tmem_scope = (ptr_type->storage_scope == "tmem");
   }
-  if (!is_inline_data) {
-    kwargs.Set("data", d->AsDoc<ExprDoc>(buffer->data, buffer_p->Attr("data")));
+  bool is_inline_data = false;
+  if (!is_tmem_scope) {
+    if (is_new_var(buffer->data)) {
+      if (var_definitions >= BufferVarDefinition::DataPointer) {
+        is_inline_data = try_inline_def(buffer->data, buffer_p->Attr("data"), [=]() {
+          return d->AsDoc<ExprDoc>(buffer, buffer_p)->Attr("data");
+        });
+      } else {
+        add_out_of_line_var_def(buffer->data, buffer_p->Attr("data"));
+      }
+    }
+    if (!is_inline_data) {
+      kwargs.Set("data", d->AsDoc<ExprDoc>(buffer->data, buffer_p->Attr("data")));
+    }
   }
   // Step 4. Handle `buffer.strides`
   if (!buffer->strides.empty()) {
@@ -185,8 +192,37 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   }
   // Step 13. Handle `buffer.allocated_addr`
   if (!buffer->allocated_addr.empty()) {
-    kwargs.Set("allocated_addr",
-               d->AsDoc<ExprDoc>(buffer->allocated_addr, buffer_p->Attr("allocated_addr")));
+    if (buffer->allocated_addr.size() == 1) {
+      // Unwrap single-element array: DeclBuffer expects Optional<PrimExpr>, not Array.
+      // For BufferLoad from scalar buffers, we must explicitly print buf[idx] because
+      // the scalar shorthand (which drops the index) produces just the variable name,
+      // and the parser resolves that to a Buffer object rather than a PrimExpr value.
+      PrimExpr addr = buffer->allocated_addr[0];
+      AccessPath addr_p = buffer_p->Attr("allocated_addr")->ArrayItem(0);
+      if (const auto* bl = addr.as<tir::BufferLoadNode>()) {
+        // Ensure the buffer variable is defined (may emit a Tx.Buffer(...) statement).
+        d->AsDoc<ExprDoc>(bl->buffer, addr_p->Attr("buffer"));
+        // Get the variable name bound to this buffer.
+        ffi::Optional<ExprDoc> buf_var = d->GetVarDoc(bl->buffer);
+        TVM_FFI_ICHECK(buf_var.has_value())
+            << "Buffer in allocated_addr is not defined: " << bl->buffer;
+        // Build var[indices] explicitly instead of going through the default BufferLoad
+        // printer, which would use the scalar shorthand and drop the index.
+        int n_idx = bl->indices.size();
+        ffi::Array<Doc> idx_docs;
+        idx_docs.reserve(n_idx);
+        for (int i = 0; i < n_idx; ++i) {
+          idx_docs.push_back(
+              d->AsDoc<ExprDoc>(bl->indices[i], addr_p->Attr("indices")->ArrayItem(i)));
+        }
+        kwargs.Set("allocated_addr", buf_var.value()[idx_docs]);
+      } else {
+        kwargs.Set("allocated_addr", d->AsDoc<ExprDoc>(addr, addr_p));
+      }
+    } else {
+      kwargs.Set("allocated_addr",
+                 d->AsDoc<ExprDoc>(buffer->allocated_addr, buffer_p->Attr("allocated_addr")));
+    }
   }
 
   if (var_def_lhs.size() == 1) {

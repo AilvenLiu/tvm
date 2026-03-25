@@ -1,0 +1,65 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The smem descriptor cache in gemm_async.py used a key derived from
+
+    hash(smem_buf.data) + (ldo, sdo, swizzle_val). Pool-allocated buffers
+
+    A_smem and B_smem shared the same .data Var (pointing to the same
+
+    physical shared memory region). When A and B had identical encode
+
+    parameters, the cache returned B''s descriptor for A.
+
+
+    This caused the fp8_blockwise_gemm kernel to produce cosine similarity
+
+    of -0.001 (completely wrong output). The bug was subtle because:
+
+    - It only manifested with pool allocation (not separate smem allocs)
+
+    - It required both buffers to have matching encode parameters
+
+    - Unit tests with distinct shapes didn''t trigger it
+
+
+    Fix: hash(smem_buf) instead of hash(smem_buf.data). Buffer object
+
+    identity is unique even when .data is shared.
+
+
+    Lesson: when caching by buffer identity, always use the buffer object
+
+    itself, never just .data, because pool allocation aliases .data.
+
+    '
+  summary: Used hash(smem_buf.data) for smem descriptor cache keys, but pool-allocated
+    buffers share the same .data Var — caused GEMM to reuse B's descriptor for A,
+    producing garbage output.
+created: '2026-03-25'
+id: M-20260325-174353-51abbb
+scope:
+- repo
+tags:
+- caching
+- correctness
+- smem
+- pool-allocator
+- gemm
+title: Cache key collision from pool-allocated buffer .data identity
+updated: '2026-03-25'

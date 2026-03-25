@@ -41,6 +41,7 @@ def _contains_exec_scope(mod):
 
 
 def compare(before, after, transform):
+    """Compare lowered output against expected ``after`` IR."""
     if isinstance(before, PrimFunc):
         before = tvm.IRModule({"main": before})
     if isinstance(after, PrimFunc):
@@ -267,220 +268,6 @@ def test_lower_view_get():
     # fmt: on
 
     compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRx)
-
-
-def test_lower_tirx_dedup_cu_tensormap():
-    # fmt: off
-    @Tx.prim_func(private=True, tirx=True)
-    def before(A_ptr: Tx.handle, cond: Tx.bool) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", scope="global")
-
-        # Two tensormap allocations
-        map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map3: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-
-        if cond:
-            # Two identical cuTensorMapEncodeTiled initializations
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                map1, "float16", 2, A.data,
-                32, 64,    # global_shape (reversed)
-                64,        # global stride
-                16, 16,    # shared_shape (boxDim)
-                1, 1,      # shared_strides
-                0, 0, 0, 0 # interleave, swizzle, l2, oob
-            )
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                map2, "float16", 2, A.data,
-                32, 64, 64,
-                16, 16,
-                1, 1,
-                0, 0, 0, 0
-            )
-            # unused map, should be removed in the pass
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                map3, "float16", 2, A.data,
-                32, 64, 64,
-                16, 16,
-                1, 1,
-                0, 0, 0, 0
-            )
-        else:
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                map1, "float16", 2, A.data,
-                32, 64, 64,
-                16, 16,
-                1, 1,
-                0, 0, 0, 0
-            )
-
-        # Use site of map2, should be rewritten to map1
-        with Tx.kernel():
-            with Tx.cta():
-                S = Tx.alloc_buffer((16, 16), "float16", scope="shared")
-                Tx.ptx.cp_async.bulk.tensor.s2g(2, S.ptr_to([0, 0]), map2, 0, 0)
-
-    @Tx.prim_func(private=True, tirx=True)
-    def after(A_ptr: Tx.handle, cond: Tx.bool) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
-        tmap: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        if cond:
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                tmap, "float16", 2, A.data,
-                32, 64, 64,
-                16, 16,
-                1, 1,
-                0, 0, 0, 0
-            )
-        else:
-            Tx.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                tmap, "float16", 2, A.data,
-                32, 64, 64,
-                16, 16,
-                1, 1,
-                0, 0, 0, 0
-            )
-        S = Tx.alloc_buffer((256,), "float16", scope="shared", layout=None)
-        Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), tmap, 0, 0)
-    # fmt: on
-
-    compare(before, after, LowerTIRx)
-
-
-def test_lower_tirx_keep_different_cu_tensormaps():
-    # fmt: off
-    @Tx.prim_func(private=True, tirx=True)
-    def before(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", scope="global")
-
-        map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-
-        # First tensormap uses float16
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map1, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-
-        # Second tensormap differs in dtype (float32), so must not be deduped
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map2, "float32", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-
-        # Use both maps in body to confirm no rewrite across different params
-        with Tx.kernel():
-            with Tx.cta():
-                S = Tx.alloc_buffer((16, 16), "float16", scope="shared")
-                Tx.ptx.cp_async.bulk.tensor.s2g(2, S.ptr_to([0, 0]), map1, 0, 0)
-                Tx.ptx.cp_async.bulk.tensor.s2g(2, S.ptr_to([0, 0]), map2, 0, 0)
-
-    @Tx.prim_func(private=True, tirx=True)
-    def after(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
-        map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map1, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map2, "float32", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-        S = Tx.alloc_buffer((256,), "float16", scope="shared", layout=None)
-        Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map1, 0, 0)
-        Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map2, 0, 0)
-    # fmt: on
-
-    compare(before, after, LowerTIRx)
-
-
-def test_lower_tirx_keep_different_swizzle():
-    # fmt: off
-    @Tx.prim_func(private=True, tirx=True)
-    def before(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", scope="global")
-
-        map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-
-        # Identical except swizzle_kind (0 vs 1)
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map1, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map2, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 1, 0, 0   # swizzle differs
-        )
-
-        with Tx.kernel():
-            with Tx.cta():
-                S = Tx.alloc_buffer((256,), "float16", scope="shared", layout=None)
-                Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map1, 0, 0)
-                Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map2, 0, 0)
-
-    @Tx.prim_func(private=True, tirx=True)
-    def after(A_ptr: Tx.handle) -> None:
-        A = Tx.match_buffer(A_ptr, (64, 32), "float16", layout=None)
-        A_1 = Tx.decl_buffer((2048,), "float16", data=A.data, layout=None)  # noqa: F841
-        map1: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        map2: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map1, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map2, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 1, 0, 0
-        )
-        S = Tx.alloc_buffer((256,), "float16", scope="shared", layout=None)
-        Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map1, 0, 0)
-        Tx.ptx.cp_async.bulk.tensor.s2g(2, Tx.address_of(S[0]), map2, 0, 0)
-    # fmt: on
-
-    compare(before, after, LowerTIRx)
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
@@ -1279,6 +1066,215 @@ def test_lower_preferred_cluster():
     # Variables resolve to clusterCtaIdx registers
     assert "clusterCtaIdx_x" in after_str
     assert "clusterCtaIdx_y" in after_str
+
+
+def test_lower_tirx_dedup_tensormap():
+    """Two identical TMA copy_async calls from the same global buffer should share one tensormap."""
+    from tvm.tirx.op_dispatch.cuda.tma_utils import tma_shared_layout
+
+    shared_layout = tma_shared_layout("float16", 3, (8, 256))
+
+    # fmt: off
+    @Tx.prim_func(private=True, tirx=True)
+    def before(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (8, 256), "float16")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([6208], "uint8", scope="shared.dyn")
+                A_smem = Tx.decl_buffer((8, 256), "float16", dyn.data, elem_offset=0, layout=shared_layout)  # noqa: E501
+                A_smem2 = Tx.decl_buffer((8, 256), "float16", dyn.data, elem_offset=2048, layout=shared_layout)  # noqa: E501
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=1024)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem[:, :], A[:, :], dispatch="tma", mbar=mbar_ptr)
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem2[:, :], A[:, :], dispatch="tma", mbar=mbar_ptr)
+
+    @Tx.prim_func(private=True, tirx=True)
+    def after(A_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, (8, 256), "float16", layout=None)
+        A_1 = A.view(2048)  # noqa: F841
+        A_ptr_tensormap: Tx.let[Tx.handle("tensormap", "global")] = Tx.tvm_stack_alloca("tensormap", 1)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_ptr_tensormap, "float16", 3, A.data, 64, 8, 4, 512, 128, 64, 8, 4, 1, 1, 1, 0, 3, 2, 0)  # noqa: E501
+        with Tx.launch_thread("blockIdx.x", 1) as blockIdx_x:
+            threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+            warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501, F841
+            v: Tx.let[Tx.int32] = blockIdx_x
+            v_1: Tx.let[Tx.int32] = threadIdx_x
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
+            dyn = Tx.alloc_buffer((6208,), "uint8", scope="shared.dyn", layout=None)
+            A_smem = Tx.decl_buffer((2048,), "float16", data=dyn.data, scope="shared.dyn", layout=None)  # noqa: E501, F841
+            A_smem2 = Tx.decl_buffer((2048,), "float16", data=dyn.data, elem_offset=2048, scope="shared.dyn", layout=None)  # noqa: E501
+            mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                for loop_vars in range(1):
+                    s_buf_w_offset = A_smem2[-2048:0]
+                    Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                for loop_vars in range(1):
+                    s_buf_w_offset = Tx.decl_buffer((2048,), "float16", data=dyn.data, elem_offset=2048, scope="shared.dyn", layout=None)  # noqa: E501
+                    Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
+    # fmt: on
+
+    compare(before, after, LowerTIRx)
+
+
+def test_lower_tirx_keep_different_tensormaps():
+    """Same global buffer but different smem shapes should get separate tensormaps."""
+    from tvm.tirx.op_dispatch.cuda.tma_utils import tma_shared_layout
+
+    layout_8x64 = tma_shared_layout("float16", 3, (8, 64))
+    layout_8x128 = tma_shared_layout("float16", 3, (8, 128))
+
+    # fmt: off
+    @Tx.prim_func(private=True, tirx=True)
+    def before(A_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (8, 256), "float16")
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.thread_id([128], parent="cta")
+            with Tx.thread():
+                dyn = Tx.alloc_buffer([4160], "uint8", scope="shared.dyn")
+                A_smem1 = Tx.decl_buffer((8, 64), "float16", dyn.data, elem_offset=0, layout=layout_8x64)  # noqa: E501
+                A_smem2 = Tx.decl_buffer((8, 128), "float16", dyn.data, elem_offset=1024, layout=layout_8x128)  # noqa: E501
+                mbarrier = Tx.decl_buffer([1], "uint64", dyn.data, elem_offset=512)
+                mbar_ptr = Tx.meta_var(mbarrier.ptr_to([0]))
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem1[:, :], A[0:8, 0:64], dispatch="tma", mbar=mbar_ptr)
+                with Tx.thread()[0:1]:
+                    Tx.copy_async(A_smem2[:, :], A[0:8, 0:128], dispatch="tma", mbar=mbar_ptr)
+
+    @Tx.prim_func(private=True, tirx=True)
+    def after(A_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, (8, 256), "float16", layout=None)
+        A_1 = A.view(2048)  # noqa: F841
+        A_ptr_tensormap: Tx.let[Tx.handle("tensormap", "global")] = Tx.tvm_stack_alloca("tensormap", 1)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_ptr_tensormap, "float16", 3, A.data, 64, 8, 4, 512, 128, 64, 8, 2, 1, 1, 1, 0, 3, 2, 0)  # noqa: E501
+        A_ptr_tensormap_1: Tx.let[Tx.handle("tensormap", "global")] = Tx.tvm_stack_alloca("tensormap", 1)  # noqa: E501
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_ptr_tensormap_1, "float16", 2, A.data, 256, 8, 512, 64, 8, 1, 1, 0, 3, 2, 0)  # noqa: E501
+        with Tx.launch_thread("blockIdx.x", 1) as blockIdx_x:
+            threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+            warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501, F841
+            v: Tx.let[Tx.int32] = blockIdx_x
+            v_1: Tx.let[Tx.int32] = threadIdx_x
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
+            dyn = Tx.alloc_buffer((4160,), "uint8", scope="shared.dyn", layout=None)
+            A_smem1 = Tx.decl_buffer((512,), "float16", data=dyn.data, scope="shared.dyn", layout=None)  # noqa: E501, F841
+            A_smem2 = Tx.decl_buffer((1024,), "float16", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
+            mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=512, scope="shared.dyn", layout=None)  # noqa: E501
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                for loop_vars in range(1):
+                    s_buf_w_offset = A_smem2[-1024:-512]
+                    Tx.ptx.cp_async.bulk.tensor.g2c(2, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap_1, 0, 1, "", 0, 0)  # noqa: E501
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                for loop_vars in range(1):
+                    s_buf_w_offset = Tx.decl_buffer((1024,), "float16", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
+                    Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
+    # fmt: on
+
+    compare(before, after, LowerTIRx)
+
+
+def test_lower_tirx_dedup_smem_descriptor():
+    """Two gemm_async calls using the same smem buffers should share descriptors."""
+    from tvm.tir.layout import S, TCol, TileLayout, TLane
+    from tvm.tirx.op_dispatch.cuda.tma_utils import tma_shared_layout
+
+    A_layout = tma_shared_layout("float16", 3, (128, 64))
+    B_layout = tma_shared_layout("float16", 3, (128, 64))
+
+    # fmt: off
+    @Tx.prim_func(private=True, tirx=True)
+    def before(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (128, 64), "float16")  # noqa: F841
+        B = Tx.match_buffer(B_ptr, (128, 64), "float16")  # noqa: F841
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            Tx.thread_id([128], parent="warpgroup")
+            A_smem = Tx.alloc_buffer((128, 64), "float16", scope="shared", layout=A_layout)
+            B_smem = Tx.alloc_buffer((128, 64), "float16", scope="shared", layout=B_layout)
+            tmem_addr = Tx.alloc_shared([1], "uint32")
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=128, cta_group=1)
+            tmem = Tx.decl_buffer((128, 128), "float32", scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, 128) : (1 @ TLane, 1 @ TCol)]))  # noqa: E501
+            with Tx.thread()[0:1]:
+                Tx.gemm_async(tmem[0:128, 0:128], A_smem[0:128, 0:64], B_smem[0:128, 0:64], dispatch="tcgen05")  # noqa: E501
+            with Tx.thread()[0:1]:
+                Tx.gemm_async(tmem[0:128, 0:128], A_smem[0:128, 0:64], B_smem[0:128, 0:64], dispatch="tcgen05")  # noqa: E501
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=128, cta_group=1)
+
+    _UNIFORM_SRC = "\n        __forceinline__ __device__ void smem_desc_make_lo_uniform_(uint64_t* desc) {\n            SmemDescriptor* d = reinterpret_cast<SmemDescriptor*>(desc);\n            d->lo = __shfl_sync(0xffffffff, d->lo, 0);\n        }\n        "  # noqa: E501
+    _OFFSET_SRC = "\n__forceinline__ __device__ uint64_t tvm_builtin_smem_desc_add_16B_offset(uint64_t desc_base, int32_t offset) {\n    SmemDescriptor desc;\n    desc.desc_ = desc_base;\n    desc.lo += static_cast<uint32_t>(offset);\n    return desc.desc_;\n}\n"  # noqa: E501
+
+    @Tx.prim_func(private=True, tirx=True)
+    def after(A_ptr: Tx.handle, B_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, (128, 64), "float16", layout=None)
+        B = Tx.match_buffer(B_ptr, (128, 64), "float16", layout=None)
+        B_1 = B.view(8192)  # noqa: F841
+        A_1 = A.view(8192)  # noqa: F841
+        with Tx.launch_thread("blockIdx.x", 1) as blockIdx_x:
+            threadIdx_x = Tx.launch_thread("threadIdx.x", 128)
+            warp_id_in_cta: Tx.let[Tx.int32] = Tx.tvm_warp_shuffle(Tx.uint32(4294967295), threadIdx_x // 32, 0, 32, 32)  # noqa: E501
+            v: Tx.let[Tx.int32] = blockIdx_x
+            v_1: Tx.let[Tx.int32] = warp_id_in_cta // 4
+            v_2: Tx.let[Tx.int32] = threadIdx_x % 128
+            Tx.evaluate(v)
+            Tx.evaluate(v_1)
+            Tx.evaluate(v_2)
+            A_smem = Tx.alloc_shared((8192,), "float16", layout=None)
+            descA = Tx.alloc_local((1,), "uint64", layout=None)
+            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descA[0]), Tx.address_of(A_smem[0]), 64, 64, 3)  # noqa: E501
+            Tx.cuda.func_call("smem_desc_make_lo_uniform_", Tx.address_of(descA[0]), source_code=_UNIFORM_SRC)  # noqa: E501
+            B_smem = Tx.alloc_shared((8192,), "float16", layout=None)
+            descB = Tx.alloc_local((1,), "uint64", layout=None)
+            Tx.ptx.tcgen05.encode_matrix_descriptor(Tx.address_of(descB[0]), Tx.address_of(B_smem[0]), 64, 64, 3)  # noqa: E501
+            Tx.cuda.func_call("smem_desc_make_lo_uniform_", Tx.address_of(descB[0]), source_code=_UNIFORM_SRC)  # noqa: E501
+            tmem_addr = Tx.alloc_shared((1,), "uint32", layout=None)
+            if warp_id_in_cta >= 0 and warp_id_in_cta < 1:
+                Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr[0]), 128, 1)
+            tmem_addr_1 = Tx.Buffer((1,), "uint32", data=tmem_addr.data, scope="shared")
+            tmem = Tx.decl_buffer((16384,), scope="tmem", layout=None, allocated_addr=tmem_addr_1[0])  # noqa: E501, F841
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                descI_local = Tx.alloc_local((1,), "uint32", layout=None)
+                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), "float32", "float16", "float16", 128, 128, 16, Tx.bool(False), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))  # noqa: E501
+                for mi in Tx.unroll(1):
+                    for ni in Tx.unroll(1):
+                        for ki in Tx.unroll(4):
+                            a_val = Tx.alloc_local((1,), "uint64", layout=None)
+                            a_val[0] = Tx.cuda.func_call("tvm_builtin_smem_desc_add_16B_offset", descA[0], (mi * 8192 + ki * 16) // 8, source_code=_OFFSET_SRC, return_type="uint64")  # noqa: E501
+                            descB_val = Tx.alloc_local((1,), "uint64", layout=None)
+                            descB_val[0] = Tx.cuda.func_call("tvm_builtin_smem_desc_add_16B_offset", descB[0], (ni * 8192 + ki * 16) // 8, source_code=_OFFSET_SRC, return_type="uint64")  # noqa: E501
+                            should_accum = Tx.alloc_local((1,), "int8", layout=None)
+                            should_accum[0] = Tx.Cast("int8", ki != 0)
+                            tmem_col = Tx.alloc_local((1,), "int32", layout=None)
+                            tmem_col[0] = ni * 128
+                            Tx.ptx.tcgen05.mma("float32", "float16", "float16", Tx.cuda.get_tmem_addr(tmem_addr[0], mi * 128, tmem_col[0]), a_val[0], descB_val[0], descI_local[0], Tx.bool(False), 1, Tx.Cast("bool", should_accum[0]), 0, 0, 0, 0, 0)  # noqa: E501
+            if threadIdx_x >= 0 and threadIdx_x < 1:
+                descI_local = Tx.alloc_local((1,), "uint32", layout=None)
+                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), "float32", "float16", "float16", 128, 128, 16, Tx.bool(False), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))  # noqa: E501
+                for mi in Tx.unroll(1):
+                    for ni in Tx.unroll(1):
+                        for ki in Tx.unroll(4):
+                            a_val = Tx.alloc_local((1,), "uint64", layout=None)
+                            a_val[0] = Tx.cuda.func_call("tvm_builtin_smem_desc_add_16B_offset", descA[0], (mi * 8192 + ki * 16) // 8, source_code=_OFFSET_SRC, return_type="uint64")  # noqa: E501
+                            descB_val = Tx.alloc_local((1,), "uint64", layout=None)
+                            descB_val[0] = Tx.cuda.func_call("tvm_builtin_smem_desc_add_16B_offset", descB[0], (ni * 8192 + ki * 16) // 8, source_code=_OFFSET_SRC, return_type="uint64")  # noqa: E501
+                            should_accum = Tx.alloc_local((1,), "int8", layout=None)
+                            should_accum[0] = Tx.Cast("int8", ki != 0)
+                            tmem_col = Tx.alloc_local((1,), "int32", layout=None)
+                            tmem_col[0] = ni * 128
+                            Tx.ptx.tcgen05.mma("float32", "float16", "float16", Tx.cuda.get_tmem_addr(tmem_addr[0], mi * 128, tmem_col[0]), a_val[0], descB_val[0], descI_local[0], Tx.bool(False), 1, Tx.Cast("bool", should_accum[0]), 0, 0, 0, 0, 0)  # noqa: E501
+            if warp_id_in_cta >= 0 and warp_id_in_cta < 1:
+                Tx.ptx.tcgen05.dealloc(tmem_addr[0], 128, 1)
+    # fmt: on
+
+    compare(before, after, LowerTIRx)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The old approach used a separate C++ pass (lower_tirx_dedup_tensormap.cc,\n\
+    314 lines) that ran after dispatch to deduplicate tensormaps by analyzing\nthe\
+    \ lowered IR. This had limitations:\n- Could not handle smem descriptors (different\
+    \ construction pattern)\n- Required scope-visibility analysis to determine safe\
+    \ dedup points\n- Was a separate pass that added pipeline complexity\n\nThe new\
+    \ approach adds a shared_state field (Map<String, ObjectRef>) to\nDispatchContextNode\
+    \ that persists across all dispatch calls within a\nsingle LowerTIRxDispatchOps\
+    \ pass. Each dispatcher (copy_async, gemm_async)\ncaches its created objects using\
+    \ string keys derived from construction\nparameters.\n\nKey design choices:\n\
+    - String keys (not structural equality) for O(1) lookup\n- Buffer object identity\
+    \ (hash(buf)) in keys, not buf.data\n- COW-aware: C++ reads shared_state back\
+    \ after each dispatch call\n- No scope lifting needed: if a cached object is visible\
+    \ at the current\n  scope, it's reused; otherwise a new one is created (though\
+    \ in practice\n  all tensormaps are created at the same scope level)\n\nThis unified\
+    \ approach handles both TMA tensormaps and GEMM smem\ndescriptors with the same\
+    \ mechanism.\n"
+  summary: Tensormap and smem descriptor deduplication is done at dispatch time via
+    a shared_state Map on DispatchContext, replacing the separate LowerTIRxDedupCuTensorMaps
+    C++ pass.
+created: '2026-03-25'
+id: ADR-20260325-174353-f8ad92
+scope:
+- repo
+tags:
+- dispatch
+- caching
+- tensormap
+- smem-descriptor
+- architecture
+- pipeline
+title: Dispatch-time caching via shared_state replaces post-hoc dedup pass
+updated: '2026-03-25'

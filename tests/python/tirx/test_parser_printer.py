@@ -1886,5 +1886,118 @@ def test_vector_annotation_with_python_variable_size():
     assert_structural_equal(func, from_source(code))
 
 
+def test_roundtrip_tmem_decl_buffer():
+    """DeclBuffer with tmem scope: data kwarg must be suppressed, allocated_addr
+    must print as PrimExpr (not Array), and scalar buffer index must not get
+    a .buffer suffix."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.launch_thread("blockIdx.x", 1):
+            Tx.launch_thread("threadIdx.x", 128)
+            addr = Tx.alloc_shared((1,), "uint32", layout=None)
+            addr_alias = Tx.Buffer((1,), "uint32", data=addr.data, scope="shared")
+            buf = Tx.decl_buffer((64,), scope="tmem", layout=None, allocated_addr=addr_alias[0])  # noqa: F841
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_roundtrip_cuda_func_call_source_code():
+    """cuda_func_call with multiline source_code must print as keyword arg with
+    inline string literal, not as a metadata reference."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def func():
+        with Tx.kernel():
+            with Tx.cta():
+                desc = Tx.alloc_local((1,), "uint64")
+                Tx.cuda.func_call("my_func", Tx.address_of(desc[0]), source_code="\n__device__ void my_func(uint64_t* p) {\n    *p = 42;\n}\n")  # noqa: E501
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_roundtrip_cp_async_bulk_tensor_g2c():
+    """cp.async.bulk.tensor.g2c must round-trip with *coords at end."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def func(A_ptr: Tx.handle):
+        _ = Tx.match_buffer(A_ptr, (16, 16), "float32")
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        with Tx.launch_thread("blockIdx.x", 1):
+            Tx.launch_thread("threadIdx.x", 128)
+            A_smem = Tx.alloc_buffer((16, 16), "float32", scope="shared")
+            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.data, 0, A_map, 0, 1, "", 0, 0)
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_roundtrip_cp_async_bulk_tensor_s2g():
+    """cp.async.bulk.tensor.s2g must round-trip with *coords at end."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def func(A_ptr: Tx.handle):
+        _ = Tx.match_buffer(A_ptr, (16, 16), "float32")
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        with Tx.launch_thread("blockIdx.x", 1):
+            Tx.launch_thread("threadIdx.x", 128)
+            A_smem = Tx.alloc_buffer((16, 16), "float32", scope="shared")
+            Tx.ptx.cp_async.bulk.tensor.s2g(2, A_smem.data, A_map, "", 0, 0)
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_roundtrip_cp_async_bulk_tensor_g2c_prefetch():
+    """cp.async.bulk.tensor.g2c_prefetch must round-trip with *coords at end."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def func(A_ptr: Tx.handle):
+        _ = Tx.match_buffer(A_ptr, (16, 16), "float32")
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        with Tx.launch_thread("blockIdx.x", 1):
+            Tx.launch_thread("threadIdx.x", 128)
+            Tx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, A_map, "", 0, 0)
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
+def test_roundtrip_cp_async_bulk_tensor_s2g_reduce():
+    """cp.async.bulk.tensor.s2g_reduce must round-trip with *coords at end."""
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def func(A_ptr: Tx.handle):
+        _ = Tx.match_buffer(A_ptr, (16, 16), "float32")
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        with Tx.launch_thread("blockIdx.x", 1):
+            Tx.launch_thread("threadIdx.x", 128)
+            A_smem = Tx.alloc_buffer((16, 16), "float32", scope="shared")
+            Tx.ptx.cp_async.bulk.tensor.s2g_reduce(2, A_smem.data, A_map, "", "add", 0, 0)
+    # fmt: on
+
+    code = func.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func, from_source(code))
+
+
 if __name__ == "__main__":
     tvm.testing.main()

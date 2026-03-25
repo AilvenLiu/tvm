@@ -630,9 +630,32 @@ def copy_tma_impl(
     else:
         cta_mask = 0
 
-    tensor_map = Tx.Var(
-        g_buf.data.name + "_tensormap", dtype=Tx.handle("tensormap").type_annotation
+    # Build tensormap cache key from cuTensorMapEncodeTiled construction params.
+    # tma_g_strides_for_map needs to be computed here for the cache key
+    # (also used later in host-side code).
+    _element_strides = [1] * tma_rank
+    _tma_g_strides_for_map = tma_global_strides[:-1] if tma_rank > 1 else []
+
+    def _val_key(v):
+        """Convert a value (int, IntImm, or PrimExpr) to a cache-key-safe string."""
+        return str(v)
+
+    _tensormap_cache_key = (
+        f"tensormap:{hash(g_buf.data)}:{g_buf.dtype}:{_val_key(tma_rank)}"
+        f":{tuple(_val_key(v) for v in tma_g_shape)}"
+        f":{tuple(_val_key(v) for v in _tma_g_strides_for_map)}"
+        f":{tuple(_val_key(v) for v in box_dim)}"
+        f":{_val_key(swizzle_mode.value)}"
     )
+    _cached_tensormap = sctx.cache_get(_tensormap_cache_key)
+    if _cached_tensormap is not None:
+        tensor_map = _cached_tensormap
+        _tensormap_is_cached = True
+    else:
+        tensor_map = Tx.Var(
+            g_buf.data.name + "_tensormap", dtype=Tx.handle("tensormap").type_annotation
+        )
+        _tensormap_is_cached = False
 
     if direction == "g2s":
         # get mbar from config
@@ -823,10 +846,10 @@ def copy_tma_impl(
                     s_buf_w_offset.ptr_to(s_st),
                     mbar,
                     tensor_map,
+                    cta_mask,
+                    cta_group,
+                    op_call.config.get("cache_hint", ""),
                     *tma_coords,
-                    cta_mask=cta_mask,
-                    cta_group=cta_group,
-                    cache_hint=op_call.config.get("cache_hint", ""),
                 )
             else:
                 if use_tma_reduce is None:
@@ -834,57 +857,51 @@ def copy_tma_impl(
                         tma_rank,
                         s_buf_w_offset.ptr_to(s_st),
                         tensor_map,
+                        op_call.config.get("cache_hint", ""),
                         *tma_coords,
-                        cache_hint=op_call.config.get("cache_hint", ""),
                     )
                 else:
                     Tx.ptx.cp_async.bulk.tensor.s2g_reduce(
                         tma_rank,
                         s_buf_w_offset.ptr_to(s_st),
                         tensor_map,
+                        op_call.config.get("cache_hint", ""),
+                        use_tma_reduce,
                         *tma_coords,
-                        cache_hint=op_call.config.get("cache_hint", ""),
-                        red_op=use_tma_reduce,
                     )
 
     # fmt: on
     # ---------------------------------------------------------------------
-    # Host-side tensor-map creation
+    # Host-side tensor-map creation (skipped on cache hit)
     # ---------------------------------------------------------------------
-    element_strides = [1] * tma_rank
+    if not _tensormap_is_cached:
+        element_strides = _element_strides
+        tma_g_strides_for_map = _tma_g_strides_for_map
 
-    # Use the tensor map shape and strides computed from the layout analysis
-    # This works for both SWIZZLE_NONE and swizzled layouts
-    # tma_g_shape and tma_g_strides are already computed above
-    tma_g_strides_for_map = (
-        tma_global_strides[:-1] if tma_rank > 1 else []
-    )  # Exclude innermost stride
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def create_tensor_map():
+            Tx.Bind(Tx.tvm_stack_alloca("tensormap", 1), var=tensor_map)
+            Tx.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                tensor_map,
+                g_buf.dtype,
+                tma_rank,
+                g_buf.data,
+                *reversed(tma_g_shape),
+                *reversed(tma_g_strides_for_map) if tma_rank > 1 else [],
+                *reversed(box_dim),
+                *element_strides,
+                0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
+                swizzle_mode.value,
+                2,  # CU_TENSOR_MAP_L2_PROMOTION_L2_128B
+                0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
+            )
+            Tx.tvm_kernel_replace_point()
+        # fmt: on
 
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def create_tensor_map():
-        Tx.Bind(Tx.tvm_stack_alloca("tensormap", 1), var=tensor_map)
-        Tx.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            tensor_map,
-            g_buf.dtype,
-            tma_rank,
-            g_buf.data,
-            *reversed(tma_g_shape),
-            *reversed(tma_g_strides_for_map) if tma_rank > 1 else [],
-            *reversed(box_dim),
-            *element_strides,
-            0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
-            swizzle_mode.value,
-            2,  # CU_TENSOR_MAP_L2_PROMOTION_L2_128B
-            0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
-        )
-        Tx.tvm_kernel_replace_point()
-    # fmt: on
-    # create_tensor_map.show()
-
-    # Insert host-side initialization
-    sctx.add_init_stmt(create_tensor_map.body, host=True)
+        sctx.add_init_stmt(create_tensor_map.body, host=True)
+        sctx.cache_set(_tensormap_cache_key, tensor_map)
 
     return impl
 

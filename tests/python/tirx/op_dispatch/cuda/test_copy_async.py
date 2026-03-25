@@ -240,22 +240,22 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
 
     # Build PTX call based on direction
     if direction == "g2s":
-        # g2c(dim, addr, mbar, tensormap, *coords, cta_mask, cta_group, cache_hint)
+        # g2c(dim, addr, mbar, tensormap, cta_mask, cta_group, cache_hint, *coords)
         ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_global_to_cluster")
         ptx_args = [
             IntImm("int32", dim),
             addr_of,
             mbar_ptr,
             A_tensormap,
-            *coords,
             IntImm("int32", 0),
             IntImm("int32", 1),
             StringImm(""),
+            *coords,
         ]
     else:  # s2g
-        # s2g(dim, addr, tensormap, *coords, cache_hint)
+        # s2g(dim, addr, tensormap, cache_hint, *coords)
         ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_shared_to_global")
-        ptx_args = [IntImm("int32", dim), addr_of, A_tensormap, *coords, StringImm("")]
+        ptx_args = [IntImm("int32", dim), addr_of, A_tensormap, StringImm(""), *coords]
 
     eval_stmt = tvm.tir.Evaluate(tvm.tir.Call("", ptx_op, ptx_args))
 

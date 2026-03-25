@@ -319,7 +319,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
                             if threadIdx == 0:
                                 Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
                                 Tx.ptx.fence.proxy_async("shared::cta")
-                                Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, *coord)  # noqa: E501
+                                Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, 0, 1, "", *coord)  # noqa: E501
                                 Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                             Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                             phase = phase ^ 1
@@ -328,7 +328,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
                             Tx.ptx.fence.proxy_async("shared::cta")
 
                             if threadIdx == 0:
-                                Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord)  # noqa: E501
+                                Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, "", *coord)  # noqa: E501
                                 Tx.ptx.cp_async.bulk.commit_group()
                                 Tx.ptx.cp_async.bulk.wait_group(0)
         # fmt: on
@@ -407,7 +407,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
                             if threadIdx == 0:
                                 Tx.ptx.mbarrier.init(Tx.address_of(bar), 1)
                                 Tx.ptx.fence.proxy_async("shared::cta")
-                                Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, *coord)  # noqa: E501
+                                Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, 0, 1, "", *coord)  # noqa: E501
                                 Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)
                                 Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                             phase = phase ^ 1
@@ -416,7 +416,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
                             Tx.ptx.fence.proxy_async("shared::cta")
 
                             if threadIdx == 0:
-                                Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord)  # noqa: E501
+                                Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, "", *coord)  # noqa: E501
                                 Tx.ptx.cp_async.bulk.commit_group()
                                 Tx.ptx.cp_async.bulk.wait_group(0)
         # fmt: on
@@ -496,7 +496,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                                     Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)  # noqa: E501
                                     if clusterCtaIdx == 0:
                                         # only the first CTA in the cluster does the copy, and then multicast  # noqa: E501
-                                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, *coord, cta_mask=int("1111", 2))  # noqa: E501
+                                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, Tx.address_of(bar), A_map, int("1111", 2), 1, "", *coord)  # noqa: E501
                                 # wait for the copy to finish
                                 Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                                 phase = phase ^ 1
@@ -505,7 +505,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
 
                                 if bx == 2:
                                     if tx == 0:
-                                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord)  # noqa: E501
+                                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, "", *coord)  # noqa: E501
                                         Tx.ptx.cp_async.bulk.commit_group()
                                         Tx.ptx.cp_async.bulk.wait_group(0)
         # fmt: on
@@ -578,16 +578,16 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                                     Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), total_bytes)  # noqa: E501
                                     if clusterCtaIdx == 0:
                                         Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord0[::-1])),  # noqa: E501
-                                                                       Tx.address_of(bar), A_map, *coord0, cta_mask=int("1111", 2))  # noqa: E501
+                                                                       Tx.address_of(bar), A_map, int("1111", 2), 1, "", *coord0)  # noqa: E501
                                     if clusterCtaIdx == 1:
                                         Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord1[::-1])),  # noqa: E501
-                                                                       Tx.address_of(bar), A_map, *coord1, cta_mask=int("1111", 2))  # noqa: E501
+                                                                       Tx.address_of(bar), A_map, int("1111", 2), 1, "", *coord1)  # noqa: E501
                                     if clusterCtaIdx == 2:
                                         Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord2[::-1])),  # noqa: E501
-                                                                       Tx.address_of(bar), A_map, *coord2, cta_mask=int("1111", 2))  # noqa: E501
+                                                                       Tx.address_of(bar), A_map, int("1111", 2), 1, "", *coord2)  # noqa: E501
                                     if clusterCtaIdx == 3:
                                         Tx.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord3[::-1])),  # noqa: E501
-                                                                       Tx.address_of(bar), A_map, *coord3, cta_mask=int("1111", 2))  # noqa: E501
+                                                                       Tx.address_of(bar), A_map, int("1111", 2), 1, "", *coord3)  # noqa: E501
                                 # wait for the copy to finish
                                 Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                                 phase = phase ^ 1
@@ -595,7 +595,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
 
                                 if bx == 1:
                                     if tx == 0:
-                                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, *coord0)  # noqa: E501
+                                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), B_map, "", *coord0)  # noqa: E501
                                         Tx.ptx.cp_async.bulk.commit_group()
                                         Tx.ptx.cp_async.bulk.wait_group(0)
         # fmt: on
@@ -656,7 +656,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
                     Tx.cuda.cta_sync()
 
                     if tx == 0:
-                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), A_map, *coord)  # noqa: E501
+                        Tx.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), A_map, "", *coord)  # noqa: E501
                         Tx.ptx.cp_async.bulk.commit_group()
                         Tx.ptx.cp_async.bulk.wait_group(0)
         # fmt: on
@@ -745,8 +745,8 @@ def test_wgmma_ss_nt():
                     Tx.cuda.cta_sync()
                     # load A and B to smem
                     if tx == 0:
-                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeA), A_smem.data, Tx.address_of(bar), A_map, *coordA)  # noqa: E501
-                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, Tx.address_of(bar), B_map, *coordB)  # noqa: E501
+                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeA), A_smem.data, Tx.address_of(bar), A_map, 0, 1, "", *coordA)  # noqa: E501
+                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, Tx.address_of(bar), B_map, 0, 1, "", *coordB)  # noqa: E501
                         Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), A_bytes + B_bytes)
                     Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), phase)
                     phase = phase ^ 1
@@ -910,7 +910,7 @@ def test_wgmma_rs_nt():
                     Tx.cuda.cta_sync()
                     # load B to smem
                     if tx == 0:
-                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, Tx.address_of(bar), B_map, *coordB)  # noqa: E501
+                        Tx.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, Tx.address_of(bar), B_map, 0, 1, "", *coordB)  # noqa: E501
                         Tx.ptx.mbarrier.arrive.expect_tx(Tx.address_of(bar), B_bytes)
                     Tx.ptx.mbarrier.try_wait(Tx.address_of(bar), 0)
                     Tx.cuda.cta_sync()

@@ -529,11 +529,9 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
 
     # Allocate descriptor cells and encode once, right after A/B buffer defs.
     # The callback is inserted as a flat SeqStmt after the target buffer def.
+    # Descriptors with identical construction parameters are cached and reused
+    # across dispatch calls via sctx.shared_state.
     B_base = [0] * len(B_buffer.shape)
-    descB_buf = tvm.tir.decl_buffer((1,), "uint64", name="descB", scope="local")
-    if not a_is_tmem:
-        A_base = [0] * len(A_buffer.shape)
-        descA_buf = tvm.tir.decl_buffer((1,), "uint64", name="descA", scope="local")
     krp = KernelReplacePoint(workspace={}, config={})
 
     def _make_lo_uniform(desc):
@@ -572,12 +570,24 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
             ]
         )
 
-    # TODO: deduplicate desc pointing to the same buffer
+    def _get_or_create_desc(smem_buf, base, ldo, sdo, swizzle_val, name):
+        """Return a cached desc_buf or create and register a new one."""
+        cache_key = f"smem_desc:{hash(smem_buf)}:{int(ldo)}:{int(sdo)}:{int(swizzle_val)}"
+        cached = sctx.cache_get(cache_key)
+        if cached is not None:
+            return cached
+        desc_buf = tvm.tir.decl_buffer((1,), "uint64", name=name, scope="local")
+        wrap = _make_desc_wrap(desc_buf, smem_buf, base, ldo, sdo, swizzle_val)
+        sctx.add_post_buffer_def_stmt(smem_buf, wrap)
+        sctx.cache_set(cache_key, desc_buf)
+        return desc_buf
+
+    descB_buf = _get_or_create_desc(B_buffer, B_base, B_ldo, B_sdo, B_swizzle_mode.value, "descB")
     if not a_is_tmem:
-        wrap_A = _make_desc_wrap(descA_buf, A_buffer, A_base, A_ldo, A_sdo, A_swizzle_mode.value)
-        sctx.add_post_buffer_def_stmt(A_buffer, wrap_A)
-    wrap_B = _make_desc_wrap(descB_buf, B_buffer, B_base, B_ldo, B_sdo, B_swizzle_mode.value)
-    sctx.add_post_buffer_def_stmt(B_buffer, wrap_B)
+        A_base = [0] * len(A_buffer.shape)
+        descA_buf = _get_or_create_desc(
+            A_buffer, A_base, A_ldo, A_sdo, A_swizzle_mode.value, "descA"
+        )
     elect_pred = Tx.ptx.elect_sync() if warp_scope else True
 
     # Helper: compute B descriptor value for a given (ni, ki) tile

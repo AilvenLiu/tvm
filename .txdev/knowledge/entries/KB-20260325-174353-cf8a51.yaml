@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "When dispatch code writes to a Map (e.g., shared_state via SharedStateSet\
+    \ FFI),\nthe underlying TVM Map creates a new object due to COW semantics. The\
+    \ caller\nholding the original reference still sees the old map. This caused a\
+    \ bug where\nTIRxOpDispatcher::shared_state_ was stale after each dispatch call.\n\
+    \nFix pattern: after calling Python dispatch that may mutate the map, read\nthe\
+    \ map back from the context object into the C++ field:\n  shared_state_ = ctx->shared_state;\n\
+    \nThis applies to any TVM container (Map, Array) passed across FFI boundaries\n\
+    where the callee may modify it.\n"
+  summary: TVM's Map<K,V> uses copy-on-write — Set() returns a new map, so C++/Python
+    callers holding a reference to the old map won't see changes unless they re-read
+    the updated map.
+created: '2026-03-25'
+id: KB-20260325-174353-cf8a51
+scope:
+- repo
+tags:
+- tvm
+- cow
+- map
+- ffi
+- dispatch
+title: 'TVM Map uses copy-on-write: callers must read back after mutation'
+updated: '2026-03-25'

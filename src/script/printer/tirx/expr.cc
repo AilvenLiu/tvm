@@ -303,6 +303,33 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
           return prefix.value()->Call(args);
         }
+        // cuda_func_call: last arg is source_code (keyword-only in the Python API).
+        // Print it as source_code=... to enable TVMScript round-trip.
+        if (op->name == "tir.cuda_func_call") {
+          int n_args = call->args.size();
+          ffi::Array<ExprDoc> args;
+          // All args except the last (source_code) are positional.
+          for (int i = 0; i < n_args - 1; ++i) {
+            args.push_back(d->AsDoc<ExprDoc>(call->args[i], call_p->Attr("args")->ArrayItem(i)));
+          }
+          // source_code is the last arg, printed as keyword.
+          // Extract the string value directly to avoid the StringImm printer
+          // storing multiline source code in metadata (which can't be reparsed).
+          ffi::Array<ffi::String> kw_keys;
+          ffi::Array<ExprDoc> kw_vals;
+          const auto* src_str = call->args[n_args - 1].as<tir::StringImmNode>();
+          TVM_FFI_ICHECK(src_str) << "cuda_func_call: last arg (source_code) must be StringImm";
+          ExprDoc src =
+              LiteralDoc::Str(src_str->value, call_p->Attr("args")->ArrayItem(n_args - 1));
+          kw_keys.push_back("source_code");
+          kw_vals.push_back(src);
+          // If non-void return type, print return_type keyword.
+          if (call->dtype != DataType::Void()) {
+            kw_keys.push_back("return_type");
+            kw_vals.push_back(LiteralDoc::DataType(call->dtype, call_p->Attr("dtype")));
+          }
+          return prefix.value()->Call(args, kw_keys, kw_vals);
+        }
       } else if (call->op.as<GlobalVarNode>()) {
         prefix = d->AsDoc<ExprDoc>(call->op, call_p->Attr("op"));
       } else {

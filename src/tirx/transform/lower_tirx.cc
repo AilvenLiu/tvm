@@ -66,7 +66,6 @@ Pass LowerTIRx() {
     passes.push_back(tvm::transform::PrintIR());
   }
   passes.push_back(LowerTIRxResolveScopeSlices());
-  passes.push_back(LowerTIRxDedupCuTensorMaps());
   passes.push_back(LowerTIRxCleanup());
   passes.push_back(LowerTIRxStripExecScope());
   return tvm::transform::Sequential(passes, "tirx.LowerTIRx");
@@ -78,11 +77,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("tirx.transform.LowerTIRxResolveScopeIds", LowerTIRxResolveScopeIds)
       .def("tirx.transform.LowerTIRxDispatchOps", LowerTIRxDispatchOps)
       .def("tirx.transform.LowerTIRxResolveScopeSlices", LowerTIRxResolveScopeSlices)
-      .def("tirx.transform.LowerTIRxDedupCuTensorMaps", LowerTIRxDedupCuTensorMaps)
       .def("tirx.transform.LowerTIRxCleanup", LowerTIRxCleanup)
       .def("tirx.transform.LowerTIRx", LowerTIRx);
 }
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
 }  // namespace tvm

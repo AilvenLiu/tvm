@@ -98,10 +98,23 @@ void DispatchContextNode::AddPostBufferDefStmt(Buffer buffer, Stmt stmt) {
   callbacks.Set(callback::kPostBufferDefStmt, mapping);
 }
 
+void DispatchContextNode::SharedStateSet(ffi::String key, ObjectRef value) {
+  shared_state.Set(key, value);
+}
+
+ffi::Optional<ObjectRef> DispatchContextNode::SharedStateGet(ffi::String key) {
+  auto it = shared_state.find(key);
+  if (it != shared_state.end()) {
+    return (*it).second;
+  }
+  return ffi::Optional<ObjectRef>();
+}
+
 DispatchContext::DispatchContext(Target target, ExecScope exec_scope,
                                  ffi::Map<ffi::String, IterVar> launch_params,
                                  ffi::Map<Var, Range> var_range_map, bool alloc_only,
-                                 ffi::Map<ffi::String, ObjectRef> callbacks) {
+                                 ffi::Map<ffi::String, ObjectRef> callbacks,
+                                 ffi::Map<ffi::String, ObjectRef> shared_state) {
   auto n = ffi::make_object<DispatchContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
@@ -109,6 +122,7 @@ DispatchContext::DispatchContext(Target target, ExecScope exec_scope,
   n->var_range_map = std::move(var_range_map);
   n->alloc_only = alloc_only;
   n->callbacks = std::move(callbacks);
+  n->shared_state = std::move(shared_state);
   data_ = std::move(n);
 }
 
@@ -118,14 +132,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("tirx.DispatchContext",
            [](Target target, ExecScope exec_scope, ffi::Map<ffi::String, IterVar> launch_params,
               ffi::Map<Var, Range> var_range_map, bool alloc_only,
-              ffi::Map<ffi::String, ObjectRef> callbacks) {
+              ffi::Map<ffi::String, ObjectRef> callbacks,
+              ffi::Map<ffi::String, ObjectRef> shared_state) {
              return DispatchContext(target, exec_scope, launch_params, var_range_map, alloc_only,
-                                    callbacks);
+                                    callbacks, shared_state);
            })
       .def_method("tirx.DispatchContextAddAllocBuffer", &DispatchContextNode::AddAllocBuffer)
       .def_method("tirx.DispatchContextAddInitStmt", &DispatchContextNode::AddInitStmt)
       .def_method("tirx.DispatchContextAddPostBufferDefStmt",
-                  &DispatchContextNode::AddPostBufferDefStmt);
+                  &DispatchContextNode::AddPostBufferDefStmt)
+      .def_method("tirx.DispatchContextSharedStateSet", &DispatchContextNode::SharedStateSet)
+      .def_method("tirx.DispatchContextSharedStateGet", &DispatchContextNode::SharedStateGet);
 }
 
 /********************* Dispatch Ops **********************/

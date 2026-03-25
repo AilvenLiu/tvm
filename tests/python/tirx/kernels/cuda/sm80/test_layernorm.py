@@ -156,8 +156,7 @@ def test_layernorm(dtype):
                     out_resid_tvm,
                 )
 
-            ms = bench(func, warmup=2, repeat=10, proton_name="tir")
-            print(f"TIR layernorm time: {ms:.3f} ms")
+            bench(func, warmup=2, repeat=10, proton_name="tir")
 
         return torch.from_dlpack(out_tvm).cpu(), torch.from_dlpack(out_resid_tvm).cpu()
 
@@ -178,8 +177,7 @@ def test_layernorm(dtype):
         def func():
             return ln_func(inp_torch + inp_resid_torch)
 
-        ms = bench(func, warmup=2, repeat=10, proton_name="torch")
-        print(f"Torch time: {ms:.3f} ms")
+        bench(func, warmup=2, repeat=10, proton_name="torch")
         out_torch = func().detach().cpu()
         out_resid_torch = (inp_torch + inp_resid_torch).detach().cpu()
         return out_torch, out_resid_torch

@@ -149,7 +149,8 @@ __forceinline__ __device__ void {func_name}() {{
 @register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
 def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
     dim = int(dim)
-    coords, cta_mask, cta_group, cache_hint = args[:-3], args[-3], int(args[-2]), args[-1]
+    cta_mask, cta_group, cache_hint = args[0], int(args[1]), args[2]
+    coords = args[3:]
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
@@ -251,7 +252,8 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
 @register_codegen("ptx_cp_async_bulk_tensor_shared_to_global")
 def codegen_ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *args):
     dim = int(dim)
-    coords, cache_hint = args[:-1], args[-1]
+    cache_hint = args[0]
+    coords = args[1:]
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
@@ -299,7 +301,8 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
 @register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster_prefetch")
 def codegen_ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *args):
     dim = int(dim)
-    coords, cache_hint = args[:-1], args[-1]
+    cache_hint = args[0]
+    coords = args[1:]
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
@@ -347,7 +350,8 @@ __forceinline__ __device__ void {func_name}(const CUtensorMap& tensormap, {coord
 @register_codegen("ptx_cp_async_bulk_tensor_shared_to_global_reduce")
 def codegen_ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tensormap, *args):
     dim = int(dim)
-    coords, cache_hint, red_op = args[:-2], args[-2], args[-1]
+    cache_hint, red_op = args[0], args[1]
+    coords = args[2:]
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."

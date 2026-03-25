@@ -1,0 +1,45 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The original signatures had *coords before keyword args:\n  g2c(dim, dst_ptr,\
+    \ bar, tensormap, *coords, cta_mask=0, cta_group=1, cache_hint=\"\")\n\nThis was\
+    \ a latent round-trip bug: the TVMScript printer emits all args\npositionally,\
+    \ and on re-parse *coords would swallow the trailing fixed args.\nThe bug was\
+    \ masked because tests never round-tripped through TVMScript.\n\nDecision: reorder\
+    \ to put *coords last:\n  g2c(dim, dst_ptr, bar, tensormap, cta_mask, cta_group,\
+    \ cache_hint, *coords)\n\nTrade-off considered:\n- Breaking change: all call sites\
+    \ must pass cta_mask/cta_group/cache_hint\n  explicitly (no more keyword defaults)\n\
+    - Benefit: generic positional printer works naturally, no special-case\n  handling\
+    \ needed, round-trip tests pass without reparse workaround\n\nThe explicit-args\
+    \ requirement is actually beneficial — it makes the\nmulticast/cache_hint behavior\
+    \ visible at every call site instead of\nhidden behind defaults.\n"
+  summary: All 4 cp_async.bulk.tensor intrinsic signatures place *coords as the last
+    parameter, after all fixed keyword args, to ensure the TVMScript positional printer
+    round-trips correctly.
+created: '2026-03-25'
+id: ADR-20260325-174353-029f36
+scope:
+- repo
+tags:
+- cp_async
+- intrinsic
+- api-design
+- tvmscript
+- round-trip
+title: 'cp_async.bulk.tensor: *coords last in intrinsic signature'
+updated: '2026-03-25'

@@ -173,7 +173,9 @@ def test_printer_cuda_more():
     )
     _assert_print(tir.op.cuda_atomic_cas(p, 1, 2), "p = Tx.handle()\nTx.cuda.atomic_cas(p, 1, 2)")
     _assert_print(tir.op.cuda_ldg(p, "float32"), 'p = Tx.handle()\nTx.cuda.ldg(p, "float32")')
-    _assert_print(tir.op.cuda_func_call("f", 1, source_code=""), 'Tx.cuda.func_call("f", 1, "")')
+    _assert_print(
+        tir.op.cuda_func_call("f", 1, source_code=""), 'Tx.cuda.func_call("f", 1, source_code="")'
+    )
 
 
 def test_printer_nvshmem_more():
@@ -350,20 +352,20 @@ def test_printer_ptx_mma_and_wgmma():
 def test_printer_ptx_cp_async_tensor():
     tmap = tir.Var("tm", "handle")
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster(2, tmap, 0, tmap, 0, 0, 0, 0, 1, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 0, 0, 0, 1, "", 0, 1, "")',  # noqa: E501
+        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster(2, tmap, 0, tmap, 0, 1, "", 0, 0, 0),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 1, "", 0, 0, 0)',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, 0, 0, 0, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, tm, 0, 0, 0, "", "")',
+        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, "", 0, 0, 0),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, tm, "", 0, 0, 0)',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_shared_to_global(2, 0, tmap, 0, 0, 0, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g(2, 0, tm, 0, 0, 0, "", "")',
+        tir.op.ptx_cp_async_bulk_tensor_shared_to_global(2, 0, tmap, "", 0, 0, 0),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g(2, 0, tm, "", 0, 0, 0)',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_shared_to_global_reduce(2, 0, tmap, 0, 0, 0, "", "add"),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, 0, 0, 0, "", "add", "", "add")',  # noqa: E501
+        tir.op.ptx_cp_async_bulk_tensor_shared_to_global_reduce(2, 0, tmap, "", "add", 0, 0, 0),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, "", "add", 0, 0, 0)',
     )
 
 

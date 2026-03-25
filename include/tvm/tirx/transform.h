@@ -361,12 +361,6 @@ TVM_DLL Pass LowerTIRxDispatchOps();
 TVM_DLL Pass LowerTIRxResolveScopeSlices();
 
 /*!
- * \brief Deduplicate identical cuTensorMap initializations and unify their variables.
- * \return The pass.
- */
-TVM_DLL Pass LowerTIRxDedupCuTensorMaps();
-
-/*!
  * \brief Finalize TIRx lowering by applying layout rewriters and cleanup passes.
  * \return The pass.
  */

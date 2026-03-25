@@ -1,0 +1,61 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'TVMScript''s scalar buffer shorthand prints BufferLoad(buf, [0]) as just
+    the
+
+    buffer variable name (dropping the [0] index). When the context requires a
+
+    PrimExpr (e.g., allocated_addr parameter of DeclBuffer), this causes a
+
+    type mismatch: the parser resolves the bare variable name to a Buffer object,
+
+    not a PrimExpr.
+
+
+    The fix in the printer is to bypass the scalar shorthand by using GetVarDoc
+
+    to get the variable name and manually constructing var[idx] as an IndexDoc.
+
+    This produces e.g., `tmem_addr_1[0]` instead of `tmem_addr_1`.
+
+
+    Additionally, for tmem-scope DeclBuffer, the data Var is auto-created by the
+
+    parser, so the printer must suppress the `data=` kwarg to avoid a parse error.
+
+    The well-formedness verifier also needs an EnterDef(Buffer) override to
+
+    auto-define the buffer''s data Var for tmem scope.
+
+    '
+  summary: Shape [1] buffers use scalar shorthand (bare name, no [0] index) in TVMScript.
+    The parser resolves the bare name to a Buffer object, not a PrimExpr — so printer
+    must use explicit var[idx] when PrimExpr is needed.
+created: '2026-03-25'
+id: KB-20260325-174353-9679e0
+scope:
+- repo
+tags:
+- tvmscript
+- printer
+- parser
+- scalar-buffer
+- allocated_addr
+title: TVMScript scalar buffer shorthand and parser resolution
+updated: '2026-03-25'

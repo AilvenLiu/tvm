@@ -166,6 +166,16 @@ class UndefinedVarVerifier : public Verifier<UndefinedVarVerifier> {
     }
   }
 
+  void EnterDef(const Buffer& buffer, AccessPath path) override {
+    // A buffer definition implicitly defines its data Var when that Var has no
+    // prior definition (e.g., tmem buffers where DeclBuffer auto-creates data).
+    if (currently_defined_.find(buffer->data) == currently_defined_.end() &&
+        previously_defined_.find(buffer->data) == previously_defined_.end()) {
+      currently_defined_.insert({buffer->data, path->Attr("data")});
+    }
+    Verifier::EnterDef(buffer, path);
+  }
+
   void EnterDef(const Var& var, AccessPath path) override {
     bool redefine_is_allowed = redefine_allowed_within_function_.count(var);
     {

@@ -1,0 +1,56 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'The TIRX pool allocator assigns multiple logical buffers to the same physical
+
+    shared memory region, meaning buf.data points to the same TIR Var for all
+
+    pool-allocated buffers. Using hash(buf.data) as part of a cache key caused
+
+    A_smem and B_smem descriptors to collide when they had identical (ldo, sdo,
+
+    swizzle_val), resulting in the B descriptor being reused for A — pointing the
+
+    GEMM at wrong smem addresses and producing garbage output.
+
+
+    Fix: use hash(buf) which gives buffer object identity, distinguishing A_smem
+
+    from B_smem even when they share the same .data Var.
+
+
+    This pattern applies to any caching logic keyed on buffer identity in the
+
+    presence of pool allocation.
+
+    '
+  summary: Pool-allocated shared memory buffers (e.g., A_smem, B_smem) share the same
+    underlying .data Var, so hash(buf.data) collides — use hash(buf) (buffer object
+    identity) for cache keys.
+created: '2026-03-25'
+id: KB-20260325-174353-b5e171
+scope:
+- repo
+tags:
+- smem
+- pool-allocator
+- buffer
+- caching
+- correctness
+title: Pool-allocated smem buffers share the same .data Var
+updated: '2026-03-25'

@@ -355,6 +355,33 @@ entries:
   - benchmarking
   title: Claude Code slash commands over CLAUDE.md for standard operations
   updated: '2026-03-24'
+- created: '2026-03-25'
+  id: ADR-20260325-174353-029f36
+  path: entries/ADR-20260325-174353-029f36.yaml
+  scope:
+  - repo
+  tags:
+  - cp_async
+  - intrinsic
+  - api-design
+  - tvmscript
+  - round-trip
+  title: 'cp_async.bulk.tensor: *coords last in intrinsic signature'
+  updated: '2026-03-25'
+- created: '2026-03-25'
+  id: ADR-20260325-174353-f8ad92
+  path: entries/ADR-20260325-174353-f8ad92.yaml
+  scope:
+  - repo
+  tags:
+  - dispatch
+  - caching
+  - tensormap
+  - smem-descriptor
+  - architecture
+  - pipeline
+  title: Dispatch-time caching via shared_state replaces post-hoc dedup pass
+  updated: '2026-03-25'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -367,6 +394,7 @@ tags:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-3e7d62
   - ADR-20260322-182024-efa75b
+  - ADR-20260325-174353-029f36
   api-evolution:
   - ADR-20260228-0002
   architecture:
@@ -381,6 +409,7 @@ tags:
   - ADR-20260323-185836-4f44fc
   - ADR-20260324-171756-31a4c8
   - ADR-20260324-171756-41723a
+  - ADR-20260325-174353-f8ad92
   assert_structural_equal:
   - ADR-20260227-0001
   baseline:
@@ -402,6 +431,8 @@ tags:
   - ADR-20260324-171756-b03f0f
   buffer-view:
   - ADR-20260227-0002
+  caching:
+  - ADR-20260325-174353-f8ad92
   ci:
   - ADR-20260228-0001
   claude-code:
@@ -413,11 +444,15 @@ tags:
   compatibility:
   - ADR-20260228-0002
   - ADR-20260228-0003
+  cp_async:
+  - ADR-20260325-174353-029f36
   cross-repo:
   - ADR-20260324-171756-31a4c8
   - ADR-20260324-171756-41723a
   design-pattern:
   - ADR-20260319-022448-4d7f83
+  dispatch:
+  - ADR-20260325-174353-f8ad92
   dsl:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-efa75b
@@ -425,6 +460,8 @@ tags:
   - ADR-20260227-0001
   infrastructure:
   - ADR-20260319-022448-7cc00e
+  intrinsic:
+  - ADR-20260325-174353-029f36
   json:
   - ADR-20260324-171756-41723a
   kernel:
@@ -453,6 +490,7 @@ tags:
   - ADR-20260322-182024-3e7d62
   pipeline:
   - ADR-20260317-211411-5664ea
+  - ADR-20260325-174353-f8ad92
   policy:
   - ADR-20260306-195314-450625
   poller:
@@ -476,15 +514,21 @@ tags:
   - ADR-20260307-231252-f0561c
   - ADR-20260308-232603-16186a
   - ADR-20260308-232603-d77714
+  round-trip:
+  - ADR-20260325-174353-029f36
   run_bench:
   - ADR-20260323-185836-cff692
   smem:
   - ADR-20260322-182024-efa75b
+  smem-descriptor:
+  - ADR-20260325-174353-f8ad92
   stdout:
   - ADR-20260324-171756-41723a
   syntax:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-efa75b
+  tensormap:
+  - ADR-20260325-174353-f8ad92
   test-organization:
   - ADR-20260301-0002
   testing:
@@ -524,6 +568,7 @@ tags:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-3e7d62
   - ADR-20260322-182024-efa75b
+  - ADR-20260325-174353-029f36
   upstream-alignment:
   - ADR-20260228-0001
   - ADR-20260301-0001

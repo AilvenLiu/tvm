@@ -358,6 +358,31 @@ entries:
   title: Ran sm100a kernel tests instead of full tirx test suite when asked for 'standard
     test'
   updated: '2026-03-24'
+- created: '2026-03-25'
+  id: M-20260325-174353-4a9cda
+  path: entries/M-20260325-174353-4a9cda.yaml
+  scope:
+  - repo
+  tags:
+  - delegation
+  - testing
+  - defaults
+  - verification
+  title: Agent delegation with wrong default parameter values
+  updated: '2026-03-25'
+- created: '2026-03-25'
+  id: M-20260325-174353-51abbb
+  path: entries/M-20260325-174353-51abbb.yaml
+  scope:
+  - repo
+  tags:
+  - caching
+  - correctness
+  - smem
+  - pool-allocator
+  - gemm
+  title: Cache key collision from pool-allocated buffer .data identity
+  updated: '2026-03-25'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -381,6 +406,8 @@ tags:
   - M-20260323-185836-374105
   buffer:
   - M-20260322-182024-631109
+  caching:
+  - M-20260325-174353-51abbb
   claude-md:
   - M-20260324-171756-5d4c5e
   closure:
@@ -392,12 +419,17 @@ tags:
   - M-20260301-0001
   - M-20260307-231252-423c4d
   - M-20260322-182024-631109
+  - M-20260325-174353-51abbb
   cross-repo:
   - M-20260319-174407-01b7d3
   deadlock:
   - M-20260317-211411-ba6927
   debugging:
   - M-20260227-0003
+  defaults:
+  - M-20260325-174353-4a9cda
+  delegation:
+  - M-20260325-174353-4a9cda
   design:
   - M-20260319-022448-dbe043
   duplication:
@@ -409,6 +441,8 @@ tags:
   - M-20260307-231252-423c4d
   formula:
   - M-20260323-185836-967c0e
+  gemm:
+  - M-20260325-174353-51abbb
   gh:
   - M-20260228-0003
   git:
@@ -447,6 +481,8 @@ tags:
   - M-20260322-182024-19635e
   pipeline:
   - M-20260317-211411-ba6927
+  pool-allocator:
+  - M-20260325-174353-51abbb
   pre-commit:
   - M-20260228-0001
   - M-20260301-0001
@@ -492,6 +528,8 @@ tags:
   - M-20260307-231252-423c4d
   shell:
   - M-20260228-0003
+  smem:
+  - M-20260325-174353-51abbb
   testing:
   - M-20260227-0001
   - M-20260227-0002
@@ -508,6 +546,7 @@ tags:
   - M-20260322-182024-19635e
   - M-20260323-185836-4c16ff
   - M-20260324-171756-5d4c5e
+  - M-20260325-174353-4a9cda
   thoroughness:
   - M-20260317-211411-dfb881
   thunderkittens:
@@ -527,6 +566,7 @@ tags:
   - M-20260319-174407-01b7d3
   - M-20260319-174407-26e7d3
   - M-20260322-182024-19635e
+  - M-20260325-174353-4a9cda
   warnings:
   - M-20260306-195314-50a55c
   workflow:

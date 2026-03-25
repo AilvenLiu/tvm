@@ -3836,7 +3836,7 @@ def ptx_cp_async_wait_group(num=0):
 
 
 def ptx_cp_async_bulk_tensor_global_to_cluster(
-    dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1, cache_hint=""
+    dim, dst_ptr, bar, tensormap, cta_mask, cta_group, cache_hint, *coords
 ):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
@@ -3854,9 +3854,6 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
     tensormap: Var
         The tensor map.
 
-    coords : List[PrimExpr]
-        specifies the starting coordinates in the tensor data in the global memory
-
     cta_mask : int
         The mask of the cta for multicast.
 
@@ -3868,6 +3865,9 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
 
     cache_hint : str
         The cache hint.
+
+    coords : List[PrimExpr]
+        specifies the starting coordinates in the tensor data in the global memory
 
     Returns
     -------
@@ -3881,14 +3881,14 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
         dst_ptr,
         bar,
         tensormap,
-        *coords,
         cta_mask,
         cta_group,
         cache_hint,
+        *coords,
     )
 
 
-def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords, cache_hint=""):
+def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, cache_hint, *coords):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group
 
     Parameters
@@ -3902,11 +3902,11 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords, 
     tensormap: Var
         The tensor map.
 
-    coords : List[PrimExpr]
-        specifies the starting coordinates in the tensor data in the global memory
-
     cache_hint : str
         The cache hint.
+
+    coords : List[PrimExpr]
+        specifies the starting coordinates in the tensor data in the global memory
 
     Returns
     -------
@@ -3919,12 +3919,12 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords, 
         dim,
         src_ptr,
         tensormap,
-        *coords,
         cache_hint,
+        *coords,
     )
 
 
-def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords, cache_hint=""):
+def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, cache_hint, *coords):
     """TVM intrinsic to call cp.async.bulk.prefetch.tensor.dim.L2.global.tile
 
     Parameters
@@ -3935,11 +3935,11 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords,
     tensormap: Var
         The tensor map.
 
-    coords : List[PrimExpr]
-        specifies the starting coordinates in the tensor data in the global memory
-
     cache_hint : str
         The cache hint.
+
+    coords : List[PrimExpr]
+        specifies the starting coordinates in the tensor data in the global memory
 
     Returns
     -------
@@ -3951,13 +3951,13 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords,
         "tir.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
         dim,
         tensormap,
-        *coords,
         cache_hint,
+        *coords,
     )
 
 
 def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
-    dim, src_ptr, tensormap, *coords, cache_hint="", red_op="add"
+    dim, src_ptr, tensormap, cache_hint, red_op, *coords
 ):
     """TVM intrinsic to call cp.reduce.async.bulk.tensor.dim.dst.src.redOp
 
@@ -3966,17 +3966,20 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
     dim : int
         The dimension of the copy tensor.
 
-    tensor_map: Var
-        The tensor map.
+    src_ptr : PrimExpr
+        The source pointer to the shared memory.
 
-    coords: List[PrimExpr]
-        The coordinates of the tensor.
+    tensormap: Var
+        The tensor map.
 
     cache_hint: str
         The cache hint.
 
     red_op: str
         The reduction operator.
+
+    coords: List[PrimExpr]
+        The coordinates of the tensor.
 
     Returns
     -------
@@ -3989,9 +3992,9 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
         dim,
         src_ptr,
         tensormap,
-        *coords,
         cache_hint,
         red_op,
+        *coords,
     )
 
 

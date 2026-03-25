@@ -92,6 +92,10 @@ class DispatchContextNode : public Object {
   bool alloc_only;
   /*! \brief Callback to be handled when the operator is scheduled. */
   ffi::Map<ffi::String, ObjectRef> callbacks;
+  /*! \brief Shared state that persists across dispatch calls within a single lowering pass.
+   *  Used by dispatch implementations to cache and reuse descriptors/tensormaps.
+   */
+  ffi::Map<ffi::String, ObjectRef> shared_state;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -101,7 +105,8 @@ class DispatchContextNode : public Object {
         .def_ro("launch_params", &DispatchContextNode::launch_params)
         .def_ro("var_range_map", &DispatchContextNode::var_range_map)
         .def_ro("alloc_only", &DispatchContextNode::alloc_only)
-        .def_ro("callbacks", &DispatchContextNode::callbacks);
+        .def_ro("callbacks", &DispatchContextNode::callbacks)
+        .def_ro("shared_state", &DispatchContextNode::shared_state);
   }
 
   /*! \brief Add a buffer to be allocated in the kernel. */
@@ -121,6 +126,18 @@ class DispatchContextNode : public Object {
    */
   void AddPostBufferDefStmt(Buffer buffer, Stmt stmt);
 
+  /*! \brief Set a value in the shared state cache.
+   *  \param key The cache key.
+   *  \param value The value to cache.
+   */
+  void SharedStateSet(ffi::String key, ObjectRef value);
+
+  /*! \brief Get a value from the shared state cache.
+   *  \param key The cache key.
+   *  \return The cached value, or NullOpt if not found.
+   */
+  ffi::Optional<ObjectRef> SharedStateGet(ffi::String key);
+
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.DispatchContext", DispatchContextNode, Object);
 };
 
@@ -137,11 +154,13 @@ class DispatchContext : public ObjectRef {
    * \param var_range_map: A map from loop variables to their ranges.
    * \param alloc_only Whether the dispatch context is only used for buffer allocation.
    * \param callbacks The callbacks to be handled when the operator is scheduled.
+   * \param shared_state Shared state persisting across dispatch calls within a lowering pass.
    */
   TVM_DLL DispatchContext(Target target, ExecScope exec_scope,
                           ffi::Map<ffi::String, IterVar> launch_params = {},
                           ffi::Map<Var, Range> var_range_map = {}, bool alloc_only = false,
-                          ffi::Map<ffi::String, ObjectRef> callbacks = {});
+                          ffi::Map<ffi::String, ObjectRef> callbacks = {},
+                          ffi::Map<ffi::String, ObjectRef> shared_state = {});
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(DispatchContext, ObjectRef, DispatchContextNode);
 };

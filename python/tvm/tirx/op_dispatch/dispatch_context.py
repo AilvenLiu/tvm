@@ -46,6 +46,9 @@ class DispatchContext(Object, Scriptable):
 
     callbacks : Dict[str, Object]
         The callbacks of the dispatch context.
+
+    shared_state : Dict[str, Object]
+        Shared state persisting across dispatch calls within a single lowering pass.
     """
 
     target: Target
@@ -54,6 +57,7 @@ class DispatchContext(Object, Scriptable):
     var_range_map: dict[Var, Range]
     alloc_only: bool
     callbacks: dict[str, Object]
+    shared_state: dict[str, Object]
 
     kPrivateAlloc = "private_alloc"
     kDeviceInitStmt = "device_init_stmt"
@@ -68,6 +72,7 @@ class DispatchContext(Object, Scriptable):
         var_range_map: dict[Var, Range],
         alloc_only: bool = False,
         callbacks: dict[str, Object] = {},
+        shared_state: dict[str, Object] = {},
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.DispatchContext,  # pylint: disable=no-member
@@ -77,6 +82,7 @@ class DispatchContext(Object, Scriptable):
             var_range_map,
             alloc_only,
             callbacks,
+            shared_state,
         )
 
     def add_alloc_buffer(self, buffer: Buffer) -> None:
@@ -119,6 +125,33 @@ class DispatchContext(Object, Scriptable):
             The statement to be inserted.
         """
         _ffi_api.DispatchContextAddPostBufferDefStmt(self, buffer, stmt)  # pylint: disable=no-member
+
+    def cache_get(self, key: str) -> Object | None:
+        """Look up a cached value by key.
+
+        Parameters
+        ----------
+        key : str
+            Cache key (built by the caller from construction parameters).
+
+        Returns
+        -------
+        Optional[Object]
+            The cached value, or None on miss.
+        """
+        return _ffi_api.DispatchContextSharedStateGet(self, key)
+
+    def cache_set(self, key: str, value: Object) -> None:
+        """Store a value in the cross-dispatch cache.
+
+        Parameters
+        ----------
+        key : str
+            Cache key (built by the caller from construction parameters).
+        value : Object
+            The object to cache (e.g. a Buffer or Var).
+        """
+        _ffi_api.DispatchContextSharedStateSet(self, key, value)
 
     def is_cuda(self) -> bool:
         """Check if the target is CUDA."""

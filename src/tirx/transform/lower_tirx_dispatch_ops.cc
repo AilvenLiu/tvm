@@ -243,7 +243,8 @@ class TIRxOpDispatcher : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const tirx::OpCallNode* op) final {
-    tirx::DispatchContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
+    tirx::DispatchContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_,
+                               /*alloc_only=*/false, /*callbacks=*/{}, shared_state_);
     static auto f_op_dispatcher_ = ffi::Function::GetGlobal("tirx.f_op_dispatcher");
     TVM_FFI_ICHECK(f_op_dispatcher_.has_value())
         << "Internal Error: tirx.f_op_dispatcher is not registered";
@@ -269,6 +270,8 @@ class TIRxOpDispatcher : public StmtExprMutator {
         vec.insert(vec.end(), stmts.begin(), stmts.end());
       }
     }
+    // Propagate shared_state changes back (Map uses COW semantics)
+    shared_state_ = sctx->shared_state;
     return res->body;
   }
 
@@ -281,6 +284,7 @@ class TIRxOpDispatcher : public StmtExprMutator {
   std::vector<Stmt> host_init_stmts_;
   std::unordered_map<Buffer, std::vector<Stmt>, ObjectPtrHash, ObjectPtrEqual>
       post_buffer_def_stmts_;
+  ffi::Map<ffi::String, ObjectRef> shared_state_;
 
   bool is_first_block_{true};
   bool is_first_thread_attr_{true};
