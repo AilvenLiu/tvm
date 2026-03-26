@@ -1,0 +1,45 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The cp_async.bulk.tensor family has 4 intrinsics: g2c, s2g, s2g_reduce,\
+    \ and prefetch.\nWhen commit 7d4c378f2c moved *coords to the end of g2c (adding\
+    \ cta_mask, cta_group,\ncache_hint as positional params), and s2g gained a cache_hint\
+    \ parameter, ALL downstream\ncall sites needed updating:\n\n- tir tests: tests/python/tirx/codegen/,\
+    \ tests/python/tirx/transform/\n- tirx-kernels: tirx_kernels/gemm/*.py (hgemm_rs_cpasync,\
+    \ hgemm_rs_tilelink,\n  hgemm_rs_multimem_dynamic_scheduler, hgemm_rs_multimem_static_scheduler,\n\
+    \  tf32_hc_prenorm_gemm)\n\nThe signatures after the change:\n- g2c: (dim, dst_ptr,\
+    \ bar, tensormap, cta_mask, cta_group, cache_hint, *coords)\n- s2g: (dim, src_ptr,\
+    \ tensormap, cache_hint, *coords)\n- s2g_reduce: (dim, src_ptr, tensormap, cache_hint,\
+    \ red_op, *coords)\n- prefetch: (dim, tensormap, cache_hint, *coords)\n\nWhen\
+    \ fixing one intrinsic's call sites, always grep for ALL related intrinsics\n\
+    (g2c, s2g, s2g_reduce, prefetch) to catch all affected sites in a single pass.\n"
+  summary: When cp_async.bulk.tensor intrinsic signatures change (g2c, s2g, s2g_reduce,
+    prefetch), ALL call sites in both tir tests and tirx-kernels must be updated together.
+created: '2026-03-26'
+id: KB-20260326-004750-bc6d9b
+scope:
+- repo
+tags:
+- cp_async
+- intrinsic
+- cross-repo
+- tirx-kernels
+- migration
+title: Intrinsic signature changes require updating all cp_async.bulk.tensor call
+  sites across repos
+updated: '2026-03-26'

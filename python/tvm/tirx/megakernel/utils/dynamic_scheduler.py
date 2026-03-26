@@ -422,7 +422,7 @@ class DynamicTileScheduler(TileSchedulerBase):
                     "cta": (0, tid),
                 }
             )
-            idx = idx_map[scope]
+            idx = Tx.meta_var(idx_map[scope])
             if self.debug:
                 Tx.cuda.trap_when_assert_failed(
                     scope_id == -1 or scope_id < max_scope_id_map[scope]
@@ -511,7 +511,7 @@ class DynamicTileScheduler(TileSchedulerBase):
                 {"thread": tid, "warp": warp_id, "warpgroup": wg_id, "cta": 0}
             )
             new_scope_id = Tx.if_then_else(scope_id == -1, scope_id_map[scope], scope_id)
-            idx = idx_map[scope]
+            idx = Tx.meta_var(idx_map[scope])
             if self.debug:
                 Tx.cuda.trap_when_assert_failed(
                     scope_id == -1 or scope_id < max_scope_id_map[scope]

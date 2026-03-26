@@ -142,9 +142,11 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
     elif getattr(type(value), "_is_meta_class", False):
         return value
     elif isinstance(value, list | tuple):
-        for i, v in enumerate(value):
-            bind_assign_value(self, node, f"{var_name}_{i}", v)
-        return value
+        self.report_error(
+            node,
+            "Cannot assign a list or tuple directly to a variable in TVMScript. "
+            "Use T.meta_var([...]) for Python-level values, or pass inline as *[...].",
+        )
     elif isinstance(value, BufferRegion):
         import functools  # pylint: disable=import-outside-toplevel
 
@@ -244,29 +246,7 @@ def find_decorator_annotation(node: doc.FunctionDef, annotation: str, default: b
     return default
 
 
-def range_sugar(
-    start: PrimExpr,
-    stop: PrimExpr = None,
-    step: PrimExpr | None = None,
-    *,
-    annotations: dict[str, Any] | None = None,
-) -> T.frame.ForFrame:
-    """The sugar for python range builtin."""
-
-    # Since `tirx.For` do not support reversed iteration semantic,
-    # the step must be checked to be positive integer when use range sugar
-    if step is not None:
-        try:
-            step = int(step)
-            if step <= 0:
-                raise ValueError(f"Only support positive step in range(), get {step}")
-        except TypeError:  # pylint: disable=broad-except
-            raise ValueError(f"Only support literal step in range(), get {step}")
-
-    return T.serial(start, stop, annotations=annotations, step=step)
-
-
-@dispatch.register(token="tirx", type_name="For")
+@dispatch.register(token="tir", type_name="For")
 def visit_for(self: Parser, node: doc.For) -> None:
     """The for visiting method for tirx.
 
@@ -278,9 +258,24 @@ def visit_for(self: Parser, node: doc.For) -> None:
     node : doc.For
         The doc AST for node.
     """
-    for_frame = self.eval_expr(node.iter)
-    if isinstance(for_frame, range):
-        for_frame = T.serial(for_frame.start, for_frame.stop)
+    # Intercept range() at AST level so it works with both Python ints and PrimExprs.
+    # In other contexts (e.g. list comprehensions), range remains Python's builtin.
+    if (
+        isinstance(node.iter, doc.Call)
+        and isinstance(node.iter.func, doc.Name)
+        and node.iter.func.id == "range"
+    ):
+        args = [self.eval_expr(a) for a in node.iter.args]
+        if len(args) == 1:
+            for_frame = T.serial(0, args[0])
+        elif len(args) == 2:
+            for_frame = T.serial(args[0], args[1])
+        elif len(args) == 3:
+            for_frame = T.serial(args[0], args[1], step=args[2])
+        else:
+            self.report_error(node.iter, "range() takes 1 to 3 arguments")
+    else:
+        for_frame = self.eval_expr(node.iter)
     if not isinstance(for_frame, T.frame.ForFrame):
         self.report_error(
             node.iter,
@@ -605,7 +600,6 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     persistent = find_decorator_annotation(node, "persistent", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
-        # self.var_table.add("range", range_sugar)
         try:
             prim_func_ctx = T.prim_func(is_private=privacy, is_tirx=tirx, persistent=persistent)
         except TypeError:

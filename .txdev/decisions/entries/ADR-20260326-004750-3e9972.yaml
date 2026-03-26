@@ -1,0 +1,74 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Problem: After commit 680edb2bb6 enabled list comprehension evaluation
+    via the
+
+    ExprEvaluator ListComp early-exit, bare assignments like b_los = [f(i) for i in
+    range(N)]
+
+    would flow into bind_assign_value''s list branch, which created orphan T.local_scalar
+
+    buffers for each element -- dead IR that wasted compile time and could cause subtle
+    bugs.
+
+
+    Decision: Replace the list/tuple branch in bind_assign_value (~line 144) with
+
+    self.report_error() that tells the user to use T.meta_var([...]) for Python-level
+
+    values, or pass inline as *[...].
+
+
+    Why not silently wrap in meta_var: Making it explicit forces the user to choose
+
+    between meta_var (Python-level list, no IR footprint) and inline unpacking (elements
+
+    become separate IR expressions). The old silent behavior created IR nodes the
+    user
+
+    didn''t intend.
+
+
+    Note: T.meta_var([...]) is checked before the list/tuple branch (line ~140), so
+    it
+
+    still works. Tuple destructuring (a, b = func()) goes through _eval_assign before
+
+    bind_assign_value, so it''s unaffected. T.grid multi-dimensional loops where a
+    single
+
+    variable receives a tuple of iterators also go through bind_for_value, not
+
+    bind_assign_value, so they''re unaffected.
+
+    '
+  summary: Bare list/tuple variable assignment (var = [comp]) is now a parse error
+    in TVMScript; users must use T.meta_var([...]) or inline *[...].
+created: '2026-03-26'
+id: ADR-20260326-004750-3e9972
+scope:
+- repo
+tags:
+- tvmscript
+- parser
+- list-comprehension
+- meta-var
+- api-design
+title: Reject bare list/tuple assignment in TVMScript bind_assign_value
+updated: '2026-03-26'

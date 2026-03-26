@@ -1,0 +1,70 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Problem: The old range_sugar approach added a custom range function to
+    the parser''s
+
+    value table that returned T.serial ForFrames. This worked for for-loops but broke
+    list
+
+    comprehensions: [f(i) for i in range(N)] would get range_sugar instead of Python''s
+
+    builtin range, producing ForFrame objects inside the comprehension.
+
+
+    Decision: Intercept range() at the AST level in visit_for only. Before evaluating
+
+    node.iter, check if it''s a doc.Call with doc.Name func id "range". If so, eval
+    the
+
+    args individually and construct T.serial(start, stop, step=step). Otherwise, fall
+
+    through to normal eval_expr.
+
+
+    Trade-offs:
+
+    - Pro: range() in comprehensions and other non-for contexts remains Python''s
+    builtin
+
+    - Pro: Works with both Python int and PrimExpr arguments (args are eval''d individually)
+
+    - Pro: No value-table pollution; range_sugar function can be deleted entirely
+
+    - Con: Only intercepts simple range(N) calls, not method-call or aliased range
+
+    - Accepted: The simple pattern covers all real usage in TVMScript kernels
+
+
+    Key code: parser.py visit_for, ~lines 269-293.
+
+    '
+  summary: Handle for i in range(N) by intercepting range() at the AST level in visit_for,
+    instead of shadowing Python's range in the parser value table.
+created: '2026-03-26'
+id: ADR-20260326-004750-de4733
+scope:
+- repo
+tags:
+- tvmscript
+- parser
+- range
+- for-loop
+- api-design
+title: AST-level range() interception in visit_for over value-table shadowing
+updated: '2026-03-26'

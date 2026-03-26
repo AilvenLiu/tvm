@@ -524,6 +524,33 @@ entries:
   - dispatch
   title: 'TVM Map uses copy-on-write: callers must read back after mutation'
   updated: '2026-03-25'
+- created: '2026-03-26'
+  id: KB-20260326-004750-bc6d9b
+  path: entries/KB-20260326-004750-bc6d9b.yaml
+  scope:
+  - repo
+  tags:
+  - cp_async
+  - intrinsic
+  - cross-repo
+  - tirx-kernels
+  - migration
+  title: Intrinsic signature changes require updating all cp_async.bulk.tensor call
+    sites across repos
+  updated: '2026-03-26'
+- created: '2026-03-26'
+  id: KB-20260326-004750-e4d4b4
+  path: entries/KB-20260326-004750-e4d4b4.yaml
+  scope:
+  - repo
+  tags:
+  - tvmscript
+  - parser
+  - evaluator
+  - list-comprehension
+  - range
+  title: TVMScript ExprEvaluator ListComp early-exit and range() interaction
+  updated: '2026-03-26'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -586,11 +613,13 @@ tags:
   - KB-20260325-174353-cf8a51
   cp_async:
   - KB-20260325-174353-9b4386
+  - KB-20260326-004750-bc6d9b
   cross-repo:
   - KB-20260319-022448-393527
   - KB-20260319-174406-349680
   - KB-20260324-171756-7ab04c
   - KB-20260324-171756-cea50a
+  - KB-20260326-004750-bc6d9b
   cuda:
   - KB-20260307-231252-48549d
   deadlock:
@@ -603,6 +632,8 @@ tags:
   - KB-20260301-0004
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
+  evaluator:
+  - KB-20260326-004750-e4d4b4
   ffi:
   - KB-20260325-174353-cf8a51
   flaky-tests:
@@ -626,6 +657,7 @@ tags:
   - KB-20260322-201254-ba181e
   intrinsic:
   - KB-20260325-174353-9b4386
+  - KB-20260326-004750-bc6d9b
   ir:
   - KB-20260301-0001
   json-file:
@@ -642,6 +674,8 @@ tags:
   - KB-20260301-0003
   - KB-20260308-232603-205e85
   - KB-20260322-182024-1738c4
+  list-comprehension:
+  - KB-20260326-004750-e4d4b4
   local-scalar:
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
@@ -655,6 +689,8 @@ tags:
   - KB-20260323-185836-570267
   megakernel:
   - KB-20260322-201254-ba181e
+  migration:
+  - KB-20260326-004750-bc6d9b
   noqa:
   - KB-20260301-0003
   - KB-20260322-182024-1738c4
@@ -673,6 +709,7 @@ tags:
   parser:
   - KB-20260317-211410-e366ed
   - KB-20260325-174353-9679e0
+  - KB-20260326-004750-e4d4b4
   pip:
   - KB-20260320-002326-24c511
   pipeline:
@@ -712,6 +749,8 @@ tags:
   - KB-20260308-232603-205e85
   - KB-20260317-211410-e366ed
   - KB-20260320-002326-24c511
+  range:
+  - KB-20260326-004750-e4d4b4
   recovery:
   - KB-20260228-0003
   refactor:
@@ -775,6 +814,7 @@ tags:
   - KB-20260320-002326-24c511
   - KB-20260322-201254-ba181e
   - KB-20260324-171756-7ab04c
+  - KB-20260326-004750-bc6d9b
   tma:
   - KB-20260227-0002
   - KB-20260227-0003
@@ -794,6 +834,7 @@ tags:
   - KB-20260322-182024-e7c4c2
   - KB-20260325-174353-9679e0
   - KB-20260325-174353-9b4386
+  - KB-20260326-004750-e4d4b4
   validation:
   - KB-20260228-0004
   vector-annotation:

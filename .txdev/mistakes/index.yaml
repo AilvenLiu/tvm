@@ -383,6 +383,19 @@ entries:
   - gemm
   title: Cache key collision from pool-allocated buffer .data identity
   updated: '2026-03-25'
+- created: '2026-03-26'
+  id: M-20260326-004750-646f60
+  path: entries/M-20260326-004750-646f60.yaml
+  scope:
+  - repo
+  tags:
+  - cp_async
+  - intrinsic
+  - cross-repo
+  - thoroughness
+  - tirx-kernels
+  title: Only searched for g2c call sites, missed s2g with same signature issue
+  updated: '2026-03-26'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -420,8 +433,11 @@ tags:
   - M-20260307-231252-423c4d
   - M-20260322-182024-631109
   - M-20260325-174353-51abbb
+  cp_async:
+  - M-20260326-004750-646f60
   cross-repo:
   - M-20260319-174407-01b7d3
+  - M-20260326-004750-646f60
   deadlock:
   - M-20260317-211411-ba6927
   debugging:
@@ -458,6 +474,8 @@ tags:
   import:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
+  intrinsic:
+  - M-20260326-004750-646f60
   lambda:
   - M-20260323-185836-374105
   lint:
@@ -549,12 +567,15 @@ tags:
   - M-20260325-174353-4a9cda
   thoroughness:
   - M-20260317-211411-dfb881
+  - M-20260326-004750-646f60
   thunderkittens:
   - M-20260323-185836-967c0e
   tirx:
   - M-20260301-0002
   - M-20260308-232603-9a9463
   - M-20260317-211411-dfb881
+  tirx-kernels:
+  - M-20260326-004750-646f60
   tvmscript:
   - M-20260322-182024-631109
   user-intent:

@@ -1,0 +1,46 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "In evaluator.py (~line 240), when the evaluator encounters a doc.ListComp\
+    \ node, it\ntakes an early-exit path: it calls doc.from_doc(node) to convert back\
+    \ to a Python AST,\nthen compile()+eval() with the value_table as globals. This\
+    \ means:\n\n1. Any value-table overrides (like range_sugar shadowing Python's\
+    \ range) take effect\n   inside comprehensions too, which can cause unexpected\
+    \ ForFrame objects instead of\n   Python range iterators.\n2. The comprehension\
+    \ result is a plain Python list, which then flows into\n   bind_assign_value where\
+    \ it was silently creating orphan T.local_scalar buffers.\n\nThe fix was two-fold:\n\
+    - Remove range_sugar from the value table entirely; intercept range() at the AST\
+    \ level\n  in visit_for instead, so it only applies in for-loop context.\n- Reject\
+    \ bare list/tuple assignment in bind_assign_value with an error guiding users\n\
+    \  to T.meta_var([...]) or inline *[...].\n\nKey file: python/tvm/script/parser/core/evaluator.py\
+    \ (ListComp handler ~line 240,\n_eval_expr ~line 499).\n"
+  summary: ExprEvaluator short-circuits doc.ListComp by compiling the whole comprehension
+    as raw Python via compile()+eval(), so range inside comprehensions uses Python's
+    builtin range, not any value-table override.
+created: '2026-03-26'
+id: KB-20260326-004750-e4d4b4
+scope:
+- repo
+tags:
+- tvmscript
+- parser
+- evaluator
+- list-comprehension
+- range
+title: TVMScript ExprEvaluator ListComp early-exit and range() interaction
+updated: '2026-03-26'

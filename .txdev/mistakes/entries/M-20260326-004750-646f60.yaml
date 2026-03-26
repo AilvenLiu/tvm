@@ -1,0 +1,61 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'After the cp_async.bulk.tensor signature refactor, the g2c intrinsic had
+    *coords moved
+
+    to the end, requiring all callers to pass cta_mask, cta_group, cache_hint positionally.
+
+    The s2g intrinsic had a different but related change: cache_hint was added before
+    *coords.
+
+
+    I fixed all 20 g2c call sites across 5 tirx-kernels files but did not search for
+    s2g
+
+    call sites. The tf32_hc_prenorm_gemm test failure (ValueError: "Number of coordinate
+
+    expressions (2) does not match dimension (3)") revealed 6 unfixed s2g call sites
+    across
+
+    the same 5 files.
+
+
+    Root cause: I treated the g2c and s2g changes as independent when they were part
+    of
+
+    the same signature refactor. When fixing one member of an intrinsic family, always
+
+    grep for ALL members (g2c, s2g, s2g_reduce, prefetch) in the same pass.
+
+    '
+  summary: When fixing g2c call sites for the new positional signature, failed to
+    also search for s2g call sites that had a parallel signature change (cache_hint
+    added), causing a test failure.
+created: '2026-03-26'
+id: M-20260326-004750-646f60
+scope:
+- repo
+tags:
+- cp_async
+- intrinsic
+- cross-repo
+- thoroughness
+- tirx-kernels
+title: Only searched for g2c call sites, missed s2g with same signature issue
+updated: '2026-03-26'

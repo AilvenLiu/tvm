@@ -202,7 +202,7 @@ class StaticTileScheduler(TileSchedulerBase):
                     "cta": (0, tid),
                 }
             )
-            idx = idx_map[scope]
+            idx = Tx.meta_var(idx_map[scope])
             if self.debug:
                 Tx.cuda.trap_when_assert_failed(
                     scope_id == -1 or scope_id < max_scope_id_map[scope]
