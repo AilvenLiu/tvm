@@ -1,20 +1,3 @@
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-
 entries:
 - created: '2026-02-27'
   id: KB-20260227-0001
@@ -591,6 +574,19 @@ entries:
   - correctness
   title: Linearized thread ID required for warp_id/lane_id in 2D/3D CUDA blocks
   updated: '2026-03-26'
+- created: '2026-03-26'
+  id: KB-20260326-203453-d526a0
+  path: entries/KB-20260326-203453-d526a0.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - lint
+  - txdev
+  - claude
+  - asf-header
+  title: Exclude .txdev and .claude from pre-commit at three layers
+  updated: '2026-03-26'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -607,6 +603,8 @@ tags:
   architecture:
   - KB-20260308-232603-d83e44
   - KB-20260319-022448-901600
+  asf-header:
+  - KB-20260326-203453-d526a0
   assert_structural_equal:
   - KB-20260227-0001
   barrier:
@@ -636,6 +634,8 @@ tags:
   - KB-20260326-030915-12829a
   caching:
   - KB-20260325-174353-b5e171
+  claude:
+  - KB-20260326-203453-d526a0
   codegen:
   - KB-20260227-0002
   - KB-20260301-0001
@@ -725,6 +725,7 @@ tags:
   - KB-20260301-0003
   - KB-20260308-232603-205e85
   - KB-20260322-182024-1738c4
+  - KB-20260326-203453-d526a0
   list-comprehension:
   - KB-20260326-004750-e4d4b4
   local-scalar:
@@ -776,6 +777,7 @@ tags:
   - KB-20260228-0001
   - KB-20260228-0003
   - KB-20260301-0001
+  - KB-20260326-203453-d526a0
   pre-push:
   - KB-20260228-0003
   printer:
@@ -892,6 +894,8 @@ tags:
   - KB-20260325-174353-9679e0
   - KB-20260325-174353-9b4386
   - KB-20260326-004750-e4d4b4
+  txdev:
+  - KB-20260326-203453-d526a0
   validation:
   - KB-20260228-0004
   vector-annotation:

@@ -122,6 +122,9 @@ def filename_allowed(name: str) -> bool:
     if name.startswith("3rdparty"):
         return True
 
+    if name.startswith(".txdev") or name.startswith(".claude"):
+        return True
+
     if name in ALLOW_SPECIFIC_FILE:
         return True
 

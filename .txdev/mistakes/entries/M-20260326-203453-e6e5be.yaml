@@ -1,0 +1,37 @@
+content:
+  details: 'The .txdev entry files had ASF headers (16 comment lines + 1 blank line)
+    prepended before the actual YAML content.
+
+    The bulk strip used `tail -n +18` to remove the first 17 lines. However, the origin/tirx
+    version of these files
+
+    has a proper YAML structure with `content:` as a top-level key (added by the ASF
+    header fixer in a structured way).
+
+    After stripping, the files started with the `details:` or `summary:` sub-key without
+    the parent `content:` mapping,
+
+    making them unparseable. The fix was to restore from origin/tirx (the clean base)
+    and let the pre-commit exclude
+
+    prevent headers from being added in the future, rather than trying to strip headers
+    from already-structured files.
+
+    Lesson: when bulk-modifying structured files, validate the output parses correctly
+    before committing.
+
+    '
+  summary: Bulk-stripping the 17-line ASF header from .txdev YAML files removed the
+    top-level `content:` key, producing malformed YAML that broke downstream index
+    rebuilds.
+created: '2026-03-26'
+id: M-20260326-203453-e6e5be
+scope:
+- repo
+tags:
+- txdev
+- yaml
+- pre-commit
+- data-integrity
+title: Stripping ASF headers from .txdev broke YAML structure
+updated: '2026-03-26'

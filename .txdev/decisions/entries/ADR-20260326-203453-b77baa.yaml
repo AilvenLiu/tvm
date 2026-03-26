@@ -1,0 +1,32 @@
+content:
+  details: 'The .txdev/ directory contains agent knowledge base, decision records,
+    and mistake logs (YAML files).
+
+    The .claude/ directory contains Claude skill definitions and command templates
+    (Markdown files).
+
+    Neither contains project source code subject to the Apache 2.0 license policy.
+
+    Previously, check_asf_header.py forced these files to carry ASF headers, adding
+    16-line boilerplate to every entry.
+
+    The decision is to exclude these directories from all pre-commit enforcement and
+    strip the unnecessary headers,
+
+    keeping the files clean for their intended purpose as agent/tooling metadata.
+
+    '
+  summary: Agent metadata (.txdev/, .claude/) is excluded from ASF license headers
+    since these are tooling configuration files, not project source code.
+created: '2026-03-26'
+id: ADR-20260326-203453-b77baa
+scope:
+- repo
+tags:
+- pre-commit
+- asf-header
+- txdev
+- claude
+- policy
+title: Exclude agent metadata directories from ASF license header requirements
+updated: '2026-03-26'

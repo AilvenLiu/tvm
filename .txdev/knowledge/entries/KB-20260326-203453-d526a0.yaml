@@ -1,0 +1,36 @@
+content:
+  details: 'The tir repo has three independent file-scanning mechanisms that all need
+    exclusion rules:
+
+    1. `.pre-commit-config.yaml` top-level `exclude` regex — applies to all external
+    hooks (yamllint, ruff, clang-format, trailing-whitespace, etc.)
+
+    2. `tests/lint/check_asf_header.py` SKIP_LIST — this script calls `git ls-files`
+    directly and ignores pre-commit''s exclude, so it needs its own skip entries (`.txdev/*`,
+    `.claude/*`)
+
+    3. `tests/lint/check_file_type.py` filename_allowed() — also uses `git ls-files`
+    directly; needs early-return for `.txdev`/`.claude` paths like the existing `3rdparty`
+    exemption
+
+
+    A top-level `exclude` in .pre-commit-config.yaml is the most maintainable approach
+    since it applies globally to all hooks, but the two custom lint scripts bypass
+    pre-commit''s filtering and must be updated independently.
+
+    '
+  summary: 'Agent metadata dirs (.txdev/, .claude/) must be excluded from pre-commit
+    at three layers: global exclude in .pre-commit-config.yaml, SKIP_LIST in check_asf_header.py,
+    and filename_allowed() in check_file_type.py.'
+created: '2026-03-26'
+id: KB-20260326-203453-d526a0
+scope:
+- repo
+tags:
+- pre-commit
+- lint
+- txdev
+- claude
+- asf-header
+title: Exclude .txdev and .claude from pre-commit at three layers
+updated: '2026-03-26'

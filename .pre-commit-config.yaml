@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+exclude: ^(\.txdev/|\.claude/)
+
 default_install_hook_types:
   - pre-commit
 repos:
@@ -70,7 +72,7 @@ repos:
         args:
           - --config-file
           - .yamllint.yaml
-        exclude: ^(\.github/|\.txdev/)
+        exclude: ^\.github/
 
   # ---------- TOML format ----------
   - repo: https://github.com/ComPWA/taplo-pre-commit
