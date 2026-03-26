@@ -1,0 +1,57 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'TVM''s PoolAllocator creates sub-buffers that share a single `extern __shared__
+    uchar[]` base array. Each sub-buffer has its own `elem_offset` within this shared
+    allocation.
+
+
+    - `buf.data` returns the raw base Var of the entire pool, generating code like
+    `((float*)smem_ptr)` — this points to offset 0 of shared memory regardless of
+    which sub-buffer you''re accessing.
+
+    - `buf.ptr_to([0])` returns a pointer that accounts for the pool offset, generating
+    code like `(&(((float*)smem_ptr)[4096]))` when the sub-buffer starts at element
+    4096.
+
+
+    This distinction is critical when passing scratch buffers to inline CUDA functions
+    (e.g., cta_reduce''s scratch parameter). Using `.data` causes the generated function
+    to write to the wrong shared memory location, potentially corrupting other sub-buffers
+    (e.g., input data stored in x_smem).
+
+
+    In kernel code, the correct pattern is: `T.cuda.cta_sum(value, num_warps, scratch_smem.ptr_to([0]))`.
+
+    '
+  summary: When passing a pool-allocated shared memory buffer as a pointer argument
+    to generated CUDA code, use `buf.ptr_to([0])` (accounts for pool offset) instead
+    of `buf.data` (raw base of entire shared memory region).
+created: '2026-03-26'
+id: KB-20260326-030915-12829a
+scope:
+- repo
+tags:
+- smem
+- pool-allocator
+- buffer
+- codegen
+- cuda
+- correctness
+title: 'Pool-allocated smem: .ptr_to([0]) vs .data for codegen pointer arguments'
+updated: '2026-03-26'

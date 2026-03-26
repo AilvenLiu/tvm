@@ -1,0 +1,66 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Three CTA reduction sync patterns existed across tirx-kernels:
+
+
+    1. `cta_sync()` (fused_add_rms_norm) — maps to `__syncthreads()` directly. Trivially
+    equivalent.
+
+
+    2. `bar.sync(1, bdx*bdy) + fence.proxy_async("shared::cta")` (activation/rmsnorm)
+    — `bar.sync(1,N)` where N=all CTA threads is functionally equivalent to `bar.sync(0,N)`
+    for synchronization. `fence.proxy_async` is redundant because data loading is
+    synchronous (Tx.copy, not TMA). `__syncthreads()` provides a strict superset:
+    both sync and full CTA memory barrier.
+
+
+    3. `bar.sync(1, b_dx*b_dy) + fence.proxy("shared")` (normalization/rmsnorm) —
+    SM100a kernel with TMA pipeline, but TMA completion is guarded by `input_bar.wait(0,
+    0)` (mbarrier wait with acquire semantics) before the reduction starts. At reduction
+    time, only synchronous smem writes occur. `__syncthreads()` orders these correctly.
+
+
+    Three conditions were verified at each target site:
+
+    - All CTA threads participate (no thread subset isolation at reduction sites)
+
+    - No pending async proxy operations at reduction time
+
+    - `__syncthreads()` provides sufficient memory ordering for synchronous smem read/write
+
+
+    Empirical validation: all 1910 tirx tests pass, benchmarks show no regression.
+
+    '
+  summary: 'The cta_reduce intrinsic generates __syncthreads() internally, which correctly
+    replaces three different sync patterns used at CTA reduction sites: cta_sync(),
+    bar.sync(id,n)+fence.proxy_async, and bar.sync(id,n)+fence.proxy.'
+created: '2026-03-26'
+id: ADR-20260326-030916-ac4a46
+scope:
+- repo
+tags:
+- cuda
+- sync
+- cta-reduce
+- codegen
+- correctness
+title: cta_reduce uses __syncthreads() to replace both cta_sync and bar.sync+fence
+  patterns
+updated: '2026-03-26'

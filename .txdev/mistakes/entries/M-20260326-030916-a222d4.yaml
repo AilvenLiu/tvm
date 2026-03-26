@@ -1,0 +1,43 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: "The initial cta_reduce codegen generated:\n```cuda\ntemplate <typename\
+    \ T>\nT cta_reduce_sum(T val, T* scratch) { ... }\n```\n\nThis fails at CUDA compilation\
+    \ because the pool allocator's shared memory is declared as `extern __shared__\
+    \ uchar smem[];` and the sub-buffer pointer has type `unsigned char*` at the call\
+    \ site. Template argument deduction sees `(float, unsigned char*)` and cannot\
+    \ reconcile T.\n\nFix: Accept `void*` and cast inside:\n```cuda\ntemplate <typename\
+    \ T>\nT cta_reduce_sum(T val, void* scratch_raw) {\n    T* scratch = reinterpret_cast<T*>(scratch_raw);\n\
+    \    ...\n}\n```\n\nThis pattern applies to any codegen that takes a buffer pointer\
+    \ from pool-allocated shared memory as a function argument.\n"
+  summary: 'CTA reduce codegen used typed `T* scratch` parameter, but pool allocator
+    produces `extern __shared__ uchar[]`. CUDA template deduction failed because T
+    couldn''t be deduced from (float, unsigned char[]). Fix: use `void* scratch_raw`
+    with `T* scratch = reinterpret_cast<T*>(scratch_raw)`.'
+created: '2026-03-26'
+id: M-20260326-030916-a222d4
+scope:
+- repo
+tags:
+- codegen
+- cuda
+- pool-allocator
+- smem
+- template
+title: Used T* scratch parameter instead of void* for pool-allocated shared memory
+updated: '2026-03-26'

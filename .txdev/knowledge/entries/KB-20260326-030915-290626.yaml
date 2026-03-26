@@ -1,0 +1,67 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Full registration stack for a new TIR CUDA intrinsic (e.g., cuda_warp_reduce,
+    cuda_cta_reduce):
+
+
+    1. **python/tvm/tir/op.py**: Define Python function calling `call_intrin(dtype,
+    "tir.<op_name>", *args)`. Scalars become IntImm/FloatImm, strings become StringImm.
+    Add convenience wrappers (e.g., cuda_cta_sum calls cuda_cta_reduce with op="sum").
+
+
+    2. **python/tvm/script/ir_builder/tir/ir.py**: Register in CUDANamespace.__init__
+    as `self.<name> = _op_wrapper(_tir_op.<func>)`. This enables `T.cuda.<name>(...)`
+    and `Tx.cuda.<name>(...)` in TVMScript.
+
+
+    3. **include/tvm/tir/builtin.h**: Add C++ declaration `TVM_DLL const Op& <op_name>();`.
+
+
+    4. **src/tir/op/builtin.cc**: Register with `TIR_DEFINE_BUILTIN_FUNC(<op_name>).set_attr<TCallEffectKind>(...)`.
+    Use kOpaque for side-effectful ops (prevents reordering/elimination/duplication).
+
+
+    5. **python/tvm/tir/device_op_codegen/cuda/<file>.py**: Implement `@register_codegen("<op_name>")`
+    that generates inline CUDA via `cuda_func_call(func_name, *args, source_code=src,
+    return_type=dtype)`. The function name should encode parameters (e.g., `tvm_builtin_cuda_warp_reduce_sum_32`)
+    for deduplication.
+
+
+    Also update `device_op_codegen/cuda/__init__.py` to import the new codegen module
+    (side-effect import for registration).
+
+
+    After C++ changes (steps 3-4), rebuild TVM with `cmake --build . -j$(nproc)`.
+
+    '
+  summary: 'Adding a new TIR intrinsic requires changes in 5 layers: op.py (Python
+    def) -> ir.py (CUDANamespace) -> builtin.h (C++ decl) -> builtin.cc (C++ registration
+    with TCallEffectKind) -> device_op_codegen/cuda/ (codegen via @register_codegen).'
+created: '2026-03-26'
+id: KB-20260326-030915-290626
+scope:
+- repo
+tags:
+- tir
+- intrinsic
+- codegen
+- registration
+- how-to
+title: 'TIR intrinsic registration stack: full 5-layer checklist'
+updated: '2026-03-26'

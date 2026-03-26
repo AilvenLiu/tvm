@@ -1,0 +1,62 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'Many TIRX kernels use 2D thread blocks where threadIdx.x = lane within
+    warp and threadIdx.y = warp index. In this layout, `threadIdx.x / 32 = 0` for
+    ALL threads (since threadIdx.x < 32), making naive warp_id computation incorrect.
+
+
+    The correct approach for generated CUDA code that needs warp_id/lane_id:
+
+    ```cuda
+
+    int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x *
+    blockDim.y;
+
+    int warp_id = tid / 32;
+
+    int lane_id = tid % 32;
+
+    ```
+
+
+    This works correctly for 1D, 2D, and 3D block configurations. The linearized form
+    is a strict generalization — for 1D blocks it reduces to `threadIdx.x` since blockDim.y
+    and blockDim.z are 1.
+
+
+    Symptom of the bug: all threads compute warp_id=0, so only scratch[0] is written
+    in step 1 of CTA reduce, and step 2 reads uninitialized scratch[1..N-1], causing
+    ~99.7% of values to be wrong.
+
+    '
+  summary: CUDA codegen that computes warp_id or lane_id must use linearized tid =
+    threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y,
+    not just threadIdx.x / 32.
+created: '2026-03-26'
+id: KB-20260326-030915-be19fc
+scope:
+- repo
+tags:
+- cuda
+- codegen
+- thread-block
+- warp
+- correctness
+title: Linearized thread ID required for warp_id/lane_id in 2D/3D CUDA blocks
+updated: '2026-03-26'

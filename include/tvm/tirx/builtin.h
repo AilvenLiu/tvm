@@ -842,6 +842,22 @@ TVM_DLL const Op& cuda_atomic_add();
 TVM_DLL const Op& cuda_thread_fence();
 
 /*!
+ * \brief Warp-level butterfly shuffle-XOR reduction.
+ *
+ * cuda_warp_reduce(value, op, width) reduces value across width adjacent
+ * lanes using the specified operation ("sum", "max", "min").
+ */
+TVM_DLL const Op& cuda_warp_reduce();
+
+/*!
+ * \brief CTA-wide reduction via warp shuffle + shared memory.
+ *
+ * cuda_cta_reduce(value, op, num_warps, scratch) reduces value across
+ * the entire CTA using the specified operation ("sum", "max", "min").
+ */
+TVM_DLL const Op& cuda_cta_reduce();
+
+/*!
  * \brief tvm intrinsic for cuda warp sync instruction
  */
 TVM_DLL const Op& cuda_warp_sync();

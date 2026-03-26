@@ -1,0 +1,61 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+content:
+  details: 'CTA reduce is a 2-step algorithm: (1) intra-warp warp_reduce, (2) cross-warp
+    via shared memory. This means cta_reduce''s codegen must embed the warp_reduce
+    CUDA template.
+
+
+    With two files (cuda_warp_reduce.py, cuda_cta_reduce.py), the op-to-code mapping
+    (sum->"+= shuffled", max->"max(val, shuffled)", min->"min(val, shuffled)") and
+    the warp reduce template generator would be duplicated.
+
+
+    Merged into cuda_reduce.py with:
+
+    - `_OP_TABLE = {"sum": ("val += shuffled;", "T(0)"), "max": (...), "min": (...)}`
+    — shared
+
+    - `_warp_reduce_source(func_name, width, step_expr)` — shared helper generating
+    the __shfl_xor_sync butterfly loop
+
+    - `@register_codegen("cuda_warp_reduce")` — uses _warp_reduce_source directly
+
+    - `@register_codegen("cuda_cta_reduce")` — embeds _warp_reduce_source output in
+    the 2-step CTA template
+
+
+    The __init__.py import was updated from two separate imports to one: `from . import
+    cuda_reduce`.
+
+    '
+  summary: Warp reduce and CTA reduce codegen share an op table (_OP_TABLE) and warp
+    reduce source generator (_warp_reduce_source), so they live in one file (cuda_reduce.py)
+    instead of two separate files.
+created: '2026-03-26'
+id: ADR-20260326-030916-5826a7
+scope:
+- repo
+tags:
+- codegen
+- cuda
+- architecture
+- warp-reduce
+- cta-reduce
+title: Merged warp_reduce and cta_reduce codegen into single cuda_reduce.py
+updated: '2026-03-26'

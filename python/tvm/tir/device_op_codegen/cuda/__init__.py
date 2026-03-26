@@ -36,7 +36,19 @@ The ops are split into logical groups:
 
 # Import header generator and tags (registers tir.device_op_codegen.cuda.header_generator)
 # Import op modules to register their codegen functions
-from . import barrier, cp_async, cuda_sync, math, misc_ptx, mma, nvshmem, tcgen05, timer, wgmma
+from . import (
+    barrier,
+    cp_async,
+    cuda_reduce,
+    cuda_sync,
+    math,
+    misc_ptx,
+    mma,
+    nvshmem,
+    tcgen05,
+    timer,
+    wgmma,
+)
 from .header import TAGS, header_generator
 
 # Import registry (registers tir.device_op_codegen.cuda.get_codegen)

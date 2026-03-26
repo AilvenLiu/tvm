@@ -296,13 +296,20 @@ def _analyze_shuffle_reduce(src_layout, dst_layout):
     return reduce_width, local_elems
 
 
-def _gen_warp_shuffle_reduce(src, dst, reduce_width, local_elems, accum, op_func, init_value):
+_REDUCE_OP_TO_STR = {
+    ReduceOpType.SUM: "sum",
+    ReduceOpType.MAX: "max",
+    ReduceOpType.MIN: "min",
+}
+
+
+def _gen_warp_shuffle_reduce(src, dst, reduce_width, local_elems, accum, op_type, init_value):
     """Generate warp shuffle reduce codegen for laneid shard→replica pattern.
 
     Unified for both full warp (reduce_width=32) and partial warp (e.g. reduce_width=8).
     """
-    num_steps = int(math.log2(reduce_width))
     is_same_buffer = src.same_as(dst)
+    op_str = _REDUCE_OP_TO_STR[op_type]
 
     # fmt: off
     @Tx.prim_func(tirx=True, check_well_formed=False)
@@ -313,10 +320,7 @@ def _gen_warp_shuffle_reduce(src, dst, reduce_width, local_elems, accum, op_func
             for k in Tx.serial(local_elems):
                 if not is_same_buffer:
                     dst_local[k] = src_local[k]
-                row_var = Tx.meta_var(dst_local[k])
-                for step in Tx.unroll(num_steps):
-                    xor_mask = Tx.meta_var(reduce_width >> (step + 1))
-                    dst_local[k] = op_func(row_var, Tx.tvm_warp_shuffle_xor(0xFFFFFFFF, row_var, xor_mask, 32, 32))  # noqa: E501
+                dst_local[k] = Tx.cuda.warp_reduce(dst_local[k], op_str, reduce_width)
     # fmt: on
 
     return impl
@@ -901,13 +905,12 @@ def reduction_local_impl(
         shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
         if shuffle_info is not None:
             reduce_width, local_elems = shuffle_info
-            op_func = reduce_op_table.get(op_type)
-            if op_func is None:
+            if op_type not in _REDUCE_OP_TO_STR:
                 fail(f"unsupported reduce op: {op_type}")
             dtype = src.dtype
             init_value = reduce_default_value_table(dtype).get(op_type)
             return _gen_warp_shuffle_reduce(
-                src, dst, reduce_width, local_elems, accum, op_func, init_value
+                src, dst, reduce_width, local_elems, accum, op_type, init_value
             )
 
         # --- Existing WGMMA layout path below ---

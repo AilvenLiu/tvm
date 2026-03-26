@@ -396,6 +396,32 @@ entries:
   - tirx-kernels
   title: Only searched for g2c call sites, missed s2g with same signature issue
   updated: '2026-03-26'
+- created: '2026-03-26'
+  id: M-20260326-030916-99f4b9
+  path: entries/M-20260326-030916-99f4b9.yaml
+  scope:
+  - repo
+  tags:
+  - codegen
+  - cuda
+  - thread-block
+  - correctness
+  - warp
+  title: Hardcoded threadIdx.x/32 as warp_id in CTA reduce codegen for 2D blocks
+  updated: '2026-03-26'
+- created: '2026-03-26'
+  id: M-20260326-030916-a222d4
+  path: entries/M-20260326-030916-a222d4.yaml
+  scope:
+  - repo
+  tags:
+  - codegen
+  - cuda
+  - pool-allocator
+  - smem
+  - template
+  title: Used T* scratch parameter instead of void* for pool-allocated shared memory
+  updated: '2026-03-26'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -428,6 +454,9 @@ tags:
   code-review:
   - M-20260301-0003
   - M-20260308-232603-cf510d
+  codegen:
+  - M-20260326-030916-99f4b9
+  - M-20260326-030916-a222d4
   correctness:
   - M-20260301-0001
   - M-20260307-231252-423c4d
@@ -438,6 +467,10 @@ tags:
   cross-repo:
   - M-20260319-174407-01b7d3
   - M-20260326-004750-646f60
+  - M-20260326-030916-99f4b9
+  cuda:
+  - M-20260326-030916-99f4b9
+  - M-20260326-030916-a222d4
   deadlock:
   - M-20260317-211411-ba6927
   debugging:
@@ -501,6 +534,7 @@ tags:
   - M-20260317-211411-ba6927
   pool-allocator:
   - M-20260325-174353-51abbb
+  - M-20260326-030916-a222d4
   pre-commit:
   - M-20260228-0001
   - M-20260301-0001
@@ -548,6 +582,9 @@ tags:
   - M-20260228-0003
   smem:
   - M-20260325-174353-51abbb
+  - M-20260326-030916-a222d4
+  template:
+  - M-20260326-030916-a222d4
   testing:
   - M-20260227-0001
   - M-20260227-0002
@@ -568,6 +605,8 @@ tags:
   thoroughness:
   - M-20260317-211411-dfb881
   - M-20260326-004750-646f60
+  thread-block:
+  - M-20260326-030916-99f4b9
   thunderkittens:
   - M-20260323-185836-967c0e
   tirx:
@@ -590,6 +629,8 @@ tags:
   - M-20260325-174353-4a9cda
   warnings:
   - M-20260306-195314-50a55c
+  warp:
+  - M-20260326-030916-99f4b9
   workflow:
   - M-20260228-0002
   - M-20260301-0001

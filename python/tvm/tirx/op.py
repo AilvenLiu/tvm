@@ -2934,6 +2934,92 @@ def cuda_func_call(func_name, *args, source_code, return_type="void"):
     return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)
 
 
+def cuda_warp_reduce(value, op, width=32):
+    """Warp-level butterfly shuffle-XOR reduction.
+
+    Reduces ``value`` across ``width`` adjacent lanes using the specified
+    operation.  Codegen emits ``log2(width)`` steps of
+    ``__shfl_xor_sync(0xFFFFFFFF, val, mask)`` with descending XOR masks.
+
+    Parameters
+    ----------
+    value : PrimExpr
+        The per-thread scalar value to reduce.
+
+    op : str
+        Reduction operation: ``"sum"``, ``"max"``, or ``"min"``.
+
+    width : int
+        Number of lanes participating in each reduction group.
+        Must be a power of two in [2, 32].  Defaults to 32 (full warp).
+
+    Returns
+    -------
+    call : PrimExpr
+        The reduced value (same dtype as *value*).
+    """
+    return call_intrin(value.dtype, "tir.cuda_warp_reduce", value, op, width)
+
+
+def cuda_warp_sum(value, width=32):
+    """Convenience wrapper: ``cuda_warp_reduce(value, "sum", width)``."""
+    return cuda_warp_reduce(value, "sum", width)
+
+
+def cuda_warp_max(value, width=32):
+    """Convenience wrapper: ``cuda_warp_reduce(value, "max", width)``."""
+    return cuda_warp_reduce(value, "max", width)
+
+
+def cuda_warp_min(value, width=32):
+    """Convenience wrapper: ``cuda_warp_reduce(value, "min", width)``."""
+    return cuda_warp_reduce(value, "min", width)
+
+
+def cuda_cta_reduce(value, op, num_warps, scratch):
+    """CTA-wide reduction via warp shuffle + shared memory.
+
+    Two-step reduction: (1) intra-warp shuffle reduction, (2) warp-0
+    collects per-warp partials from ``scratch``, reduces, broadcasts via
+    ``__syncthreads()``.  All CTA threads must participate.
+
+    Parameters
+    ----------
+    value : PrimExpr
+        Per-thread scalar value to reduce.
+
+    op : str
+        Reduction operation: ``"sum"``, ``"max"``, or ``"min"``.
+
+    num_warps : int
+        Number of warps in the CTA.  Must be a power of two in [1, 32].
+
+    scratch : Var
+        Data pointer to shared-memory scratch space (>= num_warps elements).
+
+    Returns
+    -------
+    call : PrimExpr
+        The reduced value broadcast to all threads (same dtype as *value*).
+    """
+    return call_intrin(value.dtype, "tir.cuda_cta_reduce", value, op, num_warps, scratch)
+
+
+def cuda_cta_sum(value, num_warps, scratch):
+    """Convenience wrapper: ``cuda_cta_reduce(value, "sum", num_warps, scratch)``."""
+    return cuda_cta_reduce(value, "sum", num_warps, scratch)
+
+
+def cuda_cta_max(value, num_warps, scratch):
+    """Convenience wrapper: ``cuda_cta_reduce(value, "max", num_warps, scratch)``."""
+    return cuda_cta_reduce(value, "max", num_warps, scratch)
+
+
+def cuda_cta_min(value, num_warps, scratch):
+    """Convenience wrapper: ``cuda_cta_reduce(value, "min", num_warps, scratch)``."""
+    return cuda_cta_reduce(value, "min", num_warps, scratch)
+
+
 def cuda_warp_sync():
     """TVM intrinsic to synchronize threads within the current warp.
 

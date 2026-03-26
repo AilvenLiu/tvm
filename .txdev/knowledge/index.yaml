@@ -551,6 +551,46 @@ entries:
   - range
   title: TVMScript ExprEvaluator ListComp early-exit and range() interaction
   updated: '2026-03-26'
+- created: '2026-03-26'
+  id: KB-20260326-030915-12829a
+  path: entries/KB-20260326-030915-12829a.yaml
+  scope:
+  - repo
+  tags:
+  - smem
+  - pool-allocator
+  - buffer
+  - codegen
+  - cuda
+  - correctness
+  title: 'Pool-allocated smem: .ptr_to([0]) vs .data for codegen pointer arguments'
+  updated: '2026-03-26'
+- created: '2026-03-26'
+  id: KB-20260326-030915-290626
+  path: entries/KB-20260326-030915-290626.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - intrinsic
+  - codegen
+  - registration
+  - how-to
+  title: 'TIR intrinsic registration stack: full 5-layer checklist'
+  updated: '2026-03-26'
+- created: '2026-03-26'
+  id: KB-20260326-030915-be19fc
+  path: entries/KB-20260326-030915-be19fc.yaml
+  scope:
+  - repo
+  tags:
+  - cuda
+  - codegen
+  - thread-block
+  - warp
+  - correctness
+  title: Linearized thread ID required for warp_id/lane_id in 2D/3D CUDA blocks
+  updated: '2026-03-26'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -593,11 +633,15 @@ tags:
   buffer:
   - KB-20260322-182024-e7c4c2
   - KB-20260325-174353-b5e171
+  - KB-20260326-030915-12829a
   caching:
   - KB-20260325-174353-b5e171
   codegen:
   - KB-20260227-0002
   - KB-20260301-0001
+  - KB-20260326-030915-12829a
+  - KB-20260326-030915-290626
+  - KB-20260326-030915-be19fc
   compatibility:
   - KB-20260301-0005
   copy:
@@ -609,6 +653,8 @@ tags:
   - KB-20260227-0001
   correctness:
   - KB-20260325-174353-b5e171
+  - KB-20260326-030915-12829a
+  - KB-20260326-030915-be19fc
   cow:
   - KB-20260325-174353-cf8a51
   cp_async:
@@ -622,6 +668,8 @@ tags:
   - KB-20260326-004750-bc6d9b
   cuda:
   - KB-20260307-231252-48549d
+  - KB-20260326-030915-12829a
+  - KB-20260326-030915-be19fc
   deadlock:
   - KB-20260317-211410-c51a41
   debugging:
@@ -646,6 +694,8 @@ tags:
   gpu:
   - KB-20260307-231252-48549d
   - KB-20260317-211410-c51a41
+  how-to:
+  - KB-20260326-030915-290626
   import:
   - KB-20260227-0003
   - KB-20260302-015214-9e29ce
@@ -658,6 +708,7 @@ tags:
   intrinsic:
   - KB-20260325-174353-9b4386
   - KB-20260326-004750-bc6d9b
+  - KB-20260326-030915-290626
   ir:
   - KB-20260301-0001
   json-file:
@@ -720,6 +771,7 @@ tags:
   pool-allocator:
   - KB-20260317-211410-3d3076
   - KB-20260325-174353-b5e171
+  - KB-20260326-030915-12829a
   pre-commit:
   - KB-20260228-0001
   - KB-20260228-0003
@@ -761,6 +813,7 @@ tags:
   - KB-20260308-232603-d83e44
   registration:
   - KB-20260307-231252-72bc64
+  - KB-20260326-030915-290626
   registry:
   - KB-20260319-022448-901600
   rg:
@@ -783,6 +836,7 @@ tags:
   smem:
   - KB-20260317-211410-3d3076
   - KB-20260325-174353-b5e171
+  - KB-20260326-030915-12829a
   syntax:
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
@@ -797,10 +851,13 @@ tags:
   - KB-20260319-022448-901600
   - KB-20260319-022448-dec2c4
   - KB-20260322-201254-ba181e
+  thread-block:
+  - KB-20260326-030915-be19fc
   thunderkittens:
   - KB-20260323-185836-2fe7e7
   tir:
   - KB-20260227-0001
+  - KB-20260326-030915-290626
   tirx:
   - KB-20260301-0002
   - KB-20260301-0003
@@ -841,6 +898,8 @@ tags:
   - KB-20260322-182024-e7c4c2
   warnings:
   - KB-20260306-195314-a33c27
+  warp:
+  - KB-20260326-030915-be19fc
   worker:
   - KB-20260324-171756-cea50a
   workflow:

@@ -408,6 +408,33 @@ entries:
   - api-design
   title: AST-level range() interception in visit_for over value-table shadowing
   updated: '2026-03-26'
+- created: '2026-03-26'
+  id: ADR-20260326-030916-5826a7
+  path: entries/ADR-20260326-030916-5826a7.yaml
+  scope:
+  - repo
+  tags:
+  - codegen
+  - cuda
+  - architecture
+  - warp-reduce
+  - cta-reduce
+  title: Merged warp_reduce and cta_reduce codegen into single cuda_reduce.py
+  updated: '2026-03-26'
+- created: '2026-03-26'
+  id: ADR-20260326-030916-ac4a46
+  path: entries/ADR-20260326-030916-ac4a46.yaml
+  scope:
+  - repo
+  tags:
+  - cuda
+  - sync
+  - cta-reduce
+  - codegen
+  - correctness
+  title: cta_reduce uses __syncthreads() to replace both cta_sync and bar.sync+fence
+    patterns
+  updated: '2026-03-26'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -438,6 +465,7 @@ tags:
   - ADR-20260324-171756-31a4c8
   - ADR-20260324-171756-41723a
   - ADR-20260325-174353-f8ad92
+  - ADR-20260326-030916-5826a7
   assert_structural_equal:
   - ADR-20260227-0001
   baseline:
@@ -467,16 +495,27 @@ tags:
   - ADR-20260324-171756-b03f0f
   cluster:
   - ADR-20260301-0003
+  codegen:
+  - ADR-20260326-030916-5826a7
+  - ADR-20260326-030916-ac4a46
   commands:
   - ADR-20260324-171756-b03f0f
   compatibility:
   - ADR-20260228-0002
   - ADR-20260228-0003
+  correctness:
+  - ADR-20260326-030916-ac4a46
   cp_async:
   - ADR-20260325-174353-029f36
   cross-repo:
   - ADR-20260324-171756-31a4c8
   - ADR-20260324-171756-41723a
+  cta-reduce:
+  - ADR-20260326-030916-5826a7
+  - ADR-20260326-030916-ac4a46
+  cuda:
+  - ADR-20260326-030916-5826a7
+  - ADR-20260326-030916-ac4a46
   design-pattern:
   - ADR-20260319-022448-4d7f83
   dispatch:
@@ -562,6 +601,8 @@ tags:
   - ADR-20260325-174353-f8ad92
   stdout:
   - ADR-20260324-171756-41723a
+  sync:
+  - ADR-20260326-030916-ac4a46
   syntax:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-efa75b
@@ -616,6 +657,8 @@ tags:
   - ADR-20260322-182024-efa75b
   warnings:
   - ADR-20260306-195314-450625
+  warp-reduce:
+  - ADR-20260326-030916-5826a7
   worker:
   - ADR-20260324-171756-31a4c8
   xdist:

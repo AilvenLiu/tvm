@@ -922,5 +922,99 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
         tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
+def test_reduction_warp_shuffle_multi_warp_loop():
+    """Test intra-warp + cross-warp reduction via Tx.sum in a for loop with multiple warps.
+
+    Validates the scope alternation pattern (thread → warp → thread) inside a loop,
+    which is needed for replacing manual warp shuffle reductions in tirx-kernels.
+    """
+    dev = tvm.cuda(0)
+    BDX = 32
+    BDY = 4
+    N = BDX * BDY  # 128
+    N_ITER = 3
+
+    src_layout = TileLayout(S[BDX : 1 @ laneid])
+    dst_layout = TileLayout(S[1:1] + R[BDX : 1 @ laneid])
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, [N_ITER, N], "float32", scope="global")
+        B = Tx.match_buffer(B_ptr, [N_ITER], "float32", scope="global")
+
+        with Tx.kernel():
+            Tx.cta_id([1], parent="kernel")
+            ty = Tx.warp_id([BDY], parent="cta")
+            tx = Tx.thread_id([BDX], parent="warp")
+            thread_id = Tx.meta_var(ty * BDX + tx)
+
+            with Tx.cta():
+                pool = Tx.PoolAllocator()
+                sum_smem = pool.alloc([BDY], "float32")
+                pool.commit()
+
+                with Tx.thread():
+                    partial_buf = Tx.alloc_buffer([1], "float32", scope="local")
+                    result_buf = Tx.alloc_buffer([1], "float32", scope="local")
+                    cross_buf = Tx.alloc_buffer([1], "float32", scope="local")
+                    cross_res = Tx.alloc_buffer([1], "float32", scope="local")
+
+                    for it in Tx.serial(N_ITER):
+                        # Phase 1: each thread loads its value
+                        with Tx.thread():
+                            partial_buf[0] = A[it, thread_id]
+
+                        # Phase 2: intra-warp reduction
+                        with Tx.warp():
+                            src_v = partial_buf.view(BDX, layout=src_layout)
+                            dst_v = result_buf.view(1, layout=dst_layout)
+                            Tx.sum(dst_v, src_v)
+
+                        # Phase 3: write per-warp result to smem
+                        with Tx.thread():
+                            sum_smem[ty] = result_buf[0]
+                        Tx.cuda.cta_sync()
+
+                        # Phase 4: cross-warp reduction (warp 0 only)
+                        if ty == 0:
+                            with Tx.thread():
+                                if tx < BDY:
+                                    cross_buf[0] = sum_smem[tx]
+                                else:
+                                    cross_buf[0] = Tx.float32(0)
+                            with Tx.warp():
+                                cs = cross_buf.view(BDX, layout=src_layout)
+                                cd = cross_res.view(1, layout=dst_layout)
+                                Tx.sum(cd, cs)
+                            with Tx.thread():
+                                sum_smem[0] = cross_res[0]
+                        Tx.cuda.cta_sync()
+
+                        # Phase 5: one thread writes result to global
+                        with Tx.thread():
+                            if tx == 0:
+                                if ty == 0:
+                                    B[it] = sum_smem[0]
+                        Tx.cuda.cta_sync()
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(42)
+        A_np = np.random.rand(N_ITER, N).astype("float32")
+        B_np = np.zeros(N_ITER, dtype="float32")
+        A_dev = tvm.runtime.tensor(A_np, dev)
+        B_dev = tvm.runtime.tensor(B_np, dev)
+        mod(A_dev, B_dev)
+
+        # Each iteration: sum across all N threads
+        B_ref = A_np.astype("float64").sum(axis=1).astype("float32")
+        tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-3)
+
+
 if __name__ == "__main__":
     tvm.testing.main()
