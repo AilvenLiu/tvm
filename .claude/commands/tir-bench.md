@@ -3,7 +3,7 @@ Run kernel performance benchmarks to verify codegen changes.
 ## Kernels to benchmark
 
 - **GEMM**: square GEMM at M=N=K in {1024, 2048, 4096, 8192, 16384} for three variants:
-  - fp16: `python -m tirx_kernels.bench --kernel hgemm`
+  - fp16: `python -m tirx_kernels.bench --kernel fp16_bf16_gemm`
   - fp8: `python -m tirx_kernels.bench --kernel fp8_blockwise_gemm`
   - nvfp4: `python -m tirx_kernels.bench --kernel nvfp4_gemm`
 - **FA4** (flash_attention4): all registered configs
