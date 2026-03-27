@@ -204,7 +204,7 @@ StructInfo InferStructInfoResize3D(const Call& call, const BlockBuilder& ctx) {
 
   const auto* attrs = call->attrs.as<Resize3DAttrs>();
   auto [data_layout, data2NCDHW] = CheckTensorLayout(call, ctx, attrs->layout,  //
-                                                     /*tgt_layout=*/"NCDHW",     //
+                                                     /*tgt_layout=*/"NCDHW",    //
                                                      /*tensor_name=*/"data");
 
   DataType out_dtype = attrs->out_dtype.is_void() ? data_sinfo->dtype : attrs->out_dtype;

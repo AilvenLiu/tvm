@@ -350,6 +350,6 @@ TVM_DLL tirx::Buffer BufferWithOffsetAlignment(ffi::Array<PrimExpr> shape, DataT
                                                std::string name, int data_alignment,
                                                int offset_factor, bool compact,
                                                std::string memory_scope = "");
-}  // namespace tirxxxx
+}  // namespace tirx
 }  // namespace tvm
 #endif  // TVM_TIRX_BUFFER_H_

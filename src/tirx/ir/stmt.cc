@@ -681,5 +681,5 @@ TVM_TIRX_REGISTER_OP("type_annotation")
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-}  // namespace tirxxxx
+}  // namespace tirx
 }  // namespace tvm

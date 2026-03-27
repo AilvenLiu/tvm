@@ -307,5 +307,5 @@ Pass LowerTIRxResolveScopeIds() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxx
+}  // namespace tirx
 }  // namespace tvm

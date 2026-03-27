@@ -554,7 +554,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

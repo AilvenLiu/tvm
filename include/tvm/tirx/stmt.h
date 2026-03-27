@@ -1165,7 +1165,8 @@ constexpr const char* software_pipeline_async_stages = "software_pipeline_async_
 constexpr const char* layout_free_buffers = "layout_free_buffers";
 
 /*! \brief Mark the local stage for the shared memory access should be added. */
-constexpr const char* manifest_shared_memory_local_stage = "tirx.manifest_shared_memory_local_stage";
+constexpr const char* manifest_shared_memory_local_stage =
+    "tirx.manifest_shared_memory_local_stage";
 
 /*! \brief Mark the tiling structure of blocks that are applied by rule Multi-Level-Tiling */
 constexpr const char* meta_schedule_tiling_structure = "meta_schedule.tiling_structure";
@@ -1310,6 +1311,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

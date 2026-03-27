@@ -670,7 +670,8 @@ Buffer Buffer::with_data(Var data) const {
 }
 
 PrimExpr Buffer::OffsetOf_p(const Array<PrimExpr>& indices) const {
-  return tirx::Call(DataType::Int(32), tirx::builtin::buffer_offset(), {BufferLoad(*this, indices)});
+  return tirx::Call(DataType::Int(32), tirx::builtin::buffer_offset(),
+                    {BufferLoad(*this, indices)});
 }
 
 bool Buffer::IsScalar(bool alloc_or_decl) const {
@@ -718,5 +719,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferIsScalar", &Buffer::IsScalar);
 }
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm

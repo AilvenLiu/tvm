@@ -599,7 +599,7 @@ bool ContainsNode(const Stmt& stmt) {
   return visitor.contains_node;
 }
 
-}  // namespace tirxxx
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_STMT_FUNCTOR_H_

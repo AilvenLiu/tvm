@@ -14,48 +14,48 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 import tvm
+import tvm.testing
 from tvm import tir
-from tvm.ir import Op, Range
+from tvm.ir import Op
 from tvm.ir.base import assert_structural_equal
-from tvm.tir.expr_functor import ExprMutator, ExprVisitor
 from tvm.tir.expr import (
-    Var,
-    SizeVar,
-    BufferLoad,
-    ProducerLoad,
-    Let,
-    Call,
+    EQ,
+    GE,
+    GT,
+    LE,
+    LT,
+    NE,
     Add,
-    Sub,
-    Mul,
+    And,
+    Broadcast,
+    BufferLoad,
+    Call,
+    Cast,
     Div,
-    Mod,
+    FloatImm,
     FloorDiv,
     FloorMod,
-    Min,
-    Max,
-    EQ,
-    NE,
-    LT,
-    LE,
-    GT,
-    GE,
-    And,
-    Or,
-    Reduce,
-    Cast,
-    Not,
-    Select,
-    Ramp,
-    Broadcast,
-    Shuffle,
     IntImm,
-    FloatImm,
+    Let,
+    Max,
+    Min,
+    Mod,
+    Mul,
+    Not,
+    Or,
+    ProducerLoad,
+    Ramp,
+    Reduce,
+    Select,
+    Shuffle,
+    SizeVar,
     StringImm,
+    Sub,
+    Var,
 )
-import pytest
-import tvm.testing
+from tvm.tir.expr_functor import ExprMutator, ExprVisitor
 
 # Basic example variables for testing
 n = tir.Var("n", "int32")
@@ -495,10 +495,9 @@ class ASTPostPrinterMutator(ExprMutator):
         return result
 
 
-
 def basic_check(expr, visitor_str, mutator_str):
     """Helper function to check visitor and mutator on an expression"""
-    
+
     # Check visitor
     basic_visitor = BasicVisitor()
     basic_visitor.visit_expr(expr)
@@ -542,293 +541,147 @@ def test_string_imm():
 
 def test_add():
     add_node = tir.Add(n, m)
-    basic_check(
-        add_node, 
-        "\n".join(["Add", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Add"])
-    )
+    basic_check(add_node, "\n".join(["Add", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Add"]))
 
 
 def test_sub():
     sub_node = tir.Sub(n, m)
-    basic_check(
-        sub_node, 
-        "\n".join(["Sub", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Sub"])
-    )
+    basic_check(sub_node, "\n".join(["Sub", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Sub"]))
 
 
 def test_mul():
     mul_node = tir.Mul(n, m)
-    basic_check(
-        mul_node, 
-        "\n".join(["Mul", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Mul"])
-    )
+    basic_check(mul_node, "\n".join(["Mul", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Mul"]))
 
 
 def test_div():
     div_node = tir.Div(n, m)
-    basic_check(
-        div_node, 
-        "\n".join(["Div", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Div"])
-    )
+    basic_check(div_node, "\n".join(["Div", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Div"]))
 
 
 def test_floor_div():
     floor_div_node = tir.FloorDiv(n, m)
     basic_check(
-        floor_div_node, 
-        "\n".join(["FloorDiv", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "FloorDiv"])
+        floor_div_node,
+        "\n".join(["FloorDiv", "\tVar", "\tVar"]),
+        "\n".join(["Var", "Var", "FloorDiv"]),
     )
 
 
 def test_floor_mod():
     floor_mod_node = tir.FloorMod(n, m)
     basic_check(
-        floor_mod_node, 
-        "\n".join(["FloorMod", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "FloorMod"])
+        floor_mod_node,
+        "\n".join(["FloorMod", "\tVar", "\tVar"]),
+        "\n".join(["Var", "Var", "FloorMod"]),
     )
 
 
 def test_min():
     min_node = tir.Min(n, m)
-    basic_check(
-        min_node, 
-        "\n".join(["Min", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Min"])
-    )
+    basic_check(min_node, "\n".join(["Min", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Min"]))
 
 
 def test_max():
     max_node = tir.Max(n, m)
-    basic_check(
-        max_node, 
-        "\n".join(["Max", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "Max"])
-    )
+    basic_check(max_node, "\n".join(["Max", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "Max"]))
 
 
 def test_eq():
     eq_node = tir.EQ(n, m)
-    basic_check(
-        eq_node, 
-        "\n".join(["EQ", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "EQ"])
-    )
+    basic_check(eq_node, "\n".join(["EQ", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "EQ"]))
 
 
 def test_ne():
     ne_node = tir.NE(n, m)
-    basic_check(
-        ne_node, 
-        "\n".join(["NE", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "NE"])
-    )
+    basic_check(ne_node, "\n".join(["NE", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "NE"]))
 
 
 def test_lt():
     lt_node = tir.LT(n, m)
-    basic_check(
-        lt_node, 
-        "\n".join(["LT", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "LT"])
-    )
+    basic_check(lt_node, "\n".join(["LT", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "LT"]))
 
 
 def test_le():
     le_node = tir.LE(n, m)
-    basic_check(
-        le_node, 
-        "\n".join(["LE", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "LE"])
-    )
+    basic_check(le_node, "\n".join(["LE", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "LE"]))
 
 
 def test_gt():
     gt_node = tir.GT(n, m)
-    basic_check(
-        gt_node, 
-        "\n".join(["GT", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "GT"])
-    )
+    basic_check(gt_node, "\n".join(["GT", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "GT"]))
 
 
 def test_ge():
     ge_node = tir.GE(n, m)
-    basic_check(
-        ge_node, 
-        "\n".join(["GE", "\tVar", "\tVar"]), 
-        "\n".join(["Var", "Var", "GE"])
-    )
+    basic_check(ge_node, "\n".join(["GE", "\tVar", "\tVar"]), "\n".join(["Var", "Var", "GE"]))
 
 
 def test_and():
     and_node = tir.And(tir.EQ(n, m), tir.LT(n, 10))
     basic_check(
-        and_node, 
-        "\n".join([
-            "And", 
-            "\tEQ", 
-            "\t\tVar", 
-            "\t\tVar", 
-            "\tLT", 
-            "\t\tVar", 
-            "\t\tIntImm"
-        ]), 
-        "\n".join([
-            "Var", 
-            "Var", 
-            "EQ", 
-            "Var", 
-            "IntImm", 
-            "LT", 
-            "And"
-        ])
+        and_node,
+        "\n".join(["And", "\tEQ", "\t\tVar", "\t\tVar", "\tLT", "\t\tVar", "\t\tIntImm"]),
+        "\n".join(["Var", "Var", "EQ", "Var", "IntImm", "LT", "And"]),
     )
 
 
 def test_or():
     or_node = tir.Or(tir.EQ(n, m), tir.LT(n, 10))
     basic_check(
-        or_node, 
-        "\n".join([
-            "Or", 
-            "\tEQ", 
-            "\t\tVar", 
-            "\t\tVar", 
-            "\tLT", 
-            "\t\tVar", 
-            "\t\tIntImm"
-        ]), 
-        "\n".join([
-            "Var", 
-            "Var", 
-            "EQ", 
-            "Var", 
-            "IntImm", 
-            "LT", 
-            "Or"
-        ])
+        or_node,
+        "\n".join(["Or", "\tEQ", "\t\tVar", "\t\tVar", "\tLT", "\t\tVar", "\t\tIntImm"]),
+        "\n".join(["Var", "Var", "EQ", "Var", "IntImm", "LT", "Or"]),
     )
 
 
 def test_not():
     not_node = tir.Not(tir.EQ(n, m))
     basic_check(
-        not_node, 
-        "\n".join([
-            "Not", 
-            "\tEQ", 
-            "\t\tVar", 
-            "\t\tVar"
-        ]), 
-        "\n".join([
-            "Var", 
-            "Var", 
-            "EQ", 
-            "Not"
-        ])
+        not_node,
+        "\n".join(["Not", "\tEQ", "\t\tVar", "\t\tVar"]),
+        "\n".join(["Var", "Var", "EQ", "Not"]),
     )
 
 
 def test_select():
     select_node = tir.Select(tir.EQ(n, m), n, m)
     basic_check(
-        select_node, 
-        "\n".join([
-            "Select", 
-            "\tEQ", 
-            "\t\tVar", 
-            "\t\tVar", 
-            "\tVar", 
-            "\tVar"
-        ]), 
-        "\n".join([
-            "Var", 
-            "Var", 
-            "EQ", 
-            "Var", 
-            "Var", 
-            "Select"
-        ])
+        select_node,
+        "\n".join(["Select", "\tEQ", "\t\tVar", "\t\tVar", "\tVar", "\tVar"]),
+        "\n".join(["Var", "Var", "EQ", "Var", "Var", "Select"]),
     )
 
 
 def test_cast():
     cast_node = tir.Cast("float32", n)
-    basic_check(
-        cast_node, 
-        "\n".join([
-            "Cast", 
-            "\tVar"
-        ]), 
-        "\n".join([
-            "Var", 
-            "Cast"
-        ])
-    )
+    basic_check(cast_node, "\n".join(["Cast", "\tVar"]), "\n".join(["Var", "Cast"]))
 
 
 def test_let():
     let_node = tir.Let(n, tir.IntImm("int32", 10), n + 1)
     basic_check(
-        let_node, 
-        "\n".join([
-            "Let", 
-            "\tVar", 
-            "\tIntImm", 
-            "\tAdd", 
-            "\t\tVar", 
-            "\t\tIntImm"
-        ]), 
-        "\n".join([
-            "Var", 
-            "IntImm", 
-            "Var", 
-            "IntImm", 
-            "Add", 
-            "Let"
-        ])
+        let_node,
+        "\n".join(["Let", "\tVar", "\tIntImm", "\tAdd", "\t\tVar", "\t\tIntImm"]),
+        "\n".join(["Var", "IntImm", "Var", "IntImm", "Add", "Let"]),
     )
 
 
 def test_ramp():
     ramp_node = tir.Ramp(n, 1, 4)
     basic_check(
-        ramp_node, 
-        "\n".join([
-            "Ramp", 
-            "\tVar", 
-            "\tIntImm",
-            "\tIntImm"
-        ]), 
-        "\n".join([
-            "Var", 
-            "IntImm", 
-            "IntImm", 
-            "Ramp"
-        ])
+        ramp_node,
+        "\n".join(["Ramp", "\tVar", "\tIntImm", "\tIntImm"]),
+        "\n".join(["Var", "IntImm", "IntImm", "Ramp"]),
     )
 
 
 def test_broadcast():
     broadcast_node = tir.Broadcast(n, 4)
     basic_check(
-        broadcast_node, 
-        "\n".join([
-            "Broadcast", 
-            "\tVar", 
-            "\tIntImm"
-        ]), 
-        "\n".join([
-            "Var", 
-            "IntImm", 
-            "Broadcast"
-        ])
+        broadcast_node,
+        "\n".join(["Broadcast", "\tVar", "\tIntImm"]),
+        "\n".join(["Var", "IntImm", "Broadcast"]),
     )
 
 
@@ -896,6 +749,7 @@ def test_inherit_with_cls():
     lv.visit_expr(add_node)
     assert str(lv.log) == "\n".join(["LeafAdd", "\tInternalVar", "\tInternalVar"])
 
+
 def test_call_visitor_super():
     class InternalVisitor(ExprVisitor):
         def __init__(self) -> None:
@@ -962,11 +816,12 @@ def test_call_mutator_super():
 
 def test_var_mutation():
     """Test mutating variables in a TIR expression"""
+
     class VarMutator(ExprMutator):
         def __init__(self, var_map):
             super().__init__()
             self.var_map = var_map
-            
+
         def visit_var_(self, op: Var) -> tir.PrimExpr:
             if op.name in self.var_map:
                 return self.var_map[op.name]
@@ -974,14 +829,12 @@ def test_var_mutation():
 
     # Create a simple expression
     expr = n + m
-    
+
     # Create a mutator that replaces 'n' with a constant
-    var_map = {
-        "n": tir.IntImm("int32", 42)
-    }
+    var_map = {"n": tir.IntImm("int32", 42)}
     mutator = VarMutator(var_map)
     result = mutator.visit_expr(expr)
-    
+
     # The result should be 42 + m
     expected = tir.Add(tir.IntImm("int32", 42), m)
     assert_structural_equal(result, expected)

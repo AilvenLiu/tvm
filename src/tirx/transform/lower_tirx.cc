@@ -82,5 +82,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm

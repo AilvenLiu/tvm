@@ -116,8 +116,8 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScopeSlice", [](ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
-                                                 ffi::Optional<ffi::Array<PrimExpr>> extents,
-                                                 ffi::String parent, ffi::String cur) {
+                                                  ffi::Optional<ffi::Array<PrimExpr>> extents,
+                                                  ffi::String parent, ffi::String cur) {
     return ExecScopeSlice(slices, extents, parent, cur);
   });
 }
@@ -378,5 +378,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm
