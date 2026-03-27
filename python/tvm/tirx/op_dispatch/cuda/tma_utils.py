@@ -22,7 +22,7 @@ from enum import Enum
 
 import tvm
 from tvm.arith.analyzer import Analyzer
-from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
+from tvm.tirx.layout import ComposeLayout, Layout, S, SwizzleLayout, TileLayout
 
 
 class SwizzleMode(Enum):
@@ -63,7 +63,7 @@ def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int]
     return atom_shape
 
 
-def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> TLayout:
+def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> Layout:
     """Generate the TMA layout for the shared memory given shape and dtype.
 
     It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
@@ -91,7 +91,7 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     return True
 
 
-def get_swizzle_mode_from_layout(layout: TLayout) -> SwizzleMode | None:
+def get_swizzle_mode_from_layout(layout: Layout) -> SwizzleMode | None:
     """Extract swizzle mode from a shared memory layout."""
     if isinstance(layout, ComposeLayout):
         swizzle = layout.swizzle  # SwizzleLayout is named 'swizzle' in ComposeLayout

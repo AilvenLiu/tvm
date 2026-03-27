@@ -85,11 +85,11 @@ from tvm.tirx.generic import cast
 from tvm.tirx.layout import (
     ComposeLayout,
     Iter,
+    Layout,
     R,
     S,
     SwizzleLayout,
     TileLayout,
-    TLayout,
 )
 
 from .. import IRBuilder
@@ -99,10 +99,10 @@ from .external_kernel import call_kernel
 # pylint: enable=unused-import
 
 
-def _get_layout(layout: str | TLayout | None, shape: list[PrimExpr], scope: str) -> TLayout | None:
+def _get_layout(layout: str | Layout | None, shape: list[PrimExpr], scope: str) -> Layout | None:
     if layout is None:
         return None
-    if isinstance(layout, TLayout):
+    if isinstance(layout, Layout):
         return layout
     assert isinstance(layout, str)
     if layout == "default":
@@ -169,7 +169,7 @@ def buffer(
     offset_factor: int = 0,
     buffer_type: str = "",
     axis_separators: list[int] | None = None,
-    layout: str | TLayout | None = "default",
+    layout: str | Layout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     buffer_name: str = "",
 ) -> Buffer:
@@ -355,7 +355,7 @@ def match_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
-    layout: str | TLayout | None = "default",
+    layout: str | Layout | None = "default",
 ) -> Buffer:
     """The buffer match function.
 
@@ -410,7 +410,7 @@ def match_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
-    layout: Optional[Union[str, TLayout]]
+    layout: Optional[Union[str, Layout]]
         The layout of the buffer.
 
     Returns
@@ -744,7 +744,7 @@ def alloc_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
-    layout: str | TLayout | None = "default",
+    layout: str | Layout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     name: str | None = None,
     annotations: dict[str, Any] | None = None,
@@ -782,7 +782,7 @@ def alloc_buffer(
         Buffer type.
     axis_separators : Optional[List[int]]
         Optional axis separators.
-    layout : Optional[Union[str, TLayout]]
+    layout : Optional[Union[str, Layout]]
         Optional layout.
     allocated_addr : Optional[Union[int, Tuple[int, ...]]]
         Optional pre-allocated address metadata.
@@ -828,7 +828,7 @@ def sblock_alloc_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
-    layout: str | TLayout | None = "default",
+    layout: str | Layout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     name: str | None = None,
 ) -> Buffer:
@@ -857,7 +857,7 @@ def sblock_alloc_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
-    layout: Optional[Union[str, TLayout]]
+    layout: Optional[Union[str, Layout]]
         The layout of the buffer.
 
     allocated_addr: Optional[Union[int, Tuple[int]]]
@@ -1705,7 +1705,7 @@ def decl_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
-    layout : TLayout
+    layout : Layout
         The layout of the buffer.
 
     name : str
@@ -3438,11 +3438,11 @@ __all__ += [
     "ComposeLayout",
     "ExecScope",
     "Iter",
+    "Layout",
     "R",
     "S",
     "ScopeIdDef",
     "SwizzleLayout",
-    "TLayout",
     "TileLayout",
     "Var",
     "add_to_parent",

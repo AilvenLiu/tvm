@@ -1018,7 +1018,7 @@ void ConcreteScheduleNode::Unannotate(const SBlockRV& block_rv, const ffi::Strin
   TVM_TIR_SCHEDULE_END("unannotate", this->error_render_level_);
 }
 
-/******** Schedule: Layout transformation ********/
+/******** Schedule: SLayout transformation ********/
 void ConcreteScheduleNode::TransformLayout(const SBlockRV& block_rv, int buffer_index,
                                            BufferIndexType buffer_index_type,
                                            const IndexMap& index_map,

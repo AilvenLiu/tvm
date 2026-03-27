@@ -73,7 +73,7 @@ ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
   return swizzle_res;
 }
 
-TLayout ComposeLayoutNode::Canonicalize() const {
+Layout ComposeLayoutNode::Canonicalize() const {
   auto tile_normalized = tile_layout->Canonicalize().as<TileLayout>().value();
   if (tile_normalized->IsTrivial()) {
     return swizzle;
@@ -81,15 +81,15 @@ TLayout ComposeLayoutNode::Canonicalize() const {
   return ComposeLayout(swizzle, tile_normalized);
 }
 
-TLayout ComposeLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
-                                const ffi::Array<PrimExpr>& inner_shape) const {
+Layout ComposeLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+                               const ffi::Array<PrimExpr>& inner_shape) const {
   // layout_B is first tiled with `outer`, then compose with layout_A.
   auto tiled_B = tile_layout->Tile(outer, outer_shape, inner_shape).as<TileLayout>().value();
   return ComposeLayout(swizzle, tiled_B);
 }
 
 ffi::Optional<TileLayout> ComposeLayoutNode::IsTileInner(
-    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const Layout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& inner_shape) const {
   if (auto comp = tile_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->swizzle, this->swizzle)) {
@@ -99,14 +99,14 @@ ffi::Optional<TileLayout> ComposeLayoutNode::IsTileInner(
   return std::nullopt;
 }
 
-ffi::Optional<TLayout> ComposeLayoutNode::IsTileOuter(
-    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+ffi::Optional<Layout> ComposeLayoutNode::IsTileOuter(
+    const Layout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& outer_shape) const {
   return std::nullopt;
 }
 
-ffi::Optional<TLayout> ComposeLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
-                                                const Region& region) const {
+ffi::Optional<Layout> ComposeLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
+                                               const Region& region) const {
   // Slice applies to the tile layout then compose with swizzle.
   auto sliced_opt = tile_layout->Slice(shape, region);
   if (!sliced_opt.has_value()) return std::nullopt;

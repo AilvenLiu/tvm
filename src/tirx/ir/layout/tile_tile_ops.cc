@@ -74,8 +74,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       });
 }
 
-TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
-                             const Array<PrimExpr>& inner_shape) const {
+Layout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
+                            const Array<PrimExpr>& inner_shape) const {
   auto outer = outer_in->Canonicalize().as<TileLayout>().value();
   auto inner = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
@@ -221,7 +221,7 @@ TileLayout SplitAxesByScope(TileLayout layout, const ffi::String& split_scope) {
 }
 
 ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
-    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const Layout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& inner_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) return std::nullopt;
@@ -318,9 +318,9 @@ ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
   return TileLayout(outer_shard, outer_replicate, outer_exclude);
 }
 
-ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
-                                                   const ffi::Array<PrimExpr>& tiled_shape,
-                                                   const ffi::Array<PrimExpr>& outer_shape) const {
+ffi::Optional<Layout> TileLayoutNode::IsTileOuter(const Layout& tile_layout,
+                                                  const ffi::Array<PrimExpr>& tiled_shape,
+                                                  const ffi::Array<PrimExpr>& outer_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) {
     if (auto comp = tile_layout.as<ComposeLayout>()) {

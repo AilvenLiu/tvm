@@ -39,7 +39,7 @@ using tvm::ffi::Variant;
 using tvm::runtime::Tensor;
 using tvm::tirx::Buffer;
 using tvm::tirx::ExecScope;
-using tvm::tirx::TLayout;
+using tvm::tirx::Layout;
 using tvm::tirx::Var;
 
 /*!
@@ -64,7 +64,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                  ffi::Optional<TLayout> layout = std::nullopt,
+                  ffi::Optional<Layout> layout = std::nullopt,
                   ffi::Array<PrimExpr> allocated_addr = {});
 
 /*!
@@ -130,7 +130,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::String storage_scope = "global", int align = -1, int offset_factor = 0,
                    ffi::String buffer_type = "default",
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                   ffi::Optional<TLayout> layout = std::nullopt);
+                   ffi::Optional<Layout> layout = std::nullopt);
 
 /*!
  * \brief The block declaration statement.
@@ -240,7 +240,7 @@ ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "", int align = -1,
     int offset_factor = 0, ffi::String buffer_type = "default",
     ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-    ffi::Optional<TLayout> layout = std::nullopt, ffi::Array<PrimExpr> allocated_addr = {});
+    ffi::Optional<Layout> layout = std::nullopt, ffi::Array<PrimExpr> allocated_addr = {});
 
 namespace axis {
 /*!
@@ -443,7 +443,7 @@ DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Stri
                            ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
                            int align, int offset_factor, ffi::String buffer_type,
                            ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                           ffi::Optional<TLayout> layout = std::nullopt,
+                           ffi::Optional<Layout> layout = std::nullopt,
                            ffi::Optional<PrimExpr> allocated_addr = std::nullopt);
 
 /*!

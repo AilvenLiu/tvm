@@ -113,7 +113,7 @@ from .generic import add, subtract, multiply
 
 # TIRX-specific imports (must come before subpackage imports to avoid circular imports)
 from .exec_scope import ExecScope, ExecScopeSlice, ScopeIdDef
-from .layout import TileLayout, TLayout, SwizzleLayout, ComposeLayout
+from .layout import TileLayout, Layout, SwizzleLayout, ComposeLayout
 from .predicate import Predicate
 from .async_structs import Pipeline, CopyPipeline
 from .expr_functor import ExprFunctor

@@ -270,8 +270,7 @@ std::vector<tirx::Buffer> FindParentBuffers(const tirx::Buffer& child, const IRD
 /*!
  * \brief Check if a layout is the default layout for a given shape.
  */
-bool IsDefaultLayout(const ffi::Optional<tirx::TLayout>& layout,
-                     const ffi::Array<PrimExpr>& shape) {
+bool IsDefaultLayout(const ffi::Optional<tirx::Layout>& layout, const ffi::Array<PrimExpr>& shape) {
   if (!layout.defined()) return false;
   return StructuralEqual()(layout.value(), tirx::TileLayoutNode::DefaultLayout(shape));
 }
@@ -402,7 +401,7 @@ ffi::Optional<ExprDoc> TryDeclBufferSugarWithParent(const tirx::Buffer& child, c
         bool child_matches_storage = false;
         if (child->layout.defined()) {
           child_matches_storage =
-              StructuralEqual()(child->layout.value(), tirx::TLayout(expected_storage));
+              StructuralEqual()(child->layout.value(), tirx::Layout(expected_storage));
         }
         if (child_matches_storage) {
           // Compute storage total for auto-infer check

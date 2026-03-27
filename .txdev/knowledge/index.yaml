@@ -650,6 +650,42 @@ entries:
   - ir-nodes
   title: 'LetStmt-to-Bind migration pattern: SeqStmt([Bind(var, value), body])'
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-185547-0a74c4
+  path: entries/KB-20260327-185547-0a74c4.yaml
+  scope:
+  - repo
+  tags:
+  - ffi
+  - rename
+  - sed
+  - refactor
+  title: FFI compound method names require targeted sed, not word-boundary matching
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-185547-89e579
+  path: entries/KB-20260327-185547-89e579.yaml
+  scope:
+  - repo
+  tags:
+  - rename
+  - refactor
+  - cpp
+  - namespace
+  title: using-alias propagation creates hidden rename dependencies across files
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-185547-e51f21
+  path: entries/KB-20260327-185547-e51f21.yaml
+  scope:
+  - repo
+  tags:
+  - rename
+  - namespace
+  - refactor
+  - ffi
+  title: Two-phase rename strategy for namespace collision avoidance
+  updated: '2026-03-27'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -727,6 +763,8 @@ tags:
   cp_async:
   - KB-20260325-174353-9b4386
   - KB-20260326-004750-bc6d9b
+  cpp:
+  - KB-20260327-185547-89e579
   cross-repo:
   - KB-20260319-022448-393527
   - KB-20260319-174406-349680
@@ -752,6 +790,8 @@ tags:
   - KB-20260326-004750-e4d4b4
   ffi:
   - KB-20260325-174353-cf8a51
+  - KB-20260327-185547-0a74c4
+  - KB-20260327-185547-e51f21
   flaky-tests:
   - KB-20260307-231252-48549d
   flashinfer:
@@ -820,6 +860,8 @@ tags:
   - KB-20260327-170120-a4aad4
   namespace:
   - KB-20260327-142528-4fa3ef
+  - KB-20260327-185547-89e579
+  - KB-20260327-185547-e51f21
   noqa:
   - KB-20260301-0003
   - KB-20260322-182024-1738c4
@@ -892,6 +934,9 @@ tags:
   - KB-20260302-015214-9e29ce
   - KB-20260308-232603-18dfc3
   - KB-20260308-232603-d83e44
+  - KB-20260327-185547-0a74c4
+  - KB-20260327-185547-89e579
+  - KB-20260327-185547-e51f21
   registration:
   - KB-20260307-231252-72bc64
   - KB-20260326-030915-290626
@@ -899,6 +944,10 @@ tags:
   - KB-20260319-022448-901600
   - KB-20260327-142528-25e213
   - KB-20260327-142528-4a9323
+  rename:
+  - KB-20260327-185547-0a74c4
+  - KB-20260327-185547-89e579
+  - KB-20260327-185547-e51f21
   rg:
   - KB-20260228-0004
   round-trip:
@@ -912,6 +961,8 @@ tags:
   - KB-20260325-174353-9679e0
   scoping:
   - KB-20260301-0004
+  sed:
+  - KB-20260327-185547-0a74c4
   shared-memory:
   - KB-20260307-231252-48549d
   skip:

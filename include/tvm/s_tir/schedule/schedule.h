@@ -749,7 +749,7 @@ class ScheduleNode : public runtime::Object {
    */
   virtual void Unannotate(const SBlockRV& block_rv, const ffi::String& ann_key) = 0;
 
-  /******** Schedule: Layout transformation ********/
+  /******** Schedule: SLayout transformation ********/
   /*!
    * \brief Apply a transformation represented by IndexMap to buffer
    * \details The indices and the access region to the target buffer is transformed by the given

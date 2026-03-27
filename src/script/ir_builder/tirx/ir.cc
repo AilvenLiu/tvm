@@ -35,13 +35,13 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::tirx::IterVar;
-using tvm::tirx::TLayout;
+using tvm::tirx::Layout;
 
 Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<TLayout> layout,
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<Layout> layout,
                   ffi::Array<PrimExpr> allocated_addr) {
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty(),
                 ValueError)
@@ -148,7 +148,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
                    ffi::Optional<Var> data, ffi::Array<PrimExpr> strides, PrimExpr elem_offset,
                    ffi::String storage_scope, int align, int offset_factor,
                    ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                   ffi::Optional<TLayout> layout) {
+                   ffi::Optional<Layout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
                              offset_factor, buffer_type_str, axis_separators, layout, {});
   if (const auto* var = param.as<tvm::tirx::VarNode>()) {
@@ -437,7 +437,7 @@ ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data,
     ffi::Array<PrimExpr> strides, PrimExpr elem_offset, ffi::String storage_scope, int align,
     int offset_factor, ffi::String buffer_type_str,
-    ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<TLayout> layout,
+    ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<Layout> layout,
     ffi::Array<PrimExpr> allocated_addr) {
   std::string scope = static_cast<std::string>(storage_scope);
   if (scope.empty()) {
@@ -847,7 +847,7 @@ DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Stri
                            ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
                            int align, int offset_factor, ffi::String buffer_type,
                            ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                           ffi::Optional<TLayout> layout, ffi::Optional<PrimExpr> allocated_addr) {
+                           ffi::Optional<Layout> layout, ffi::Optional<PrimExpr> allocated_addr) {
   std::string scope = static_cast<std::string>(storage_scope);
   if (scope.empty()) {
     scope = "global";

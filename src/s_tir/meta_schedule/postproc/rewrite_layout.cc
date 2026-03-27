@@ -248,7 +248,7 @@ bool RewriteLayout(const Schedule& sch) {
 
 namespace s_tir {
 namespace meta_schedule {
-/*! \brief Layout Rewrite. */
+/*! \brief SLayout Rewrite. */
 class RewriteLayoutNode : public PostprocNode {
  public:
   // Inherited from PostprocNode

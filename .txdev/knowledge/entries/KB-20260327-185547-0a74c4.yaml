@@ -1,0 +1,36 @@
+content:
+  details: 'TVM FFI registers methods with compound names like "s_tir.LayoutIndexOf",
+    "s_tir.LayoutNdim",
+
+    "tirx.TLayoutVerifyWellFormed". When renaming `Layout` to `SLayout`, `sed ''s/\bLayout\b/SLayout/g''`
+
+    correctly renames standalone type references and protects compound class names
+    like `LayoutDecision`.
+
+    However, it does NOT rename FFI strings because the `.` before `Layout` is not
+    a word boundary.
+
+    These require targeted replacements: `sed ''s/s_tir\.Layout/s_tir.SLayout/g''`
+    for the FFI prefix,
+
+    or individual Edit calls for each compound name. Always audit FFI registrations
+    separately after
+
+    bulk sed renames. Grep for the old FFI prefix pattern (e.g., `"s_tir\.Layout"`)
+    to find stragglers.
+
+    '
+  summary: Word-boundary sed (`\bLayout\b`) does NOT match Layout inside FFI compound
+    strings like `s_tir.LayoutIndexOf` because there is no word boundary between `.`
+    and `L`.
+created: '2026-03-27'
+id: KB-20260327-185547-0a74c4
+scope:
+- repo
+tags:
+- ffi
+- rename
+- sed
+- refactor
+title: FFI compound method names require targeted sed, not word-boundary matching
+updated: '2026-03-27'

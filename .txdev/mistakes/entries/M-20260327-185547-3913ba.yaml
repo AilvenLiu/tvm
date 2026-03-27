@@ -1,0 +1,35 @@
+content:
+  details: 'During the layout rename, changes were initially applied to files inside
+
+    `tirx-kernels/references/repos/tir/` as if they were regular files in the tirx-kernels
+    repo.
+
+    But this path is a git submodule -- it has its own .git, its own history, and
+    its own remote.
+
+    Modifying files there creates uncommittable changes in the wrong repo. The fix
+    was to revert
+
+    with `git submodule update --force references/repos/tir` and instead plan to bump
+    the submodule
+
+    pointer after the tir PR merges. Rule: never modify files inside a submodule directory;
+    instead,
+
+    make changes in the source repo and bump the submodule ref.
+
+    '
+  summary: Directly edited files inside `tirx-kernels/references/repos/tir` (a git
+    submodule pointing to the tir repo), which is incorrect -- submodule files belong
+    to the submodule's own git history.
+created: '2026-03-27'
+id: M-20260327-185547-3913ba
+scope:
+- repo
+tags:
+- git
+- submodule
+- cross-repo
+- tirx-kernels
+title: Modified files inside git submodule instead of treating it as separate repo
+updated: '2026-03-27'

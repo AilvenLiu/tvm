@@ -483,6 +483,18 @@ entries:
   - process
   title: Backward-compat wrappers should have explicit removal timelines
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: ADR-20260327-185547-d8244c
+  path: entries/ADR-20260327-185547-d8244c.yaml
+  scope:
+  - repo
+  tags:
+  - rename
+  - namespace
+  - ffi
+  - architecture
+  title: Two-phase ordering for bidirectional type rename in shared namespace
+  updated: '2026-03-27'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -517,6 +529,7 @@ tags:
   - ADR-20260324-171756-41723a
   - ADR-20260325-174353-f8ad92
   - ADR-20260326-030916-5826a7
+  - ADR-20260327-185547-d8244c
   asf-header:
   - ADR-20260326-203453-b77baa
   assert_structural_equal:
@@ -583,6 +596,8 @@ tags:
   dsl:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-efa75b
+  ffi:
+  - ADR-20260327-185547-d8244c
   for-loop:
   - ADR-20260326-004750-de4733
   golden:
@@ -617,6 +632,7 @@ tags:
   namespace:
   - ADR-20260327-142529-3943af
   - ADR-20260327-142529-6acc98
+  - ADR-20260327-185547-d8244c
   op-schedule:
   - ADR-20260301-0002
   - ADR-20260301-0003
@@ -667,6 +683,8 @@ tags:
   - ADR-20260307-231252-f0561c
   - ADR-20260308-232603-16186a
   - ADR-20260308-232603-d77714
+  rename:
+  - ADR-20260327-185547-d8244c
   round-trip:
   - ADR-20260325-174353-029f36
   run_bench:

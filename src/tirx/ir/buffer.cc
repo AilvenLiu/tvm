@@ -565,7 +565,7 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
 Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                BufferType buffer_type, ffi::Array<IntImm> axis_separators, Span span,
-               ffi::Optional<TLayout> layout, ffi::Array<PrimExpr> allocated_addr) {
+               ffi::Optional<Layout> layout, ffi::Array<PrimExpr> allocated_addr) {
   DataType storage_dtype = dtype;
   // specially handle bool
   if (storage_dtype == DataType::Bool()) {
@@ -702,7 +702,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                     auto offset_factor = args[7].cast<int>();
                     auto axis_separators = args[9].cast<ffi::Array<IntImm>>();
                     auto span = args[10].cast<Span>();
-                    auto layout = args[11].cast<TLayout>();
+                    auto layout = args[11].cast<Layout>();
                     *ret = Buffer(data, dtype, shape, strides, elem_offset, name, data_alignment,
                                   offset_factor, type, axis_separators, span, layout);
                   })

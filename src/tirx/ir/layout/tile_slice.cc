@@ -127,8 +127,8 @@ ffi::Optional<TileLayout> SlicePerGroup(TileLayout layout, PrimExpr begin, PrimE
   return std::nullopt;
 }
 
-ffi::Optional<TLayout> TileLayoutNode::Slice(const Array<PrimExpr>& shape,
-                                             const Region& region) const {
+ffi::Optional<Layout> TileLayoutNode::Slice(const Array<PrimExpr>& shape,
+                                            const Region& region) const {
   arith::Analyzer analyzer;
   auto [grouped_layout, seps] = Group(ffi::GetRef<TileLayout>(this), shape);
   std::vector<Iter> new_shard;

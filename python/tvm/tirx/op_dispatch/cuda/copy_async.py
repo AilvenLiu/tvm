@@ -29,7 +29,7 @@ import tvm
 from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tirx import Buffer, PrimFunc
-from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
+from tvm.tirx.layout import ComposeLayout, Layout, S, SwizzleLayout, TileLayout
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
@@ -195,7 +195,7 @@ def compute_box_dim(grouped_shared: TileLayout) -> tuple:
     return list(box_dim), list(contiguous_indices), contiguous_extent
 
 
-def to_tile_layout(layout: TLayout, shape: list[int]) -> TileLayout:
+def to_tile_layout(layout: Layout, shape: list[int]) -> TileLayout:
     """Convert a layout to a tile layout."""
     if isinstance(layout, ComposeLayout):
         return layout.tile_layout

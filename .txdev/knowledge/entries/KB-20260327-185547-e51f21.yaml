@@ -1,0 +1,32 @@
+content:
+  details: 'In the layout-rename feature, both `Layout` (s_tir) and `TLayout` (tirx)
+    lived in `tvm::tirx`.
+
+    The goal was Layout->SLayout and TLayout->Layout. If TLayout->Layout happened
+    first, it would
+
+    collide with the existing Layout. The solution: Phase 1 renames Layout->SLayout
+    (defusing the
+
+    collision), then Phase 2 renames TLayout->Layout (claiming the freed name). This
+    ordering is
+
+    critical and must be enforced in both C++ and Python layers. The build must succeed
+    after each
+
+    phase independently.
+
+    '
+  summary: When renaming type A->B and B->A in the same namespace, first rename A
+    to a temporary/prefixed name (Phase 1), then rename B to A (Phase 2).
+created: '2026-03-27'
+id: KB-20260327-185547-e51f21
+scope:
+- repo
+tags:
+- rename
+- namespace
+- refactor
+- ffi
+title: Two-phase rename strategy for namespace collision avoidance
+updated: '2026-03-27'

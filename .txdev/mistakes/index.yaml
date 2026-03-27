@@ -470,6 +470,30 @@ entries:
   - resolved
   title: LetStmt = Bind alias silently dropped body argument, causing 35 test failures
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: M-20260327-185547-3913ba
+  path: entries/M-20260327-185547-3913ba.yaml
+  scope:
+  - repo
+  tags:
+  - git
+  - submodule
+  - cross-repo
+  - tirx-kernels
+  title: Modified files inside git submodule instead of treating it as separate repo
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: M-20260327-185547-c88284
+  path: entries/M-20260327-185547-c88284.yaml
+  scope:
+  - repo
+  tags:
+  - encoding
+  - json
+  - workflow
+  - pr-draft
+  title: Non-ASCII characters in generated JSON/metadata files
+  updated: '2026-03-27'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -522,6 +546,7 @@ tags:
   - M-20260319-174407-01b7d3
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726
+  - M-20260327-185547-3913ba
   cuda:
   - M-20260326-030916-99f4b9
   - M-20260326-030916-a222d4
@@ -542,6 +567,8 @@ tags:
   editable-install:
   - M-20260320-002326-7c92c5
   - M-20260322-182024-19635e
+  encoding:
+  - M-20260327-185547-c88284
   flaky-tests:
   - M-20260307-231252-423c4d
   formula:
@@ -553,6 +580,7 @@ tags:
   git:
   - M-20260228-0001
   - M-20260228-0003
+  - M-20260327-185547-3913ba
   golden:
   - M-20260227-0002
   - M-20260227-0003
@@ -566,6 +594,8 @@ tags:
   - M-20260327-142529-6d1726
   intrinsic:
   - M-20260326-004750-646f60
+  json:
+  - M-20260327-185547-c88284
   lambda:
   - M-20260323-185836-374105
   lint:
@@ -592,6 +622,8 @@ tags:
   pool-allocator:
   - M-20260325-174353-51abbb
   - M-20260326-030916-a222d4
+  pr-draft:
+  - M-20260327-185547-c88284
   pre-commit:
   - M-20260228-0001
   - M-20260301-0001
@@ -650,6 +682,8 @@ tags:
   smem:
   - M-20260325-174353-51abbb
   - M-20260326-030916-a222d4
+  submodule:
+  - M-20260327-185547-3913ba
   template:
   - M-20260326-030916-a222d4
   testing:
@@ -689,6 +723,7 @@ tags:
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726
   - M-20260327-142529-e741bb
+  - M-20260327-185547-3913ba
   tvmscript:
   - M-20260322-182024-631109
   txdev:
@@ -713,6 +748,7 @@ tags:
   - M-20260301-0001
   - M-20260306-195314-50a55c
   - M-20260319-022448-da2fb0
+  - M-20260327-185547-c88284
   xdist:
   - M-20260319-022448-dbe043
   yaml:

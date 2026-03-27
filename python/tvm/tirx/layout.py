@@ -36,10 +36,10 @@ from . import _ffi_api
 from .exec_scope import ExecScope
 
 
-@tvm_ffi.register_object("tirx.TLayout")
-class TLayout(Object):
+@tvm_ffi.register_object("tirx.Layout")
+class Layout(Object):
     def __init__(self):
-        self.__init_handle_by_constructor__(_ffi_api.TLayout)  # pylint: disable=no-member
+        self.__init_handle_by_constructor__(_ffi_api.Layout)  # pylint: disable=no-member
 
     def verify_well_formed(self) -> bool:
         """Verify if the layout is well-formed.
@@ -49,7 +49,7 @@ class TLayout(Object):
         bool
             True if the layout is well-formed, False otherwise
         """
-        return _ffi_api.TLayoutVerifyWellFormed(self)  # pylint: disable=no-member
+        return _ffi_api.LayoutVerifyWellFormed(self)  # pylint: disable=no-member
 
     def size(self, axis_name: str | None = None):
         """Get the size of the layout.
@@ -59,7 +59,7 @@ class TLayout(Object):
         axis_name : Optional[str]
             The name of the axis to get the size of. If not provided, the default input size will be returned.
         """  # noqa: E501
-        return _ffi_api.TLayoutGetSize(self, axis_name)  # pylint: disable=no-member
+        return _ffi_api.LayoutGetSize(self, axis_name)  # pylint: disable=no-member
 
     def span(self, axis_name: str | None = None):
         """Get the span of the layout.
@@ -69,7 +69,7 @@ class TLayout(Object):
         axis_name : Optional[str]
             The name of the axis to get the span of. If not provided, the default span will be returned.
         """  # noqa: E501
-        return _ffi_api.TLayoutGetSpan(self, axis_name)  # pylint: disable=no-member
+        return _ffi_api.LayoutGetSpan(self, axis_name)  # pylint: disable=no-member
 
     # Note: no backward-compat alias; `cosize` is removed.
 
@@ -91,20 +91,20 @@ class TLayout(Object):
         """
         if len(coord) == 1:
             # assert shape is None, "shape must be None if coord is not a list or tuple"
-            return _ffi_api.TLayoutApplyLinear(self, coord[0])  # pylint: disable=no-member
+            return _ffi_api.LayoutApplyLinear(self, coord[0])  # pylint: disable=no-member
         if shape is None:
-            return _ffi_api.TLayoutApply(self, coord)  # pylint: disable=no-member
-        return _ffi_api.TLayoutApplyWithShape(self, coord, shape)  # pylint: disable=no-member
+            return _ffi_api.LayoutApply(self, coord)  # pylint: disable=no-member
+        return _ffi_api.LayoutApplyWithShape(self, coord, shape)  # pylint: disable=no-member
 
-    def canonicalize(self) -> "TLayout":
+    def canonicalize(self) -> "Layout":
         """Canonicalize the layout by simplifying and fusing iterators where possible.
 
         Returns
         -------
-        TLayout
+        Layout
             The canonicalized layout
         """
-        return _ffi_api.TLayoutCanonicalize(self)  # pylint: disable=no-member
+        return _ffi_api.LayoutCanonicalize(self)  # pylint: disable=no-member
 
     def tile(
         self,
@@ -128,7 +128,7 @@ class TLayout(Object):
         Union[TileLayout, ComposeLayout]
             The resulting tiled layout
         """
-        return _ffi_api.TLayoutTile(  # pylint: disable=no-member
+        return _ffi_api.LayoutTile(  # pylint: disable=no-member
             self, outer, outer_shape, inner_shape
         )
 
@@ -145,7 +145,7 @@ class TLayout(Object):
         The resulting layout is evaluated over the interleaved domain S_A ⊗ S_B,
         without span scaling (unlike tiling).
         """
-        return _ffi_api.TLayoutDirectSum(  # pylint: disable=no-member
+        return _ffi_api.LayoutDirectSum(  # pylint: disable=no-member
             self, left, left_shape, right_shape
         )
 
@@ -171,7 +171,7 @@ class TLayout(Object):
         Optional[TileLayout]
             The outer layout if it is the inner layout of the tiled layout, None otherwise
         """
-        return _ffi_api.TLayoutIsTileInner(  # pylint: disable=no-member
+        return _ffi_api.LayoutIsTileInner(  # pylint: disable=no-member
             self, tile_layout, tiled_shape, inner_shape
         )
 
@@ -180,7 +180,7 @@ class TLayout(Object):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: list[PrimExpr],
         outer_shape: list[PrimExpr],
-    ) -> Optional["TLayout"]:
+    ) -> Optional["Layout"]:
         """Check if a layout is the outer layout of a tiled layout.
 
         Parameters
@@ -194,10 +194,10 @@ class TLayout(Object):
 
         Returns
         -------
-        Optional[TLayout]
+        Optional[Layout]
             The inner layout if it is the outer layout of the tiled layout, None otherwise
         """
-        return _ffi_api.TLayoutIsTileOuter(  # pylint: disable=no-member
+        return _ffi_api.LayoutIsTileOuter(  # pylint: disable=no-member
             self, tile_layout, tiled_shape, outer_shape
         )
 
@@ -211,7 +211,7 @@ class TLayout(Object):
 
         Returns the left addend A if recognized, otherwise None.
         """
-        return _ffi_api.TLayoutIsDirectSumRight(  # pylint: disable=no-member
+        return _ffi_api.LayoutIsDirectSumRight(  # pylint: disable=no-member
             self, sum_layout, interleaved_shape, right_shape
         )
 
@@ -220,18 +220,18 @@ class TLayout(Object):
         sum_layout: Union["TileLayout", "ComposeLayout"],
         interleaved_shape: list[PrimExpr],
         left_shape: list[PrimExpr],
-    ) -> Optional["TLayout"]:
+    ) -> Optional["Layout"]:
         """Check if this layout is the left addend A in a direct-sum A + B.
 
         Returns the right addend B if recognized, otherwise None.
         """
-        return _ffi_api.TLayoutIsDirectSumLeft(  # pylint: disable=no-member
+        return _ffi_api.LayoutIsDirectSumLeft(  # pylint: disable=no-member
             self, sum_layout, interleaved_shape, left_shape
         )
 
     def slice(
         self, shape: list[PrimExpr], region: list[tuple[PrimExpr, PrimExpr]]
-    ) -> Optional["TLayout"]:
+    ) -> Optional["Layout"]:
         """Slice the layout with a given shape and region.
 
         Parameters
@@ -243,7 +243,7 @@ class TLayout(Object):
 
         Returns
         -------
-        Optional[TLayout]
+        Optional[Layout]
             The sliced layout, or None if slicing is not possible
         """
         assert len(shape) == len(region), "shape and region must have the same length"
@@ -254,9 +254,9 @@ class TLayout(Object):
                 region_list.append(range_i)
             else:
                 region_list.append(tvm.ir.Range(range_i[0], range_i[1]))
-        return _ffi_api.TLayoutSlice(self, shape, region_list)  # pylint: disable=no-member
+        return _ffi_api.LayoutSlice(self, shape, region_list)  # pylint: disable=no-member
 
-    def tile_to(self, to_shape: list[PrimExpr], current_shape: list[PrimExpr]) -> "TLayout":
+    def tile_to(self, to_shape: list[PrimExpr], current_shape: list[PrimExpr]) -> "Layout":
         """Tile the current layout to the given shape.
 
         Parameters
@@ -298,7 +298,7 @@ class TLayout(Object):
             return False
         return _ffi_api.TileLayoutIsTrainium(self)  # pylint: disable=no-member
 
-    def storage(self) -> "TLayout":
+    def storage(self) -> "Layout":
         if isinstance(self, TileLayout):
             # Filter out shard with thread axis
             shard = [iter for iter in self.shard if not iter.axis.is_thread()]
@@ -313,7 +313,7 @@ class TLayout(Object):
         else:
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
-    def unpack(self, num: int) -> "TLayout":
+    def unpack(self, num: int) -> "Layout":
         """Unpack the layout, where a single element in the layout is unpacked into num contiguous elements.
 
         Parameters
@@ -323,7 +323,7 @@ class TLayout(Object):
 
         Returns
         -------
-        TLayout
+        Layout
             The unpacked layout
         """  # noqa: E501
         if isinstance(self, TileLayout):
@@ -343,7 +343,7 @@ class TLayout(Object):
         else:
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
-    def pack(self, num: int) -> "TLayout":
+    def pack(self, num: int) -> "Layout":
         """Pack the layout, where num contiguous elements in the layout are packed into a single element.
 
         Parameters
@@ -353,7 +353,7 @@ class TLayout(Object):
 
         Returns
         -------
-        TLayout
+        Layout
             The packed layout
         """  # noqa: E501
         if isinstance(self, TileLayout):
@@ -650,7 +650,7 @@ def _spec_to_iters(pair) -> list:
         return []
     shape, strides = pair
     if strides is None:
-        strides = TLayout._get_default_strides(shape, 1)
+        strides = Layout._get_default_strides(shape, 1)
     result = []
     for e, s in zip(shape, strides):
         if isinstance(s, _OnAxis):
@@ -665,7 +665,7 @@ def _spec_to_iters(pair) -> list:
 
 
 @tvm_ffi.register_object("tirx.TileLayout")
-class TileLayout(TLayout):
+class TileLayout(Layout):
     """A memory layout that tiles data across devices."""
 
     shard: list[Iter]
@@ -701,7 +701,7 @@ class TileLayout(TLayout):
         """Check if the layout is trivial."""
         return _ffi_api.TileLayoutIsTrivial(self)  # pylint: disable=no-member
 
-    def group(self, shape: list[PrimExpr]) -> tuple["TLayout", list[int]]:
+    def group(self, shape: list[PrimExpr]) -> tuple["Layout", list[int]]:
         """Group the current layout by the given shape.
 
         Parameters
@@ -711,7 +711,7 @@ class TileLayout(TLayout):
 
         Returns
         -------
-        Tuple[TLayout, List[int]]
+        Tuple[Layout, List[int]]
             The grouped layout and the separators
         """
         return _ffi_api.TileLayoutGroup(self, shape)  # pylint: disable=no-member
@@ -753,8 +753,8 @@ class TileLayout(TLayout):
 
         f_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "F"]
         p_shape = [s for i, (s, c) in enumerate(zip(shape, annotation)) if c == "P"]
-        f_strides = TLayout._get_default_strides(f_shape, 1)
-        p_strides = TLayout._get_default_strides(p_shape, 1)
+        f_strides = Layout._get_default_strides(f_shape, 1)
+        p_strides = Layout._get_default_strides(p_shape, 1)
         f_tile_layout = TileLayout(S[tuple(f_shape) : tuple(s @ F for s in f_strides)])
         p_tile_layout = TileLayout(S[tuple(p_shape) : tuple(s @ P for s in p_strides)])
         result = []
@@ -817,7 +817,7 @@ class TileLayout(TLayout):
 
 
 @tvm_ffi.register_object("tirx.SwizzleLayout")
-class SwizzleLayout(TLayout):
+class SwizzleLayout(Layout):
     """A memory layout that swizzles elements to improve memory access patterns."""
 
     per_element: int
@@ -838,7 +838,7 @@ class SwizzleLayout(TLayout):
 
 
 @tvm_ffi.register_object("tirx.ComposeLayout")
-class ComposeLayout(TLayout):
+class ComposeLayout(Layout):
     """A memory layout that composes 2 layouts."""
 
     def __init__(self, layout_A: "SwizzleLayout", layout_B: "TileLayout"):

@@ -111,7 +111,7 @@ class BufferNode : public Object {
   mutable Span span;
 
   /*! \brief The layout of the buffer */
-  ffi::Optional<TLayout> layout;
+  ffi::Optional<Layout> layout;
 
   /*! \brief The allocated address of the buffer.
    * The address might be multi-dimensional based on its scope.
@@ -175,7 +175,7 @@ class Buffer : public ObjectRef {
   TVM_DLL Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                  PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                  BufferType buffer_type, ffi::Array<IntImm> axis_separators = {},
-                 Span span = Span(), ffi::Optional<TLayout> layout = std::nullopt,
+                 Span span = Span(), ffi::Optional<Layout> layout = std::nullopt,
                  ffi::Array<PrimExpr> allocated_addr = {});
 
   /*!

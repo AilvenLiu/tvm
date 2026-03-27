@@ -690,7 +690,7 @@ void TracedScheduleNode::Unannotate(const SBlockRV& block_rv, const ffi::String&
                                       /*outputs=*/{}));
 }
 
-/******** Schedule: Layout transformation ********/
+/******** Schedule: SLayout transformation ********/
 
 void TracedScheduleNode::TransformLayout(const SBlockRV& block_rv, int buffer_index,
                                          BufferIndexType buffer_index_type,

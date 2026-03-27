@@ -83,17 +83,17 @@ ffi::Map<ffi::String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
       {"m", analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base))}};
 }
 
-TLayout SwizzleLayoutNode::Canonicalize() const { return ffi::GetRef<SwizzleLayout>(this); }
+Layout SwizzleLayoutNode::Canonicalize() const { return ffi::GetRef<SwizzleLayout>(this); }
 
-TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
-                                const ffi::Array<PrimExpr>& inner_shape) const {
+Layout SwizzleLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+                               const ffi::Array<PrimExpr>& inner_shape) const {
   // Compose(Swizzle, Identity) -> then tile with `outer`.
   auto comp = ComposeLayout(ffi::GetRef<SwizzleLayout>(this), IdentityTileLayout(inner_shape));
   return comp->Tile(outer, outer_shape, inner_shape);
 }
 
 ffi::Optional<TileLayout> SwizzleLayoutNode::IsTileInner(
-    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const Layout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& inner_shape) const {
   // We expect tile_layout to be Compose(SwizzleLayout(this), _).
   if (auto comp = tile_layout.as<ComposeLayout>()) {
@@ -111,14 +111,14 @@ ffi::Optional<TileLayout> SwizzleLayoutNode::IsTileInner(
   return std::nullopt;
 }
 
-ffi::Optional<TLayout> SwizzleLayoutNode::IsTileOuter(
-    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+ffi::Optional<Layout> SwizzleLayoutNode::IsTileOuter(
+    const Layout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& outer_shape) const {
   return std::nullopt;
 }
 
-ffi::Optional<TLayout> SwizzleLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
-                                                const Region& region) const {
+ffi::Optional<Layout> SwizzleLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
+                                               const Region& region) const {
   // Compose(Swizzle, Identity) -> then slice.
   auto comp = ComposeLayout(ffi::GetRef<SwizzleLayout>(this), IdentityTileLayout(shape));
   return comp->Slice(shape, region);

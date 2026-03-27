@@ -648,7 +648,7 @@ TVM_DLL void Annotate(ScheduleState self, const StmtSRef& sref, const ffi::Strin
  */
 TVM_DLL void Unannotate(ScheduleState self, const StmtSRef& sref, const ffi::String& ann_key);
 
-/******** Schedule: Layout transformation ********/
+/******** Schedule: SLayout transformation ********/
 /*!
  * \brief Apply a transformation represented by IndexMap to buffer
  * \details The indices and the access region to the target buffer is transformed by the given

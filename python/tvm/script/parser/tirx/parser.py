@@ -24,7 +24,7 @@ from typing import Any
 
 import tvm
 from tvm.ir import GlobalVar, PrimType
-from tvm.tirx import Buffer, IterVar, PrimExpr, TLayout, Var
+from tvm.tirx import Buffer, IterVar, Layout, PrimExpr, Var
 from tvm.tirx.stmt import BufferRegion
 
 from ...ir_builder import ir as I
@@ -209,7 +209,7 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         res = value.__enter__()
         IRBuilder.name(var_name, res)
         return res
-    elif isinstance(value, Buffer | IterVar | TLayout) or (
+    elif isinstance(value, Buffer | IterVar | Layout) or (
         isinstance(value, Var) and not self.var_table.exist(value)
     ):
         IRBuilder.name(var_name, value)

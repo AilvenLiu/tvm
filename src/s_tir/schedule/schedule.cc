@@ -310,7 +310,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            });
 }
 
-/******** (FFI) Layout transformation ********/
+/******** (FFI) SLayout transformation ********/
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()

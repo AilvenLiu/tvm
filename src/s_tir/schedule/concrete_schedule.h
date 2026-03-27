@@ -173,7 +173,7 @@ class ConcreteScheduleNode : public ScheduleNode {
   void Unannotate(const LoopRV& loop_rv, const ffi::String& ann_key) override;
   void Annotate(const SBlockRV& block_rv, const ffi::String& ann_key, const Any& ann_val) override;
   void Unannotate(const SBlockRV& block_rv, const ffi::String& ann_key) override;
-  /******** Schedule: Layout transformation ********/
+  /******** Schedule: SLayout transformation ********/
   void TransformLayout(const SBlockRV& block_rv, int buffer_index,
                        BufferIndexType buffer_index_type, const IndexMap& index_map,
                        const ffi::Optional<IndexMap>& pad_value,

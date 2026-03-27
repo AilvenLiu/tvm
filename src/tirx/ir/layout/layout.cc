@@ -21,9 +21,9 @@
 namespace tvm {
 namespace tirx {
 
-/**************** TLayout ****************/
-ffi::Map<ffi::String, PrimExpr> TLayoutNode::Apply(const ffi::Array<PrimExpr>& coord,
-                                                   const ffi::Array<PrimExpr>& shape) const {
+/**************** Layout ****************/
+ffi::Map<ffi::String, PrimExpr> LayoutNode::Apply(const ffi::Array<PrimExpr>& coord,
+                                                  const ffi::Array<PrimExpr>& shape) const {
   TVM_FFI_ICHECK_EQ(coord.size(), shape.size())
       << "ValueError: The size of coord and shape should be equal";
   return Apply(FlattenCoord(coord, shape));
@@ -32,56 +32,55 @@ ffi::Map<ffi::String, PrimExpr> TLayoutNode::Apply(const ffi::Array<PrimExpr>& c
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   auto def = refl::GlobalDef();
-  def.def("tirx.TLayoutCompatibleWithShape",
-          [](TLayout layout, Array<PrimExpr> shape) { return layout->CompatibleWithShape(shape); });
-  def.def("tirx.TLayoutVerifyWellFormed",
-          [](TLayout layout) { return layout->VerifyWellFormed(); });
-  def.def("tirx.TLayoutGetSize", [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+  def.def("tirx.LayoutCompatibleWithShape",
+          [](Layout layout, Array<PrimExpr> shape) { return layout->CompatibleWithShape(shape); });
+  def.def("tirx.LayoutVerifyWellFormed", [](Layout layout) { return layout->VerifyWellFormed(); });
+  def.def("tirx.LayoutGetSize", [](Layout layout, ffi::Optional<ffi::String> axis_name) {
     return layout->GetSize(axis_name);
   });
-  def.def("tirx.TLayoutGetSpan", [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+  def.def("tirx.LayoutGetSpan", [](Layout layout, ffi::Optional<ffi::String> axis_name) {
     return layout->GetSpan(axis_name);
   });
-  def.def("tirx.TLayoutApplyWithShape",
-          [](TLayout layout, ffi::Array<PrimExpr> coord, ffi::Array<PrimExpr> shape) {
+  def.def("tirx.LayoutApplyWithShape",
+          [](Layout layout, ffi::Array<PrimExpr> coord, ffi::Array<PrimExpr> shape) {
             return layout->Apply(coord, shape);
           });
-  def.def("tirx.TLayoutApply",
-          [](TLayout layout, ffi::Array<PrimExpr> coord) { return layout->Apply(coord); });
-  def.def("tirx.TLayoutApplyLinear",
-          [](TLayout layout, PrimExpr coord) { return layout->Apply(coord); });
-  def.def("tirx.TLayoutCanonicalize", [](TLayout layout) { return layout->Canonicalize(); });
-  def.def("tirx.TLayoutTile", [](TLayout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
-                                 ffi::Array<PrimExpr> inner_shape) {
+  def.def("tirx.LayoutApply",
+          [](Layout layout, ffi::Array<PrimExpr> coord) { return layout->Apply(coord); });
+  def.def("tirx.LayoutApplyLinear",
+          [](Layout layout, PrimExpr coord) { return layout->Apply(coord); });
+  def.def("tirx.LayoutCanonicalize", [](Layout layout) { return layout->Canonicalize(); });
+  def.def("tirx.LayoutTile", [](Layout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
+                                ffi::Array<PrimExpr> inner_shape) {
     return layout->Tile(outer, outer_shape, inner_shape);
   });
-  def.def("tirx.TLayoutDirectSum",
-          [](TLayout layout, TileLayout left, ffi::Array<PrimExpr> left_shape,
+  def.def("tirx.LayoutDirectSum",
+          [](Layout layout, TileLayout left, ffi::Array<PrimExpr> left_shape,
              ffi::Array<PrimExpr> right_shape) {
             return layout->DirectSum(left, left_shape, right_shape);
           });
-  def.def("tirx.TLayoutIsTileInner",
-          [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+  def.def("tirx.LayoutIsTileInner",
+          [](Layout layout, Layout tile_layout, ffi::Array<PrimExpr> tiled_shape,
              ffi::Array<PrimExpr> inner_shape) {
             return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
           });
-  def.def("tirx.TLayoutIsTileOuter",
-          [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+  def.def("tirx.LayoutIsTileOuter",
+          [](Layout layout, Layout tile_layout, ffi::Array<PrimExpr> tiled_shape,
              ffi::Array<PrimExpr> outer_shape) {
             return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
           });
-  def.def("tirx.TLayoutIsDirectSumRight",
-          [](TLayout layout, TLayout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
+  def.def("tirx.LayoutIsDirectSumRight",
+          [](Layout layout, Layout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
              ffi::Array<PrimExpr> right_shape) {
             return layout->IsDirectSumRight(sum_layout, interleaved_shape, right_shape);
           });
-  def.def("tirx.TLayoutIsDirectSumLeft",
-          [](TLayout layout, TLayout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
+  def.def("tirx.LayoutIsDirectSumLeft",
+          [](Layout layout, Layout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
              ffi::Array<PrimExpr> left_shape) {
             return layout->IsDirectSumLeft(sum_layout, interleaved_shape, left_shape);
           });
-  def.def("tirx.TLayoutSlice",
-          [](TLayout layout, ffi::Array<PrimExpr> shape, Region region) -> ffi::Optional<TLayout> {
+  def.def("tirx.LayoutSlice",
+          [](Layout layout, ffi::Array<PrimExpr> shape, Region region) -> ffi::Optional<Layout> {
             return layout->Slice(shape, region);
           });
 }

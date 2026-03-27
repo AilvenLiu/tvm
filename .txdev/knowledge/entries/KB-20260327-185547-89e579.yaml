@@ -1,0 +1,38 @@
+content:
+  details: 'In the layout rename, `src/relax/transform/infer_layout_utils.h` had `using
+    tirx::Layout;` which
+
+    allowed downstream relax files to use bare `Layout` without qualifying. When Phase
+    1 renamed this
+
+    to `using tirx::SLayout;`, files like `src/relax/op/image/resize.cc` and
+
+    `src/relax/op/tensor/statistical.cc` still used bare `Layout` and failed to compile.
+    These files
+
+    never included `data_layout.h` directly -- they depended on the using-alias. After
+    Phase 2 brought
+
+    `tirx::Layout` back (the renamed TLayout), these files would have compiled but
+    with the WRONG type.
+
+    Lesson: after renaming a using-alias, grep for bare usages of the old name in
+    all downstream files
+
+    that transitively include the alias header.
+
+    '
+  summary: C++ `using tirx::Layout;` aliases propagate the type name into files that
+    never directly include the defining header; renaming the source type requires
+    finding all bare usages.
+created: '2026-03-27'
+id: KB-20260327-185547-89e579
+scope:
+- repo
+tags:
+- rename
+- refactor
+- cpp
+- namespace
+title: using-alias propagation creates hidden rename dependencies across files
+updated: '2026-03-27'

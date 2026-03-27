@@ -1,0 +1,39 @@
+content:
+  details: 'The layout rename required Layout->SLayout and TLayout->Layout, both in
+    `tvm::tirx`. We chose
+
+    to execute Phase 1 (Layout->SLayout) fully across C++, Python, FFI registrations,
+    and tests
+
+    before starting Phase 2 (TLayout->Layout). This ensures: (1) no name collision
+    at any point,
+
+    (2) the build compiles after each phase so errors can be attributed to the correct
+    phase,
+
+    (3) FFI string registrations never have duplicates (which would cause runtime
+    crashes).
+
+    Alternative considered: a single atomic rename pass -- rejected because debugging
+    collisions
+
+    across ~70 files would be intractable. The two-phase approach adds one extra build
+    verification
+
+    but makes each phase independently debuggable.
+
+    '
+  summary: When swapping two type names (A->B, B->A) in the same namespace, always
+    defuse first (A->A'), then claim (B->A), ensuring the build passes after each
+    phase.
+created: '2026-03-27'
+id: ADR-20260327-185547-d8244c
+scope:
+- repo
+tags:
+- rename
+- namespace
+- ffi
+- architecture
+title: Two-phase ordering for bidirectional type rename in shared namespace
+updated: '2026-03-27'

@@ -121,7 +121,7 @@ InferLayoutOutput InferLayoutResize2d(
 
   if (it != desired_layouts.end()) {
     // We have a desired layout for resize2d.
-    Layout desired_data_layout = (*it).second[0];
+    SLayout desired_data_layout = (*it).second[0];
     TVM_FFI_ICHECK_EQ(desired_data_layout.ndim(), desired_data_layout.ndim_primal())
         << "Axis swap only";
     data_layout = TransposeLike(InitialLayout(4), attrs->layout, desired_data_layout);
@@ -236,7 +236,7 @@ InferLayoutOutput InferLayoutResize3d(
   ObjectPtr<Resize3DAttrs> new_attrs = ffi::make_object<Resize3DAttrs>(*attrs);
 
   if (it != desired_layouts.end()) {
-    Layout desired_data_layout = (*it).second[0];
+    SLayout desired_data_layout = (*it).second[0];
     TVM_FFI_ICHECK_EQ(desired_data_layout.ndim(), desired_data_layout.ndim_primal())
         << "Axis swap only";
     data_layout = TransposeLike(InitialLayout(5), attrs->layout, desired_data_layout);

@@ -1,0 +1,25 @@
+content:
+  details: 'PR draft metadata files contained `->` written as Unicode `\u2192` arrows
+    in descriptions like
+
+    "Layout -> SLayout". The workflow tooling that consumes these JSON files failed
+    to parse them.
+
+    Fixed by rewriting with plain ASCII (`->`). Rule: always use plain ASCII in machine-readable
+
+    metadata files (JSON, YAML) unless the schema explicitly supports Unicode.
+
+    '
+  summary: Used Unicode arrows (U+2192) in PR draft JSON files, which caused parsing
+    failures in downstream tooling that expected ASCII.
+created: '2026-03-27'
+id: M-20260327-185547-c88284
+scope:
+- repo
+tags:
+- encoding
+- json
+- workflow
+- pr-draft
+title: Non-ASCII characters in generated JSON/metadata files
+updated: '2026-03-27'
