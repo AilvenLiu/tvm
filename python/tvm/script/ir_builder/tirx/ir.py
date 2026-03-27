@@ -30,7 +30,8 @@ from typing import Literal
 
 # isort: on
 
-from tvm import DataType, ir, tir
+from tvm import DataType, ir
+from tvm import tirx as tir
 from tvm.ir import Type
 from tvm.ir import register_op_attr as _register_op_attr
 from tvm.ir.base import deprecated
@@ -928,7 +929,7 @@ def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
         from tvm.arith import Analyzer  # pylint: disable=import-outside-toplevel
 
         extent = Analyzer().simplify(dom[1] - dom[0])
-        if isinstance(extent, tirx.IntImm):
+        if isinstance(extent, tir.IntImm):
             return ir.Range.from_min_extent(dom[0], extent)
         return ir.Range(dom[0], dom[1])
     if hasattr(dom, "dtype"):
@@ -2901,7 +2902,7 @@ def _register_tir_namespace_printer_names():
         # If the namespace object itself maps to an op via __call__
         call_op = getattr(ns_obj, "__tir_call_op_name__", None)
         if call_op:
-            _register_op_attr(f"tir.{call_op}", "TScriptPrinterName", dotted_prefix, level=20)
+            _register_op_attr(f"tirx.{call_op}", "TScriptPrinterName", dotted_prefix, level=20)
         # Walk attributes to find wrapped ops and sub-namespaces
         for name in dir(ns_obj):
             if name.startswith("_"):
@@ -2918,7 +2919,7 @@ def _register_tir_namespace_printer_names():
             op_name = getattr(val, "__tir_op_name__", None)
             if callable(val) and op_name:
                 _register_op_attr(
-                    f"tir.{op_name}", "TScriptPrinterName", f"{dotted_prefix}.{name}", level=20
+                    f"tirx.{op_name}", "TScriptPrinterName", f"{dotted_prefix}.{name}", level=20
                 )
 
     try:

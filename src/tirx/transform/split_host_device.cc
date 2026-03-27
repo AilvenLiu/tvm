@@ -110,9 +110,9 @@ class HostDeviceSplitter : public StmtMutator {
     if (num_inputs.defined()) {
       device_func = WithAttr(std::move(device_func), tvm::attr::kNumInputs, num_inputs);
     }
-    auto persistent = cur_func_->GetAttr<Bool>(tir::attr::kPersistentKernel);
+    auto persistent = cur_func_->GetAttr<Bool>(tirx::attr::kPersistentKernel);
     if (persistent.defined()) {
-      device_func = WithAttr(std::move(device_func), tir::attr::kPersistentKernel, persistent);
+      device_func = WithAttr(std::move(device_func), tirx::attr::kPersistentKernel, persistent);
     }
     GlobalVar kernel_symbol_global = var_supply_();
     (*device_mod_)->Add(kernel_symbol_global, device_func);
@@ -190,5 +190,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirx
 }  // namespace tvm

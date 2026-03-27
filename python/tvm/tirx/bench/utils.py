@@ -425,8 +425,8 @@ class CudaProfiler:
         profiler_buffer: Tx.Buffer,
         write_stride: int,
         num_groups: int,
-        default_leader: None | tvm.tir.PrimExpr | bool = None,
-        profiler_enabled: bool | tvm.tir.PrimExpr = True,
+        default_leader: None | tvm.tirx.PrimExpr | bool = None,
+        profiler_enabled: bool | tvm.tirx.PrimExpr = True,
     ):
         self.buffer = profiler_buffer
         self.write_stride = write_stride
@@ -447,7 +447,7 @@ class CudaProfiler:
             [1], "uint32", scope="local", align=8, name="profiler_write_offset"
         )
 
-    def _leader(self, leader: None | tvm.tir.PrimExpr | bool):
+    def _leader(self, leader: None | tvm.tirx.PrimExpr | bool):
         if leader is not None:
             if isinstance(leader, (bool, np.bool_)):  # noqa: UP038
                 return Tx.bool(bool(leader))
@@ -457,7 +457,7 @@ class CudaProfiler:
         return Tx.bool(True)
 
     @Tx.inline
-    def init(self, group_id: tvm.tir.PrimExpr):
+    def init(self, group_id: tvm.tirx.PrimExpr):
         if self.profiler_enabled:
             Tx.timer_init_cuda(
                 self.buffer.data,
@@ -468,7 +468,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def start(self, event_type: Enum, leader: None | tvm.tir.PrimExpr | bool = None):
+    def start(self, event_type: Enum, leader: None | tvm.tirx.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_start_cuda(
                 event_type,
@@ -480,7 +480,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def end(self, event_type: Enum, leader: None | tvm.tir.PrimExpr | bool = None):
+    def end(self, event_type: Enum, leader: None | tvm.tirx.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_end_cuda(
                 event_type,
@@ -492,7 +492,7 @@ class CudaProfiler:
             )
 
     @Tx.inline
-    def finalize(self, leader: None | tvm.tir.PrimExpr | bool = None):
+    def finalize(self, leader: None | tvm.tirx.PrimExpr | bool = None):
         if self.profiler_enabled:
             Tx.timer_finalize_cuda(
                 self.buffer.data,

@@ -23,14 +23,14 @@ import operator
 from tvm.arith.analyzer import Analyzer
 from tvm.ir import assert_structural_equal
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import BufferRegion, PrimFunc
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
     predicate,
     register_dispatch,
 )
+from tvm.tirx.stmt import OpCall
 
 from .common import init_analyzer
 from .dim_utils import normalize_and_group

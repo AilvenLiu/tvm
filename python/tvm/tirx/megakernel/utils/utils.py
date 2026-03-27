@@ -21,7 +21,7 @@ import numpy as np
 
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tir import PrimExpr
+from tvm.tirx import PrimExpr
 
 
 def ceildiv(a, b):
@@ -84,7 +84,7 @@ def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr)
 
 
 def is_power_of_two(n: Tx.int32):
-    return tvm.tir.all(n > 0, Tx.bitwise_and(n, n - 1) == 0)
+    return tvm.tirx.all(n > 0, Tx.bitwise_and(n, n - 1) == 0)
 
 
 def next_power_of_two(x):
@@ -267,7 +267,7 @@ __forceinline__ __device__ int32_t atomic_add_int32(int32_t* addr, int32_t value
 
 def is_const_minus_one(value):
     return (isinstance(value, int) and value == -1) or (
-        isinstance(value, tvm.tir.IntImm) and value.value == -1
+        isinstance(value, tvm.tirx.IntImm) and value.value == -1
     )
 
 
@@ -376,7 +376,7 @@ def get_source(module: "tvm.ir.IRModule"):
     return src, lib
 
 
-def get_source_func(func: "tvm.tir.PrimFunc"):
+def get_source_func(func: "tvm.tirx.PrimFunc"):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

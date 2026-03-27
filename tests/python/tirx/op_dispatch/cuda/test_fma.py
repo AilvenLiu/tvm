@@ -25,7 +25,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TileLayout
+from tvm.tirx.layout import S, TileLayout
 
 
 def _get_sm_version():

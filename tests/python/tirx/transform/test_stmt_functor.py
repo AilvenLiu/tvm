@@ -20,11 +20,11 @@ Tests for StmtVisitor and StmtMutator functionality in TVM TIR.
 
 import tvm
 import tvm.testing
-from tvm import tir
+from tvm import tirx as tir
 from tvm.ir import Range
 from tvm.script import tirx as Tx
-from tvm.tir.expr import EQ, GT, LT, Add, IntImm, Mul, Sub, Var
-from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor, StmtMutator, StmtVisitor
+from tvm.tirx.expr import EQ, GT, LT, Add, IntImm, Mul, Sub, Var
+from tvm.tirx.stmt_functor import StmtExprMutator, StmtExprVisitor, StmtMutator, StmtVisitor
 
 
 class ASTLog:
@@ -1105,7 +1105,7 @@ def test_op_call_config_mutated():
     scope IDs and uses Substitute to replace them in the body. Without visiting
     OpCall.config, the config retains stale var references.
     """
-    from tvm.tir.stmt_functor import substitute
+    from tvm.tirx.stmt_functor import substitute
 
     @Tx.prim_func
     def op_call_with_config(A: Tx.Buffer((10,), "int32"), B: Tx.Buffer((10,), "int32")):

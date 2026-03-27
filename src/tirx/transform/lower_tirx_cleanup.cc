@@ -27,17 +27,10 @@
 #include <tvm/target/target.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirx_op.h>
-#include <tvm/tirx/transform.h>
-=======
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>> e003fe6cd1 ([Refactor] Decouple exec_scope from SBlock into independent ExecScopeStmt node (#469)):src/tir/transform/lower_tirx_cleanup.cc
 
 #include <tuple>
 #include <unordered_map>
@@ -80,9 +73,8 @@ class DispatchContextRemover : public StmtExprMutator {
 
 class LayoutApplier : public arith::IRMutatorWithAnalyzer {
  public:
-  static std::pair<Stmt, ffi::Map<Var, Buffer>> Flatten(const Stmt& stmt,
-                                                        const ffi::Map<tirx::Var, Buffer> buffer_map,
-                                                        const Target& target) {
+  static std::pair<Stmt, ffi::Map<Var, Buffer>> Flatten(
+      const Stmt& stmt, const ffi::Map<tirx::Var, Buffer> buffer_map, const Target& target) {
     arith::Analyzer ana;
     LayoutApplier storage_lower(&ana, target);
     std::unordered_map<Var, Buffer> new_buffer_map;
@@ -406,5 +398,5 @@ Pass LowerTIRxCleanup() {
 }
 
 }  // namespace transform
-}  // namespace tirxxx
+}  // namespace tirx
 }  // namespace tvm

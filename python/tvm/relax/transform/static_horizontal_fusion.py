@@ -32,8 +32,8 @@ from tvm.relax.expr import Expr, ShapeExpr
 from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
 from tvm.script import relax as R
-from tvm.script import tir as T
-from tvm.tir import (
+from tvm.script import tirx as T
+from tvm.tirx import (
     AttrStmt,
     Bind,
     Buffer,
@@ -48,8 +48,7 @@ from tvm.tir import (
     Stmt,
     Var,
 )
-from tvm.tir.analysis import verify_tirx_well_formed
-from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
+from tvm.tirx.analysis import verify_tirx_well_formed
 from tvm.tirx.bench.utils import CudaProfiler
 from tvm.tirx.megakernel.utils.base import SemaphoreBase, SmemManager, TileSchedulerBase
 from tvm.tirx.megakernel.utils.config import (
@@ -59,6 +58,7 @@ from tvm.tirx.megakernel.utils.config import (
 )
 from tvm.tirx.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.tirx.operator import KernelReplacePoint
+from tvm.tirx.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
 
 
@@ -365,7 +365,7 @@ class EventHandleHelper(PyExprVisitor):
         final_evt_shape = [s for s in final_evt.struct_info.shape.values]
         if (
             len(final_evt_shape) != 1
-            or not isinstance(final_evt_shape[0], tvm.tir.IntImm)
+            or not isinstance(final_evt_shape[0], tvm.tirx.IntImm)
             or final_evt_shape[0].value != 1
         ):
             raise ValueError("The final event must have shape (1,)")
@@ -396,7 +396,7 @@ class EventPrimFuncHelper(StmtExprMutator):
         return (
             isinstance(stmt, AttrStmt)
             and stmt.attr_key == "marks"
-            and isinstance(stmt.value, tvm.tir.StringImm)
+            and isinstance(stmt.value, tvm.tirx.StringImm)
             and stmt.value.value == mark
         )
 
@@ -741,7 +741,7 @@ class DuplicateVarReplacer(StmtExprMutator):
         min_val = self.visit_expr(op.min)
         extent = self.visit_expr(op.extent)
         body = self.visit_stmt(op.body)
-        return tvm.tir.For(
+        return tvm.tirx.For(
             self.vars[op.loop_var],
             min_val,
             extent,
@@ -758,7 +758,7 @@ class DuplicateVarReplacer(StmtExprMutator):
         extents = [self.visit_expr(extent) for extent in op.extents]
         body = self.visit_stmt(op.body)
         condition = self.visit_expr(op.condition)
-        return tvm.tir.Allocate(
+        return tvm.tirx.Allocate(
             self.vars[op.buffer_var], op.dtype, extents, condition, body, op.annotations, op.span
         )
 
@@ -773,7 +773,7 @@ class DuplicateVarReplacer(StmtExprMutator):
             data_or_idx = op.irmod_storage_idx
         else:
             data_or_idx = None
-        return tvm.tir.AllocateConst(
+        return tvm.tirx.AllocateConst(
             self.vars[op.buffer_var], op.dtype, extents, data_or_idx, body, op.annotations, op.span
         )
 
@@ -2086,7 +2086,7 @@ class _Rewriter(PyExprMutator):
             with T.If(bx >= len(self.evt_handle_helper.entry_points) + 1):
                 with T.Then():
                     with T.If(
-                        tvm.tir.all(tx == 0, bx == len(self.evt_handle_helper.entry_points) + 1)
+                        tvm.tirx.all(tx == 0, bx == len(self.evt_handle_helper.entry_points) + 1)
                     ):
                         with T.Then():
                             T.buffer_store(head, 0, [0])

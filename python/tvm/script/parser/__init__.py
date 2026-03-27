@@ -17,6 +17,6 @@
 # under the License.
 """The parser"""
 
-from . import _core, ir
+from . import _core, ir, tirx
 from ._core import parse
 from .ir import ir_module

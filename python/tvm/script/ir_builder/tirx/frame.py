@@ -33,11 +33,11 @@ class TIRFrame(IRBuilderFrame): ...
 class PrimFuncFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tir.SSBlockFrame")
+@_register_object("script.ir_builder.tirx.SSBlockFrame")
 class SBlockFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tir.ExecScopeFrame")
+@_register_object("script.ir_builder.tirx.ExecScopeFrame")
 class ExecScopeFrame(TIRFrame):
     """A frame that represents an execution scope (e.g. cta, warp, thread).
 
@@ -102,7 +102,7 @@ class AllocateFrame(TIRFrame):
         return self.buffer_var
 
 
-@_register_object("script.ir_builder.tir.AttrFrame")
+@_register_object("script.ir_builder.tirx.AttrFrame")
 class AttrFrame(TIRFrame): ...
 
 
@@ -122,30 +122,30 @@ class ThenFrame(TIRFrame): ...
 class ElseFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tir.DeclBufferFrame")
+@_register_object("script.ir_builder.tirx.DeclBufferFrame")
 class DeclBufferFrame(TIRFrame):
     def __enter__(self) -> Buffer:
         super().__enter__()
         return self.buffer
 
 
-@_register_object("script.ir_builder.tir.LaunchThreadFrame")
+@_register_object("script.ir_builder.tirx.LaunchThreadFrame")
 class LaunchThreadFrame(TIRFrame):
     def __enter__(self) -> Var:
         super().__enter__()
         return self.iter_var.var
 
 
-@_register_object("script.ir_builder.tir.ComposeOpFrame")
+@_register_object("script.ir_builder.tirx.ComposeOpFrame")
 class ComposeOpFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tir.AllocBufferFrame")
+@_register_object("script.ir_builder.tirx.AllocBufferFrame")
 class AllocBufferFrame(TIRFrame):
     def __enter__(self) -> Buffer:
         super().__enter__()
         return self.buffer
 
 
-@_register_object("script.ir_builder.tir.HintFrame")
+@_register_object("script.ir_builder.tirx.HintFrame")
 class HintFrame(TIRFrame): ...

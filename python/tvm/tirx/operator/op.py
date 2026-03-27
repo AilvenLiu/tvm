@@ -18,9 +18,9 @@
 """Implementation of TIR operator."""
 
 from tvm.ir import Op
-from tvm.tir import BufferRegion, FloatImm, IntImm, PrimExpr
-from tvm.tir.predicate import Predicate
-from tvm.tir.stmt import OpCall, _ffi_api, normalize_const_arg
+from tvm.tirx import BufferRegion, FloatImm, IntImm, PrimExpr
+from tvm.tirx.predicate import Predicate
+from tvm.tirx.stmt import OpCall, _ffi_api, normalize_const_arg
 
 
 def get_tirx_op(op_name: str):

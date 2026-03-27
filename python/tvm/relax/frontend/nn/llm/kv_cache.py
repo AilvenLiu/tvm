@@ -82,6 +82,8 @@ from .tree_attn import (
     tree_attn_with_paged_kv_cache_cpu,
 )
 
+tir = tirx  # Backward-compat alias for existing type annotations.
+
 __all__ = [
     "AttnKind",
     "FlashInferPagedKVCache",
@@ -512,7 +514,7 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
         )
 
 
-class TIRXagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
+class TIRPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
     """Paged KV cache using TIR kernels."""
 
     def __init__(  # pylint: disable=too-many-locals

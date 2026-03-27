@@ -18,10 +18,10 @@
 import functools
 
 from tvm import DataType
-from tvm.tir import AllocBuffer, IntImm
-from tvm.tir.buffer import Buffer
-from tvm.tir.stmt_functor import StmtVisitor
-from tvm.tir.transform.function_pass import prim_func_pass
+from tvm.tirx import AllocBuffer, IntImm
+from tvm.tirx.buffer import Buffer
+from tvm.tirx.stmt_functor import StmtVisitor
+from tvm.tirx.transform.function_pass import prim_func_pass
 
 from .common import BufferReplacer
 

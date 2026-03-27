@@ -124,8 +124,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           keys_to_remove.insert(tvm::attr::kIsTIRx);
         }
         // for persistent, don't display it (shown in decorator)
-        if (func->attrs->dict.count(tir::attr::kPersistentKernel)) {
-          keys_to_remove.insert(tir::attr::kPersistentKernel);
+        if (func->attrs->dict.count(tirx::attr::kPersistentKernel)) {
+          keys_to_remove.insert(tirx::attr::kPersistentKernel);
         }
         ffi::Map<ffi::String, Any> new_attrs;
         for (auto kv : func->attrs->dict) {
@@ -213,7 +213,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         kwargs_keys.push_back("tirx");
         kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
       }
-      if (func->attrs.defined() && func->attrs->dict.count(tir::attr::kPersistentKernel)) {
+      if (func->attrs.defined() && func->attrs->dict.count(tirx::attr::kPersistentKernel)) {
         kwargs_keys.push_back("persistent");
         kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
       }

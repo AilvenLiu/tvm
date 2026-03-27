@@ -20,11 +20,11 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.function import PrimFunc
-from tvm.tir.layout import laneid, tid_in_wg, warpid
-from tvm.tir.stmt import ExecScopeStmt
-from tvm.tir.stmt_functor import post_order_visit
-from tvm.tir.transform import LowerTIRx
+from tvm.tirx.function import PrimFunc
+from tvm.tirx.layout import laneid, tid_in_wg, warpid
+from tvm.tirx.stmt import ExecScopeStmt
+from tvm.tirx.stmt_functor import post_order_visit
+from tvm.tirx.transform import LowerTIRx
 
 
 def _contains_exec_scope(mod):
@@ -1181,7 +1181,7 @@ def test_lower_tirx_keep_different_tensormaps():
 
 def test_lower_tirx_dedup_smem_descriptor():
     """Two gemm_async calls using the same smem buffers should share descriptors."""
-    from tvm.tir.layout import S, TCol, TileLayout, TLane
+    from tvm.tirx.layout import S, TCol, TileLayout, TLane
     from tvm.tirx.op_dispatch.cuda.tma_utils import tma_shared_layout
 
     A_layout = tma_shared_layout("float16", 3, (128, 64))

@@ -18,10 +18,10 @@
 
 from tvm import DataTypeCode
 from tvm.ir import PointerType, PrimType
-from tvm.tir import AllocBuffer, Var
-from tvm.tir.buffer import Buffer
-from tvm.tir.function import PrimFunc
-from tvm.tir.transform.function_pass import prim_func_pass
+from tvm.tirx import AllocBuffer, Var
+from tvm.tirx.buffer import Buffer
+from tvm.tirx.function import PrimFunc
+from tvm.tirx.transform.function_pass import prim_func_pass
 
 from .common import BufferReplacer
 

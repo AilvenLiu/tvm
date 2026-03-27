@@ -23,8 +23,8 @@ dispatch result.
 
 from tvm_ffi import register_global_func
 
-from tvm.tir.stmt import OpCall
 from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.stmt import OpCall
 
 # Note: legacy `register_schedule` is intentionally removed.
 

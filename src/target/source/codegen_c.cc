@@ -104,7 +104,7 @@ void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Pr
     } else {
       PrintType(GetType(v), os);
     }
-    bool no_alias = func->HasNonzeroAttr(tir::attr::kNoAlias);
+    bool no_alias = func->HasNonzeroAttr(tirx::attr::kNoAlias);
     bool is_handle = v.dtype().is_handle();
     auto* ptr = v->type_annotation.as<PointerTypeNode>();
     if (ptr && ptr->element_type.as<TensorMapTypeNode>()) {

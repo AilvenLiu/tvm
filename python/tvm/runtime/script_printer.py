@@ -210,7 +210,7 @@ class Scriptable:
         tir_import_module_val = tir_import_module
         if tir_prefix == "T" and tir_import_module == "tir":
             from tvm.ir import IRModule  # pylint: disable=import-outside-toplevel
-            from tvm.tir import PrimFunc  # pylint: disable=import-outside-toplevel
+            from tvm.tirx import PrimFunc  # pylint: disable=import-outside-toplevel
 
             is_tirx = False
             if isinstance(self, PrimFunc) and getattr(self, "attrs", None):

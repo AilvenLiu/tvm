@@ -1467,6 +1467,7 @@ __all__ = [
     "max",
     "maximum",
     "memset",
+    "meta_class",
     "min",
     "minimum",
     "mul",

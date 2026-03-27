@@ -19,7 +19,7 @@ import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import tirx as Tx
-from tvm.tir.layout import F, P, S, TileLayout
+from tvm.tirx.layout import F, P, S, TileLayout
 from tvm.tirx.transform import NaiveAllocator
 
 

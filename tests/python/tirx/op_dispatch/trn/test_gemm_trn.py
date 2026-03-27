@@ -20,8 +20,8 @@ import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
-from tvm.tir.layout import F, P, S, TileLayout
-from tvm.tir.stmt_functor import ir_transform
+from tvm.tirx.layout import F, P, S, TileLayout
+from tvm.tirx.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -31,14 +31,14 @@ def _strip_exec_scope_stmt(stmt):
         stmt,
         preorder=lambda _node: None,
         postorder=lambda node: node.body,
-        only_enable=["tir.ExecScopeStmt"],
+        only_enable=["tirx.ExecScopeStmt"],
     )
 
 
 def assert_structural_equal(lhs, rhs, *args, **kwargs):
-    if isinstance(lhs, tvm.tir.PrimFunc):
+    if isinstance(lhs, tvm.tirx.PrimFunc):
         lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
-    if isinstance(rhs, tvm.tir.PrimFunc):
+    if isinstance(rhs, tvm.tirx.PrimFunc):
         rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
     _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
@@ -75,7 +75,7 @@ def test_simple_gemm():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -111,7 +111,7 @@ def test_larger_gemm():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -154,7 +154,7 @@ def test_gemm_in_a_loop():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -198,7 +198,7 @@ def test_gemm_with_stride():
 
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -241,7 +241,7 @@ def test_gemm_swap_lhs_rhs():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -290,8 +290,8 @@ def test_gemm_with_sbuf_output():
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
-        mod = tvm.tir.transform.LowerTIRx()(mod)
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -334,7 +334,7 @@ def test_gemm_different_shape():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -370,7 +370,7 @@ def test_gemm_too_large_f_size():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -420,8 +420,8 @@ def test_gemm_sbuf_output_with_workspace():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -450,7 +450,7 @@ def test_gemm_pf_mismatch_fail():
     with pytest.raises(Exception):
         with target:
             mod = tvm.IRModule({"main": gemm})
-            mod = tvm.tir.transform.LowerTIRx()(mod)
+            mod = tvm.tirx.transform.LowerTIRx()(mod)
 
 
 def test_gemm_transpose_AB():
@@ -495,7 +495,7 @@ def test_gemm_transpose_AB():
         #fmt: off
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -547,8 +547,8 @@ def test_gemm_guard():
     with target:
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
-        mod = tvm.tir.transform.LowerTIRx()(mod)
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -592,8 +592,8 @@ def test_gemm_guard2():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
 
 

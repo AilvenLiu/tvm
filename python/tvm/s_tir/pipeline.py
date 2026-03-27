@@ -20,7 +20,9 @@
 
 import tvm
 from tvm import s_tir, tirx
-from tvm.tirx import pipeline as tir_pipeline
+from tvm.tirx import compilation_pipeline as tir_pipeline
+
+tir = tirx  # alias for backward compat
 
 
 def default_s_tir_pipeline():

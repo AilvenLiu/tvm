@@ -26,8 +26,6 @@
 
 #include <tvm/ir/global_info.h>
 #include <tvm/relax/expr.h>
-#include <tvm/tir/function.h>
-#include <tvm/tir/index_map.h>
 
 namespace tvm {
 namespace relax {

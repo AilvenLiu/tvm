@@ -17,7 +17,7 @@
 """Tests for T.inline / Tx.inline with Python LEGB scoping semantics."""
 
 from tvm.ir import assert_structural_equal
-from tvm.script import tir as T
+from tvm.script import tirx as T
 from tvm.script import tirx as Tx
 
 # Module-level constant for testing global visibility

@@ -20,8 +20,8 @@ import tvm
 import tvm.testing
 from tvm.ir import assert_structural_equal as _assert_structural_equal
 from tvm.script import tirx as Tx
-from tvm.tir.layout import F, P, S, TileLayout
-from tvm.tir.stmt_functor import ir_transform
+from tvm.tirx.layout import F, P, S, TileLayout
+from tvm.tirx.stmt_functor import ir_transform
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -31,14 +31,14 @@ def _strip_exec_scope_stmt(stmt):
         stmt,
         preorder=lambda _node: None,
         postorder=lambda node: node.body,
-        only_enable=["tir.ExecScopeStmt"],
+        only_enable=["tirx.ExecScopeStmt"],
     )
 
 
 def assert_structural_equal(lhs, rhs, *args, **kwargs):
-    if isinstance(lhs, tvm.tir.PrimFunc):
+    if isinstance(lhs, tvm.tirx.PrimFunc):
         lhs = lhs.with_body(_strip_exec_scope_stmt(lhs.body))
-    if isinstance(rhs, tvm.tir.PrimFunc):
+    if isinstance(rhs, tvm.tirx.PrimFunc):
         rhs = rhs.with_body(_strip_exec_scope_stmt(rhs.body))
     _assert_structural_equal(lhs, rhs, *args, **kwargs)
 
@@ -90,7 +90,7 @@ def test_simple_reduction(op_type):
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -124,7 +124,7 @@ def test_reduction_with_multiple_axes():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -158,7 +158,7 @@ def test_reduction_in_loop():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -199,7 +199,7 @@ def test_reduction_two_stage():
     with target:
         mod = tvm.IRModule({"main": reduction})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -247,8 +247,8 @@ def test_reduction_with_guard():
     with target:
         mod = tvm.IRModule({"main": reduction})
         mod = tvm.tirx.transform.PrivateBufferAlloc()(mod)
-        mod = tvm.tir.transform.LowerTIRx()(mod)
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
 
 
@@ -289,7 +289,7 @@ def test_reduction_two_stage_workspace():
         # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         assert_structural_equal(mod["main"], expected)
 
 

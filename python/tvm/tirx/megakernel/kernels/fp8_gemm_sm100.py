@@ -16,10 +16,10 @@
 # under the License.
 
 
-from tvm.script import tir as T
+from tvm.script import tirx as T
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TileLayout
 from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.layout import S, TileLayout
 from tvm.tirx.megakernel.kernels.gemm import GemmTile
 from tvm.tirx.megakernel.utils.base import Barriers, SmemManager
 from tvm.tirx.megakernel.utils.config import (

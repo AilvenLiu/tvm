@@ -24,9 +24,9 @@ from enum import Enum
 from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, BufferRegion, PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, BufferRegion, PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
+from tvm.tirx.stmt import OpCall
 
 
 def next_power_of_2(x: int) -> int:

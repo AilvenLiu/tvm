@@ -25,8 +25,8 @@
 
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/function.h>
-#include <tvm/tir/index_map.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/tirx/index_map.h>
+#include <tvm/tirx/stmt_functor.h>
 
 #include <cmath>
 #include <string>
@@ -34,7 +34,7 @@
 #include <vector>
 
 #include "../../runtime/thread_storage_scope.h"
-#include "../../tir/transform/ir_utils.h"
+#include "../../tirx/transform/ir_utils.h"
 #include "literal/cuda_half_t.h"
 #include "literal/cuda_int8_t.h"
 #include "ptx.h"
@@ -170,7 +170,7 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
       if (iv->var->name_hint == "threadIdx.z" || iv->thread_tag == "threadIdx.z") {
         threadIdx_z_ext = op->value;
       }
-    } else if (op->attr_key == tir::attr::kPersistentKernel) {
+    } else if (op->attr_key == tirx::attr::kPersistentKernel) {
       is_persistent_kernel = op->value.as<IntImmNode>()->value;
     }
     StmtVisitor::VisitStmt_(op);
@@ -188,7 +188,7 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
   extractor(f->body);
   // Also check PrimFunc attrs for persistent kernel (decorator-level)
   bool is_persistent = extractor.is_persistent_kernel;
-  if (!is_persistent && f->attrs.defined() && f->attrs->dict.count(tir::attr::kPersistentKernel)) {
+  if (!is_persistent && f->attrs.defined() && f->attrs->dict.count(tirx::attr::kPersistentKernel)) {
     is_persistent = true;
   }
   arith::Analyzer analyzer;
@@ -209,9 +209,9 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 
 std::string CodeGenCUDA::Finish() {
   // Generate header
-  auto header_generator = ffi::Function::GetGlobal("tir.device_op_codegen.cuda.header_generator");
+  auto header_generator = ffi::Function::GetGlobal("tirx.device_op_codegen.cuda.header_generator");
   TVM_FFI_ICHECK(header_generator.has_value())
-      << "tir.device_op_codegen.cuda.header_generator is not defined";
+      << "tirx.device_op_codegen.cuda.header_generator is not defined";
   ffi::Array<ffi::String> tags;
   for (const auto& tag : codegen_tags_) tags.push_back(ffi::String(tag));
   std::string header = header_generator.value()(tags).cast<ffi::String>().operator std::string();
@@ -892,9 +892,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
   if (auto opt_call_opt = op->op.as<Op>()) {
     Op call_op = opt_call_opt.value();
-    auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.device_op_codegen.cuda.get_codegen");
+    auto codegen_getter = tvm::ffi::Function::GetGlobal("tirx.device_op_codegen.cuda.get_codegen");
     TVM_FFI_ICHECK(codegen_getter.has_value())
-        << "tir.device_op_codegen.cuda.get_codegen is not registered";
+        << "tirx.device_op_codegen.cuda.get_codegen is not registered";
     // either codegen is registered or not
     auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
     if (codegen.has_value()) {
@@ -1382,15 +1382,15 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 }
 
 void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
-  if (op->attr_key == tir::attr::fragment_shape) {
+  if (op->attr_key == tirx::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* shape_str = op->value.as<StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
-  } else if (op->attr_key == tir::attr::fragment_layout) {
+  } else if (op->attr_key == tirx::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* layout_str = op->value.as<StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
-  } else if (op->attr_key == tir::attr::async_commit_queue_scope) {
+  } else if (op->attr_key == tirx::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
         << "For CUDA, the index of an async queue must be 0.";
@@ -1398,7 +1398,7 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
     auto commit_group = Call(DataType::Void(), builtin::ptx_cp_async_commit_group(), {});
     this->VisitExpr(commit_group, this->stream);
     return;
-  } else if (op->attr_key == tir::attr::async_wait_queue_scope) {
+  } else if (op->attr_key == tirx::attr::async_wait_queue_scope) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
     auto queue_id = wait_attrs.first.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
@@ -1410,7 +1410,7 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
     TVM_FFI_ICHECK(inner);
     this->VisitStmt(inner->body);
     return;
-  } else if (op->attr_key == tir::attr::thread_extent) {
+  } else if (op->attr_key == tirx::attr::thread_extent) {
   }
   CodeGenC::VisitStmt_(op);
 }
@@ -1441,7 +1441,7 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
     PrintStorageScope(scope, stream);
     if (scope != "shared.dyn") {
       int align = op->buffer->data_alignment;
-      auto it = op->annotations.find(tir::attr::buffer_data_alignment);
+      auto it = op->annotations.find(tirx::attr::buffer_data_alignment);
       if (it != op->annotations.end()) {
         if (const auto* n = (*it).second.as<IntImmNode>()) {
           align = n->value;
@@ -1476,7 +1476,7 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
   }
 
   RegisterHandleType(op->buffer->data.get(), dtype);
-  if (op->annotations.count(tir::attr::kVolatile)) {
+  if (op->annotations.count(tirx::attr::kVolatile)) {
     MarkVolatile(op->buffer->data.get());
   }
 }

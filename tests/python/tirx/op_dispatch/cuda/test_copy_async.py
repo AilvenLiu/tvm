@@ -25,11 +25,9 @@ import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.ir.type import TensorMapType
 from tvm.script import tirx as Tx
-from tvm.tir import IntImm, StringImm, Var
-from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
-from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tir.stmt import DeclBuffer, OpCall
-from tvm.tir.stmt_functor import StmtExprVisitor
+from tvm.tirx import IntImm, StringImm, Var
+from tvm.tirx.layout import S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.op_dispatch.cuda.common import next_power_of_2
 from tvm.tirx.op_dispatch.cuda.tma_utils import (
     SwizzleMode,
@@ -37,6 +35,8 @@ from tvm.tirx.op_dispatch.cuda.tma_utils import (
     tma_atom_shape,
     tma_shared_layout,
 )
+from tvm.tirx.stmt import DeclBuffer, OpCall
+from tvm.tirx.stmt_functor import StmtExprVisitor
 
 # ===========================================================================
 # Helpers
@@ -62,11 +62,11 @@ class TMACounter(StmtExprVisitor):
         self.loop_extents.pop()
 
     def visit_evaluate_(self, op):
-        if isinstance(op.value, tvm.tir.Call):
+        if isinstance(op.value, tvm.tirx.Call):
             if op.value.op.name in (
-                "tir.ptx_cp_async_bulk_tensor_global_to_cluster",
-                "tir.ptx_cp_async_bulk_tensor_shared_to_global",
-                "tir.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
+                "tirx.ptx_cp_async_bulk_tensor_global_to_cluster",
+                "tirx.ptx_cp_async_bulk_tensor_shared_to_global",
+                "tirx.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
             ):
                 # Multiply all enclosing loop extents
                 iters = 1
@@ -92,15 +92,15 @@ def _make_tma_call(
     for host-side tensor map creation.
     """
     from tvm.ir import Range
-    from tvm.tir import Var
-    from tvm.tir.exec_scope import ExecScope
-    from tvm.tir.stmt import BufferRegion
+    from tvm.tirx import Var
+    from tvm.tirx.exec_scope import ExecScope
     from tvm.tirx.op_dispatch.cuda.copy_async import copy_tma_impl
     from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
     from tvm.tirx.operator.op import CopyAsync
+    from tvm.tirx.stmt import BufferRegion
 
-    g_buf = tvm.tir.decl_buffer(g_shape, dtype, "A", layout=gmem_layout)
-    s_buf = tvm.tir.decl_buffer(s_shape, dtype, "A_smem", scope="shared.dyn", layout=smem_layout)
+    g_buf = tvm.tirx.decl_buffer(g_shape, dtype, "A", layout=gmem_layout)
+    s_buf = tvm.tirx.decl_buffer(s_shape, dtype, "A_smem", scope="shared.dyn", layout=smem_layout)
 
     g_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in g_region]
     s_ranges = [Range.from_min_extent(r[0], r[1] - r[0]) for r in s_region]
@@ -143,9 +143,9 @@ def _build_expected_host_init(dtype, encode_args):
     where ndim = encode_args[0] and the rest are the tensor map parameters.
     """
     A_tensormap = Var("A_tensormap", PointerType(TensorMapType(), "global"))
-    stack_alloca = tvm.tir.Call(
+    stack_alloca = tvm.tirx.Call(
         "handle",
-        tvm.ir.Op.get("tir.tvm_stack_alloca"),
+        tvm.ir.Op.get("tirx.tvm_stack_alloca"),
         [StringImm("tensormap"), IntImm("int32", 1)],
     )
     A_var = Var("A", PointerType(PrimType(dtype), "global"))
@@ -159,12 +159,12 @@ def _build_expected_host_init(dtype, encode_args):
         ]
         + [IntImm("int32", v) for v in encode_args[1:]]
     )
-    encode_call = tvm.tir.Call("int32", tvm.ir.Op.get("tir.tvm_call_packed"), call_args)
+    encode_call = tvm.tirx.Call("int32", tvm.ir.Op.get("tirx.tvm_call_packed"), call_args)
     replace_point = OpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
-    return tvm.tir.LetStmt(
+    return tvm.tirx.LetStmt(
         A_tensormap,
         stack_alloca,
-        tvm.tir.SeqStmt([tvm.tir.Evaluate(encode_call), replace_point]),
+        tvm.tirx.SeqStmt([tvm.tirx.Evaluate(encode_call), replace_point]),
     )
 
 
@@ -178,7 +178,7 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
         coord_fn: callable(loop_vars) -> list[PrimExpr]  (dim coordinate args)
         s_start: optional list[int]  — starting index for address_of (default all zeros)
     """
-    from tvm.tir.layout import ComposeLayout, SwizzleLayout
+    from tvm.tirx.layout import ComposeLayout, SwizzleLayout
 
     loop_extents = impl_spec["loop_extents"]
     dim = impl_spec["dim"]
@@ -209,7 +209,7 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
         PointerType(PrimType(dtype), "shared.dyn"),
     )
     elem_offset = elem_offset_fn(loop_vars) if elem_offset_fn else IntImm("int32", 0)
-    s_buf = tvm.tir.decl_buffer(
+    s_buf = tvm.tirx.decl_buffer(
         s_shape,
         dtype,
         "s_buf_w_offset",
@@ -229,10 +229,10 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
         buf_indices = [IntImm("int32", v) for v in s_start]
     else:
         buf_indices = [IntImm("int32", 0)] * len(s_shape)
-    addr_of = tvm.tir.Call(
+    addr_of = tvm.tirx.Call(
         "handle",
-        tvm.ir.Op.get("tir.address_of"),
-        [tvm.tir.BufferLoad(s_buf, buf_indices)],
+        tvm.ir.Op.get("tirx.address_of"),
+        [tvm.tirx.BufferLoad(s_buf, buf_indices)],
     )
 
     # Coordinate args (must have exactly `dim` entries)
@@ -241,7 +241,7 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
     # Build PTX call based on direction
     if direction == "g2s":
         # g2c(dim, addr, mbar, tensormap, cta_mask, cta_group, cache_hint, *coords)
-        ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_global_to_cluster")
+        ptx_op = tvm.ir.Op.get("tirx.ptx_cp_async_bulk_tensor_global_to_cluster")
         ptx_args = [
             IntImm("int32", dim),
             addr_of,
@@ -254,23 +254,23 @@ def _build_expected_impl(direction, dtype, s_shape, s_layout, impl_spec):
         ]
     else:  # s2g
         # s2g(dim, addr, tensormap, cache_hint, *coords)
-        ptx_op = tvm.ir.Op.get("tir.ptx_cp_async_bulk_tensor_shared_to_global")
+        ptx_op = tvm.ir.Op.get("tirx.ptx_cp_async_bulk_tensor_shared_to_global")
         ptx_args = [IntImm("int32", dim), addr_of, A_tensormap, StringImm(""), *coords]
 
-    eval_stmt = tvm.tir.Evaluate(tvm.tir.Call("", ptx_op, ptx_args))
+    eval_stmt = tvm.tirx.Evaluate(tvm.tirx.Call("", ptx_op, ptx_args))
 
     # Wrap: DeclBuffer -> nested For loops
     body = DeclBuffer(s_buf, eval_stmt)
     for i in range(n_loops - 1, -1, -1):
-        body = tvm.tir.For(
+        body = tvm.tirx.For(
             loop_vars[i],
             IntImm("int32", 0),
             IntImm("int32", loop_extents[i]),
-            tvm.tir.ForKind.SERIAL,
+            tvm.tirx.ForKind.SERIAL,
             body,
         )
 
-    func = tvm.tir.PrimFunc([], body, ret_type=None, buffer_map={})
+    func = tvm.tirx.PrimFunc([], body, ret_type=None, buffer_map={})
     func = func.with_attr("global_symbol", "impl")
     func = func.with_attr("is_tirx", IntImm("bool", 1))
     return func
@@ -559,7 +559,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": copy_async})
-        mod = tvm.tir.transform.LowerTIRx()(mod)
+        mod = tvm.tirx.transform.LowerTIRx()(mod)
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
         np.random.seed(0)
@@ -1246,7 +1246,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
         mod = tvm.IRModule({"main": copy_async})
 
         # Verify that LowerTIRx generates exactly 1 TMA instruction
-        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        lowered = tvm.tirx.transform.LowerTIRx()(mod)
         counter = TMACounter()
         counter.visit_stmt(lowered["main"].body)
 

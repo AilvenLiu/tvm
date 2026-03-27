@@ -21,9 +21,9 @@ from enum import Enum
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, FloatImm, PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import BufferRegion, FloatImm, PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
+from tvm.tirx.stmt import OpCall
 
 from ..common import MapOpType
 from .common import init_analyzer, nki_dim

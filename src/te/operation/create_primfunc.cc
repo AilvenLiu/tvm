@@ -145,7 +145,7 @@ class LayoutFreePlaceholdersNormalizer : public StmtMutator {
     for (int i : this->layout_free_buffer_indices_) {
       indices.push_back(i);
     }
-    return WithAttr(std::move(func), tir::attr::layout_free_buffers, indices);
+    return WithAttr(std::move(func), s_tir::attr::layout_free_buffers, indices);
   }
 
   Stmt VisitStmt_(const SBlockNode* _block) final {
@@ -318,7 +318,7 @@ ffi::Map<ffi::String, ffi::Any> GenerateBlockAnnotations(const te::ComputeOp& co
     }
   }
   // Set script_parsing_detect_access
-  annotations.Set(tir::attr::script_parsing_detect_access, IntImm(DataType::Int(32), 3));
+  annotations.Set(s_tir::attr::script_parsing_detect_access, IntImm(DataType::Int(32), 3));
   return annotations;
 }
 

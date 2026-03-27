@@ -27,18 +27,10 @@
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirx_op.h>
-#include <tvm/tirx/transform.h>
-=======
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>> e003fe6cd1 ([Refactor] Decouple exec_scope from SBlock into independent ExecScopeStmt node (#469)):src/tir/transform/lower_tirx_schedule_ops.cc
 
 #include <unordered_map>
 #include <utility>
@@ -373,13 +365,9 @@ Pass LowerTIRxDispatchOps() {
     }
     return f;
   };
-<<<<<<<< HEAD:src/tirx/transform/lower_tirx_schedule_ops.cc
-  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxScheduleOps", {});
-========
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxDispatchOps", {});
->>>>>>>> 55b1679b4c (refactor(op-dispatch): rename op-schedule stack to op-dispatch (#544)):src/tirx/transform/lower_tirx_dispatch_ops.cc
 }
 
 }  // namespace transform
-}  // namespace tirxxxx
+}  // namespace tirx
 }  // namespace tvm

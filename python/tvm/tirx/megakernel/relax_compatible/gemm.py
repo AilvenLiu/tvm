@@ -16,7 +16,7 @@
 # under the License.
 
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TCol, TileLayout, TLane
+from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.megakernel.kernels import GateUpSiluTile
 from tvm.tirx.megakernel.kernels.gemm import BarLD2MMA, BarMMA2LD, BarMMA2TMA, BarTMA2MMA, GemmTile
 from tvm.tirx.megakernel.utils.base import SmemManager

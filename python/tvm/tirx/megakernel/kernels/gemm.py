@@ -19,9 +19,9 @@ from typing import Literal
 
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TCol, TileLayout, TLane
-from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.megakernel.utils.base import Barriers, SmemManager, Tile
 from tvm.tirx.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig, ProfileEventType
 from tvm.tirx.megakernel.utils.utils import ceildiv, mbarrier_try_wait
@@ -415,7 +415,7 @@ class GemmTile(Tile):
                                 n_idx * self.BLK_N,
                                 k_st,
                                 B_tma_config,
-                                predicate=tvm.tir.Not(self.prefetch_on and first_stage),
+                                predicate=tvm.tirx.Not(self.prefetch_on and first_stage),
                             )
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.TMA, lane_id == 0)

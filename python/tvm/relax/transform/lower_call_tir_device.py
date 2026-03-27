@@ -23,11 +23,11 @@ from tvm import relax
 from tvm.ir.module import IRModule
 from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
-from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tir import ExecScopeStmt, PrimFunc
-from tvm.tir.analysis import verify_tirx_well_formed
-from tvm.tir.stmt_functor import StmtExprVisitor
+from tvm.script.parser import tirx as T
+from tvm.tirx import ExecScopeStmt, PrimFunc
+from tvm.tirx.analysis import verify_tirx_well_formed
+from tvm.tirx.stmt_functor import StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
 
 

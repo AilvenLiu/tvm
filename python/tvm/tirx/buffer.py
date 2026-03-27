@@ -326,7 +326,7 @@ class Buffer(Object, Scriptable):
                 shape = [s for s in self.shape[:-1]] + [
                     self.shape[-1] * (cur_dtype.bits // cast_dtype.bits)
                 ]
-            return tvm.script.ir_builder.tir.decl_buffer(
+            return tvm.script.ir_builder.tirx.decl_buffer(
                 shape,
                 cast_dtype,
                 self.data,
@@ -359,7 +359,7 @@ class Buffer(Object, Scriptable):
             if layout is None:
                 shape = _infer_shape(shape)
 
-            return tvm.script.ir_builder.tir.decl_buffer(
+            return tvm.script.ir_builder.tirx.decl_buffer(
                 shape,
                 self.dtype,
                 self.data,
@@ -401,7 +401,7 @@ class Buffer(Object, Scriptable):
                 lambda x, y: x * y, [it.extent for it in local_layout.shard], 1
             )
             shape = (total,)
-        return tvm.script.ir_builder.tir.decl_buffer(
+        return tvm.script.ir_builder.tirx.decl_buffer(
             shape,
             self.dtype,
             self.data,
@@ -431,7 +431,7 @@ class Buffer(Object, Scriptable):
         """
         new_shape = [self.shape[d] for d in dims]
         new_layout = self.layout.permute_dims(list(dims))
-        return tvm.script.ir_builder.tir.decl_buffer(
+        return tvm.script.ir_builder.tirx.decl_buffer(
             new_shape,
             self.dtype,
             self.data,
@@ -514,7 +514,7 @@ class Buffer(Object, Scriptable):
         grid_strides = [tile_sizes[i] * orig_strides[i] for i in range(ndim)]
         new_strides = grid_strides + orig_strides
 
-        return tvm.script.ir_builder.tir.decl_buffer(
+        return tvm.script.ir_builder.tirx.decl_buffer(
             new_shape,
             self.dtype,
             self.data,
@@ -632,6 +632,6 @@ def decl_buffer(
     )
 
 
-@tvm_ffi.register_object("tir.DataProducer")
+@tvm_ffi.register_object("tirx.DataProducer")
 class DataProducer(Object):
     pass

@@ -18,10 +18,10 @@ import pytest
 
 import tvm
 from tvm.ir import Op
-from tvm.script import tir as T
+from tvm.script import tirx as T
 from tvm.script import tirx as Tx
-from tvm.tir.buffer import decl_buffer
-from tvm.tir.stmt import OpCall
+from tvm.tirx.buffer import decl_buffer
+from tvm.tirx.stmt import OpCall
 
 
 def _test(op: str, *args):
@@ -125,7 +125,7 @@ def test_tx_dynamic_op_in_prim_func():
         if isinstance(stmt, OpCall) and stmt.op == Op.get("tirx.copy_and_cast"):
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected OpCall with tirx.copy_and_cast not found"
 
 
@@ -147,7 +147,7 @@ def test_tx_dynamic_op_with_workspace():
             assert "tmp" in stmt.workspace
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected OpCall with workspace not found"
 
 
@@ -167,7 +167,7 @@ def test_tx_existing_op_not_overridden():
         if isinstance(stmt, OpCall) and stmt.op == Op.get("tirx.copy"):
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected OpCall with tirx.copy not found"
 
 
@@ -210,7 +210,7 @@ def test_permute_dims_buffer_property():
 
 def test_gemm_async_partial_scale_factor():
     """Regression test for F7: gemm_async must reject partial scale factors."""
-    from tvm.script.ir_builder.tir.tirx import gemm_async
+    from tvm.script.ir_builder.tirx.tirx import gemm_async
 
     A = decl_buffer((64, 64), "float16", scope="shared")
     B = decl_buffer((64, 64), "float16", scope="shared")

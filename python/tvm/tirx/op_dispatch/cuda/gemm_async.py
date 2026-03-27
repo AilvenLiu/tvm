@@ -29,11 +29,11 @@ import tvm
 from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tir import PrimFunc
-from tvm.tir.layout import ComposeLayout, R, S, TCol, TileLayout, TLane
-from tvm.tir.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
+from tvm.tirx import PrimFunc
+from tvm.tirx.layout import ComposeLayout, R, S, TCol, TileLayout, TLane
 from tvm.tirx.op_dispatch import DispatchContext, predicate, register_dispatch
 from tvm.tirx.operator.op import KernelReplacePoint
+from tvm.tirx.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
 
 from .common import get_st_extent, smem_desc_add_16B_offset
 from .exec_scope_utils import single_thread
@@ -183,9 +183,9 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
     op_call = OpCall.downcast(op_call)
     is_block_scaled = op_call.is_block_scaled
 
-    C_buffer_region: tvm.tir.BufferRegion = op_call.output
-    A_buffer_region: tvm.tir.BufferRegion = op_call.lhs
-    B_buffer_region: tvm.tir.BufferRegion = op_call.rhs
+    C_buffer_region: tvm.tirx.BufferRegion = op_call.output
+    A_buffer_region: tvm.tirx.BufferRegion = op_call.lhs
+    B_buffer_region: tvm.tirx.BufferRegion = op_call.rhs
     C_buffer, A_buffer, B_buffer = (
         C_buffer_region.buffer,
         A_buffer_region.buffer,
@@ -245,8 +245,8 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
     if is_block_scaled:
         SFA_buffer_region, SFB_buffer_region = op_call.sfa, op_call.sfb
         transA, transB, accum = op_call.transA, op_call.transB, op_call.accum
-        SFA_buffer: tvm.tir.Buffer = SFA_buffer_region.buffer
-        SFB_buffer: tvm.tir.Buffer = SFB_buffer_region.buffer
+        SFA_buffer: tvm.tirx.Buffer = SFA_buffer_region.buffer
+        SFB_buffer: tvm.tirx.Buffer = SFB_buffer_region.buffer
         SFA_scope, SFB_scope = SFA_buffer.scope(), SFB_buffer.scope()
         if not (SFA_scope == "tmem" and SFB_scope == "tmem"):
             raise ValueError(
@@ -516,9 +516,9 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
     # support short-circuit evaluation, so accum.dtype inside macro would fail
     # when accum is a Python bool).
     if isinstance(accum, bool):
-        accum_expr = tvm.tir.const(int(accum), "bool")
-    elif isinstance(accum, tvm.tir.PrimExpr) and accum.dtype != "bool":
-        accum_expr = tvm.tir.Cast("bool", accum)
+        accum_expr = tvm.tirx.const(int(accum), "bool")
+    elif isinstance(accum, tvm.tirx.PrimExpr) and accum.dtype != "bool":
+        accum_expr = tvm.tirx.Cast("bool", accum)
     else:
         accum_expr = accum
 
@@ -552,10 +552,10 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
 
     def _make_desc_wrap(desc_buf, smem_buf, base, ldo, sdo, swizzle_val):
         """Build: { AllocBuffer(desc); encode(desc, smem); krp }"""
-        encode_call = tvm.tir.call_intrin(
+        encode_call = tvm.tirx.call_intrin(
             "",
-            "tir.ptx_tcgen05_encode_matrix_descriptor",
-            tvm.tir.address_of(desc_buf[0]),
+            "tirx.ptx_tcgen05_encode_matrix_descriptor",
+            tvm.tirx.address_of(desc_buf[0]),
             smem_buf.ptr_to(base),
             ldo,
             sdo,
@@ -576,7 +576,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
         cached = sctx.cache_get(cache_key)
         if cached is not None:
             return cached
-        desc_buf = tvm.tir.decl_buffer((1,), "uint64", name=name, scope="local")
+        desc_buf = tvm.tirx.decl_buffer((1,), "uint64", name=name, scope="local")
         wrap = _make_desc_wrap(desc_buf, smem_buf, base, ldo, sdo, swizzle_val)
         sctx.add_post_buffer_def_stmt(smem_buf, wrap)
         sctx.cache_set(cache_key, desc_buf)
@@ -597,7 +597,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
             if transB
             else ni * N_mma_per_cta * B_extent[-1] + ki * MMA_K
         )
-        B_offset = tvm.tir.floordiv(B_slice_tile.apply(B_linear)["m"], B_elem_per_16B)
+        B_offset = tvm.tirx.floordiv(B_slice_tile.apply(B_linear)["m"], B_elem_per_16B)
         return smem_desc_add_16B_offset(descB_in, B_offset)
 
     # Helper: compute A operand (TMEM address or SMEM descriptor) for a given (mi, ki) tile
@@ -613,7 +613,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
                 if transA
                 else mi * M_mma * A_extent[-1] + ki * MMA_K
             )
-            A_offset = tvm.tir.floordiv(A_slice_tile.apply(A_linear)["m"], A_elem_per_16B)
+            A_offset = tvm.tirx.floordiv(A_slice_tile.apply(A_linear)["m"], A_elem_per_16B)
             return smem_desc_add_16B_offset(descA_in, A_offset)
 
     if is_block_scaled:
@@ -628,8 +628,12 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
         # apply(0)["TCol"] at row 0 gives physical TCol offset
         sfa_tcol_0 = SFA_slice_layout.apply(0).get("TCol", 0)
         sfb_tcol_0 = SFB_slice_layout.apply(0).get("TCol", 0)
-        SFA_init_addr = analyzer.simplify(sfa_base + tvm.tir.floordiv(sfa_tcol_0, SFA_elem_per_col))
-        SFB_init_addr = analyzer.simplify(sfb_base + tvm.tir.floordiv(sfb_tcol_0, SFB_elem_per_col))
+        SFA_init_addr = analyzer.simplify(
+            sfa_base + tvm.tirx.floordiv(sfa_tcol_0, SFA_elem_per_col)
+        )
+        SFB_init_addr = analyzer.simplify(
+            sfb_base + tvm.tirx.floordiv(sfb_tcol_0, SFB_elem_per_col)
+        )
 
         # Determine if sf_id rotation is needed:
         # sf_mma_k < epc means multiple ki's pack in one column, AND we need per-ki
@@ -646,15 +650,15 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
                 for ki in Tx.unroll(K_iters):
                     a_val = _a_operand(mi, ki, descA_in)
                     descB_val = _b_desc_val(descB_in, ni, ki)
-                    should_accum = tvm.tir.any(ki != 0, accum_expr)
+                    should_accum = tvm.tirx.any(ki != 0, accum_expr)
                     sfa_linear = mi * M_mma * SFA_K_total + ki * sfa_elems_per_ki
                     sfb_linear = ni * N_mma_per_cta * SFB_K_total + ki * sfb_elems_per_ki
                     sfa_tcol = SFA_slice_layout.apply(sfa_linear).get("TCol", 0)
                     sfb_tcol = SFB_slice_layout.apply(sfb_linear).get("TCol", 0)
-                    sfa_addr = sfa_base + tvm.tir.floordiv(sfa_tcol, SFA_elem_per_col)
-                    sfb_addr = sfb_base + tvm.tir.floordiv(sfb_tcol, SFB_elem_per_col)
+                    sfa_addr = sfa_base + tvm.tirx.floordiv(sfa_tcol, SFA_elem_per_col)
+                    sfb_addr = sfb_base + tvm.tirx.floordiv(sfb_tcol, SFB_elem_per_col)
                     if needs_sf_id:
-                        sf_id = Tx.meta_var(analyzer.simplify(tvm.tir.floormod(sfa_tcol, SFA_elem_per_col)))  # noqa: E501
+                        sf_id = Tx.meta_var(analyzer.simplify(tvm.tirx.floormod(sfa_tcol, SFA_elem_per_col)))  # noqa: E501
                         Tx.cuda.runtime_instr_desc(Tx.address_of(descI_in), sf_id)
                     tmem_col = tmem_offset_32b + ni * (N_mma // C_elem_per_32b)
                     if elect_pred:
@@ -673,7 +677,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
                 for ki in Tx.unroll(K_iters):
                     a_val = _a_operand(mi, ki, descA_in)
                     descB_val = _b_desc_val(descB_in, ni, ki)
-                    should_accum = tvm.tir.any(ki != 0, accum_expr)
+                    should_accum = tvm.tirx.any(ki != 0, accum_expr)
                     tmem_col = tmem_offset_32b + ni * (N_mma // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma(

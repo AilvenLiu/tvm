@@ -31,6 +31,8 @@ from . import _ffi_api
 from .buffer import Buffer
 from .expr import BufferLoad, Call, CommReducer, IntImm, PrimExprWithOp, Var
 
+tir = tirx  # alias for backward compat with upstream tir.convert() calls
+
 
 def _pack_buffer(buf, span=None):
     """Build intrinsics that packs the buffer."""
@@ -660,7 +662,7 @@ def tvm_storage_sync(storage_scope, is_load=False, num_blocks=-1):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("void", "tir.tvm_storage_sync", storage_scope, is_load, num_blocks)
+    return call_intrin("void", "tirx.tvm_storage_sync", storage_scope, is_load, num_blocks)
 
 
 def tvm_global_barrier_kinit():
@@ -671,7 +673,7 @@ def tvm_global_barrier_kinit():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("void", "tir.tvm_global_barrier_kinit")
+    return call_intrin("void", "tirx.tvm_global_barrier_kinit")
 
 
 def tvm_warp_shuffle(mask, value, warp_id, width, warp_size):
@@ -774,7 +776,7 @@ def tvm_warp_shuffle_xor(mask, value, lane_mask, width, warp_size):
         The call expression.
     """
     return call_intrin(
-        value.dtype, "tir.tvm_warp_shuffle_xor", mask, value, lane_mask, width, warp_size
+        value.dtype, "tirx.tvm_warp_shuffle_xor", mask, value, lane_mask, width, warp_size
     )
 
 
@@ -875,7 +877,7 @@ def make_filled_simdgroup_matrix(
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("handle", "tir.make_filled_simdgroup_matrix", d, index, value, col, row)
+    return call_intrin("handle", "tirx.make_filled_simdgroup_matrix", d, index, value, col, row)
 
 
 def simdgroup_load(
@@ -919,7 +921,7 @@ def simdgroup_load(
     """
     return call_intrin(
         "handle",
-        "tir.simdgroup_load",
+        "tirx.simdgroup_load",
         d,
         index,
         ptr,
@@ -972,7 +974,7 @@ def simdgroup_store(
     """
     return call_intrin(
         "handle",
-        "tir.simdgroup_store",
+        "tirx.simdgroup_store",
         d,
         index,
         ptr,
@@ -1029,7 +1031,7 @@ def simdgroup_multiply_accumulate(
     """
     return call_intrin(
         "handle",
-        "tir.simdgroup_multiply_accumulate",
+        "tirx.simdgroup_multiply_accumulate",
         d,
         index_d,
         a,
@@ -1057,7 +1059,7 @@ def vectorlow(dtype, vec):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin(dtype, "tir.vectorlow", vec)
+    return call_intrin(dtype, "tirx.vectorlow", vec)
 
 
 def vectorhigh(dtype, vec):
@@ -1076,7 +1078,7 @@ def vectorhigh(dtype, vec):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin(dtype, "tir.vectorhigh", vec)
+    return call_intrin(dtype, "tirx.vectorhigh", vec)
 
 
 def vectorcombine(dtype, vec1, vec2):
@@ -1095,7 +1097,7 @@ def vectorcombine(dtype, vec1, vec2):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin(dtype, "tir.vectorcombine", vec1, vec2)
+    return call_intrin(dtype, "tirx.vectorcombine", vec1, vec2)
 
 
 def dp4a(vec1, vec2, acc=0):
@@ -1117,7 +1119,7 @@ def dp4a(vec1, vec2, acc=0):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int32", "tir.dp4a", vec1, vec2, acc)
+    return call_intrin("int32", "tirx.dp4a", vec1, vec2, acc)
 
 
 def ret(val, span=None):
@@ -1227,7 +1229,7 @@ def trace(args, trace_action="tvm.default_trace_action"):
         raise Exception("tvm.tirx.trace consumes the args as list type")
     call_args = [_pack_buffer(x) if isinstance(x, Buffer) else x for x in args]
     call_args.insert(0, trace_action)
-    return tvm.tirx.Call(args[-1].dtype, Op.get("tir.tvm_call_trace_packed"), call_args)
+    return tvm.tirx.Call(args[-1].dtype, Op.get("tirx.tvm_call_trace_packed"), call_args)
 
 
 def min_value(dtype, span=None):
@@ -1323,7 +1325,7 @@ def exp(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.exp", x)
+    return call_intrin(x.dtype, "tirx.exp", x)
 
 
 def exp2(x):
@@ -1340,7 +1342,7 @@ def exp2(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.exp2", x)
+    return call_intrin(x.dtype, "tirx.exp2", x)
 
 
 def exp10(x):
@@ -1357,7 +1359,7 @@ def exp10(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.exp10", x)
+    return call_intrin(x.dtype, "tirx.exp10", x)
 
 
 def erf(x):
@@ -1374,7 +1376,7 @@ def erf(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.erf", x)
+    return call_intrin(x.dtype, "tirx.erf", x)
 
 
 def tanh(x):
@@ -1391,7 +1393,7 @@ def tanh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.tanh", x)
+    return call_intrin(x.dtype, "tirx.tanh", x)
 
 
 def sigmoid(x):
@@ -1408,7 +1410,7 @@ def sigmoid(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.sigmoid", x)
+    return call_intrin(x.dtype, "tirx.sigmoid", x)
 
 
 def log(x):
@@ -1425,7 +1427,7 @@ def log(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.log", x)
+    return call_intrin(x.dtype, "tirx.log", x)
 
 
 def log2(x):
@@ -1442,7 +1444,7 @@ def log2(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.log2", x)
+    return call_intrin(x.dtype, "tirx.log2", x)
 
 
 def log10(x):
@@ -1459,7 +1461,7 @@ def log10(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.log10", x)
+    return call_intrin(x.dtype, "tirx.log10", x)
 
 
 def log1p(x):
@@ -1476,7 +1478,7 @@ def log1p(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.log1p", x)
+    return call_intrin(x.dtype, "tirx.log1p", x)
 
 
 def tan(x):
@@ -1493,7 +1495,7 @@ def tan(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.tan", x)
+    return call_intrin(x.dtype, "tirx.tan", x)
 
 
 def cos(x):
@@ -1510,7 +1512,7 @@ def cos(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.cos", x)
+    return call_intrin(x.dtype, "tirx.cos", x)
 
 
 def cosh(x):
@@ -1527,7 +1529,7 @@ def cosh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.cosh", x)
+    return call_intrin(x.dtype, "tirx.cosh", x)
 
 
 def acos(x):
@@ -1544,7 +1546,7 @@ def acos(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.acos", x)
+    return call_intrin(x.dtype, "tirx.acos", x)
 
 
 def acosh(x):
@@ -1561,7 +1563,7 @@ def acosh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.acosh", x)
+    return call_intrin(x.dtype, "tirx.acosh", x)
 
 
 def sin(x):
@@ -1578,7 +1580,7 @@ def sin(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.sin", x)
+    return call_intrin(x.dtype, "tirx.sin", x)
 
 
 def sinh(x):
@@ -1595,7 +1597,7 @@ def sinh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.sinh", x)
+    return call_intrin(x.dtype, "tirx.sinh", x)
 
 
 def asin(x):
@@ -1612,7 +1614,7 @@ def asin(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.asin", x)
+    return call_intrin(x.dtype, "tirx.asin", x)
 
 
 def asinh(x):
@@ -1629,7 +1631,7 @@ def asinh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.asinh", x)
+    return call_intrin(x.dtype, "tirx.asinh", x)
 
 
 def atan(x):
@@ -1646,7 +1648,7 @@ def atan(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.atan", x)
+    return call_intrin(x.dtype, "tirx.atan", x)
 
 
 def atanh(x):
@@ -1663,7 +1665,7 @@ def atanh(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.atanh", x)
+    return call_intrin(x.dtype, "tirx.atanh", x)
 
 
 def atan2(x1, x2):
@@ -1684,7 +1686,7 @@ def atan2(x1, x2):
     """
     x1 = tir.convert(x1)
     x2 = tir.convert(x2)
-    return call_intrin(x1.dtype, "tir.atan2", x1, x2)
+    return call_intrin(x1.dtype, "tirx.atan2", x1, x2)
 
 
 def sqrt(x):
@@ -1701,7 +1703,7 @@ def sqrt(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.sqrt", x)
+    return call_intrin(x.dtype, "tirx.sqrt", x)
 
 
 def rsqrt(x):
@@ -1718,7 +1720,7 @@ def rsqrt(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.rsqrt", x)
+    return call_intrin(x.dtype, "tirx.rsqrt", x)
 
 
 def clz(x):
@@ -1735,7 +1737,7 @@ def clz(x):
     y : PrimExpr
         The result.
     """
-    return call_intrin("int32", "tir.clz", x)
+    return call_intrin("int32", "tirx.clz", x)
 
 
 def floor(x: PrimExprWithOp, span=None):
@@ -1965,7 +1967,7 @@ def nextafter(x1, x2):
     """
     x1 = tir.convert(x1)
     x2 = tir.convert(x2)
-    return call_intrin(x1.dtype, "tir.nextafter", x1, x2)  # type: ignore
+    return call_intrin(x1.dtype, "tirx.nextafter", x1, x2)  # type: ignore
 
 
 def hypot(x1, x2):
@@ -1986,7 +1988,7 @@ def hypot(x1, x2):
     """
     x1 = tir.convert(x1)
     x2 = tir.convert(x2)
-    return call_intrin(x1.dtype, "tir.hypot", x1, x2)  # type: ignore
+    return call_intrin(x1.dtype, "tirx.hypot", x1, x2)  # type: ignore
 
 
 def copysign(x1, x2):
@@ -2007,7 +2009,7 @@ def copysign(x1, x2):
     """
     x1 = tir.convert(x1)
     x2 = tir.convert(x2)
-    return call_intrin(x1.dtype, "tir.copysign", x1, x2)  # type: ignore
+    return call_intrin(x1.dtype, "tirx.copysign", x1, x2)  # type: ignore
 
 
 def ldexp(x1, x2):
@@ -2028,7 +2030,7 @@ def ldexp(x1, x2):
     """
     x1 = tir.convert(x1)
     x2 = tir.convert(x2)
-    return call_intrin(x1.dtype, "tir.ldexp", x1, x2)  # type: ignore
+    return call_intrin(x1.dtype, "tirx.ldexp", x1, x2)  # type: ignore
 
 
 def likely(cond, span=None):
@@ -2086,7 +2088,7 @@ def isnullptr(x, span=None):
     y : PrimExpr
         The result.
     """
-    return call_intrin("bool", "tir.isnullptr", x, span=span)  # type: ignore
+    return call_intrin("bool", "tirx.isnullptr", x, span=span)  # type: ignore
 
 
 def isfinite(x, span=None):
@@ -2185,7 +2187,7 @@ def popcount(x):
         The result.
     """
     x = tir.convert(x)
-    return call_intrin(x.dtype, "tir.popcount", x)
+    return call_intrin(x.dtype, "tirx.popcount", x)
 
 
 def q_multiply_shift(x, y, q, s):
@@ -2214,7 +2216,7 @@ def q_multiply_shift(x, y, q, s):
     y : PrimExpr
         The result.
     """
-    return call_intrin("int32", "tir.q_multiply_shift", x, y, q, s)
+    return call_intrin("int32", "tirx.q_multiply_shift", x, y, q, s)
 
 
 def q_multiply_shift_per_axis(
@@ -2252,7 +2254,7 @@ def q_multiply_shift_per_axis(
     """
     return call_intrin(
         "int32",
-        "tir.q_multiply_shift_per_axis",
+        "tirx.q_multiply_shift_per_axis",
         x,
         y,
         ls,
@@ -2318,7 +2320,7 @@ def fmod(x, y):
     """
     x = tir.convert(x)
     y = tir.convert(y)
-    return call_intrin(x.dtype, "tir.fmod", x, y)
+    return call_intrin(x.dtype, "tirx.fmod", x, y)
 
 
 def if_then_else(cond, t, f, span=None):
@@ -2653,12 +2655,14 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
             if init is not None:
                 init = [init]
         combiner = CommReducer(lhs, rhs, result, id_elem)
-        if not isinstance(axis, (list, tuple, tvm.ir.Array)):  # noqa: UP038
+        if not isinstance(axis, list | tuple | tvm.ir.Array):
             axis = [axis]
         if where is None:
             where = tir.convert(True)
         if init is None:
-            outputs = tuple(tvm.tirx.Reduce(combiner, expr, axis, where, i, []) for i in range(size))
+            outputs = tuple(
+                tvm.tirx.Reduce(combiner, expr, axis, where, i, []) for i in range(size)
+            )
         else:
             outputs = tuple(
                 tvm.tirx.Reduce(combiner, expr, axis, where, i, init) for i in range(size)
@@ -2667,7 +2671,7 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
 
     # pylint: disable=keyword-arg-before-vararg
     def reducer(expr, axis, where=None, init=None, *args):
-        if isinstance(axis, (tvm.tirx.IterVar, list, tuple)):  # noqa: UP038
+        if isinstance(axis, tvm.tirx.IterVar | list | tuple):
             assert not args
             return _make_reduce(expr, axis, where, init)
 
@@ -2744,7 +2748,7 @@ def TVMBackendAllocWorkspace(device_type, device_id, nbytes, dtype_code_hint, dt
     """
     return call_intrin(
         "handle",
-        "tir.TVMBackendAllocWorkspace",
+        "tirx.TVMBackendAllocWorkspace",
         device_type,
         device_id,
         nbytes,
@@ -2772,7 +2776,7 @@ def TVMBackendFreeWorkspace(device_type, device_id, ptr):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int32", "tir.TVMBackendFreeWorkspace", device_type, device_id, ptr)
+    return call_intrin("int32", "tirx.TVMBackendFreeWorkspace", device_type, device_id, ptr)
 
 
 def anylist_getitem(list_handle, index):
@@ -2786,7 +2790,7 @@ def anylist_getitem(list_handle, index):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("handle", "tir.anylist_getitem", list_handle, index)
+    return call_intrin("handle", "tirx.anylist_getitem", list_handle, index)
 
 
 def anylist_resetitem(list_handle, index):
@@ -2800,7 +2804,7 @@ def anylist_resetitem(list_handle, index):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int", "tir.anylist_resetitem", list_handle, index)
+    return call_intrin("int", "tirx.anylist_resetitem", list_handle, index)
 
 
 def anylist_setitem_call_packed(list_handle, index, func_name, *args):
@@ -2819,7 +2823,7 @@ def anylist_setitem_call_packed(list_handle, index, func_name, *args):
         The call expression.
     """
     return call_intrin(
-        "int", "tir.anylist_setitem_call_packed", list_handle, index, func_name, *args
+        "int", "tirx.anylist_setitem_call_packed", list_handle, index, func_name, *args
     )
 
 
@@ -2839,7 +2843,7 @@ def anylist_setitem_call_cpacked(list_handle, index, func_name, *args):
         The call expression.
     """
     return call_intrin(
-        "int", "tir.anylist_setitem_call_cpacked", list_handle, index, func_name, *args
+        "int", "tirx.anylist_setitem_call_cpacked", list_handle, index, func_name, *args
     )
 
 
@@ -2851,7 +2855,7 @@ def vscale():
     call : PrimExpr
         Call to the vscale intrinsic
     """
-    return call_intrin("int32", "tir.vscale")
+    return call_intrin("int32", "tirx.vscale")
 
 
 def get_active_lane_mask(dtype, base, limit):
@@ -2872,7 +2876,7 @@ def get_active_lane_mask(dtype, base, limit):
     limit : PrimExpr
         An expression representing the limit.
     """
-    return call_intrin(dtype, "tir.get_active_lane_mask", base, limit)
+    return call_intrin(dtype, "tirx.get_active_lane_mask", base, limit)
 
 
 def get_vscale_expr(dtype: str | tvm_ffi.dtype, min_size: int = 128) -> PrimExpr:
@@ -2900,7 +2904,7 @@ def ignore_loop_partition(predicate) -> PrimExpr:
     predicate : PrimExpr
         The annotated predicate expression.
     """
-    return call_intrin("bool", "tir.ignore_loop_partition", predicate)
+    return call_intrin("bool", "tirx.ignore_loop_partition", predicate)
 
 
 # pylint: disable=unnecessary-lambda
@@ -2931,7 +2935,7 @@ def cuda_func_call(func_name, *args, source_code, return_type="void"):
     return_type: str
         The return type of the CUDA function.
     """
-    return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)
+    return call_intrin(return_type, "tirx.cuda_func_call", func_name, *args, source_code)
 
 
 def cuda_warp_reduce(value, op, width=32):
@@ -2958,7 +2962,7 @@ def cuda_warp_reduce(value, op, width=32):
     call : PrimExpr
         The reduced value (same dtype as *value*).
     """
-    return call_intrin(value.dtype, "tir.cuda_warp_reduce", value, op, width)
+    return call_intrin(value.dtype, "tirx.cuda_warp_reduce", value, op, width)
 
 
 def cuda_warp_sum(value, width=32):
@@ -3002,7 +3006,7 @@ def cuda_cta_reduce(value, op, num_warps, scratch):
     call : PrimExpr
         The reduced value broadcast to all threads (same dtype as *value*).
     """
-    return call_intrin(value.dtype, "tir.cuda_cta_reduce", value, op, num_warps, scratch)
+    return call_intrin(value.dtype, "tirx.cuda_cta_reduce", value, op, num_warps, scratch)
 
 
 def cuda_cta_sum(value, num_warps, scratch):
@@ -3030,7 +3034,7 @@ def cuda_warp_sync():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_warp_sync")
+    return call_intrin("", "tirx.cuda_warp_sync")
 
 
 def cuda_cta_sync():
@@ -3041,7 +3045,7 @@ def cuda_cta_sync():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_cta_sync")
+    return call_intrin("", "tirx.cuda_cta_sync")
 
 
 def cuda_grid_sync():
@@ -3052,7 +3056,7 @@ def cuda_grid_sync():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_grid_sync")
+    return call_intrin("", "tirx.cuda_grid_sync")
 
 
 def cuda_cluster_sync():
@@ -3063,7 +3067,7 @@ def cuda_cluster_sync():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_cluster_sync")
+    return call_intrin("", "tirx.cuda_cluster_sync")
 
 
 def cuda_half2float(src):
@@ -3079,7 +3083,7 @@ def cuda_half2float(src):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("float32", "tir.cuda_half2float", src)
+    return call_intrin("float32", "tirx.cuda_half2float", src)
 
 
 def cuda_bfloat162float(src):
@@ -3095,7 +3099,7 @@ def cuda_bfloat162float(src):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("float32", "tir.cuda_bfloat162float", src)
+    return call_intrin("float32", "tirx.cuda_bfloat162float", src)
 
 
 def cuda_float22half2(dst, src):
@@ -3114,7 +3118,7 @@ def cuda_float22half2(dst, src):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_float22half2", dst, src)
+    return call_intrin("", "tirx.cuda_float22half2", dst, src)
 
 
 def cuda_trap_when_assert_failed(cond):
@@ -3130,7 +3134,7 @@ def cuda_trap_when_assert_failed(cond):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_trap_when_assert_failed", cond)
+    return call_intrin("", "tirx.cuda_trap_when_assert_failed", cond)
 
 
 def cuda_runtime_instr_desc(desc, sf_id):
@@ -3149,7 +3153,7 @@ def cuda_runtime_instr_desc(desc, sf_id):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_runtime_instr_desc", desc, sf_id)
+    return call_intrin("", "tirx.cuda_runtime_instr_desc", desc, sf_id)
 
 
 def cuda_half8tofloat8(src_addr, dst_addr):
@@ -3168,7 +3172,7 @@ def cuda_half8tofloat8(src_addr, dst_addr):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_half8tofloat8", src_addr, dst_addr)
+    return call_intrin("", "tirx.cuda_half8tofloat8", src_addr, dst_addr)
 
 
 def cuda_float8tohalf8(src_addr, dst_addr):
@@ -3187,7 +3191,7 @@ def cuda_float8tohalf8(src_addr, dst_addr):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_float8tohalf8", src_addr, dst_addr)
+    return call_intrin("", "tirx.cuda_float8tohalf8", src_addr, dst_addr)
 
 
 def tvm_load_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):
@@ -3662,7 +3666,7 @@ def ptx_cp_async_mbarrier_arrive(barrier_id):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_mbarrier_arrive", barrier_id)
+    return call_intrin("", "tirx.ptx_cp_async_mbarrier_arrive", barrier_id)
 
 
 def ptx_fence(sem: str, scope: str):
@@ -3682,7 +3686,7 @@ def ptx_fence(sem: str, scope: str):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fence", sem, scope)
+    return call_intrin("", "tirx.ptx_fence", sem, scope)
 
 
 def ptx_fence_proxy_async(space: str = ""):
@@ -3701,7 +3705,7 @@ def ptx_fence_proxy_async(space: str = ""):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fence_proxy_async", space)
+    return call_intrin("", "tirx.ptx_fence_proxy_async", space)
 
 
 def ptx_mbarrier_init(bar, thread_count):
@@ -3720,7 +3724,7 @@ def ptx_mbarrier_init(bar, thread_count):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_mbarrier_init", bar, thread_count)
+    return call_intrin("", "tirx.ptx_mbarrier_init", bar, thread_count)
 
 
 def ptx_mbarrier_arrive(bar, cta_id=None, pred=None):
@@ -3742,10 +3746,10 @@ def ptx_mbarrier_arrive(bar, cta_id=None, pred=None):
         The predicate to guard the operation.
     """
     if cta_id is None and pred is None:
-        return call_intrin("", "tir.ptx_mbarrier_arrive", bar)
+        return call_intrin("", "tirx.ptx_mbarrier_arrive", bar)
     else:
         assert cta_id is not None and pred is not None
-        return call_intrin("", "tir.ptx_mbarrier_arrive", bar, cta_id, pred)
+        return call_intrin("", "tirx.ptx_mbarrier_arrive", bar, cta_id, pred)
 
 
 def ptx_mbarrier_arrive_expect_tx(bar, byte_count, cta_id=None, pred=None):
@@ -3776,10 +3780,10 @@ def ptx_mbarrier_arrive_expect_tx(bar, byte_count, cta_id=None, pred=None):
         The call expression.
     """
     if cta_id is None and pred is None:
-        return call_intrin("", "tir.ptx_mbarrier_arrive_expect_tx", bar, byte_count)
+        return call_intrin("", "tirx.ptx_mbarrier_arrive_expect_tx", bar, byte_count)
     else:
         assert cta_id is not None and pred is not None
-        return call_intrin("", "tir.ptx_mbarrier_arrive_expect_tx", bar, byte_count, cta_id, pred)
+        return call_intrin("", "tirx.ptx_mbarrier_arrive_expect_tx", bar, byte_count, cta_id, pred)
 
 
 def ptx_mbarrier_try_wait(bar, phase):
@@ -3798,7 +3802,7 @@ def ptx_mbarrier_try_wait(bar, phase):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_mbarrier_try_wait", bar, phase)
+    return call_intrin("", "tirx.ptx_mbarrier_try_wait", bar, phase)
 
 
 def ptx_bar_arrive(name_bar_id, thread_count):
@@ -3817,7 +3821,7 @@ def ptx_bar_arrive(name_bar_id, thread_count):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_bar_arrive", name_bar_id, thread_count)
+    return call_intrin("", "tirx.ptx_bar_arrive", name_bar_id, thread_count)
 
 
 def ptx_bar_sync(name_bar_id, thread_count):
@@ -3836,7 +3840,7 @@ def ptx_bar_sync(name_bar_id, thread_count):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_bar_sync", name_bar_id, thread_count)
+    return call_intrin("", "tirx.ptx_bar_sync", name_bar_id, thread_count)
 
 
 def ptx_cp_async(
@@ -3881,7 +3885,7 @@ def ptx_cp_async(
     """
     return call_intrin(
         "",
-        "tir.ptx_cp_async",
+        "tirx.ptx_cp_async",
         dst_ptr,
         src_ptr,
         cp_size,
@@ -3901,7 +3905,7 @@ def ptx_cp_async_commit_group():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_commit_group")
+    return call_intrin("", "tirx.ptx_cp_async_commit_group")
 
 
 def ptx_cp_async_wait_group(num=0):
@@ -3918,7 +3922,7 @@ def ptx_cp_async_wait_group(num=0):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_wait_group", num)
+    return call_intrin("", "tirx.ptx_cp_async_wait_group", num)
 
 
 def ptx_cp_async_bulk_tensor_global_to_cluster(
@@ -3962,7 +3966,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
     """  # noqa: E501
     return call_intrin(
         "",
-        "tir.ptx_cp_async_bulk_tensor_global_to_cluster",
+        "tirx.ptx_cp_async_bulk_tensor_global_to_cluster",
         dim,
         dst_ptr,
         bar,
@@ -4001,7 +4005,7 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, cache_hin
     """
     return call_intrin(
         "",
-        "tir.ptx_cp_async_bulk_tensor_shared_to_global",
+        "tirx.ptx_cp_async_bulk_tensor_shared_to_global",
         dim,
         src_ptr,
         tensormap,
@@ -4034,7 +4038,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, cache_hi
     """
     return call_intrin(
         "",
-        "tir.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
+        "tirx.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
         dim,
         tensormap,
         cache_hint,
@@ -4074,7 +4078,7 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
     """
     return call_intrin(
         "",
-        "tir.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
+        "tirx.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
         dim,
         src_ptr,
         tensormap,
@@ -4092,7 +4096,7 @@ def ptx_cp_async_bulk_commit_group():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_bulk_commit_group")
+    return call_intrin("", "tirx.ptx_cp_async_bulk_commit_group")
 
 
 def ptx_cp_async_bulk_wait_group(n=0, read=True):
@@ -4111,7 +4115,7 @@ def ptx_cp_async_bulk_wait_group(n=0, read=True):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_bulk_wait_group", n, read)
+    return call_intrin("", "tirx.ptx_cp_async_bulk_wait_group", n, read)
 
 
 def ptx_barrier_cluster_arrive(sem="", aligned=True):
@@ -4125,7 +4129,7 @@ def ptx_barrier_cluster_arrive(sem="", aligned=True):
     aligned : bool
         Whether all threads in the warp must execute the same instruction.
     """
-    return call_intrin("", "tir.ptx_barrier_cluster_arrive", sem, aligned)
+    return call_intrin("", "tirx.ptx_barrier_cluster_arrive", sem, aligned)
 
 
 def ptx_barrier_cluster_wait(acquire=False, aligned=True):
@@ -4139,12 +4143,12 @@ def ptx_barrier_cluster_wait(acquire=False, aligned=True):
     aligned : bool
         Whether all threads in the warp must execute the same instruction.
     """
-    return call_intrin("", "tir.ptx_barrier_cluster_wait", acquire, aligned)
+    return call_intrin("", "tirx.ptx_barrier_cluster_wait", acquire, aligned)
 
 
 def ptx_elect_sync():
     """TVM intrinsic to call elect.sync"""
-    return call_intrin("uint32", "tir.ptx_elect_sync")
+    return call_intrin("uint32", "tirx.ptx_elect_sync")
 
 
 def ptx_fence_mbarrier_init():
@@ -4157,7 +4161,7 @@ def ptx_fence_mbarrier_init():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_fence_mbarrier_init")
+    return call_intrin("", "tirx.ptx_fence_mbarrier_init")
 
 
 def ptx_fetch_register(bits, reg_name):
@@ -4176,7 +4180,7 @@ def ptx_fetch_register(bits, reg_name):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
+    return call_intrin("int" + str(bits), "tirx.ptx_fetch_register", bits, reg_name)
 
 
 def ptx_mma(
@@ -4247,7 +4251,7 @@ def ptx_mma(
     if bit_op is None:
         return call_intrin(
             "",
-            "tir.ptx_mma",
+            "tirx.ptx_mma",
             shape,
             a_layout,
             b_layout,
@@ -4263,7 +4267,7 @@ def ptx_mma(
         )
     return call_intrin(
         "",
-        "tir.ptx_mma",
+        "tirx.ptx_mma",
         shape,
         a_layout,
         b_layout,
@@ -4308,7 +4312,7 @@ def ptx_ldmatrix(trans, num, dtype, local_ptr, smem_ptr):
     """
     return call_intrin(
         "",
-        "tir.ptx_ldmatrix",
+        "tirx.ptx_ldmatrix",
         trans,
         num,
         dtype,
@@ -4335,7 +4339,7 @@ def ptx_stmatrix(num, trans, smem_ptr, local_ptr):
     local_ptr : PrimExpr
         The pointer to the local memory (register)
     """
-    return call_intrin("", "tir.ptx_stmatrix", num, trans, smem_ptr, local_ptr)
+    return call_intrin("", "tirx.ptx_stmatrix", num, trans, smem_ptr, local_ptr)
 
 
 def ptx_wgmma_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
@@ -4358,7 +4362,7 @@ def ptx_wgmma_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
     swizzle : int
         The swizzle value (CUtensorMapSwizzle_enum).
     """
-    return call_intrin("", "tir.ptx_wgmma_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle)
+    return call_intrin("", "tirx.ptx_wgmma_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle)
 
 
 def ptx_wgmma_noop_barrier(reg):
@@ -4374,7 +4378,7 @@ def ptx_wgmma_noop_barrier(reg):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_wgmma_noop_barrier", reg)
+    return call_intrin("", "tirx.ptx_wgmma_noop_barrier", reg)
 
 
 def ptx_wgmma_mma_async_ss(
@@ -4425,7 +4429,7 @@ def ptx_wgmma_mma_async_ss(
     """  # noqa: E501
     return call_intrin(
         "",
-        "tir.ptx_wgmma_mma_async_ss",
+        "tirx.ptx_wgmma_mma_async_ss",
         M,
         N,
         K,
@@ -4488,7 +4492,7 @@ def ptx_wgmma_mma_async_rs(
     """
     return call_intrin(
         "",
-        "tir.ptx_wgmma_mma_async_rs",
+        "tirx.ptx_wgmma_mma_async_rs",
         M,
         N,
         K,
@@ -4512,7 +4516,7 @@ def ptx_wgmma_fence():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_wgmma_fence")
+    return call_intrin("", "tirx.ptx_wgmma_fence")
 
 
 def ptx_wgmma_commit_group():
@@ -4523,7 +4527,7 @@ def ptx_wgmma_commit_group():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_wgmma_commit_group")
+    return call_intrin("", "tirx.ptx_wgmma_commit_group")
 
 
 def ptx_wgmma_wait_group(n):
@@ -4539,7 +4543,7 @@ def ptx_wgmma_wait_group(n):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_wgmma_wait_group", n)
+    return call_intrin("", "tirx.ptx_wgmma_wait_group", n)
 
 
 def ptx_setmaxnreg(inc: bool, reg_count):
@@ -4553,7 +4557,7 @@ def ptx_setmaxnreg(inc: bool, reg_count):
     reg_count : int
         The register count.
     """
-    return call_intrin("", "tir.ptx_setmaxnreg", inc, reg_count)
+    return call_intrin("", "tirx.ptx_setmaxnreg", inc, reg_count)
 
 
 def ptx_tcgen05_alloc(dst_ptr, n_cols, cta_group=1):
@@ -4575,7 +4579,7 @@ def ptx_tcgen05_alloc(dst_ptr, n_cols, cta_group=1):
         If cta_group=1, one warp from CTA performs the allocation. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the allocation.
     """
-    return call_intrin("", "tir.ptx_tcgen05_alloc", dst_ptr, n_cols, cta_group)
+    return call_intrin("", "tirx.ptx_tcgen05_alloc", dst_ptr, n_cols, cta_group)
 
 
 def ptx_tcgen05_dealloc(taddr, n_cols, cta_group=1):
@@ -4596,7 +4600,7 @@ def ptx_tcgen05_dealloc(taddr, n_cols, cta_group=1):
         If cta_group=1, one warp from CTA performs the deallocation. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the deallocation.
     """
-    return call_intrin("", "tir.ptx_tcgen05_dealloc", taddr, n_cols, cta_group)
+    return call_intrin("", "tirx.ptx_tcgen05_dealloc", taddr, n_cols, cta_group)
 
 
 def ptx_tcgen05_relinquish_alloc_permit(cta_group=1):
@@ -4611,7 +4615,7 @@ def ptx_tcgen05_relinquish_alloc_permit(cta_group=1):
         If cta_group=1, one warp from CTA performs the relinquishing. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the relinquishing.
     """
-    return call_intrin("", "tir.ptx_tcgen05_relinquish_alloc_permit", cta_group)
+    return call_intrin("", "tirx.ptx_tcgen05_relinquish_alloc_permit", cta_group)
 
 
 def ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
@@ -4635,7 +4639,7 @@ def ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
         The swizzle value (CUtensorMapSwizzle_enum).
     """
     return call_intrin(
-        "", "tir.ptx_tcgen05_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle
+        "", "tirx.ptx_tcgen05_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle
     )
 
 
@@ -4705,7 +4709,7 @@ def ptx_tcgen05_encode_instr_descriptor(
     """
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_encode_instr_descriptor",
+        "tirx.ptx_tcgen05_encode_instr_descriptor",
         desc,
         d_dtype,
         a_dtype,
@@ -4801,7 +4805,7 @@ def ptx_tcgen05_encode_instr_descriptor_block_scaled(
     """
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_encode_instr_descriptor_block_scaled",
+        "tirx.ptx_tcgen05_encode_instr_descriptor_block_scaled",
         desc,
         d_dtype,
         a_dtype,
@@ -4891,7 +4895,7 @@ def ptx_tcgen05_mma(
 
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_mma",
+        "tirx.ptx_tcgen05_mma",
         d_dtype,
         a_dtype,
         b_dtype,
@@ -4975,7 +4979,7 @@ def ptx_tcgen05_mma_block_scale(
 
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_mma_block_scale",
+        "tirx.ptx_tcgen05_mma_block_scale",
         d_dtype,
         a_dtype,
         b_dtype,
@@ -5068,7 +5072,7 @@ def ptx_tcgen05_mma_sp(
 
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_mma_sp",
+        "tirx.ptx_tcgen05_mma_sp",
         d_dtype,
         a_dtype,
         b_dtype,
@@ -5157,7 +5161,7 @@ def ptx_tcgen05_mma_sp_block_scale(
 
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_mma_sp_block_scale",
+        "tirx.ptx_tcgen05_mma_sp_block_scale",
         d_dtype,
         a_dtype,
         b_dtype,
@@ -5180,14 +5184,14 @@ def ptx_tcgen05_fence_before_thread_sync():
     """TVM intrinsic to call tcgen05.fence::before_thread_sync
     Orders all prior asynchronous tcgen05 operations relative to subsequent operations.
     """
-    return call_intrin("", "tir.ptx_tcgen05_fence_before_thread_sync")
+    return call_intrin("", "tirx.ptx_tcgen05_fence_before_thread_sync")
 
 
 def ptx_tcgen05_fence_after_thread_sync():
     """TVM intrinsic to call tcgen05.fence::after_thread_sync
     Orders all subsequent asynchronous tcgen05 operations relative to previous operations.
     """
-    return call_intrin("", "tir.ptx_tcgen05_fence_after_thread_sync")
+    return call_intrin("", "tirx.ptx_tcgen05_fence_after_thread_sync")
 
 
 def ptx_tcgen05_cp(
@@ -5240,7 +5244,7 @@ def ptx_tcgen05_cp(
 
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_cp",
+        "tirx.ptx_tcgen05_cp",
         dst_addr,
         row_offset,
         col_offset,
@@ -5268,7 +5272,7 @@ def ptx_tcgen05_shift(taddr, cta_group=1):
         Else, shift operation is performed in the Tensor Memory of both the current CTA and
         the peer CTA.
     """
-    return call_intrin("", "tir.ptx_tcgen05_shift", taddr, cta_group)
+    return call_intrin("", "tirx.ptx_tcgen05_shift", taddr, cta_group)
 
 
 def ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack=False, *regs):
@@ -5302,7 +5306,7 @@ def ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack=False, *re
         The destination registers to copy into.
     """
     return call_intrin(
-        "", "tir.ptx_tcgen05_ld", src_addr, row_offset, col_offset, shape, num, pack, *regs
+        "", "tirx.ptx_tcgen05_ld", src_addr, row_offset, col_offset, shape, num, pack, *regs
     )
 
 
@@ -5337,7 +5341,7 @@ def ptx_tcgen05_st(dst_addr, row_offset, col_offset, shape, num, unpack=False, *
         The source registers to copy from.
     """
     return call_intrin(
-        "", "tir.ptx_tcgen05_st", dst_addr, row_offset, col_offset, shape, num, unpack, *regs
+        "", "tirx.ptx_tcgen05_st", dst_addr, row_offset, col_offset, shape, num, unpack, *regs
     )
 
 
@@ -5345,14 +5349,14 @@ def ptx_tcgen05_wait_ld():
     """TVM intrinsic to call tcgen05.wait::ld.sync.aligned
     Wait for the completion of all prior async tcgen05.ld operations.
     """
-    return call_intrin("", "tir.ptx_tcgen05_wait_ld")
+    return call_intrin("", "tirx.ptx_tcgen05_wait_ld")
 
 
 def ptx_tcgen05_wait_st():
     """TVM intrinsic to call tcgen05.wait::st.sync.aligned
     Wait for the completion of all prior async tcgen05.st operations.
     """
-    return call_intrin("", "tir.ptx_tcgen05_wait_st")
+    return call_intrin("", "tirx.ptx_tcgen05_wait_st")
 
 
 def ptx_tcgen05_commit(bar, cta_group=1, cta_mask=0):
@@ -5376,7 +5380,7 @@ def ptx_tcgen05_commit(bar, cta_group=1, cta_mask=0):
     """
     return call_intrin(
         "",
-        "tir.ptx_tcgen05_commit",
+        "tirx.ptx_tcgen05_commit",
         bar,
         cta_group,
         cta_mask,
@@ -5407,7 +5411,7 @@ def print_buffer(buffer_var, dtype, is_string, is_scalar, dim_num, *shape):
         The call expression.
     """
     final_shape_args = []
-    if len(shape) == 1 and isinstance(shape[0], (tuple, list, tvm.ir.Array)):  # noqa: UP038
+    if len(shape) == 1 and isinstance(shape[0], tuple | list | tvm.ir.Array):
         # Case 1: Called as print_buffer(..., dim, (s1, s2, ...))
         # The user provided a tuple/list as the single shape argument.
         final_shape_args = list(shape[0])
@@ -5450,7 +5454,7 @@ def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset, num_gr
 
     return call_intrin(
         "handle",
-        "tir.timer_init_cuda",
+        "tirx.timer_init_cuda",
         profiler_buffer,
         profiler_tag,
         profiler_write_offset,
@@ -5498,7 +5502,7 @@ def timer_start_cuda(
 
     return call_intrin(
         "handle",
-        "tir.timer_start_cuda",
+        "tirx.timer_start_cuda",
         event_type.value,
         profiler_buffer,
         profiler_tag,
@@ -5547,7 +5551,7 @@ def timer_end_cuda(
 
     return call_intrin(
         "handle",
-        "tir.timer_end_cuda",
+        "tirx.timer_end_cuda",
         event_type.value,
         profiler_buffer,
         profiler_tag,
@@ -5588,7 +5592,7 @@ def timer_finalize_cuda(
 
     return call_intrin(
         "handle",
-        "tir.timer_finalize_cuda",
+        "tirx.timer_finalize_cuda",
         profiler_buffer,
         profiler_tag,
         profiler_write_offset,
@@ -5614,7 +5618,7 @@ def cuda_atomic_add(res_addr, value):
         The call expression.
     """
     value = tir.convert(value)
-    return call_intrin(value.dtype, "tir.cuda_atomic_add", res_addr, value)
+    return call_intrin(value.dtype, "tirx.cuda_atomic_add", res_addr, value)
 
 
 def cuda_thread_fence():
@@ -5625,7 +5629,7 @@ def cuda_thread_fence():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_thread_fence")
+    return call_intrin("", "tirx.cuda_thread_fence")
 
 
 def cuda_warpgroup_sync(bar_no):
@@ -5645,7 +5649,7 @@ def cuda_warpgroup_sync(bar_no):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_warpgroup_sync", bar_no)
+    return call_intrin("", "tirx.cuda_warpgroup_sync", bar_no)
 
 
 def cuda_syncthreads_and(cond):
@@ -5661,7 +5665,7 @@ def cuda_syncthreads_and(cond):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
+    return call_intrin("int64", "tirx.cuda_syncthreads_and", cond)
 
 
 def cuda_syncthreads_or(cond):
@@ -5677,7 +5681,7 @@ def cuda_syncthreads_or(cond):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("int64", "tir.cuda_syncthreads_or", cond)
+    return call_intrin("int64", "tirx.cuda_syncthreads_or", cond)
 
 
 def cuda_nano_sleep(time):
@@ -5693,7 +5697,7 @@ def cuda_nano_sleep(time):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_nano_sleep", time)
+    return call_intrin("", "tirx.cuda_nano_sleep", time)
 
 
 def cuda_printf(fmt, *args):
@@ -5712,7 +5716,7 @@ def cuda_printf(fmt, *args):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_printf", fmt, *args)
+    return call_intrin("", "tirx.cuda_printf", fmt, *args)
 
 
 def cuda_ldg(addr, dtype):
@@ -5728,7 +5732,7 @@ def cuda_ldg(addr, dtype):
 
     Returns
     """
-    return call_intrin(dtype, "tir.cuda_ldg", addr, dtype)
+    return call_intrin(dtype, "tirx.cuda_ldg", addr, dtype)
 
 
 def cuda_get_tmem_addr(addr, row_offset, col_offset):
@@ -5750,7 +5754,7 @@ def cuda_get_tmem_addr(addr, row_offset, col_offset):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("uint32", "tir.cuda_get_tmem_addr", addr, row_offset, col_offset)
+    return call_intrin("uint32", "tirx.cuda_get_tmem_addr", addr, row_offset, col_offset)
 
 
 def ptx_exp2(x):
@@ -5766,7 +5770,7 @@ def ptx_exp2(x):
     call : PrimExpr
         The call expression returning 2^x (approximate).
     """
-    return call_intrin("float32", "tir.ptx_exp2", x)
+    return call_intrin("float32", "tirx.ptx_exp2", x)
 
 
 def ptx_rcp(x):
@@ -5782,7 +5786,7 @@ def ptx_rcp(x):
     call : PrimExpr
         The call expression returning 1/x (approximate).
     """
-    return call_intrin("float32", "tir.ptx_rcp", x)
+    return call_intrin("float32", "tirx.ptx_rcp", x)
 
 
 def ptx_any_sync(mask, pred):
@@ -5800,7 +5804,7 @@ def ptx_any_sync(mask, pred):
     call : PrimExpr
         The call expression returning 1 if any thread in mask has pred != 0.
     """
-    return call_intrin("int32", "tir.ptx_any_sync", mask, pred)
+    return call_intrin("int32", "tirx.ptx_any_sync", mask, pred)
 
 
 def ptx_reduce3_max_f32(a, b, c):
@@ -5816,7 +5820,7 @@ def ptx_reduce3_max_f32(a, b, c):
     call : PrimExpr
         The call expression returning max(a, b, c).
     """
-    return call_intrin("float32", "tir.ptx_reduce3_max_f32", a, b, c)
+    return call_intrin("float32", "tirx.ptx_reduce3_max_f32", a, b, c)
 
 
 def ptx_reduce3_min_f32(a, b, c):
@@ -5832,7 +5836,7 @@ def ptx_reduce3_min_f32(a, b, c):
     call : PrimExpr
         The call expression returning min(a, b, c).
     """
-    return call_intrin("float32", "tir.ptx_reduce3_min_f32", a, b, c)
+    return call_intrin("float32", "tirx.ptx_reduce3_min_f32", a, b, c)
 
 
 def ptx_add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
@@ -5858,7 +5862,7 @@ def ptx_add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_add_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
+    return call_intrin("", "tirx.ptx_add_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
 def ptx_sub_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
@@ -5884,7 +5888,7 @@ def ptx_sub_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_sub_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
+    return call_intrin("", "tirx.ptx_sub_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
 def ptx_mul_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
@@ -5910,7 +5914,7 @@ def ptx_mul_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_mul_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
+    return call_intrin("", "tirx.ptx_mul_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
 def ptx_fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr, rounding_mode="rz"):
@@ -5939,7 +5943,7 @@ def ptx_fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr, rounding_mode="rz"):
         The call expression.
     """
     return call_intrin(
-        "", "tir.ptx_fma_packed_f32x2", a1, a2, b1, b2, c1, c2, d_addr, rounding_mode
+        "", "tirx.ptx_fma_packed_f32x2", a1, a2, b1, b2, c1, c2, d_addr, rounding_mode
     )
 
 
@@ -5959,7 +5963,7 @@ def ptx_ld_global_acquire(res, addr):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)
+    return call_intrin("", "tirx.ptx_ld_global_acquire", res, addr)
 
 
 def ptx_map_shared_rank(ptr, rank):
@@ -5979,7 +5983,7 @@ def ptx_map_shared_rank(ptr, rank):
         The call expression.
     """
 
-    return call_intrin("uint64", "tir.ptx_map_shared_rank", ptr, rank)
+    return call_intrin("uint64", "tirx.ptx_map_shared_rank", ptr, rank)
 
 
 def cuda_atomic_cas(ptr, old_val, new_val):
@@ -6002,7 +6006,7 @@ def cuda_atomic_cas(ptr, old_val, new_val):
         The call expression.
     """
     old_val = tir.convert(old_val)
-    return call_intrin(old_val.dtype, "tir.cuda_atomic_cas", ptr, old_val, new_val)
+    return call_intrin(old_val.dtype, "tirx.cuda_atomic_cas", ptr, old_val, new_val)
 
 
 def thread_return():
@@ -6013,7 +6017,7 @@ def thread_return():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.thread_return")
+    return call_intrin("", "tirx.thread_return")
 
 
 def continue_loop(span=None):
@@ -6064,7 +6068,7 @@ def nvshmem_my_pe():
         The call expression.
     """
 
-    return call_intrin("int32", "tir.nvshmem_my_pe")
+    return call_intrin("int32", "tirx.nvshmem_my_pe")
 
 
 def nvshmem_n_pes():
@@ -6076,7 +6080,7 @@ def nvshmem_n_pes():
         The call expression.
     """
 
-    return call_intrin("int32", "tir.nvshmem_n_pes")
+    return call_intrin("int32", "tirx.nvshmem_n_pes")
 
 
 def nvshmem_getmem_nbi(dst, src, nelems, pe):
@@ -6102,7 +6106,7 @@ def nvshmem_getmem_nbi(dst, src, nelems, pe):
         The call expression.
     """  # noqa: E501
 
-    return call_intrin("", "tir.nvshmem_getmem_nbi", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_getmem_nbi", dst, src, nelems, pe)
 
 
 def nvshmem_putmem_nbi(dst, src, nelems, pe):
@@ -6128,7 +6132,7 @@ def nvshmem_putmem_nbi(dst, src, nelems, pe):
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_putmem_nbi", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_putmem_nbi", dst, src, nelems, pe)
 
 
 def nvshmem_getmem_nbi_warp(dst, src, nelems, pe):
@@ -6154,7 +6158,7 @@ def nvshmem_getmem_nbi_warp(dst, src, nelems, pe):
         The call expression.
     """  # noqa: E501
 
-    return call_intrin("", "tir.nvshmem_getmem_nbi_warp", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_getmem_nbi_warp", dst, src, nelems, pe)
 
 
 def nvshmem_putmem_nbi_warp(dst, src, nelems, pe):
@@ -6180,7 +6184,7 @@ def nvshmem_putmem_nbi_warp(dst, src, nelems, pe):
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_putmem_nbi_warp", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_putmem_nbi_warp", dst, src, nelems, pe)
 
 
 def nvshmem_getmem_nbi_block(dst, src, nelems, pe):
@@ -6206,7 +6210,7 @@ def nvshmem_getmem_nbi_block(dst, src, nelems, pe):
         The call expression.
     """  # noqa: E501
 
-    return call_intrin("", "tir.nvshmem_getmem_nbi_block", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_getmem_nbi_block", dst, src, nelems, pe)
 
 
 def nvshmem_putmem_nbi_block(dst, src, nelems, pe):
@@ -6232,7 +6236,7 @@ def nvshmem_putmem_nbi_block(dst, src, nelems, pe):
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_putmem_nbi_block", dst, src, nelems, pe)
+    return call_intrin("", "tirx.nvshmem_putmem_nbi_block", dst, src, nelems, pe)
 
 
 def nvshmem_signal_op(sig_addr, signal, sig_op, pe):
@@ -6258,7 +6262,7 @@ def nvshmem_signal_op(sig_addr, signal, sig_op, pe):
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_signal_op", sig_addr, signal, sig_op, pe)
+    return call_intrin("", "tirx.nvshmem_signal_op", sig_addr, signal, sig_op, pe)
 
 
 def nvshmem_wait_until(ivar, cmp, cmp_value, type="uint64_t"):
@@ -6284,7 +6288,7 @@ def nvshmem_wait_until(ivar, cmp, cmp_value, type="uint64_t"):
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_wait_until", ivar, cmp, cmp_value, type)
+    return call_intrin("", "tirx.nvshmem_wait_until", ivar, cmp, cmp_value, type)
 
 
 def nvshmem_quiet():
@@ -6296,7 +6300,7 @@ def nvshmem_quiet():
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_quiet")
+    return call_intrin("", "tirx.nvshmem_quiet")
 
 
 def nvshmem_putmem_signal_nbi(dst, src, nelems, sig_addr, signal, sig_op, pe):
@@ -6332,7 +6336,7 @@ def nvshmem_putmem_signal_nbi(dst, src, nelems, sig_addr, signal, sig_op, pe):
     """  # noqa: E501
 
     return call_intrin(
-        "", "tir.nvshmem_putmem_signal_nbi", dst, src, nelems, sig_addr, signal, sig_op, pe
+        "", "tirx.nvshmem_putmem_signal_nbi", dst, src, nelems, sig_addr, signal, sig_op, pe
     )
 
 
@@ -6369,7 +6373,7 @@ def nvshmem_putmem_signal_nbi_warp(dst, src, nelems, sig_addr, signal, sig_op, p
     """  # noqa: E501
 
     return call_intrin(
-        "", "tir.nvshmem_putmem_signal_nbi_warp", dst, src, nelems, sig_addr, signal, sig_op, pe
+        "", "tirx.nvshmem_putmem_signal_nbi_warp", dst, src, nelems, sig_addr, signal, sig_op, pe
     )
 
 
@@ -6406,7 +6410,7 @@ def nvshmem_putmem_signal_nbi_block(dst, src, nelems, sig_addr, signal, sig_op, 
     """  # noqa: E501
 
     return call_intrin(
-        "", "tir.nvshmem_putmem_signal_nbi_block", dst, src, nelems, sig_addr, signal, sig_op, pe
+        "", "tirx.nvshmem_putmem_signal_nbi_block", dst, src, nelems, sig_addr, signal, sig_op, pe
     )
 
 
@@ -6419,7 +6423,7 @@ def nvshmem_fence():
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_fence")
+    return call_intrin("", "tirx.nvshmem_fence")
 
 
 def nvshmem_barrier_all():
@@ -6431,7 +6435,7 @@ def nvshmem_barrier_all():
         The call expression.
     """
 
-    return call_intrin("", "tir.nvshmem_barrier_all")
+    return call_intrin("", "tirx.nvshmem_barrier_all")
 
 
 ########################################################
@@ -6455,7 +6459,7 @@ def nki_load(res, data):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_load", res, data)
+    return call_intrin("", "tirx.nki_load", res, data)
 
 
 def nki_store(res, data):
@@ -6474,7 +6478,7 @@ def nki_store(res, data):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_store", res, data)
+    return call_intrin("", "tirx.nki_store", res, data)
 
 
 def nki_tensor_copy(res, data):
@@ -6493,7 +6497,7 @@ def nki_tensor_copy(res, data):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensor_copy", res, data)
+    return call_intrin("", "tirx.nki_tensor_copy", res, data)
 
 
 def nki_matmul(res, lhs, rhs, accum=True):
@@ -6518,7 +6522,7 @@ def nki_matmul(res, lhs, rhs, accum=True):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_matmul", res, lhs, rhs, accum)
+    return call_intrin("", "tirx.nki_matmul", res, lhs, rhs, accum)
 
 
 def nki_activation(result, data, opcode, bias=0.0, scale=1.0):
@@ -6546,7 +6550,7 @@ def nki_activation(result, data, opcode, bias=0.0, scale=1.0):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_activation", result, data, opcode, bias, scale)
+    return call_intrin("", "tirx.nki_activation", result, data, opcode, bias, scale)
 
 
 def nki_reciprocal(result, data):
@@ -6565,7 +6569,7 @@ def nki_reciprocal(result, data):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_reciprocal", result, data)
+    return call_intrin("", "tirx.nki_reciprocal", result, data)
 
 
 def nki_tensorreduce(result, data, opcode, negate, *axes):
@@ -6594,7 +6598,7 @@ def nki_tensorreduce(result, data, opcode, negate, *axes):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensorreduce", result, data, opcode, negate, *axes)
+    return call_intrin("", "tirx.nki_tensorreduce", result, data, opcode, negate, *axes)
 
 
 def nki_tensortensor(result, operand0, operand1, opcode):
@@ -6619,7 +6623,7 @@ def nki_tensortensor(result, operand0, operand1, opcode):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensortensor", result, operand0, operand1, opcode)
+    return call_intrin("", "tirx.nki_tensortensor", result, operand0, operand1, opcode)
 
 
 def nki_tensorscalar(result, operand0, operand1, opcode, reverse=False):
@@ -6647,7 +6651,7 @@ def nki_tensorscalar(result, operand0, operand1, opcode, reverse=False):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensorscalar", result, operand0, operand1, opcode, reverse)
+    return call_intrin("", "tirx.nki_tensorscalar", result, operand0, operand1, opcode, reverse)
 
 
 def nki_memset(result, value):
@@ -6666,7 +6670,7 @@ def nki_memset(result, value):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_memset", result, value)
+    return call_intrin("", "tirx.nki_memset", result, value)
 
 
 def nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode, bias=0.0, scale=1.0):
@@ -6705,7 +6709,7 @@ def nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode, bias
     """
     return call_intrin(
         "",
-        "tir.nki_activation_reduce",
+        "tirx.nki_activation_reduce",
         reduce_res,
         act_res,
         data,
@@ -6749,7 +6753,7 @@ def nki_tensorscalar_reduce(
     """
     return call_intrin(
         "",
-        "tir.nki_tensorscalar_reduce",
+        "tirx.nki_tensorscalar_reduce",
         reduce_res,
         tensorscalar_res,
         operand0,
@@ -6776,7 +6780,7 @@ def nki_identity(result, size):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_identity", result, size)
+    return call_intrin("", "tirx.nki_identity", result, size)
 
 
 def nki_scalar_tensor_tensor(
@@ -6818,7 +6822,7 @@ def nki_scalar_tensor_tensor(
     """
     return call_intrin(
         "",
-        "tir.nki_scalar_tensor_tensor",
+        "tirx.nki_scalar_tensor_tensor",
         result,
         data,
         operand0,
@@ -6869,7 +6873,7 @@ def nki_scalar_tensor_scalar(
     """
     return call_intrin(
         "",
-        "tir.nki_scalar_tensor_scalar",
+        "tirx.nki_scalar_tensor_scalar",
         result,
         data,
         operand0,
@@ -6903,4 +6907,4 @@ def nki_affine_select(result, pred, true_value, false_value):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_affine_select", result, pred, true_value, false_value)
+    return call_intrin("", "tirx.nki_affine_select", result, pred, true_value, false_value)

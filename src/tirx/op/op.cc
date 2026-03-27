@@ -1320,19 +1320,19 @@ PrimExpr PrintOpPacked(Var data, DataType dtype, bool is_string, bool is_scalar,
                        Array<PrimExpr> shape) {
   Array<PrimExpr> args;
   args.push_back(data);
-  args.push_back(tir::StringImm(runtime::DLDataTypeToString(dtype)));
+  args.push_back(tirx::StringImm(runtime::DLDataTypeToString(dtype)));
   args.push_back(make_const(DataType::Bool(), is_string));
   args.push_back(make_const(DataType::Bool(), is_scalar));
   args.push_back(make_const(DataType::UInt(32), dim_num));
   for (const auto& dim : shape) {
     args.push_back(dim);
   }
-  return tir::Call(dtype, tir::builtin::print_buffer(), args);
+  return tirx::Call(dtype, tirx::builtin::print_buffer(), args);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def_packed("tir.print_buffer", [](ffi::PackedArgs args, ffi::Any* ret) {
+  refl::GlobalDef().def_packed("tirx.print_buffer", [](ffi::PackedArgs args, ffi::Any* ret) {
     // Expected arguments:
     // args[0]: buffer_var (Var)
     // args[1]: dtype (DataType)

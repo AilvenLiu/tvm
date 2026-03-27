@@ -80,96 +80,94 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::tirx::OpCall>(
-        "", [](tirx::tirx::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
-          static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
-              Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
-          auto op = op_call->op;
-          if (op_names.count(op) == 0) {
-            LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
-          }
+    .set_dispatch<tirx::OpCall>("", [](tirx::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
+      static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
+          Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
+      auto op = op_call->op;
+      if (op_names.count(op) == 0) {
+        LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
+      }
 
-          static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-          static const auto& dispatch_op_map = Op::GetAttrMap<Bool>("TIsDispatchOp");
-          static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
-          static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
-          TVM_FFI_ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
-              << "Only TIRX ops can be used in tirx::tirx::OpCall";
-          ffi::String name = op_names.get(op, op->name);
-          if (bool(dispatch_op_map.get(op, tvm::Bool(false))) ||
-              bool(async_op_map.get(op, tvm::Bool(false)))) {
-            // Dispatch ops
-            // Trim trailing None args (e.g. optional bias=None, scale=None)
-            size_t n_args = op_call->args.size();
-            while (n_args > 0 &&
-                   op_call->args[n_args - 1].type_index() == ffi::TypeIndex::kTVMFFINone) {
-              --n_args;
-            }
-            // Detect in-place unary ops: after trimming Nones, if exactly 2 args
-            // and args[0]/args[1] refer to the same buffer region, collapse to 1 arg
-            bool inplace_unary = false;
-            if (n_args == 2) {
-              auto dst_opt = op_call->args[0].as<tir::BufferRegion>();
-              auto src_opt = op_call->args[1].as<tir::BufferRegion>();
-              if (dst_opt.has_value() && src_opt.has_value() &&
-                  dst_opt.value()->buffer.same_as(src_opt.value()->buffer) &&
-                  StructuralEqual()(dst_opt.value()->region, src_opt.value()->region)) {
-                inplace_unary = true;
-              }
-            }
-            ffi::Array<Doc> args;
-            for (size_t i = 0; i < n_args; ++i) {
-              if (inplace_unary && i == 1) continue;  // skip duplicate src
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
-            }
-            ffi::Optional<ExprDoc> disp = std::nullopt;
-            if (op_call->dispatch.has_value()) {
-              disp = LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch"));
-            }
-            return OpCallDoc(TIRx(d, name), args,
-                             d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
-                             d->AsDoc<DictDoc>(op_call->config, p->Attr("config")), disp);
-          } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
-            // Compose ops
-            With<TIRFrame> f(d, op_call);
-            ffi::Array<tirx::Stmt> stmts;
-            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
-              stmts.push_back(Downcast<tirx::Stmt>(op_call->args[i]));
-            }
-            tirx::SeqStmt seq_stmt(stmts);
-            AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
-            // Build kwargs: workspace, dispatch, then flatten config
-            ffi::Array<ffi::String> kw_keys;
-            ffi::Array<ExprDoc> kw_values;
-            if (!op_call->workspace.empty()) {
-              kw_keys.push_back("workspace");
-              kw_values.push_back(d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")));
-            }
-            if (op_call->dispatch.has_value()) {
-              kw_keys.push_back("dispatch");
-              kw_values.push_back(LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch")));
-            }
-            using POO = std::pair<ffi::String, ffi::Any>;
-            std::vector<POO> items{op_call->config.begin(), op_call->config.end()};
-            std::sort(items.begin(), items.end(),
-                      [](const POO& a, const POO& b) { return a.first < b.first; });
-            for (const auto& kv : items) {
-              kw_keys.push_back(kv.first);
-              kw_values.push_back(
-                  d->AsDoc<ExprDoc>(kv.second, p->Attr("config")->MapItem(kv.first)));
-            }
-            return ScopeDoc(std::nullopt, TIRx(d, "compose_op")->Call({}, kw_keys, kw_values),
-                            (*f)->stmts);
-          } else {
-            // Misc ops
-            ffi::Array<Doc> args;
-            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
-            }
-            return OpCallDoc(TIRx(d, name), args, {}, {}, std::nullopt);
+      static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
+      static const auto& dispatch_op_map = Op::GetAttrMap<Bool>("TIsDispatchOp");
+      static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
+      static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
+      TVM_FFI_ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
+          << "Only TIRX ops can be used in tirx::OpCall";
+      ffi::String name = op_names.get(op, op->name);
+      if (bool(dispatch_op_map.get(op, tvm::Bool(false))) ||
+          bool(async_op_map.get(op, tvm::Bool(false)))) {
+        // Dispatch ops
+        // Trim trailing None args (e.g. optional bias=None, scale=None)
+        size_t n_args = op_call->args.size();
+        while (n_args > 0 &&
+               op_call->args[n_args - 1].type_index() == ffi::TypeIndex::kTVMFFINone) {
+          --n_args;
+        }
+        // Detect in-place unary ops: after trimming Nones, if exactly 2 args
+        // and args[0]/args[1] refer to the same buffer region, collapse to 1 arg
+        bool inplace_unary = false;
+        if (n_args == 2) {
+          auto dst_opt = op_call->args[0].as<tirx::BufferRegion>();
+          auto src_opt = op_call->args[1].as<tirx::BufferRegion>();
+          if (dst_opt.has_value() && src_opt.has_value() &&
+              dst_opt.value()->buffer.same_as(src_opt.value()->buffer) &&
+              StructuralEqual()(dst_opt.value()->region, src_opt.value()->region)) {
+            inplace_unary = true;
           }
-        });
-TVM_SCRIPT_REPR(tirx::tirx::OpCallNode, ReprPrintTIR);
+        }
+        ffi::Array<Doc> args;
+        for (size_t i = 0; i < n_args; ++i) {
+          if (inplace_unary && i == 1) continue;  // skip duplicate src
+          args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+        }
+        ffi::Optional<ExprDoc> disp = std::nullopt;
+        if (op_call->dispatch.has_value()) {
+          disp = LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch"));
+        }
+        return OpCallDoc(TIRx(d, name), args,
+                         d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
+                         d->AsDoc<DictDoc>(op_call->config, p->Attr("config")), disp);
+      } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
+        // Compose ops
+        With<TIRFrame> f(d, op_call);
+        ffi::Array<tirx::Stmt> stmts;
+        for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+          stmts.push_back(Downcast<tirx::Stmt>(op_call->args[i]));
+        }
+        tirx::SeqStmt seq_stmt(stmts);
+        AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
+        // Build kwargs: workspace, dispatch, then flatten config
+        ffi::Array<ffi::String> kw_keys;
+        ffi::Array<ExprDoc> kw_values;
+        if (!op_call->workspace.empty()) {
+          kw_keys.push_back("workspace");
+          kw_values.push_back(d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")));
+        }
+        if (op_call->dispatch.has_value()) {
+          kw_keys.push_back("dispatch");
+          kw_values.push_back(LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch")));
+        }
+        using POO = std::pair<ffi::String, ffi::Any>;
+        std::vector<POO> items{op_call->config.begin(), op_call->config.end()};
+        std::sort(items.begin(), items.end(),
+                  [](const POO& a, const POO& b) { return a.first < b.first; });
+        for (const auto& kv : items) {
+          kw_keys.push_back(kv.first);
+          kw_values.push_back(d->AsDoc<ExprDoc>(kv.second, p->Attr("config")->MapItem(kv.first)));
+        }
+        return ScopeDoc(std::nullopt, TIRx(d, "compose_op")->Call({}, kw_keys, kw_values),
+                        (*f)->stmts);
+      } else {
+        // Misc ops
+        ffi::Array<Doc> args;
+        for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+          args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+        }
+        return OpCallDoc(TIRx(d, name), args, {}, {}, std::nullopt);
+      }
+    });
+TVM_SCRIPT_REPR(tirx::OpCallNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {
@@ -272,7 +270,8 @@ std::vector<tirx::Buffer> FindParentBuffers(const tirx::Buffer& child, const IRD
 /*!
  * \brief Check if a layout is the default layout for a given shape.
  */
-bool IsDefaultLayout(const ffi::Optional<tirx::TLayout>& layout, const ffi::Array<PrimExpr>& shape) {
+bool IsDefaultLayout(const ffi::Optional<tirx::TLayout>& layout,
+                     const ffi::Array<PrimExpr>& shape) {
   if (!layout.defined()) return false;
   return StructuralEqual()(layout.value(), tirx::TileLayoutNode::DefaultLayout(shape));
 }

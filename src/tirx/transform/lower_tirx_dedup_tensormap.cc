@@ -306,13 +306,9 @@ Pass LowerTIRxDedupCuTensorMaps() {
     n->body = CuTensorMapDedupRewriter(analyzer.var_remap())(n->body);
     return f;
   };
-<<<<<<<< HEAD:src/tirx/transform/lower_tirp_dedup_tensormap.cc
-  return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRpDedupCuTensorMaps", {});
-========
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRxDedupCuTensorMaps", {});
->>>>>>>> bd927f10c7 (rename):src/tirx/transform/lower_tirx_dedup_tensormap.cc
 }
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirx
 }  // namespace tvm

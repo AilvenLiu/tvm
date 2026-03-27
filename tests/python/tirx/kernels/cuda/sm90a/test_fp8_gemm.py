@@ -50,7 +50,7 @@ def test_fp8_gemm_hopper_no_ws():
 
     # fmt: off
     @Tx.inline
-    def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):  # noqa: E501
+    def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tirx.Buffer, B_smem: tvm.tirx.Buffer, A_map, B_map, bars: tvm.tirx.Buffer):  # noqa: E501
         with Tx.thread()[tid == 0]:
             stage = Tx.meta_var(k_tile % STAGES_TMA)
             Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
@@ -61,7 +61,7 @@ def test_fp8_gemm_hopper_no_ws():
         return [C[i] for i in range(C_elems)]
 
     @Tx.inline
-    def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):  # noqa: E501
+    def mma_compute(wg_id, k_tile, A_smem: tvm.tirx.Buffer, B_smem: tvm.tirx.Buffer, accum, bars: tvm.tirx.Buffer, descA, descB):  # noqa: E501
         stage = Tx.meta_var(k_tile % STAGES_TMA)
         parity = Tx.meta_var((k_tile // STAGES_TMA) % 2)
         Tx.ptx.mbarrier.try_wait(bars.ptr_to([stage]), parity)
@@ -74,7 +74,7 @@ def test_fp8_gemm_hopper_no_ws():
         Tx.ptx.wgmma.commit_group()
 
     @Tx.inline
-    def r2S(warp_id, lane_id, C_smem: tvm.tir.Buffer, accum, accum_half, n_tile):
+    def r2S(warp_id, lane_id, C_smem: tvm.tirx.Buffer, accum, accum_half, n_tile):
         Tx.cuda.cta_sync()
         for st_tile in Tx.serial(4):
             for i in Tx.serial(8):
@@ -85,7 +85,7 @@ def test_fp8_gemm_hopper_no_ws():
             Tx.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))  # noqa: E501
 
     @Tx.inline
-    def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
+    def s2G(warp_id, lane_id, C_smem: tvm.tirx.Buffer, C_map, m_idx, n_idx, n_tile):
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
         with Tx.thread()[warp_id == 0 and lane_id == 0]:
@@ -94,7 +94,7 @@ def test_fp8_gemm_hopper_no_ws():
             Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @Tx.inline
-    def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):  # noqa: E501
+    def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tirx.Buffer, C_map, accum, accum_half):  # noqa: E501
         Tx.cuda.cta_sync()
         for n_tile in Tx.serial(BLK_N // 64):
             if n_tile != 0:

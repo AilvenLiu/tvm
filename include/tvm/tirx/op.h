@@ -43,8 +43,10 @@
 
 namespace tvm {
 
-#define TVM_TIRX_REGISTER_OP(OpName) \
+#define TVM_TIR_REGISTER_OP(OpName) \
   TVM_REGISTER_OP("tirx." OpName).set_attr<TScriptPrinterName>("TScriptPrinterName", OpName)
+
+#define TVM_TIRX_REGISTER_OP(OpName) TVM_TIR_REGISTER_OP(OpName)
 
 // Most common operators can be overloaded by argument type(PrimExpr).
 // So we put them under the root namespace.
@@ -1033,7 +1035,7 @@ inline PrimExpr make_zero(DataType t, Span span) {
   return make_const(t, 0, span);
 }
 
-}  // namespace tirxxx
+}  // namespace tirx
 
 // additional const expression overloading
 #define TVM_DEFINE_ASSIGN_OP_OVERLOAD(Name, OpFunc) \

@@ -42,12 +42,12 @@ class PipelineNode : public Object {
   /*! \brief Whether to separate producer and consumer threads */
   bool separate_pc;
   /*! \brief The name hint of the pipeline. */
-  String name_hint;
+  ffi::String name_hint;
 
   /*! \brief The workspace of the pipeline. */
-  Map<String, tvm::tirx::Buffer> workspace;
+  ffi::Map<ffi::String, tvm::tirx::Buffer> workspace;
   /*! \brief The schedule config of the pipeline. */
-  Map<String, ffi::Any> schedule_config;
+  ffi::Map<ffi::String, ffi::Any> schedule_config;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -60,38 +60,18 @@ class PipelineNode : public Object {
         .def_ro("schedule_config", &PipelineNode::schedule_config);
   }
 
-  bool SEqualReduce(const PipelineNode* other, SEqualReducer equal) const {
-    if (!equal(thread_scope, other->thread_scope)) return false;
-    if (!equal(depth, other->depth)) return false;
-    if (!equal(separate_pc, other->separate_pc)) return false;
-    if (!equal(workspace, other->workspace)) return false;
-    if (!equal(schedule_config, other->schedule_config)) return false;
-    return equal.FreeVarEqualImpl(this, other);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(thread_scope);
-    hash_reduce(depth);
-    hash_reduce(separate_pc);
-    hash_reduce(workspace);
-    hash_reduce(schedule_config);
-    hash_reduce.FreeVarHashImpl(this);
-  }
-
-  static constexpr const char* _type_key = "tirx.Pipeline";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_BASE_OBJECT_INFO(PipelineNode, Object);
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO("tirx.Pipeline", PipelineNode, Object);
 };
 
 class Pipeline : public ObjectRef {
  public:
   TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                            String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {},
-                            Map<String, ffi::Any> schedule_config = {});
+                            ffi::String name_hint = "",
+                            ffi::Map<ffi::String, tvm::tirx::Buffer> workspace = {},
+                            ffi::Map<ffi::String, ffi::Any> schedule_config = {});
 
-  TVM_DEFINE_OBJECT_REF_METHODS(Pipeline, ObjectRef, PipelineNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Pipeline, ObjectRef, PipelineNode);
 };
 
 // CopyPipeline
@@ -108,28 +88,22 @@ class CopyPipelineNode : public PipelineNode {
         .def_ro("schedule_config", &CopyPipelineNode::schedule_config);
   }
 
-  bool SEqualReduce(const CopyPipelineNode* other, SEqualReducer equal) const { return true; }
-
-  void SHashReduce(SHashReducer hash_reduce) const {}
-
-  static constexpr const char* _type_key = "tirx.CopyPipeline";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(CopyPipelineNode, PipelineNode);
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.CopyPipeline", CopyPipelineNode, PipelineNode);
 };
 
 class CopyPipeline : public Pipeline {
  public:
   TVM_DLL explicit CopyPipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                                String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {},
-                                Map<String, ffi::Any> schedule_config = {});
+                                ffi::String name_hint = "",
+                                ffi::Map<ffi::String, tvm::tirx::Buffer> workspace = {},
+                                ffi::Map<ffi::String, ffi::Any> schedule_config = {});
 
-  TVM_DEFINE_OBJECT_REF_METHODS(CopyPipeline, Pipeline, CopyPipelineNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(CopyPipeline, Pipeline, CopyPipelineNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(CopyPipelineNode);
 };
 
-}  // namespace tirxxxxxxx
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_ASYNC_STRUCTS_H_

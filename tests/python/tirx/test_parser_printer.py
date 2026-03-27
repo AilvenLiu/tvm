@@ -20,9 +20,9 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm.ir import PointerType, PrimType, assert_structural_equal
-from tvm.script import tir as T
+from tvm.script import tirx as T
 from tvm.script import tirx as Tx
-from tvm.tir.layout import laneid
+from tvm.tirx.layout import laneid
 
 
 def from_source(code):
@@ -863,9 +863,9 @@ def test_list_comprehension():
                 acc = Tx.alloc_local([10], "bool")
                 regs = Tx.meta_var([acc[_] for _ in range(10)])
                 Tx.evaluate(regs[0])
-                Tx.evaluate(tvm.tir.all(*regs))
-                Tx.evaluate(tvm.tir.all(*[acc[_] for _ in range(10)]))
-                Tx.evaluate(tvm.tir.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))  # noqa: E501
+                Tx.evaluate(tvm.tirx.all(*regs))
+                Tx.evaluate(tvm.tirx.all(*[acc[_] for _ in range(10)]))
+                Tx.evaluate(tvm.tirx.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))  # noqa: E501
     # fmt: on
     code = test.script()
     print(code)
@@ -947,11 +947,11 @@ def test_workspace_default_none():
     binary_chain, reduce_negate) should handle workspace=None (the default)
     without error. Previously these functions were missing the
     ``if workspace is None: workspace = {}`` guard."""
-    from tvm.tir import BufferRegion
+    from tvm.tirx import BufferRegion
 
-    A_buf = tvm.tir.decl_buffer((128, 128), "float16", name="A")
-    B_buf = tvm.tir.decl_buffer((128, 128), "float16", name="B")
-    C_buf = tvm.tir.decl_buffer((128,), "float16", name="C")
+    A_buf = tvm.tirx.decl_buffer((128, 128), "float16", name="A")
+    B_buf = tvm.tirx.decl_buffer((128, 128), "float16", name="B")
+    C_buf = tvm.tirx.decl_buffer((128,), "float16", name="C")
     A = BufferRegion(A_buf, [tvm.ir.Range(0, 128), tvm.ir.Range(0, 128)])
     B = BufferRegion(B_buf, [tvm.ir.Range(0, 128), tvm.ir.Range(0, 128)])
     C = BufferRegion(C_buf, [tvm.ir.Range(0, 128)])
@@ -1024,7 +1024,7 @@ def test_scalar_assign_error_not_swallowed():
     swallowed and the assignment would silently fall through to eval_assign."""
     from unittest.mock import patch
 
-    original = tvm.script.ir_builder.tir.buffer_store
+    original = tvm.script.ir_builder.tirx.buffer_store
 
     def bomb(*args, **kwargs):
         # Intercept only the scalar-assignment path (indices == [0])
@@ -1045,7 +1045,7 @@ def func():
     # The ValueError propagates through the parser framework which wraps it
     # into a DiagnosticError.  Before the fix the broad ``except Exception``
     # would silently swallow it and fall through to eval_assign.
-    with patch("tvm.script.ir_builder.tir.buffer_store", side_effect=bomb):
+    with patch("tvm.script.ir_builder.tirx.buffer_store", side_effect=bomb):
         with pytest.raises(tvm.error.DiagnosticError):
             from_source(src)
 
@@ -1176,7 +1176,7 @@ def test_annotation_syntax_comprehensive():
 
     # 2. Banned: handle as scalar annotation
     src_handle = """
-from tvm.script import tir as T
+from tvm.script import tirx as T
 @T.prim_func
 def func():
     x: T.handle = T.int64(0)
@@ -1186,7 +1186,7 @@ def func():
 
     # 3. Banned: non-PrimType annotation without T.let
     src_ptr = """
-from tvm.script import tir as T
+from tvm.script import tirx as T
 from tvm.ir import PointerType, PrimType
 @T.prim_func
 def func():
@@ -1274,10 +1274,10 @@ def _collect_buffers(func):
     bufs = {}
 
     def _visit(node):
-        if isinstance(node, tvm.tir.DeclBuffer | tvm.tir.AllocBuffer):
+        if isinstance(node, tvm.tirx.DeclBuffer | tvm.tirx.AllocBuffer):
             bufs[node.buffer.name] = node.buffer
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, _visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, _visit)
     return bufs
 
 
@@ -1529,10 +1529,10 @@ def test_chained_partition_preserves_root_buffer():
     offsets back onto the *original* buffer ``A``, so that downstream ops
     (e.g. TMA copy_async) see a trivially-layouted global buffer.
     """
-    from tvm.tir import Var
-    from tvm.tir.stmt import BufferRegion
+    from tvm.tirx import Var
+    from tvm.tirx.stmt import BufferRegion
 
-    buf = tvm.tir.decl_buffer((1024, 512), "float16")
+    buf = tvm.tirx.decl_buffer((1024, 512), "float16")
     m = Var("m", "int32")
     n = Var("n", "int32")
 
@@ -1548,7 +1548,7 @@ def test_chained_partition_preserves_root_buffer():
 
     # Simulate the parser's bind_assign_value: create a matched buffer
     # and verify that Buffer.partition(select=...) still traces back to root.
-    matched_buf = tvm.tir.decl_buffer((256, 128), "float16")
+    matched_buf = tvm.tirx.decl_buffer((256, 128), "float16")
     matched_buf._source_region = tile1  # as bind_assign_value does
     tile3 = matched_buf.partition(tile_shape=(64, 32), select=(1, 2))
     assert isinstance(tile3, BufferRegion)

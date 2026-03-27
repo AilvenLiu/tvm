@@ -24,15 +24,6 @@
 
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/function.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirx_op.h>
-#include <tvm/tirx/transform.h>
-=======
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
@@ -41,7 +32,6 @@
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
->>>>>>> aa13d97399 (refactor(logging): remove compatibility adapters and migrate to new logging macros (#517)):src/tir/transform/lower_tirx_scope_slices.cc
 
 namespace tvm {
 namespace tirx {
@@ -206,5 +196,5 @@ Pass LowerTIRxResolveScopeSlices() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxxx
+}  // namespace tirx
 }  // namespace tvm

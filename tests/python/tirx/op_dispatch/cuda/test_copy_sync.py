@@ -22,7 +22,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.op_dispatch.cuda.common import next_power_of_2
 from tvm.tirx.op_dispatch.cuda.tma_utils import SwizzleMode, tma_atom_shape, tma_shared_layout
 

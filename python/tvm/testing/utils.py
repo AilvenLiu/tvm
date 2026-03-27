@@ -90,7 +90,7 @@ import tvm.arith
 import tvm.contrib.hexagon._ci_env_check as hexagon
 import tvm.contrib.utils
 import tvm.te
-import tvm.tir
+import tvm.tirx
 from tvm.contrib import cudnn, nvcc, rocm
 from tvm.error import TVMError
 from tvm.target import codegen
@@ -1950,7 +1950,7 @@ class CompareBeforeAfter:
 
     `before` / `Before` may be any one of the following.
 
-    - An instance of `tvm.tir.PrimFunc`.  This is allowed, but is not
+    - An instance of `tvm.tirx.PrimFunc`.  This is allowed, but is not
       the preferred method, as any errors in constructing the
       `PrimFunc` occur while collecting the test, preventing any other
       tests in the same file from being run.
@@ -1959,13 +1959,13 @@ class CompareBeforeAfter:
       The ``@T.prim_func`` decoration will be applied when running the
       test, rather than at module import.
 
-    - A method that takes no arguments and returns a `tvm.tir.PrimFunc`
+    - A method that takes no arguments and returns a `tvm.tirx.PrimFunc`
 
-    - A pytest fixture that returns a `tvm.tir.PrimFunc`
+    - A pytest fixture that returns a `tvm.tirx.PrimFunc`
 
     `expected` / `Expected` may be any one of the following.  The type of
     `expected` / `Expected` defines the test being performed.  If `expected`
-    provides a `tvm.tir.PrimFunc`, the result of the transformation
+    provides a `tvm.tirx.PrimFunc`, the result of the transformation
     must match `expected`.  If `expected` is an exception, then the
     transformation must raise that exception type.
 
@@ -1986,7 +1986,7 @@ class CompareBeforeAfter:
     .. python::
 
         class TestRemoveIf(tvm.testing.CompareBeforeAfter):
-            transform = tvm.tir.transform.Simplify()
+            transform = tvm.tirx.transform.Simplify()
 
             def before(A: T.Buffer(1, "int32")):
                 if True:
@@ -2020,7 +2020,7 @@ class CompareBeforeAfter:
 
     @classmethod
     def _normalize_ir_module(cls, func):
-        if isinstance(func, (tvm.tir.PrimFunc, tvm.IRModule)):  # noqa: UP038
+        if isinstance(func, (tvm.tirx.PrimFunc, tvm.IRModule)):  # noqa: UP038
 
             def inner(self):
                 # pylint: disable=unused-argument
@@ -2088,7 +2088,7 @@ class CompareBeforeAfter:
             def inner(obj):
                 if isinstance(obj, tvm.IRModule):
                     return module_transform(obj)
-                elif isinstance(obj, tvm.tir.PrimFunc):
+                elif isinstance(obj, tvm.tirx.PrimFunc):
                     mod = tvm.IRModule({"main": obj})
                     mod = module_transform(mod)
                     return mod["main"]
@@ -2148,12 +2148,12 @@ class CompareBeforeAfter:
                     )
                 )
 
-        elif isinstance(expected, (tvm.tir.PrimFunc, tvm.ir.IRModule)):  # noqa: UP038
+        elif isinstance(expected, (tvm.tirx.PrimFunc, tvm.ir.IRModule)):  # noqa: UP038
             after = transform(before)
 
             try:
                 # overwrite global symbol so it doesn't come up in the comparison
-                if isinstance(after, tvm.tir.PrimFunc):
+                if isinstance(after, tvm.tirx.PrimFunc):
                     after = after.with_attr("global_symbol", "main")
                     expected = expected.with_attr("global_symbol", "main")
                 tvm.ir.assert_structural_equal(after, expected)
@@ -2170,7 +2170,7 @@ class CompareBeforeAfter:
             raise TypeError(
                 f"tvm.testing.CompareBeforeAfter requires the `expected` fixture "
                 f"to return either `Exception`, an `Exception` subclass, "
-                f"or an instance of `tvm.tir.PrimFunc`.  "
+                f"or an instance of `tvm.tirx.PrimFunc`.  "
                 f"Instead, received {type(expected)}."
             )
 

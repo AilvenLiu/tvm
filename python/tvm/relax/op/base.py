@@ -26,7 +26,7 @@ from tvm.runtime import ObjectConvertible
 from tvm.runtime.object import Object
 
 from ...ir import PrimExpr
-from ...tir import PrimFunc
+from ...tirx import PrimFunc
 from ..expr import Call, Expr, ExternFunc, GlobalVar, ShapeExpr, StringImm, Var
 from ..struct_info import StructInfo, TensorStructInfo
 from ..utils import Dependency, convert_to_expr, trans_callable_to_primfunc

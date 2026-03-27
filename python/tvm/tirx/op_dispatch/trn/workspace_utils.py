@@ -17,7 +17,7 @@
 
 """Workspace buffer utilities for TRN operator scheduling."""
 
-from tvm.tir import Buffer
+from tvm.tirx import Buffer
 
 largest_psum_per_bank = 512
 max_psum_banks = 8

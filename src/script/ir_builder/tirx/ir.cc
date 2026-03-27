@@ -21,7 +21,7 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/op.h>
-#include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/script/ir_builder/tirx/ir.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/layout.h>
@@ -193,7 +193,7 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   return SBlockFrame(n);
 }
 
-void OpCall(tvm::tirx::tirx::OpCall op_call) { AddToParent(op_call); }
+void OpCall(tvm::tirx::OpCall op_call) { AddToParent(op_call); }
 
 ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name,
                               ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
@@ -222,7 +222,7 @@ ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
   }
   frame->exec_scope =
       tvm::tirx::ExecScopeSlice(slice, frame->scope_slice_extents, frame->scope_slice_parent,
-                               frame->exec_scope.value()->name);
+                                frame->exec_scope.value()->name);
   return frame;
 }
 
@@ -259,7 +259,7 @@ ExecScopeFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
 }
 
 ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
-                                  ffi::String name, ffi::String cur) {
+                                   ffi::String name, ffi::String cur) {
   ffi::Optional<ExecScopeFrame> es_frame = IRBuilder::Current()->FindFrame<ExecScopeFrame>();
   TVM_FFI_ICHECK(es_frame.defined())
       << "InternalError: " << name << " must be called inside an execution scope, "
@@ -291,7 +291,7 @@ ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String p
 }
 
 ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent,
-                                ffi::Optional<ffi::Array<PrimExpr>> preferred) {
+                                 ffi::Optional<ffi::Array<PrimExpr>> preferred) {
   if (preferred.defined()) {
     TVM_FFI_ICHECK(parent == "cluster")
         << "ValueError: preferred is only valid when parent=\"cluster\", got parent=\"" << parent
@@ -489,7 +489,7 @@ IterVar PushBlockVar(IterVar iter_var, PrimExpr binding) {
   return iter_var;
 }
 
-#define TVM_TIRX_IR_BUILDER_AXIS(Method, Kind, Name)                                           \
+#define TVM_TIRX_IR_BUILDER_AXIS(Method, Kind, Name)                                          \
   Var Method(Range dom, PrimExpr binding, DataType dtype) {                                   \
     TVM_FFI_ICHECK(dom.defined()) << Name << " axis must have a domain";                      \
     int bits = std::max({dom->min.dtype().bits(), dom->extent.dtype().bits(), dtype.bits()}); \
@@ -558,26 +558,26 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
 }  // namespace axis
 
 #define TVM_TIRX_IR_BUILDER_FOR_FRAME(Method, Kind)                                           \
-  ForFrame Method(PrimExpr start, PrimExpr stop,                                             \
-                  ffi::Optional<ffi::Map<ffi::String, Any>> annotations,                     \
-                  ffi::Optional<PrimExpr> step) {                                            \
-    PrimExpr min = start;                                                                    \
-    PrimExpr extent = arith::Analyzer().Simplify(stop - start);                              \
-    ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();                            \
-    int bits = std::max(min.dtype().bits(), extent.dtype().bits());                          \
-    n->vars = {Var("v", DataType(min.dtype().code(), bits, 1))};                             \
-    n->doms = {Range::FromMinExtent(min, extent)};                                           \
-    n->steps = {step};                                                                       \
-    n->f_make_for_loop = [annotations](ffi::Array<Var> vars, ffi::Array<Range> doms,         \
-                                       ffi::Array<ffi::Optional<PrimExpr>> steps,            \
+  ForFrame Method(PrimExpr start, PrimExpr stop,                                              \
+                  ffi::Optional<ffi::Map<ffi::String, Any>> annotations,                      \
+                  ffi::Optional<PrimExpr> step) {                                             \
+    PrimExpr min = start;                                                                     \
+    PrimExpr extent = arith::Analyzer().Simplify(stop - start);                               \
+    ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();                             \
+    int bits = std::max(min.dtype().bits(), extent.dtype().bits());                           \
+    n->vars = {Var("v", DataType(min.dtype().code(), bits, 1))};                              \
+    n->doms = {Range::FromMinExtent(min, extent)};                                            \
+    n->steps = {step};                                                                        \
+    n->f_make_for_loop = [annotations](ffi::Array<Var> vars, ffi::Array<Range> doms,          \
+                                       ffi::Array<ffi::Optional<PrimExpr>> steps,             \
                                        tvm::tirx::Stmt body) {                                \
-      TVM_FFI_ICHECK_EQ(vars.size(), 1);                                                     \
-      TVM_FFI_ICHECK_EQ(doms.size(), 1);                                                     \
-      TVM_FFI_ICHECK_EQ(steps.size(), 1);                                                    \
+      TVM_FFI_ICHECK_EQ(vars.size(), 1);                                                      \
+      TVM_FFI_ICHECK_EQ(doms.size(), 1);                                                      \
+      TVM_FFI_ICHECK_EQ(steps.size(), 1);                                                     \
       return tvm::tirx::For(vars[0], doms[0]->min, doms[0]->extent, Kind, body, std::nullopt, \
-                           annotations.value_or(ffi::Map<ffi::String, Any>()), steps[0]);    \
-    };                                                                                       \
-    return ForFrame(n);                                                                      \
+                            annotations.value_or(ffi::Map<ffi::String, Any>()), steps[0]);    \
+    };                                                                                        \
+    return ForFrame(n);                                                                       \
   }
 
 TVM_TIRX_IR_BUILDER_FOR_FRAME(Serial, tvm::tirx::ForKind::kSerial);
@@ -612,7 +612,7 @@ ForFrame ThreadBinding(PrimExpr start, PrimExpr stop, ffi::String thread,
 }
 
 ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) {
-  using namespace tvm::tir;
+  using namespace tvm::tirx;
   ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();
   n->vars.reserve(extents.size());
   n->doms.reserve(extents.size());
@@ -622,7 +622,7 @@ ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) 
       // extent is a single PrimExpr
       DataType dtype = prim_expr.value().dtype();
       n->vars.push_back(Var("v", dtype));
-      n->doms.push_back(Range(make_const(dtype, 0), prim_expr.value()));
+      n->doms.push_back(Range(tvm::tirx::make_const(dtype, 0), prim_expr.value()));
     } else if (auto tuple = extent.as<Tuple<PrimExpr, PrimExpr>>()) {
       // extent is a tuple of two PrimExpr (start, extent)
       DataType dtype = tuple.value().get<0>().dtype();
@@ -928,7 +928,7 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::BufferLoadNode>([](const ObjectRef& node, ffi::String name) -> void {
-      using namespace tvm::tir;
+      using namespace tvm::tirx;
       BufferLoadNode* buffer = const_cast<BufferLoadNode*>(node.as<BufferLoadNode>());
       Namer::Name(buffer->buffer, name);
     });
@@ -940,7 +940,7 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::SizeVarNode>([](const ObjectRef& node, ffi::String name) -> void {
-      using namespace tvm::tir;
+      using namespace tvm::tirx;
       SizeVarNode* var = const_cast<SizeVarNode*>(node.as<SizeVarNode>());
       var->name_hint = name;
     });
@@ -977,61 +977,61 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                  << "ValueError: Unexpected type for TIR Arg: " << obj->GetTypeKey();
              throw;
            })
-      .def("script.ir_builder.tir.FuncName", FuncName)
-      .def("script.ir_builder.tir.FuncAttrs", FuncAttrs)
-      .def("script.ir_builder.tir.FuncRet", FuncRet)
-      .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
-      .def("script.ir_builder.tir.ExecScopeFrameSlice", ExecScopeFrameSlice)
-      .def("script.ir_builder.tir.Block", Block)
-      .def("script.ir_builder.tir.ExecScopeBlock", ExecScopeBlock)
-      .def("script.ir_builder.tir.OpCall", OpCall)
-      .def("script.ir_builder.tir.World", World)
-      .def("script.ir_builder.tir.Kernel", Kernel)
-      .def("script.ir_builder.tir.Cluster", Cluster)
-      .def("script.ir_builder.tir.CTA", CTA)
-      .def("script.ir_builder.tir.WarpGroup", WarpGroup)
-      .def("script.ir_builder.tir.Warp", Warp)
-      .def("script.ir_builder.tir.Thread", Thread)
-      .def("script.ir_builder.tir.KernelId", KernelId)
-      .def("script.ir_builder.tir.ClusterId", ClusterId)
-      .def("script.ir_builder.tir.CtaId",
+      .def("script.ir_builder.tirx.FuncName", FuncName)
+      .def("script.ir_builder.tirx.FuncAttrs", FuncAttrs)
+      .def("script.ir_builder.tirx.FuncRet", FuncRet)
+      .def("script.ir_builder.tirx.MatchBuffer", MatchBuffer)
+      .def("script.ir_builder.tirx.ExecScopeFrameSlice", ExecScopeFrameSlice)
+      .def("script.ir_builder.tirx.Block", Block)
+      .def("script.ir_builder.tirx.ExecScopeBlock", ExecScopeBlock)
+      .def("script.ir_builder.tirx.OpCall", OpCall)
+      .def("script.ir_builder.tirx.World", World)
+      .def("script.ir_builder.tirx.Kernel", Kernel)
+      .def("script.ir_builder.tirx.Cluster", Cluster)
+      .def("script.ir_builder.tirx.CTA", CTA)
+      .def("script.ir_builder.tirx.WarpGroup", WarpGroup)
+      .def("script.ir_builder.tirx.Warp", Warp)
+      .def("script.ir_builder.tirx.Thread", Thread)
+      .def("script.ir_builder.tirx.KernelId", KernelId)
+      .def("script.ir_builder.tirx.ClusterId", ClusterId)
+      .def("script.ir_builder.tirx.CtaId",
            [](ffi::Array<PrimExpr> extents, ffi::String parent,
               ffi::Optional<ffi::Array<PrimExpr>> preferred) {
              return CtaId(extents, parent, preferred);
            })
-      .def("script.ir_builder.tir.WarpgroupId", WarpgroupId)
-      .def("script.ir_builder.tir.WarpId", WarpId)
-      .def("script.ir_builder.tir.ThreadId", ThreadId)
-      .def("script.ir_builder.tir.ScopeId", ScopeId)
-      .def("script.ir_builder.tir.Init", Init)
-      .def("script.ir_builder.tir.Where", Where)
-      .def("script.ir_builder.tir.Reads", Reads)
-      .def("script.ir_builder.tir.Writes", Writes)
-      .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
-      .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
-      .def("script.ir_builder.tir.AllocBuffer", AllocBuffer)
-      .def("script.ir_builder.tir.AxisSpatial", axis::Spatial)
-      .def("script.ir_builder.tir.AxisReduce", axis::Reduce)
-      .def("script.ir_builder.tir.AxisScan", axis::Scan)
-      .def("script.ir_builder.tir.AxisOpaque", axis::Opaque)
-      .def("script.ir_builder.tir.AxisRemap", axis::Remap)
-      .def("script.ir_builder.tir.Serial", Serial)
-      .def("script.ir_builder.tir.Parallel", Parallel)
-      .def("script.ir_builder.tir.Vectorized", Vectorized)
-      .def("script.ir_builder.tir.Unroll", Unroll)
-      .def("script.ir_builder.tir.ThreadBinding", ThreadBinding)
-      .def("script.ir_builder.tir.Grid", Grid)
-      .def("script.ir_builder.tir.Assert", Assert)
-      .def("script.ir_builder.tir.Bind", Bind)
-      .def("script.ir_builder.tir.Attr", Attr)
-      .def("script.ir_builder.tir.While", While)
-      .def("script.ir_builder.tir.Break", Break)
-      .def("script.ir_builder.tir.Continue", Continue)
-      .def("script.ir_builder.tir.If", If)
-      .def("script.ir_builder.tir.Then", Then)
-      .def("script.ir_builder.tir.Else", Else)
-      .def("script.ir_builder.tir.DeclBuffer", DeclBuffer)
-      .def("script.ir_builder.tir.LaunchThread",
+      .def("script.ir_builder.tirx.WarpgroupId", WarpgroupId)
+      .def("script.ir_builder.tirx.WarpId", WarpId)
+      .def("script.ir_builder.tirx.ThreadId", ThreadId)
+      .def("script.ir_builder.tirx.ScopeId", ScopeId)
+      .def("script.ir_builder.tirx.Init", Init)
+      .def("script.ir_builder.tirx.Where", Where)
+      .def("script.ir_builder.tirx.Reads", Reads)
+      .def("script.ir_builder.tirx.Writes", Writes)
+      .def("script.ir_builder.tirx.BlockAttrs", BlockAttrs)
+      .def("script.ir_builder.tirx.SBlockAllocBuffer", SBlockAllocBuffer)
+      .def("script.ir_builder.tirx.AllocBuffer", AllocBuffer)
+      .def("script.ir_builder.tirx.AxisSpatial", axis::Spatial)
+      .def("script.ir_builder.tirx.AxisReduce", axis::Reduce)
+      .def("script.ir_builder.tirx.AxisScan", axis::Scan)
+      .def("script.ir_builder.tirx.AxisOpaque", axis::Opaque)
+      .def("script.ir_builder.tirx.AxisRemap", axis::Remap)
+      .def("script.ir_builder.tirx.Serial", Serial)
+      .def("script.ir_builder.tirx.Parallel", Parallel)
+      .def("script.ir_builder.tirx.Vectorized", Vectorized)
+      .def("script.ir_builder.tirx.Unroll", Unroll)
+      .def("script.ir_builder.tirx.ThreadBinding", ThreadBinding)
+      .def("script.ir_builder.tirx.Grid", Grid)
+      .def("script.ir_builder.tirx.Assert", Assert)
+      .def("script.ir_builder.tirx.Bind", Bind)
+      .def("script.ir_builder.tirx.Attr", Attr)
+      .def("script.ir_builder.tirx.While", While)
+      .def("script.ir_builder.tirx.Break", Break)
+      .def("script.ir_builder.tirx.Continue", Continue)
+      .def("script.ir_builder.tirx.If", If)
+      .def("script.ir_builder.tirx.Then", Then)
+      .def("script.ir_builder.tirx.Else", Else)
+      .def("script.ir_builder.tirx.DeclBuffer", DeclBuffer)
+      .def("script.ir_builder.tirx.LaunchThread",
            [](ffi::Variant<tvm::tirx::Var, ffi::String> thread_tag_or_var, PrimExpr extent) {
              if (auto var = thread_tag_or_var.as<tvm::tirx::Var>()) {
                return LaunchThread(var.value(), extent);
@@ -1043,12 +1043,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                throw;
              }
            })
-      .def("script.ir_builder.tir.EnvThread", EnvThread)
-      .def("script.ir_builder.tir.Hint", Hint)
-      .def("script.ir_builder.tir.ComposeOp", ComposeOp)
-      .def("script.ir_builder.tir.BufferStore", BufferStore)
-      .def("script.ir_builder.tir.Evaluate", Evaluate)
-      .def("script.ir_builder.tir.Ptr", Ptr);
+      .def("script.ir_builder.tirx.EnvThread", EnvThread)
+      .def("script.ir_builder.tirx.Hint", Hint)
+      .def("script.ir_builder.tirx.ComposeOp", ComposeOp)
+      .def("script.ir_builder.tirx.BufferStore", BufferStore)
+      .def("script.ir_builder.tirx.Evaluate", Evaluate)
+      .def("script.ir_builder.tirx.Ptr", Ptr);
 }
 
 #define TVM_TMP_STR(x) #x
@@ -1181,10 +1181,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
+  refl::GlobalDef().def("script.ir_builder.tirx.AddToParent", AddToParent);
 }
 
-}  // namespace tirxxxxxxxxxxxxxxx
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

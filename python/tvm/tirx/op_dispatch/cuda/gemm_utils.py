@@ -19,9 +19,9 @@
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer
 from tvm.tirx.op_dispatch import DispatchContext
+from tvm.tirx.stmt import OpCall
 
 from .common import smem_desc_add_16B_offset
 

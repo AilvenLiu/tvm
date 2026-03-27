@@ -28,12 +28,12 @@ import tvm_ffi
 
 import tvm
 
-from .. import tir
+from .. import tirx
 from ..ir import Array, Attrs, Map, Type, VDevice
 from ..ir.expr import GlobalVar
 from ..te import Tensor as te_Tensor
 from ..te import create_prim_func
-from ..tir import PrimExpr
+from ..tirx import PrimExpr
 from . import _ffi_api
 from .expr import Expr, Function, PrimValue, ShapeExpr, StringImm, te_tensor
 from .expr import Tuple as rx_Tuple
@@ -394,8 +394,8 @@ def gen_call_tir_inputs(
 import inspect  # noqa: E402
 import types  # noqa: E402
 
-from tvm.script import tir as T  # noqa: E402
-from tvm.tir.function import PrimFunc  # noqa: E402
+from tvm.script import tirx as T  # noqa: E402
+from tvm.tirx.function import PrimFunc  # noqa: E402
 
 PrimExprLike = int | PrimExpr
 
@@ -499,13 +499,13 @@ def trans_callable_to_primfunc(
         new_func = func
     new_func, extra_args = extract_extra_args(new_func)
 
-    def _convert_arg(para: tir.Var | tir.Buffer) -> T.Var:
-        if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
+    def _convert_arg(para: tirx.Var | tirx.Buffer) -> T.Var:
+        if isinstance(para, tirx.Var) or isinstance(para, tirx.Buffer):
             ret = T.arg("var", para)
         else:
             f_imme_create = {"int32": T.int32, "int64": T.int64}[dtype]
             ret = T.arg("var", f_imme_create())
-        if isinstance(ret, tir.Var) and ret.dtype != dtype:
+        if isinstance(ret, tirx.Var) and ret.dtype != dtype:
             ret = T.cast(ret, dtype)
         return ret
 
@@ -517,7 +517,7 @@ def trans_callable_to_primfunc(
                 T.buffer_store(buf_list[i], value_list[i], [0])
 
     # prepare the tir input and output
-    tir_input = [tir.Var("", dtype) for _ in range(input_dim)]
+    tir_input = [tirx.Var("", dtype) for _ in range(input_dim)]
     for arg in extra_args:
         if isinstance(arg, Expr):
             tir_input.append(
@@ -528,7 +528,7 @@ def trans_callable_to_primfunc(
                 )
             )
         elif isinstance(arg, PrimExpr):
-            tir_input.append(tir.Var("", arg.dtype))
+            tir_input.append(tirx.Var("", arg.dtype))
         else:  # int
             tir_input.append(arg)
     tir_output = [T.Buffer(shape=[1], dtype=dtype, scope="local") for _ in range(output_dim)]

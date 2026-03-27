@@ -27,8 +27,8 @@
 
 #include <tvm/ir/name_supply.h>
 #include <tvm/target/codegen.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/op.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/op.h>
 
 #include <functional>
 #include <string>

@@ -38,22 +38,25 @@ WELL_FORMED_ERROR_MESSAGE = (
 
 def _default_globals() -> dict[str, Any]:
     # lazy import here to avoid circular deps
-    from tvm.script import tirx  # pylint: disable=import-outside-toplevel
+    from tvm.script import tirx as _tirx_dsl  # pylint: disable=import-outside-toplevel
     from tvm.script.parser import (
         ir,  # pylint: disable=import-outside-toplevel
         relax,  # pylint: disable=import-outside-toplevel
-        tir,  # pylint: disable=import-outside-toplevel
+    )
+    from tvm.script.parser import (
+        tirx as _tirx_parser,  # pylint: disable=import-outside-toplevel
     )
 
     extra_vars = {
         "tvm": tvm,
         "I": ir,
         "ir": ir,
-        "T": tirx,
-        "tirx": tirx,
+        "T": _tirx_parser,
+        "tir": _tirx_parser,
         "R": relax,
         "relax": relax,
-        "Tx": tirx,
+        "Tx": _tirx_dsl,
+        "tirx": _tirx_dsl,
     }
     return extra_vars
 
@@ -130,9 +133,9 @@ def parse(
 
         try:
             if not tirx:
-                tvm.tir.analysis.verify_well_formed(check_ret)
+                tvm.tirx.analysis.verify_well_formed(check_ret)
             else:
-                tvm.tir.analysis.verify_tirx_well_formed(check_ret)
+                tvm.tirx.analysis.verify_tirx_well_formed(check_ret)
         except Exception as err:  # pylint: disable=broad-exception-caught
             parser.report_error(
                 source_ast,

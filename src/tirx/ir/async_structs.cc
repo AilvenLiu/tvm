@@ -23,22 +23,22 @@
 
 #include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/expr.h>
-#include <tvm/tirx/tirp_op.h>
+#include <tvm/tirx/tirx_op.h>
 
 namespace tvm {
 namespace tirx {
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   PipelineNode::RegisterReflection();
   CopyPipelineNode::RegisterReflection();
-});
+}
 
 /*************************** Pipeline ***************************/
-TVM_REGISTER_NODE_TYPE(PipelineNode);
 
-Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                   Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-  auto n = make_object<PipelineNode>();
+Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, ffi::String name_hint,
+                   ffi::Map<ffi::String, Buffer> workspace,
+                   ffi::Map<ffi::String, ffi::Any> schedule_config) {
+  auto n = ffi::make_object<PipelineNode>();
   n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
   n->depth = depth;
@@ -48,22 +48,22 @@ Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, Strin
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.Pipeline",
-                        [](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-                          return Pipeline(thread_scope, depth, separate_pc, name_hint, workspace,
-                                          schedule_config);
-                        });
-});
+  refl::GlobalDef().def(
+      "tirx.Pipeline",
+      [](ExecScope thread_scope, size_t depth, bool separate_pc, ffi::String name_hint,
+         ffi::Map<ffi::String, Buffer> workspace, ffi::Map<ffi::String, ffi::Any> schedule_config) {
+        return Pipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
+      });
+}
 
 /*************************** CopyPipeline ***************************/
-TVM_REGISTER_NODE_TYPE(CopyPipelineNode);
 
-CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-  auto n = make_object<CopyPipelineNode>();
+CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
+                           ffi::String name_hint, ffi::Map<ffi::String, Buffer> workspace,
+                           ffi::Map<ffi::String, ffi::Any> schedule_config) {
+  auto n = ffi::make_object<CopyPipelineNode>();
   n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
   n->depth = depth;
@@ -73,15 +73,15 @@ CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_p
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.CopyPipeline",
-                        [](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-                          return CopyPipeline(thread_scope, depth, separate_pc, name_hint,
-                                              workspace, schedule_config);
-                        });
-});
+  refl::GlobalDef().def("tirx.CopyPipeline", [](ExecScope thread_scope, size_t depth,
+                                                bool separate_pc, ffi::String name_hint,
+                                                ffi::Map<ffi::String, Buffer> workspace,
+                                                ffi::Map<ffi::String, ffi::Any> schedule_config) {
+    return CopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
+  });
+}
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirx
 }  // namespace tvm

@@ -64,7 +64,7 @@ class ExecScope(Object):
         ExecScope
             The created execution scope.
         """
-        return get_global_func("tir.ExecScopeCreate")(name)
+        return get_global_func("tirx.ExecScopeCreate")(name)
 
 
 @register_object("tirx.ExecScopeSlice")

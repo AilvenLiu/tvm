@@ -33,7 +33,7 @@ from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
 from .._core import Parser, dispatch, doc
 from ..core.doc import from_doc
-from ..tir.entry import inline
+from ..tirx.entry import inline
 
 
 def bind_with_value(self: Parser, node: doc.expr, var_name: str, value: Any) -> Any:
@@ -246,7 +246,7 @@ def find_decorator_annotation(node: doc.FunctionDef, annotation: str, default: b
     return default
 
 
-@dispatch.register(token="tir", type_name="For")
+@dispatch.register(token="tirx", type_name="For")
 def visit_for(self: Parser, node: doc.For) -> None:
     """The for visiting method for tirx.
 
@@ -306,7 +306,7 @@ def visit_while(self: Parser, node: doc.While) -> None:
             self.visit_body(node.body)
 
 
-@dispatch.register(token="tir", type_name="Break")
+@dispatch.register(token="tirx", type_name="Break")
 def visit_break(self: Parser, node: doc.Break) -> None:
     """The break visiting method for tir.
 
@@ -321,7 +321,7 @@ def visit_break(self: Parser, node: doc.Break) -> None:
     T.Break()
 
 
-@dispatch.register(token="tir", type_name="Continue")
+@dispatch.register(token="tirx", type_name="Continue")
 def visit_continue(self: Parser, node: doc.Continue) -> None:
     """The continue visiting method for tir.
 
@@ -336,7 +336,7 @@ def visit_continue(self: Parser, node: doc.Continue) -> None:
     T.Continue()
 
 
-@dispatch.register(token="tir", type_name="Assign")
+@dispatch.register(token="tirx", type_name="Assign")
 def visit_assign(self: Parser, node: doc.Assign) -> None:
     """The assign visiting method for tirx.
 
@@ -679,7 +679,7 @@ def visit_inline_function_def(self: Parser, node: doc.FunctionDef) -> None:
     return None
 
 
-@dispatch.register(token="tir", type_name="tvm_annotation")
+@dispatch.register(token="tirx", type_name="tvm_annotation")
 def visit_tvm_annotation(self: Parser, node: doc.expr):
     """The TVM annotation visiting method for tirx.
 
@@ -848,7 +848,7 @@ def visit_return(self: Parser, node: doc.Return) -> None:
     T.evaluate(tvm.tirx.ret(value))
 
 
-@dispatch.register(token="tir", type_name="tvm_declare_function")
+@dispatch.register(token="tirx", type_name="tvm_declare_function")
 def visit_tvm_declare_function(self: Parser, node: doc.FunctionDef) -> GlobalVar:
     """The function declaration step for tirx
 

@@ -104,7 +104,7 @@ inline ExprDoc IR(const IRDocsifier& d, const ffi::String& attr) {
 
 /*! \brief Creates the TIR common prefix, which is by default `T` */
 inline ExprDoc TIR(const IRDocsifier& d, const ffi::String& attr) {
-  d->ir_usage.insert("tirx");
+  d->ir_usage.insert("tir");
   return IdDoc(d->cfg->tir_prefix)->Attr(attr);
 }
 

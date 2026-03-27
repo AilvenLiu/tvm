@@ -29,15 +29,15 @@ import operator
 
 from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, BufferRegion, IntImm, PrimFunc
-from tvm.tir.layout import TileLayout
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, BufferRegion, IntImm, PrimFunc
+from tvm.tirx.layout import TileLayout
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
     predicate,
     register_dispatch,
 )
+from tvm.tirx.stmt import OpCall
 
 from .common import get_indices, get_st_extent, get_vec_len
 from .layout_utils import (

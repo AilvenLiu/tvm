@@ -31,11 +31,11 @@ import tvm
 from tvm.arith import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, PrimFunc
-from tvm.tir.layout import S, TCol, TileLayout, TLane, tid_in_wg
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, PrimFunc
+from tvm.tirx.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.op_dispatch.dispatcher import fail, predicate, register_dispatch
 from tvm.tirx.op_dispatch.registry import DispatchContext
+from tvm.tirx.stmt import OpCall
 
 from .common import (
     CopyInstType,
@@ -74,7 +74,7 @@ def copy_default_impl(
         copy_extents = [dst_extent[i] for i in dst_indices]
 
         def get_dst_coord(lvs):
-            if isinstance(lvs, tvm.tir.Var):
+            if isinstance(lvs, tvm.tirx.Var):
                 lvs = [lvs]
             coord = [dst_st[i] for i in range(len(dst.shape))]
             for i, lv in enumerate(lvs):
@@ -82,7 +82,7 @@ def copy_default_impl(
             return coord
 
         def get_src_coord(lvs):
-            if isinstance(lvs, tvm.tir.Var):
+            if isinstance(lvs, tvm.tirx.Var):
                 lvs = [lvs]
             coord = [src_st[i] for i in range(len(src.shape))]
             for i, lv in enumerate(lvs):
@@ -284,12 +284,12 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: DispatchContext, async_op=False)
     width = local_region.region[1].extent
     candidates = [1, 2, 4, 8, 16, 32, 64, 128]
 
-    if not analyzer.can_prove_equal(tvm.tir.floormod(width, elem_per_32b), 0):
+    if not analyzer.can_prove_equal(tvm.tirx.floormod(width, elem_per_32b), 0):
         raise ValueError(f"Width {width} is not valid for tcgen05.ld/st with shape 32x32b")
 
     num = None
     for n in candidates:
-        if analyzer.can_prove_equal(tvm.tir.floordiv(width, elem_per_32b), n):
+        if analyzer.can_prove_equal(tvm.tirx.floordiv(width, elem_per_32b), n):
             num = n
             break
     else:
@@ -314,8 +314,8 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: DispatchContext, async_op=False)
     assert analyzer.can_prove_equal(local_extent[0], 128)
 
     offset = tmem_st[1]
-    assert analyzer.can_prove_equal(tvm.tir.floormod(offset, elem_per_32b), 0)
-    offset_32b = tvm.tir.floordiv(offset, elem_per_32b)
+    assert analyzer.can_prove_equal(tvm.tirx.floormod(offset, elem_per_32b), 0)
+    offset_32b = tvm.tirx.floordiv(offset, elem_per_32b)
     assert analyzer.can_prove_equal(tmem_extent[1], width), (
         f"tmem_extent[1]: {tmem_extent[1]}, width: {width}"
     )
@@ -425,7 +425,7 @@ def copy_smem_tmem_impl(op_call: OpCall, sctx: DispatchContext, async_op=False) 
     elif analyzer.can_prove_equal(smem_rows, 128):
         # Choose 128x256b or 128x128b based on alignment
         col_bits = smem_ext[1] * smem_dtype_bits
-        if analyzer.can_prove_equal(tvm.tir.floormod(col_bits, 256), 0):
+        if analyzer.can_prove_equal(tvm.tirx.floormod(col_bits, 256), 0):
             copy_shape = "128x256b"
             bits_per_copy = 256
         else:
@@ -437,16 +437,16 @@ def copy_smem_tmem_impl(op_call: OpCall, sctx: DispatchContext, async_op=False) 
         raise ValueError(f"smem rows must be 32 or 128, got {smem_rows}")
 
     # Validate row alignment
-    if not analyzer.can_prove_equal(tvm.tir.floormod(smem_st[0], copy_rows), 0):
+    if not analyzer.can_prove_equal(tvm.tirx.floormod(smem_st[0], copy_rows), 0):
         raise ValueError(f"smem row start must be aligned to {copy_rows}")
 
     # Validate column alignment (128b boundary)
     elem_per_128b = 128 // smem_dtype_bits
-    if not analyzer.can_prove_equal(tvm.tir.floormod(smem_st[1], elem_per_128b), 0):
+    if not analyzer.can_prove_equal(tvm.tirx.floormod(smem_st[1], elem_per_128b), 0):
         raise ValueError(f"smem col start must be aligned to {elem_per_128b} elements (128b)")
-    if not analyzer.can_prove_equal(tvm.tir.floormod(tmem_st[1], elem_per_128b), 0):
+    if not analyzer.can_prove_equal(tvm.tirx.floormod(tmem_st[1], elem_per_128b), 0):
         raise ValueError(f"tmem col start must be aligned to {elem_per_128b} elements (128b)")
-    if not analyzer.can_prove_equal(tvm.tir.floormod(smem_ext[1], elem_per_128b), 0):
+    if not analyzer.can_prove_equal(tvm.tirx.floormod(smem_ext[1], elem_per_128b), 0):
         raise ValueError(f"smem col extent must be aligned to {elem_per_128b} elements (128b)")
 
     # Validate bit-width match

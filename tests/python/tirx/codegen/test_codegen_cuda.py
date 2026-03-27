@@ -26,7 +26,7 @@ from tvm.script import tirx as Tx
 DEV = tvm.device("cuda")
 
 
-def _get_source(func: tvm.tir.PrimFunc) -> str:
+def _get_source(func: tvm.tirx.PrimFunc) -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

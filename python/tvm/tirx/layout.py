@@ -36,7 +36,7 @@ from . import _ffi_api
 from .exec_scope import ExecScope
 
 
-@tvm_ffi.register_object("tir.TLayout")
+@tvm_ffi.register_object("tirx.TLayout")
 class TLayout(Object):
     def __init__(self):
         self.__init_handle_by_constructor__(_ffi_api.TLayout)  # pylint: disable=no-member
@@ -383,7 +383,7 @@ class TLayout(Object):
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
 
-@tvm_ffi.register_object("tir.Axis")
+@tvm_ffi.register_object("tirx.Axis")
 class Axis(Object):
     """Layout axis wrapper."""
 
@@ -625,7 +625,7 @@ def _to_offset_expr(x: _OffsetExprLike) -> _OffsetExpr:
     return _OffsetExpr({Axis.get("m"): x})  # type: ignore[arg-type]
 
 
-@tvm_ffi.register_object("tir.Iter")
+@tvm_ffi.register_object("tirx.Iter")
 class Iter(Object):
     """A memory layout that tiles data across devices."""
 
@@ -664,7 +664,7 @@ def _spec_to_iters(pair) -> list:
     return result
 
 
-@tvm_ffi.register_object("tir.TileLayout")
+@tvm_ffi.register_object("tirx.TileLayout")
 class TileLayout(TLayout):
     """A memory layout that tiles data across devices."""
 
@@ -816,7 +816,7 @@ class TileLayout(TLayout):
         return TileLayout.from_iters(new_shard, self.replica, self.offset)
 
 
-@tvm_ffi.register_object("tir.SwizzleLayout")
+@tvm_ffi.register_object("tirx.SwizzleLayout")
 class SwizzleLayout(TLayout):
     """A memory layout that swizzles elements to improve memory access patterns."""
 
@@ -837,7 +837,7 @@ class SwizzleLayout(TLayout):
         )
 
 
-@tvm_ffi.register_object("tir.ComposeLayout")
+@tvm_ffi.register_object("tirx.ComposeLayout")
 class ComposeLayout(TLayout):
     """A memory layout that composes 2 layouts."""
 

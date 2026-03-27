@@ -18,8 +18,7 @@
 from typing import Any
 
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, FloatImm, Stmt
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, FloatImm, Stmt
 from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
 from tvm.tirx.op_dispatch.registry import f_op_dispatcher
 from tvm.tirx.op_dispatch.trn.common import init_analyzer, nki_dim
@@ -33,6 +32,7 @@ from tvm.tirx.operator.op import (
     UnaryOpWithBiasScale,
     UnaryReduce,
 )
+from tvm.tirx.stmt import OpCall
 
 
 def alloc_const_bias_trn(

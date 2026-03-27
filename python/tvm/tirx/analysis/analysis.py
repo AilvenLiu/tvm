@@ -143,7 +143,7 @@ def verify_tirx_well_formed(
 
     Parameters
     ----------
-    obj: Union[tvm.tir.PrimFunc, tvm.ir.IRModule]
+    obj: Union[tvm.tirx.PrimFunc, tvm.ir.IRModule]
         The function or module to be verified.
 
     assert_mode: bool

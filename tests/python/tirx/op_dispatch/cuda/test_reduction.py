@@ -20,7 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir.layout import R, S, TileLayout, laneid
+from tvm.tirx.layout import R, S, TileLayout, laneid
 
 
 @pytest.mark.parametrize(

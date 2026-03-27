@@ -22,8 +22,8 @@
  */
 #include "codegen_trn.h"
 
-#include <tvm/tir/expr.h>
-#include <tvm/tir/transform.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/transform.h>
 
 #include <algorithm>
 #include <cmath>
@@ -214,7 +214,7 @@ void CodeGenTrainium::VisitStmt_(const AllocBufferNode* op) {
            << ", buffer=";
   }
   Array<PrimExpr> addr;
-  if (auto allocated_addr = op->annotations.Get(tir::attr::buffer_allocated_addr)) {
+  if (auto allocated_addr = op->annotations.Get(tirx::attr::buffer_allocated_addr)) {
     addr = Downcast<Array<PrimExpr>>(allocated_addr.value());
   } else {
     // AllocBuffer is a leaf stmt after rebase; in that path allocated_addr is carried by Buffer.
@@ -244,14 +244,14 @@ void CodeGenTrainium::VisitStmt_(const AllocBufferNode* op) {
 }
 
 void CodeGenTrainium::VisitStmt_(const AttrStmtNode* op) {
-  if (op->attr_key == tir::attr::tensorized_nki_instruction) {
+  if (op->attr_key == tirx::attr::tensorized_nki_instruction) {
     ctx_.tensorizing = true;
     ctx_.mask = PrimExpr(nullptr);
     ctx_.loopvar2dim.clear();
     ctx_.is_matmul_input = false;
   }
   this->PrintStmt(op->body);
-  if (op->attr_key == tir::attr::tensorized_nki_instruction) {
+  if (op->attr_key == tirx::attr::tensorized_nki_instruction) {
     ctx_.tensorizing = false;
   }
 }

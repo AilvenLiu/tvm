@@ -31,8 +31,8 @@ import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TCol, TileLayout, TLane
-from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
+from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.op_dispatch.cuda.gemm_async import sf_tmem_layout
 from tvm.tirx.op_dispatch.cuda.tma_utils import tma_atom_layout, tma_atom_shape, tma_shared_layout
 
@@ -63,7 +63,7 @@ def _mn_major_layout(dtype, swizzle_mode, shape):
     MN-major swaps this: atom becomes [T*s, 8] with M contiguous.
     This is achieved by composing the SwizzleLayout with a stride-reversed TileLayout.
     """
-    from tvm.tir.layout import ComposeLayout
+    from tvm.tirx.layout import ComposeLayout
 
     swizzle_atom = tma_atom_layout(dtype, swizzle_mode)
     base_shape = tma_atom_shape(dtype, swizzle_mode)  # 2D: [8, T*s]

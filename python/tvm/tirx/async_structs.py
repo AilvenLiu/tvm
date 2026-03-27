@@ -16,18 +16,23 @@
 # under the License.
 # pylint: disable=no-member
 """Async structures for TIR+"""
-from typing import Union, Dict, Any
+
+from typing import Any
 
 import tvm
 from tvm.ffi import register_object
 from tvm.runtime import Object
-from tvm.tirx import BufferRegion, Buffer, OpCall
+from tvm.tirx import Buffer, BufferRegion, OpCall
 from tvm.tirx.exec_scope import ExecScope
+
 from . import _ffi_api
 
 
 def make_op_call(
-    op_name: str, args, workspace: Dict[str, Buffer] = None, schedule_config: Dict[str, Any] = None
+    op_name: str,
+    args,
+    workspace: dict[str, Buffer] | None = None,
+    schedule_config: dict[str, Any] | None = None,
 ):
     """Create a call to a TIR+ operator.
 
@@ -50,7 +55,7 @@ def make_op_call(
 
     from tvm.tirp.operator import get_tirp_op
 
-    f = tvm.get_global_func("script.ir_builder.tir.OpCall")
+    f = tvm.get_global_func("script.ir_builder.tirx.OpCall")
     return f(
         OpCall(*args, op=get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config)
     )
@@ -64,8 +69,8 @@ class Pipeline(Object):
     name_hint: str
     depth: int
     separate_pc: bool
-    workspace: Dict[str, Buffer]
-    schedule_config: Dict[str, Any]
+    workspace: dict[str, Buffer]
+    schedule_config: dict[str, Any]
 
     def __init__(
         self,
@@ -73,8 +78,8 @@ class Pipeline(Object):
         depth: int = 0,
         separate_pc: bool = False,
         name_hint: str = "",
-        workspace: Dict[str, Buffer] = None,
-        schedule_config: Dict[str, Any] = None,
+        workspace: dict[str, Buffer] | None = None,
+        schedule_config: dict[str, Any] | None = None,
     ):
         if workspace is None:
             workspace = {}
@@ -111,7 +116,7 @@ class Pipeline(Object):
         return make_op_call("pipeline_consumer_release", [self])
 
 
-def _to_region(buffer: Union[BufferRegion, Buffer]):
+def _to_region(buffer: BufferRegion | Buffer):
     if isinstance(buffer, Buffer):
         return buffer[[slice(None, None, None) for _ in range(len(buffer.shape))]]
     assert isinstance(buffer, BufferRegion)
@@ -134,7 +139,7 @@ class CopyPipeline(Pipeline):
         TMA_LOAD = "tma_load"
         TMA_STORE = "tma_store"
 
-    def copy(self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+    def copy(self, dst: BufferRegion | Buffer, src: BufferRegion | Buffer):
         """Copy data asynchronously from the source to the destination."""
         dst = _to_region(dst)
         src = _to_region(src)

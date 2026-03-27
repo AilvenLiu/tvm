@@ -18,7 +18,7 @@
 """Implementation of select schedules."""
 
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, FloatImm, OpCall, PrimFunc
+from tvm.tirx import BufferRegion, FloatImm, OpCall, PrimFunc
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,

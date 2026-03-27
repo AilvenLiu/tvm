@@ -17,7 +17,7 @@
 import pytest
 
 from tvm.script import tirx as Tx
-from tvm.tir.analysis import verify_tirx_well_formed as verify
+from tvm.tirx.analysis import verify_tirx_well_formed as verify
 
 
 def test_root_scope():

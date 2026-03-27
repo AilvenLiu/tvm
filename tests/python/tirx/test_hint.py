@@ -20,8 +20,8 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm.ir import assert_structural_equal
-from tvm.script import tir as T
-from tvm.tir import AttrStmt
+from tvm.script import tirx as T
+from tvm.tirx import AttrStmt
 
 
 def from_source(code):
@@ -54,7 +54,7 @@ def test_hint_statement():
             assert str(stmt.node["message"]) == "persistent tile scheduler with L2 swizzle"
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected AttrStmt with attr_key='tirx_hint' not found"
 
 
@@ -82,7 +82,7 @@ def test_hint_context_manager():
             assert str(stmt.node["message"]) == "software pipeline, depth 4"
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected AttrStmt with attr_key='tirx_hint' not found"
 
 
@@ -112,7 +112,7 @@ def test_hint_with_attrs():
             assert str(stmt.node["depth"]) == "4"
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected AttrStmt with attr_key='tirx_hint' not found"
 
 
@@ -185,8 +185,8 @@ def test_hint_printer_roundtrip_with_attrs():
 
 def test_hint_keyword_arg_on_tx_op():
     """Tx.op(..., hint="msg") stores hint in OpCall.config."""
-    from tvm.tir.buffer import decl_buffer
-    from tvm.tir.stmt import OpCall
+    from tvm.tirx.buffer import decl_buffer
+    from tvm.tirx.stmt import OpCall
 
     A = decl_buffer((64, 64), "float32", scope="global")
     A_sm = decl_buffer((64, 64), "float32", scope="shared")
@@ -244,12 +244,12 @@ def test_hint_no_message():
             # Should have "access" key but no "message" key
             assert "access" in stmt.node
             assert "message" not in stmt.node
-            from tvm.tir import BufferRegion
+            from tvm.tirx import BufferRegion
 
             assert isinstance(stmt.node["access"], BufferRegion)
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected AttrStmt with attr_key='tirx_hint' containing access not found"
 
 
@@ -276,7 +276,7 @@ def test_hint_access_buffer_region():
             assert isinstance(stmt.node, tvm.ir.Map)
             assert str(stmt.node["message"]) == "partition"
             assert "access" in stmt.node
-            from tvm.tir import BufferRegion
+            from tvm.tirx import BufferRegion
 
             assert isinstance(stmt.node["access"], BufferRegion)
             br = stmt.node["access"]
@@ -284,7 +284,7 @@ def test_hint_access_buffer_region():
             assert len(br.region) == 2
             found[0] = True
 
-    tvm.tir.stmt_functor.post_order_visit(func.body, visit)
+    tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
     assert found[0], "Expected AttrStmt with structured BufferRegion access not found"
 
 

@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
 
 
-@tvm_ffi.register_object("tir.Stmt")
+@tvm_ffi.register_object("tirx.Stmt")
 class Stmt(Object, Scriptable):
     """Base class of all the statements."""
 
@@ -90,7 +90,7 @@ def _normalize_legacy_stmt(stmt: Stmt | None) -> Stmt | None:
     return SeqStmt(prefix)
 
 
-@tvm_ffi.register_object("tir.Bind")
+@tvm_ffi.register_object("tirx.Bind")
 class Bind(Stmt):
     """Bind node.
 
@@ -781,7 +781,7 @@ class MatchBufferRegion(Object, Scriptable):
         )
 
 
-@tvm_ffi.register_object("tir.SBlock")
+@tvm_ffi.register_object("tirx.SBlock")
 class SBlock(Stmt):
     """SBlock node.
 
@@ -907,7 +907,7 @@ class SBlockRealize(Stmt):
         )  # type: ignore
 
 
-@tvm_ffi.register_object("tir.ExecScopeStmt")
+@tvm_ffi.register_object("tirx.ExecScopeStmt")
 class ExecScopeStmt(Stmt):
     """ExecScopeStmt node.
 
@@ -945,7 +945,7 @@ class ExecScopeStmt(Stmt):
         )  # type: ignore
 
 
-@tvm_ffi.register_object("tir.Break")
+@tvm_ffi.register_object("tirx.Break")
 class Break(Stmt):
     """Break node.
 
@@ -957,7 +957,7 @@ class Break(Stmt):
         self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
 
 
-@tvm_ffi.register_object("tir.Continue")
+@tvm_ffi.register_object("tirx.Continue")
 class Continue(Stmt):
     """Continue node.
 
@@ -1019,7 +1019,7 @@ def normalize_const_arg(arg) -> PrimExpr:
     return arg
 
 
-@tvm_ffi.register_object("tir.OpCall")
+@tvm_ffi.register_object("tirx.OpCall")
 class OpCall(Stmt):
     """OpCall node.
 

@@ -24,17 +24,11 @@
 
 #include <tvm/arith/analyzer.h>
 #include <tvm/ir/op.h>
-#include <tvm/tirx/exec_scope.h>
-#include <tvm/tirx/stmt.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/tirx_op.h>
-=======
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirx_op.h>
->>>>>>> 6527ba630b (fix(rebase): restore tirx compatibility and tests after apache/main sync):src/tir/analysis/verify_tirx_well_formed.cc
 
 #include <exception>
 #include <optional>
@@ -346,5 +340,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                           }
                         });
 }
-}  // namespace tirxxx
+}  // namespace tirx
 }  // namespace tvm

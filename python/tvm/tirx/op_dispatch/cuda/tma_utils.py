@@ -22,7 +22,7 @@ from enum import Enum
 
 import tvm
 from tvm.arith.analyzer import Analyzer
-from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
+from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
 
 
 class SwizzleMode(Enum):

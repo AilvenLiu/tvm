@@ -34,7 +34,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   bool tirx = false;
   for (Frame f : d->frames) {
     if (const auto* tir_f = f.as<TIRFrameNode>()) {
-      if (auto func = tir_f->tir.as<tir::PrimFuncNode>()) {
+      if (auto func = tir_f->tirx.as<tirx::PrimFuncNode>()) {
         if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRx)) {
           tirx = true;
           break;
@@ -247,10 +247,10 @@ TVM_SCRIPT_REPR(tirx::SBlockNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ExecScopeStmt>(
-        "", [](tir::ExecScopeStmt stmt, AccessPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::ExecScopeStmt>(
+        "", [](tirx::ExecScopeStmt stmt, AccessPath p, IRDocsifier d) -> Doc {
           With<TIRFrame> frame(d, stmt);
-          tir::ExecScope exec_scope = stmt->exec_scope;
+          tirx::ExecScope exec_scope = stmt->exec_scope;
           AccessPath scope_p = p->Attr("exec_scope");
 
           // Print scope_id_def if present
@@ -279,7 +279,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           AsDocBody(stmt->body, p->Attr("body"), frame->get(), d);
 
           // Generate the with statement
-          if (auto scope_slice_opt = exec_scope.as<tvm::tir::ExecScopeSlice>()) {
+          if (auto scope_slice_opt = exec_scope.as<tvm::tirx::ExecScopeSlice>()) {
             auto scope_slice = scope_slice_opt.value();
             ExprDoc extents_doc = d->AsDoc<ExprDoc>(scope_slice->extents, scope_p->Attr("extents"));
             ExprDoc parent_doc = LiteralDoc::Str(scope_slice->parent, scope_p->Attr("parent"));
@@ -299,8 +299,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
               auto cond = scope_slice->slices.as<PrimExpr>().value();
               // Detect thread()[ptx.elect_sync()] and print as elected()
               if (exec_scope->name == "thread") {
-                if (auto call_node = cond.as<tir::CallNode>()) {
-                  if (call_node->op.same_as(tir::builtin::ptx_elect_sync())) {
+                if (auto call_node = cond.as<tirx::CallNode>()) {
+                  if (call_node->op.same_as(tirx::builtin::ptx_elect_sync())) {
                     return ScopeDoc(std::nullopt, TIR(d, "elected")->Call({}), (*frame)->stmts);
                   }
                 }
@@ -313,35 +313,37 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
         });
 
-TVM_SCRIPT_REPR(tir::ExecScopeStmtNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::ExecScopeStmtNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ExecScope>(
-        "", [](tir::ExecScope exec_scope, AccessPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::ExecScope>(
+        "", [](tirx::ExecScope exec_scope, AccessPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "ExecScope")->Call({LiteralDoc::Str(exec_scope->name, p->Attr("name"))});
           return doc;
         });
-TVM_SCRIPT_REPR(tir::ExecScopeNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::ExecScopeNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ScopeIdDef>("", [](tir::ScopeIdDef def, AccessPath p, IRDocsifier d) -> Doc {
-      Doc doc = TIR(d, "ScopeIdDef")
-                    ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
-                            d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
-                            LiteralDoc::Str(def->scope->parent, p->Attr("parent")),
-                            LiteralDoc::Str(def->scope->cur, p->Attr("cur"))});
-      return doc;
-    });
-TVM_SCRIPT_REPR(tir::ScopeIdDefNode, ReprPrintTIR);
+    .set_dispatch<tirx::ScopeIdDef>(
+        "", [](tirx::ScopeIdDef def, AccessPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "ScopeIdDef")
+                        ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
+                                d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
+                                LiteralDoc::Str(def->scope->parent, p->Attr("parent")),
+                                LiteralDoc::Str(def->scope->cur, p->Attr("cur"))});
+          return doc;
+        });
+TVM_SCRIPT_REPR(tirx::ScopeIdDefNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ScopePair>("", [](tir::ScopePair pair, AccessPath p, IRDocsifier d) -> Doc {
-      Doc doc = TIR(d, "ScopePair")
-                    ->Call({d->AsDoc<ExprDoc>(pair->parent, p->Attr("parent")),
-                            d->AsDoc<ExprDoc>(pair->cur, p->Attr("cur"))});
-      return doc;
-    });
-TVM_SCRIPT_REPR(tir::ScopePairNode, ReprPrintTIR);
+    .set_dispatch<tirx::ScopePair>(
+        "", [](tirx::ScopePair pair, AccessPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "ScopePair")
+                        ->Call({d->AsDoc<ExprDoc>(pair->parent, p->Attr("parent")),
+                                d->AsDoc<ExprDoc>(pair->cur, p->Attr("cur"))});
+          return doc;
+        });
+TVM_SCRIPT_REPR(tirx::ScopePairNode, ReprPrintTIR);
 
 }  // namespace printer
 }  // namespace script

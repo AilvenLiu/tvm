@@ -21,7 +21,7 @@ from collections import namedtuple
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion
+from tvm.tirx import BufferRegion
 
 # Represents the part of data iter covered by the buffer region
 RangeInfo = namedtuple(

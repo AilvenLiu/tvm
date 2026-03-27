@@ -38,7 +38,7 @@ class TopkSoftmaxTile(Tile):
             f"number of experts is {num_experts}, which is not a power of 2",
         )
         Tx.Assert(
-            tvm.tir.all(1 <= num_experts, num_experts <= 256),
+            tvm.tirx.all(1 <= num_experts, num_experts <= 256),
             f"number of experts is {num_experts}, which is not within [1, 256]",
         )
         self.num_experts = num_experts
@@ -58,12 +58,12 @@ class TopkSoftmaxTile(Tile):
         # self.BYTES_PER_LDG = Tx.min(self.MAX_BYTES_PER_LDG, self.n_bytes * self.num_experts)
         self.BYTES_PER_LDG = self.MAX_BYTES_PER_LDG
         Tx.Assert(
-            tvm.tir.all(is_power_of_two(self.BYTES_PER_LDG), self.BYTES_PER_LDG <= 16),
+            tvm.tirx.all(is_power_of_two(self.BYTES_PER_LDG), self.BYTES_PER_LDG <= 16),
             f"BYTES_PER_LDG is {self.BYTES_PER_LDG}, which is not a power of 2 or is larger than 16",  # noqa: E501
         )
         self.ELTS_PER_LDG = self.BYTES_PER_LDG // self.n_bytes
         Tx.Assert(
-            tvm.tir.any(
+            tvm.tirx.any(
                 num_experts // (self.ELTS_PER_LDG * 32) == 0,
                 num_experts % (self.ELTS_PER_LDG * 32) == 0,
             ),

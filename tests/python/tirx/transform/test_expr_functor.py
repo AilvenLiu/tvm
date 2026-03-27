@@ -17,10 +17,10 @@
 
 import tvm
 import tvm.testing
-from tvm import tir
+from tvm import tirx as tir
 from tvm.ir import Op
 from tvm.ir.base import assert_structural_equal
-from tvm.tir.expr import (
+from tvm.tirx.expr import (
     EQ,
     GE,
     GT,
@@ -55,7 +55,7 @@ from tvm.tir.expr import (
     Sub,
     Var,
 )
-from tvm.tir.expr_functor import ExprMutator, ExprVisitor
+from tvm.tirx.expr_functor import ExprMutator, ExprVisitor
 
 # Basic example variables for testing
 n = tir.Var("n", "int32")

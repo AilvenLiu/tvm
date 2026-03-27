@@ -127,8 +127,9 @@ void SBlockFrameNode::ExitWithScope() {
     attrs.Set("tirx.script_parsing_detect_access", tvm::IntImm(DataType::Int(64), detect_access));
   }
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
-                         writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
-                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span());
+                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name,
+                          AsStmt(stmts), init, tir_alloc_buffers, match_buffers, attrs,
+                          tvm::Span());
   if (no_realize) {
     TVM_FFI_CHECK(iter_values.empty(), ValueError)
         << "Block bindings are not allowed when `no_realize=True`";
@@ -255,13 +256,13 @@ void ComposeOpFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   ffi::Array<ObjectRef> ops;
   for (const auto& stmt : stmts) {
-    auto op_call = stmt.as<tvm::tirx::tirx::OpCallNode>();
+    auto op_call = stmt.as<tvm::tirx::OpCallNode>();
     TVM_FFI_ICHECK(op_call) << "ValueError: Only TIRx op calls allowed in ComposeOp. Violated by "
                             << stmt;
-    ops.push_back(ffi::GetRef<tvm::tirx::tirx::OpCall>(op_call));
+    ops.push_back(ffi::GetRef<tvm::tirx::OpCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirx.compose_op");
-  AddToParent(tvm::tirx::tirx::OpCall(compose_op_op, ops, workspace, config, dispatch));
+  AddToParent(tvm::tirx::OpCall(compose_op_op, ops, workspace, config, dispatch));
 }
 
 void AllocBufferFrameNode::ExitWithScope() {
@@ -283,7 +284,7 @@ void HintFrameNode::ExitWithScope() {
       tvm::tirx::AttrStmt(full_attrs, "tirx_hint", IntImm(DataType::Int(32), 1), AsStmt(stmts)));
 }
 
-}  // namespace tirxxxxx
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

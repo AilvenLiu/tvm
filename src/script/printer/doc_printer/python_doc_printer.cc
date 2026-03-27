@@ -20,7 +20,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/script/printer/doc.h>
-#include <tvm/tir/tirx_op.h>
+#include <tvm/tirx/tirx_op.h>
 
 #include <algorithm>
 #include <cmath>

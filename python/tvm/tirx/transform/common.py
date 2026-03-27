@@ -16,7 +16,7 @@
 # under the License.
 
 
-from tvm.tir import (
+from tvm.tirx import (
     AllocBuffer,
     BufferLoad,
     BufferRegion,
@@ -28,10 +28,10 @@ from tvm.tir import (
     Var,
     decl_buffer,
 )
-from tvm.tir.buffer import Buffer
-from tvm.tir.layout import Iter, TileLayout
-from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
+from tvm.tirx.buffer import Buffer
+from tvm.tirx.layout import Iter, TileLayout
 from tvm.tirx.operator.op import KernelReplacePoint
+from tvm.tirx.stmt_functor import StmtExprMutator, StmtMutator
 
 
 # FIXME: this pass does not replace var in the shape/layout of a buffer

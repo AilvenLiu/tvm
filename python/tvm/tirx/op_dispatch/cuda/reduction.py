@@ -32,11 +32,11 @@ from typing import Any
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimFunc
-from tvm.tir.layout import TileLayout, laneid
-from tvm.tir.stmt import OpCall
+from tvm.tirx import BufferRegion, PrimFunc
+from tvm.tirx.layout import TileLayout, laneid
 from tvm.tirx.op_dispatch import DispatchContext, fail
 from tvm.tirx.op_dispatch.dispatcher import predicate, register_dispatch
+from tvm.tirx.stmt import OpCall
 
 from ..common import ReduceOpType
 from .common import get_indices, get_st_extent, next_power_of_2

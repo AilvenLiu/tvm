@@ -23,10 +23,10 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer
+from tvm.tirx import Buffer
 
 
-def _get_source(func: tvm.tir.PrimFunc) -> tuple[str, tvm.IRModule]:
+def _get_source(func: tvm.tirx.PrimFunc) -> tuple[str, tvm.IRModule]:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

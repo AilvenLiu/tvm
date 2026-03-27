@@ -35,8 +35,8 @@ import operator
 import re
 
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, OpCall, PrimExpr, PrimFunc
-from tvm.tir.expr import FloatImm
+from tvm.tirx import BufferRegion, OpCall, PrimExpr, PrimFunc
+from tvm.tirx.expr import FloatImm
 from tvm.tirx.op_dispatch import DispatchContext
 from tvm.tirx.op_dispatch.dispatcher import predicate
 

@@ -27,9 +27,9 @@ import tvm
 from tvm.arith.analyzer import Analyzer
 from tvm.ir import Range
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, PrimExpr, Var
-from tvm.tir.expr_functor import ExprMutator
-from tvm.tir.layout import Iter
+from tvm.tirx import BufferRegion, PrimExpr, Var
+from tvm.tirx.expr_functor import ExprMutator
+from tvm.tirx.layout import Iter
 
 from .dim_utils import DimensionMapper, RangeInfo, normalize_and_group
 
@@ -171,7 +171,7 @@ class InstructionGenerator:
                 assert False, f"Cannot analyze physical tensor region for: {buffer_region}"
             new_shard += reversed(reversed_shard)
             new_seps.append(len(reversed_shard) + new_seps[-1])
-        new_tile_layout = tvm.tir.layout.TileLayout.from_iters(  # pylint: disable=no-member
+        new_tile_layout = tvm.tirx.layout.TileLayout.from_iters(  # pylint: disable=no-member
             new_shard, [], dict()
         )
         return new_tile_layout, new_seps

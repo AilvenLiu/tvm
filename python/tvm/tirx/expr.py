@@ -1152,7 +1152,7 @@ class BufferLoad(PrimExprWithOp):
         return self.buffer.is_event_tensor()
 
 
-@tvm_ffi.register_object("tir.ProducerLoad")
+@tvm_ffi.register_object("tirx.ProducerLoad")
 class ProducerLoad(PrimExprWithOp):
     """Producer load node.
 

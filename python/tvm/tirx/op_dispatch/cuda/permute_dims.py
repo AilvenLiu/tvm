@@ -25,13 +25,13 @@ before/after IR examples.
 import math
 
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, BufferRegion, PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, BufferRegion, PrimFunc
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     predicate,
     register_dispatch,
 )
+from tvm.tirx.stmt import OpCall
 
 from .common import get_indices, get_st_extent
 

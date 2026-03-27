@@ -23,9 +23,9 @@ from typing import Literal
 import tvm
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
-from tvm.tir import PrimExpr
-from tvm.tir.expr import Var
+from tvm.tirx import PrimExpr
 from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.expr import Var
 
 from .config import KernelConfig, ProfileEventType
 from .utils import any_sync, f_init_const

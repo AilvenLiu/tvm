@@ -24,7 +24,7 @@ import pytest
 import tvm
 from tvm.arith import Analyzer
 from tvm.ir import assert_structural_equal
-from tvm.tir.layout import (
+from tvm.tirx.layout import (
     Axis,
     ComposeLayout,
     F,
@@ -1118,7 +1118,7 @@ def test_apply():
 
     def test_tile_layout_4():
         layout = TileLayout(S[(8, 8) : (8, 1)])
-        v = tvm.tir.Var("v", dtype="int32")
+        v = tvm.tirx.Var("v", dtype="int32")
         res = layout.apply(v)
         assert res["m"] == v
 

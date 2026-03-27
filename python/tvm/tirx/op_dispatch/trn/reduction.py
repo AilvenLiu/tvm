@@ -18,9 +18,9 @@
 """Implementation of reduction schedules."""
 
 from tvm.script import tirx as Tx
-from tvm.tir import PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
+from tvm.tirx.stmt import OpCall
 
 from ..common import ReduceOpType
 from .common import init_analyzer, nki_dim

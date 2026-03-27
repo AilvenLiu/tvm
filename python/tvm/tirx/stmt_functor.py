@@ -33,30 +33,30 @@ class StmtFunctor:
 
     def __init__(self):
         self._dispatch_map = {
-            "tir.Bind": self.visit_bind_,
-            "tir.LetStmt": self.visit_let_stmt_,
-            "tir.AttrStmt": self.visit_attr_,
-            "tir.IfThenElse": self.visit_if_then_else_,
-            "tir.For": self.visit_for_,
-            "tir.While": self.visit_while_,
-            "tir.Break": self.visit_break_,
-            "tir.Continue": self.visit_continue_,
-            "tir.Allocate": self.visit_allocate_,
-            "tir.AllocateConst": self.visit_allocate_const_,
-            "tir.DeclBuffer": self.visit_decl_buffer_,
-            "tir.BufferStore": self.visit_buffer_store_,
-            "tir.BufferRealize": self.visit_buffer_realize_,
-            "tir.AssertStmt": self.visit_assert_,
-            "tir.ProducerStore": self.visit_producer_store_,
-            "tir.ProducerRealize": self.visit_producer_realize_,
-            "tir.Prefetch": self.visit_prefetch_,
-            "tir.SeqStmt": self.visit_seqstmt_,
-            "tir.Evaluate": self.visit_evaluate_,
-            "tir.SBlock": self.visit_block_,
-            "tir.SBlockRealize": self.visit_block_realize_,
-            "tir.ExecScopeStmt": self.visit_exec_scope_stmt_,
-            "tir.OpCall": self.visit_op_call_,
-            "tir.AllocBuffer": self.visit_alloc_buffer_,
+            "tirx.Bind": self.visit_bind_,
+            "tirx.LetStmt": self.visit_let_stmt_,
+            "tirx.AttrStmt": self.visit_attr_,
+            "tirx.IfThenElse": self.visit_if_then_else_,
+            "tirx.For": self.visit_for_,
+            "tirx.While": self.visit_while_,
+            "tirx.Break": self.visit_break_,
+            "tirx.Continue": self.visit_continue_,
+            "tirx.Allocate": self.visit_allocate_,
+            "tirx.AllocateConst": self.visit_allocate_const_,
+            "tirx.DeclBuffer": self.visit_decl_buffer_,
+            "tirx.BufferStore": self.visit_buffer_store_,
+            "tirx.BufferRealize": self.visit_buffer_realize_,
+            "tirx.AssertStmt": self.visit_assert_,
+            "tirx.ProducerStore": self.visit_producer_store_,
+            "tirx.ProducerRealize": self.visit_producer_realize_,
+            "tirx.Prefetch": self.visit_prefetch_,
+            "tirx.SeqStmt": self.visit_seqstmt_,
+            "tirx.Evaluate": self.visit_evaluate_,
+            "tirx.SBlock": self.visit_block_,
+            "tirx.SBlockRealize": self.visit_block_realize_,
+            "tirx.ExecScopeStmt": self.visit_exec_scope_stmt_,
+            "tirx.OpCall": self.visit_op_call_,
+            "tirx.AllocBuffer": self.visit_alloc_buffer_,
         }
 
     def visit_stmt(self, stmt):
@@ -64,7 +64,7 @@ class StmtFunctor:
 
         Parameters
         ----------
-        stmt : tvm.tir.Stmt
+        stmt : tvm.tirx.Stmt
             The statement to be visited.
 
         Returns
@@ -74,7 +74,7 @@ class StmtFunctor:
         """
         if stmt is None:
             return None
-        if isinstance(stmt, tvm.tir.OpCall):
+        if isinstance(stmt, tvm.tirx.OpCall):
             # subclass of OpCall only exists in python side
             # and are not handled by dispatch map
             key = "OpCall"
@@ -83,14 +83,14 @@ class StmtFunctor:
         if key.endswith("Node"):
             key = key[:-4]  # Remove the "Node" suffix
 
-        key = "tir." + key
+        key = "tirx." + key
         # Legacy LetStmt compatibility: represent LetStmt as either:
         # 1) Bind + python-side body
-        # 2) SeqStmt([Bind, body]) tagged by tvm.tir.LetStmt helper
-        if key == "tir.Bind" and hasattr(stmt, "body"):
-            key = "tir.LetStmt"
-        if key == "tir.SeqStmt" and hasattr(stmt, "_legacy_let"):
-            key = "tir.LetStmt"
+        # 2) SeqStmt([Bind, body]) tagged by tvm.tirx.LetStmt helper
+        if key == "tirx.Bind" and hasattr(stmt, "body"):
+            key = "tirx.LetStmt"
+        if key == "tirx.SeqStmt" and hasattr(stmt, "_legacy_let"):
+            key = "tirx.LetStmt"
         if key in self._dispatch_map:
             return self._dispatch_map[key](stmt)
 
@@ -205,7 +205,7 @@ class StmtFunctor:
 
         Parameters
         ----------
-        stmt : tvm.tir.Stmt
+        stmt : tvm.tirx.Stmt
             The statement.
 
         Returns
@@ -363,14 +363,14 @@ class StmtVisitor(StmtFunctor):
         for arg in op.args:
             if isinstance(arg, PrimExpr):
                 self.visit_expr(arg)
-            elif isinstance(arg, tvm.tir.Stmt):
+            elif isinstance(arg, tvm.tirx.Stmt):
                 self.visit_stmt(arg)
-            elif isinstance(arg, tvm.tir.BufferRegion):
+            elif isinstance(arg, tvm.tirx.BufferRegion):
                 self.visit_buffer_region_(arg)
         for value in op.config.values():
             if isinstance(value, PrimExpr):
                 self.visit_expr(value)
-            elif isinstance(value, tvm.tir.Stmt):
+            elif isinstance(value, tvm.tirx.Stmt):
                 self.visit_stmt(value)
 
     def visit_buffer_region_(self, op):
@@ -422,7 +422,7 @@ class StmtMutator(StmtFunctor):
         if value is op.value:
             return op
 
-        return tvm.tir.Bind(op.var, value, op.span)
+        return tvm.tirx.Bind(op.var, value, op.span)
 
     def visit_let_stmt_(self, op):
         """Compatibility mutator implementation for LetStmt."""
@@ -431,7 +431,7 @@ class StmtMutator(StmtFunctor):
             body = self.visit_stmt(op.body)
             if value is op.value and body is op.body:
                 return op
-            return tvm.tir.LetStmt(op.var, value, body, op.span)
+            return tvm.tirx.LetStmt(op.var, value, body, op.span)
         return self.visit_bind_(op)
 
     def visit_attr_(self, op):
@@ -442,7 +442,7 @@ class StmtMutator(StmtFunctor):
         if value is op.value and body is op.body:
             return op
 
-        return tvm.tir.AttrStmt(op.node, op.attr_key, value, body, op.span)
+        return tvm.tirx.AttrStmt(op.node, op.attr_key, value, body, op.span)
 
     def visit_if_then_else_(self, op):
         """Mutator implementation for IfThenElse."""
@@ -453,7 +453,7 @@ class StmtMutator(StmtFunctor):
         if condition is op.condition and then_case is op.then_case and else_case is op.else_case:
             return op
 
-        return tvm.tir.IfThenElse(condition, then_case, else_case, op.span)
+        return tvm.tirx.IfThenElse(condition, then_case, else_case, op.span)
 
     def visit_for_(self, op):
         """Mutator implementation for For."""
@@ -465,7 +465,7 @@ class StmtMutator(StmtFunctor):
         if min_val is op.min and extent is op.extent and step is op.step and body is op.body:
             return op
 
-        return tvm.tir.For(
+        return tvm.tirx.For(
             op.loop_var,
             min_val,
             extent,
@@ -485,7 +485,7 @@ class StmtMutator(StmtFunctor):
         if condition is op.condition and body is op.body:
             return op
 
-        return tvm.tir.While(condition, body, op.span)
+        return tvm.tirx.While(condition, body, op.span)
 
     def visit_break_(self, op):
         """Mutator implementation for Break."""
@@ -506,7 +506,7 @@ class StmtMutator(StmtFunctor):
         if not extents_changed and body is op.body and condition is op.condition:
             return op
 
-        return tvm.tir.Allocate(
+        return tvm.tirx.Allocate(
             op.buffer_var, op.dtype, extents, condition, body, op.annotations, op.span
         )
 
@@ -528,7 +528,7 @@ class StmtMutator(StmtFunctor):
         else:
             data_or_idx = None
 
-        return tvm.tir.AllocateConst(
+        return tvm.tirx.AllocateConst(
             op.buffer_var, op.dtype, extents, data_or_idx, body, op.annotations, op.span
         )
 
@@ -538,7 +538,7 @@ class StmtMutator(StmtFunctor):
             body = self.visit_stmt(op.body)
             if body is op.body:
                 return op
-            return tvm.tir.DeclBuffer(op.buffer, body, op.span)
+            return tvm.tirx.DeclBuffer(op.buffer, body, op.span)
         return op
 
     def visit_buffer_store_(self, op):
@@ -552,7 +552,7 @@ class StmtMutator(StmtFunctor):
         if value is op.value and not indices_changed and predicate is op.predicate:
             return op
 
-        return tvm.tir.BufferStore(op.buffer, value, indices, predicate, op.span)
+        return tvm.tirx.BufferStore(op.buffer, value, indices, predicate, op.span)
 
     def visit_buffer_realize_(self, op):
         """Mutator implementation for BufferRealize."""
@@ -575,7 +575,7 @@ class StmtMutator(StmtFunctor):
         if not bounds_changed and condition is op.condition and body is op.body:
             return op
 
-        return tvm.tir.BufferRealize(op.buffer, bounds, condition, body, op.span)
+        return tvm.tirx.BufferRealize(op.buffer, bounds, condition, body, op.span)
 
     def visit_assert_(self, op):
         """Mutator implementation for AssertStmt."""
@@ -594,7 +594,7 @@ class StmtMutator(StmtFunctor):
         if condition is op.condition and not message_parts_changed:
             return op
 
-        return tvm.tir.AssertStmt(op.kind, condition, message_parts, op.span)
+        return tvm.tirx.AssertStmt(op.kind, condition, message_parts, op.span)
 
     def visit_producer_store_(self, op):
         """Mutator implementation for ProducerStore."""
@@ -606,7 +606,7 @@ class StmtMutator(StmtFunctor):
         if value is op.value and not indices_changed:
             return op
 
-        return tvm.tir.ProducerStore(op.producer, value, indices, op.span)
+        return tvm.tirx.ProducerStore(op.producer, value, indices, op.span)
 
     def visit_producer_realize_(self, op):
         """Mutator implementation for ProducerRealize."""
@@ -629,7 +629,7 @@ class StmtMutator(StmtFunctor):
         if not bounds_changed and condition is op.condition and body is op.body:
             return op
 
-        return tvm.tir.ProducerRealize(
+        return tvm.tirx.ProducerRealize(
             op.producer, bounds, condition, body, op.storage_scope, op.span
         )
 
@@ -651,7 +651,7 @@ class StmtMutator(StmtFunctor):
         if not bounds_changed:
             return op
 
-        return tvm.tir.Prefetch(op.buffer, bounds, op.span)
+        return tvm.tirx.Prefetch(op.buffer, bounds, op.span)
 
     def visit_seqstmt_(self, op):
         """Mutator implementation for SeqStmt."""
@@ -662,7 +662,7 @@ class StmtMutator(StmtFunctor):
             new_stmt = self.visit_stmt(stmt)
             if new_stmt is not stmt:
                 changed = True
-            if isinstance(new_stmt, tvm.tir.SeqStmt):
+            if isinstance(new_stmt, tvm.tirx.SeqStmt):
                 # Flatten nested SeqStmt
                 new_seq.extend(new_stmt.seq)
                 changed = True
@@ -675,7 +675,7 @@ class StmtMutator(StmtFunctor):
         if len(new_seq) == 1:
             return new_seq[0]
 
-        return tvm.tir.SeqStmt(new_seq, op.span)
+        return tvm.tirx.SeqStmt(new_seq, op.span)
 
     def visit_evaluate_(self, op):
         """Mutator implementation for Evaluate."""
@@ -684,7 +684,7 @@ class StmtMutator(StmtFunctor):
         if value is op.value:
             return op
 
-        return tvm.tir.Evaluate(value, op.span)
+        return tvm.tirx.Evaluate(value, op.span)
 
     def visit_block_(self, op):
         """Mutator implementation for Block."""
@@ -700,7 +700,7 @@ class StmtMutator(StmtFunctor):
             if new_min is not old_dom.min or new_extent is not old_dom.extent:
                 iter_vars_changed = True
                 new_dom = tvm.ir.Range(new_min, new_extent)
-                iter_vars.append(tvm.tir.IterVar(new_dom, iv.var, iv.iter_type, iv.thread_tag))
+                iter_vars.append(tvm.tirx.IterVar(new_dom, iv.var, iv.iter_type, iv.thread_tag))
             else:
                 iter_vars.append(iv)
 
@@ -725,7 +725,7 @@ class StmtMutator(StmtFunctor):
 
                 if ranges_changed:
                     regions_changed = True
-                    new_regions.append(tvm.tir.BufferRegion(region.buffer, new_ranges))
+                    new_regions.append(tvm.tirx.BufferRegion(region.buffer, new_ranges))
                 else:
                     new_regions.append(region)
 
@@ -755,8 +755,8 @@ class StmtMutator(StmtFunctor):
 
             if ranges_changed:
                 match_buffers_changed = True
-                new_source = tvm.tir.BufferRegion(source_region.buffer, new_ranges)
-                match_buffers.append(tvm.tir.MatchBufferRegion(match_buffer.buffer, new_source))
+                new_source = tvm.tirx.BufferRegion(source_region.buffer, new_ranges)
+                match_buffers.append(tvm.tirx.MatchBufferRegion(match_buffer.buffer, new_source))
             else:
                 match_buffers.append(match_buffer)
 
@@ -774,7 +774,7 @@ class StmtMutator(StmtFunctor):
             and body is op.body
         ):
             return op
-        return tvm.tir.SBlock(
+        return tvm.tirx.SBlock(
             iter_vars,
             reads,
             writes,
@@ -797,10 +797,10 @@ class StmtMutator(StmtFunctor):
         if not iter_values_changed and predicate is op.predicate and block is op.block:
             return op
 
-        if not isinstance(block, tvm.tir.SBlock):
+        if not isinstance(block, tvm.tirx.SBlock):
             raise TypeError(f"Expected SBlock, but got {type(block)}")
 
-        return tvm.tir.SBlockRealize(iter_values, predicate, block)
+        return tvm.tirx.SBlockRealize(iter_values, predicate, block)
 
     def visit_exec_scope_stmt_(self, op):
         """Mutator implementation for ExecScopeStmt."""
@@ -809,7 +809,7 @@ class StmtMutator(StmtFunctor):
         if body is op.body:
             return op
 
-        return tvm.tir.ExecScopeStmt(op.exec_scope, body, op.span)
+        return tvm.tirx.ExecScopeStmt(op.exec_scope, body, op.span)
 
     def visit_op_call_(self, op):
         """Mutator implementation for OpCall."""
@@ -819,9 +819,9 @@ class StmtMutator(StmtFunctor):
         for arg in op.args:
             if isinstance(arg, PrimExpr):
                 new_arg = self.visit_expr(arg)
-            elif isinstance(arg, tvm.tir.Stmt):
+            elif isinstance(arg, tvm.tirx.Stmt):
                 new_arg = self.visit_stmt(arg)
-            elif isinstance(arg, tvm.tir.BufferRegion):
+            elif isinstance(arg, tvm.tirx.BufferRegion):
                 new_arg = self.visit_buffer_region_(arg)
             else:
                 new_arg = arg
@@ -836,7 +836,7 @@ class StmtMutator(StmtFunctor):
         for key, value in op.config.items():
             if isinstance(value, PrimExpr):
                 new_value = self.visit_expr(value)
-            elif isinstance(value, tvm.tir.Stmt):
+            elif isinstance(value, tvm.tirx.Stmt):
                 new_value = self.visit_stmt(value)
             else:
                 new_value = value
@@ -847,7 +847,7 @@ class StmtMutator(StmtFunctor):
         if not args_changed and not config_changed:
             return op
 
-        return tvm.tir.OpCall(
+        return tvm.tirx.OpCall(
             *new_args, op=op.op, workspace=op.workspace, config=new_config, dispatch=op.dispatch
         )
 
@@ -868,7 +868,7 @@ class StmtMutator(StmtFunctor):
         if all(old_r is new_r for old_r, new_r in zip(op.region, region)):
             return op
         else:
-            return tvm.tir.BufferRegion(op.buffer, region)
+            return tvm.tirx.BufferRegion(op.buffer, region)
 
     def visit_alloc_buffer_(self, op):
         """Mutator implementation for AllocBuffer."""
@@ -876,7 +876,7 @@ class StmtMutator(StmtFunctor):
             body = self.visit_stmt(op.body)
             if body is op.body:
                 return op
-            return tvm.tir.AllocBuffer(op.buffer, body, op.annotations, op.span)
+            return tvm.tirx.AllocBuffer(op.buffer, body, op.annotations, op.span)
         return op
 
     def __call__(self, stmt):
@@ -884,12 +884,12 @@ class StmtMutator(StmtFunctor):
 
         Parameters
         ----------
-        stmt : tvm.tir.Stmt
+        stmt : tvm.tirx.Stmt
             The statement to be mutated.
 
         Returns
         -------
-        result : tvm.tir.Stmt
+        result : tvm.tirx.Stmt
             The mutated statement
         """
         return self.visit_stmt(stmt)

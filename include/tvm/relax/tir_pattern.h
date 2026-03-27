@@ -31,7 +31,7 @@
 namespace tvm {
 namespace relax {
 
-using TIRXattern = tir::PrimFunc;
+using TIRPattern = tirx::PrimFunc;
 
 /*
  * \brief The match result of a TIR pattern.
@@ -39,7 +39,7 @@ using TIRXattern = tir::PrimFunc;
 class MatchResultNode : public Object {
  public:
   /*! The matched tir pattern*/
-  TIRXattern pattern;
+  TIRPattern pattern;
   /*! \brief The evaluated values of symbolic vars. */
   ffi::Array<PrimExpr> symbol_values;
   /*! \brief The matched buffers of input and output. */
@@ -66,8 +66,8 @@ class MatchResult : public ObjectRef {
    * \param symbol_values The evaluated values of symbolic vars.
    * \param matched_buffers The matched buffers of input and output.
    */
-  TVM_DLL explicit MatchResult(TIRXattern pattern, ffi::Array<PrimExpr> symbol_values,
-                               ffi::Array<tir::Buffer> matched_buffers);
+  TVM_DLL explicit MatchResult(TIRPattern pattern, ffi::Array<PrimExpr> symbol_values,
+                               ffi::Array<tirx::Buffer> matched_buffers);
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(MatchResult, ObjectRef, MatchResultNode);
 };

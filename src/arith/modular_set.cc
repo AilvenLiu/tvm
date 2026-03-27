@@ -267,7 +267,7 @@ class ModularSetAnalyzer::Impl : public ExprFunctor<ModularSetAnalyzer::Entry(co
       return VisitRightShift(op);
     } else if (op->op.same_as(tirx::builtin::bitwise_and())) {
       return VisitBitwiseAnd(op);
-    } else if (op->op.same_as(tir::builtin::shift_left())) {
+    } else if (op->op.same_as(tirx::builtin::shift_left())) {
       return VisitLeftShift(op);
     } else {
       return Everything();

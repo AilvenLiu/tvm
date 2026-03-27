@@ -270,7 +270,7 @@ class ExecScopeFrameNode : public TIRFrameNode {
         .def_ro("scope_slice_parent", &ExecScopeFrameNode::scope_slice_parent)
         .def_ro("scope_slice_extents", &ExecScopeFrameNode::scope_slice_extents);
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ExecScopeFrame", ExecScopeFrameNode,
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.ExecScopeFrame", ExecScopeFrameNode,
                                     TIRFrameNode);
 
  public:
@@ -667,7 +667,7 @@ class DeclBufferFrameNode : public TIRFrameNode {
         .def_ro("buffer", &DeclBufferFrameNode::buffer)
         .def_ro("allocated", &DeclBufferFrameNode::allocated);
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.DeclBufferFrame", DeclBufferFrameNode,
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.DeclBufferFrame", DeclBufferFrameNode,
                                     TIRFrameNode);
 
  public:
@@ -698,7 +698,7 @@ class ComposeOpFrameNode : public TIRFrameNode {
         .def_ro("config", &ComposeOpFrameNode::config)
         .def_ro("dispatch", &ComposeOpFrameNode::dispatch);
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ComposeOpFrame", ComposeOpFrameNode,
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.ComposeOpFrame", ComposeOpFrameNode,
                                     TIRFrameNode);
 
  public:
@@ -723,7 +723,7 @@ class AllocBufferFrameNode : public TIRFrameNode {
     refl::ObjectDef<AllocBufferFrameNode>().def_ro("buffer", &AllocBufferFrameNode::buffer);
   }
 
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocBufferFrame", AllocBufferFrameNode,
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.AllocBufferFrame", AllocBufferFrameNode,
                                     TIRFrameNode);
 
  public:
@@ -757,7 +757,8 @@ class HintFrameNode : public TIRFrameNode {
         .def_ro("message", &HintFrameNode::message)
         .def_ro("attrs", &HintFrameNode::attrs);
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.HintFrame", HintFrameNode, TIRFrameNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.HintFrame", HintFrameNode,
+                                    TIRFrameNode);
 
  public:
   void ExitWithScope() final;

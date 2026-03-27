@@ -49,39 +49,39 @@ class ExprFunctor:
 
     def __init__(self):
         self._dispatch_map = {
-            "tir.Var": self.visit_var_,
-            "tir.SizeVar": self.visit_size_var_,
-            "tir.BufferLoad": self.visit_buffer_load_,
-            "tir.ProducerLoad": self.visit_producer_load_,
-            "tir.Let": self.visit_let_,
-            "tir.Call": self.visit_call_,
-            "tir.Add": self.visit_add_,
-            "tir.Sub": self.visit_sub_,
-            "tir.Mul": self.visit_mul_,
-            "tir.Div": self.visit_div_,
-            "tir.Mod": self.visit_mod_,
-            "tir.FloorDiv": self.visit_floordiv_,
-            "tir.FloorMod": self.visit_floormod_,
-            "tir.Min": self.visit_min_,
-            "tir.Max": self.visit_max_,
-            "tir.EQ": self.visit_eq_,
-            "tir.NE": self.visit_ne_,
-            "tir.LT": self.visit_lt_,
-            "tir.LE": self.visit_le_,
-            "tir.GT": self.visit_gt_,
-            "tir.GE": self.visit_ge_,
-            "tir.And": self.visit_and_,
-            "tir.Or": self.visit_or_,
-            "tir.Reduce": self.visit_reduce_,
-            "tir.Cast": self.visit_cast_,
-            "tir.Not": self.visit_not_,
-            "tir.Select": self.visit_select_,
-            "tir.Ramp": self.visit_ramp_,
-            "tir.Broadcast": self.visit_broadcast_,
-            "tir.Shuffle": self.visit_shuffle_,
-            "tir.IntImm": self.visit_int_imm_,
-            "tir.FloatImm": self.visit_float_imm_,
-            "tir.StringImm": self.visit_string_imm_,
+            "tirx.Var": self.visit_var_,
+            "tirx.SizeVar": self.visit_size_var_,
+            "tirx.BufferLoad": self.visit_buffer_load_,
+            "tirx.ProducerLoad": self.visit_producer_load_,
+            "tirx.Let": self.visit_let_,
+            "tirx.Call": self.visit_call_,
+            "tirx.Add": self.visit_add_,
+            "tirx.Sub": self.visit_sub_,
+            "tirx.Mul": self.visit_mul_,
+            "tirx.Div": self.visit_div_,
+            "tirx.Mod": self.visit_mod_,
+            "tirx.FloorDiv": self.visit_floordiv_,
+            "tirx.FloorMod": self.visit_floormod_,
+            "tirx.Min": self.visit_min_,
+            "tirx.Max": self.visit_max_,
+            "tirx.EQ": self.visit_eq_,
+            "tirx.NE": self.visit_ne_,
+            "tirx.LT": self.visit_lt_,
+            "tirx.LE": self.visit_le_,
+            "tirx.GT": self.visit_gt_,
+            "tirx.GE": self.visit_ge_,
+            "tirx.And": self.visit_and_,
+            "tirx.Or": self.visit_or_,
+            "tirx.Reduce": self.visit_reduce_,
+            "tirx.Cast": self.visit_cast_,
+            "tirx.Not": self.visit_not_,
+            "tirx.Select": self.visit_select_,
+            "tirx.Ramp": self.visit_ramp_,
+            "tirx.Broadcast": self.visit_broadcast_,
+            "tirx.Shuffle": self.visit_shuffle_,
+            "tirx.IntImm": self.visit_int_imm_,
+            "tirx.FloatImm": self.visit_float_imm_,
+            "tirx.StringImm": self.visit_string_imm_,
         }
 
     def visit_expr(self, expr: PrimExpr):
@@ -104,7 +104,7 @@ class ExprFunctor:
         if key.endswith("Node"):
             key = key[:-4]  # Remove the "Node" suffix
 
-        key = "tir." + key
+        key = "tirx." + key
         if key in self._dispatch_map:
             return self._dispatch_map[key](expr)
 

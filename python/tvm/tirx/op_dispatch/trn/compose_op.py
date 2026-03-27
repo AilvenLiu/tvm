@@ -19,7 +19,7 @@
 
 from tvm.ir import Op
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, OpCall, PrimFunc
+from tvm.tirx import BufferRegion, OpCall, PrimFunc
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     predicate,
@@ -267,7 +267,7 @@ def unary_reduce_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         import tvm
 
         mod = tvm.IRModule({"main": impl})
-        mod = tvm.tir.transform.Simplify()(mod)
+        mod = tvm.tirx.transform.Simplify()(mod)
         return mod["main"]
     else:
         # fmt: off

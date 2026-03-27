@@ -21,9 +21,8 @@ from tvm_ffi import register_object
 from tvm.ir import Range
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
-from tvm.tir import Buffer, IterVar, Stmt, Var
-from tvm.tir.exec_scope import ExecScope
-from tvm.tirx import _ffi_api
+from tvm.tirx import Buffer, IterVar, Stmt, Var, _ffi_api
+from tvm.tirx.exec_scope import ExecScope
 
 
 @register_object("tirx.DispatchContext")

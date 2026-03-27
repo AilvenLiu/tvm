@@ -16,7 +16,7 @@
 # under the License.
 import pytest
 
-from tvm.tir.exec_scope import ExecScope
+from tvm.tirx.exec_scope import ExecScope
 
 
 def test_exec_scope_create():

@@ -22,10 +22,10 @@ import operator
 from collections.abc import Callable
 
 from tvm.script import tirx as Tx
-from tvm.tir import PrimExpr, PrimFunc
-from tvm.tir.exec_scope import ExecScopeSlice
-from tvm.tir.stmt import OpCall
+from tvm.tirx import PrimExpr, PrimFunc
+from tvm.tirx.exec_scope import ExecScopeSlice
 from tvm.tirx.op_dispatch import DispatchContext
+from tvm.tirx.stmt import OpCall
 
 
 def macro_or_prim_func(macro: Callable, need_macro: bool = False) -> Callable:

@@ -148,7 +148,7 @@ def test_hgemm_ampere():
             )
 
     @Tx.inline
-    def store_accum_to_shared(tz, ty, tx, C_smem: tvm.tir.Buffer, Accum):
+    def store_accum_to_shared(tz, ty, tx, C_smem: tvm.tirx.Buffer, Accum):
         """Helper for storing accumulator results to shared memory with optimized indexing"""
         for i in Tx.serial(4):
             for j in Tx.serial(4):
@@ -174,7 +174,7 @@ def test_hgemm_ampere():
                             C_smem[row, scol + 1] = Accum[acc_offset + 1]
 
     @Tx.inline
-    def store_shared_to_global(tz, ty, tx, bx, by, C: tvm.tir.Buffer, C_smem: tvm.tir.Buffer):
+    def store_shared_to_global(tz, ty, tx, bx, by, C: tvm.tirx.Buffer, C_smem: tvm.tirx.Buffer):
         """Helper for storing shared memory results to global memory"""
         tid = Tx.meta_var(tz * 64 + ty * 32 + tx)
 
@@ -191,11 +191,11 @@ def test_hgemm_ampere():
 
     @Tx.inline
     def mmaSync(
-        fragA: tvm.tir.Buffer,
+        fragA: tvm.tirx.Buffer,
         fragA_offset: int,
-        fragB: tvm.tir.Buffer,
+        fragB: tvm.tirx.Buffer,
         fragB_offset: int,
-        Accum: tvm.tir.Buffer,
+        Accum: tvm.tirx.Buffer,
         accum_offset: int,
     ):
         """Matrix multiply-accumulate operation using tensor cores"""

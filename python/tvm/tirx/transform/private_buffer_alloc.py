@@ -18,12 +18,12 @@
 
 from tvm.ir import Range
 from tvm.target import Target
-from tvm.tir.buffer import Buffer
-from tvm.tir.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, SeqStmt, Stmt
-from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
-from tvm.tir.transform.function_pass import prim_func_pass
+from tvm.tirx.buffer import Buffer
 from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, OpCall, SeqStmt, Stmt
+from tvm.tirx.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tirx.transform.common import seek_kernel_replace_point
+from tvm.tirx.transform.function_pass import prim_func_pass
 
 
 class PrivateAllocCollector(StmtVisitor):

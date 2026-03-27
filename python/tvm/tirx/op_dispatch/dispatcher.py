@@ -28,9 +28,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from tvm.ir import Op
-from tvm.tir import PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import PrimFunc
 from tvm.tirx.operator import get_tirx_op
+from tvm.tirx.stmt import OpCall
 
 from .dispatch_context import DispatchContext
 

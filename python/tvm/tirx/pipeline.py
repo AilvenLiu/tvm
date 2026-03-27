@@ -98,7 +98,7 @@ class MBarrier:
     def remote_view(self, rank):
         """Create a view of this barrier mapped to another CTA's shared memory."""
         from tvm.ir import PointerType, PrimType
-        from tvm.tir import Var as TIRVar
+        from tvm.tirx import Var as TIRVar
 
         expr = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(self.buf.ptr_to([0]), rank))
         ptr = TIRVar("remote_mbar_ptr", PointerType(PrimType("uint64")))

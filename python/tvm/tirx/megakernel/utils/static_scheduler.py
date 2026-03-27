@@ -221,4 +221,4 @@ class StaticTileScheduler(TileSchedulerBase):
                     evt.semaphore_notify(*coord, rank=rank, release=release)
 
     def valid(self):
-        return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)
+        return tvm.tirx.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)

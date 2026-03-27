@@ -24,7 +24,7 @@ import pytest
 import torch
 
 import tvm
-from tvm.tir import PrimFunc
+from tvm.tirx import PrimFunc
 
 from .claude_rewrite import rewrite_program
 

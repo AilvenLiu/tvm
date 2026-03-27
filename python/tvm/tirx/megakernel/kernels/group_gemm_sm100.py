@@ -18,9 +18,9 @@
 from typing import Literal
 
 from tvm.script import tirx as Tx
-from tvm.tir.layout import S, TileLayout
-from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.layout import S, TileLayout
+from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.megakernel.utils.base import SmemManager
 from tvm.tirx.megakernel.utils.config import F32_BYTES, KernelConfig
 

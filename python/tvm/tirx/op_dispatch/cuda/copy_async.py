@@ -28,15 +28,15 @@ from typing import Optional
 import tvm
 from tvm.arith import Analyzer
 from tvm.script import tirx as Tx
-from tvm.tir import Buffer, PrimFunc
-from tvm.tir.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
-from tvm.tir.stmt import OpCall
+from tvm.tirx import Buffer, PrimFunc
+from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout, TLayout
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
     predicate,
     register_dispatch,
 )
+from tvm.tirx.stmt import OpCall
 
 from .common import (
     CopyInstType,
@@ -129,7 +129,7 @@ def sort_strides_partial_order(strides: list, analyzer: Analyzer) -> list[int]:
         for i in remaining[1:]:
             # Check if strides[i] <= strides[min_idx]
             # i.e., strides[min_idx] % strides[i] == 0
-            if analyzer.can_prove_equal(tvm.tir.floormod(strides[min_idx], strides[i]), 0):
+            if analyzer.can_prove_equal(tvm.tirx.floormod(strides[min_idx], strides[i]), 0):
                 min_idx = i
         result.append(min_idx)
         remaining.remove(min_idx)
@@ -301,7 +301,7 @@ def _decide_box_dim(
         else:
             prev_stride, first_pos = seen_groups[g]
             # Use the minimum stride within the group
-            if analyzer.can_prove_equal(tvm.tir.floormod(prev_stride, g_stride), 0):
+            if analyzer.can_prove_equal(tvm.tirx.floormod(prev_stride, g_stride), 0):
                 seen_groups[g] = (g_stride, first_pos)
 
     # Sort groups by their first appearance (inner→outer)
@@ -313,7 +313,7 @@ def _decide_box_dim(
     for j in range(1, len(group_strides)):
         prev_s = group_strides[j - 1]
         cur_s = group_strides[j]
-        is_multiple = analyzer.can_prove_equal(tvm.tir.floormod(cur_s, prev_s), 0)
+        is_multiple = analyzer.can_prove_equal(tvm.tirx.floormod(cur_s, prev_s), 0)
         is_equal = analyzer.can_prove_equal(cur_s, prev_s)
         if not is_multiple or is_equal:
             valid_group_count = j
@@ -434,7 +434,7 @@ def _decide_tma_global_strides_and_shape(
 
         # Compute the decomposed coordinate at the end of the copy region
         end_coord = g_st[dim] + g_ext[dim]
-        decomposed_coord = tvm.tir.floordiv(end_coord, other_extents_product)
+        decomposed_coord = tvm.tirx.floordiv(end_coord, other_extents_product)
 
         # If we cannot prove it's in bounds, mark as potential OOB
         if not analyzer.can_prove(decomposed_coord <= highest_shard.extent):
@@ -484,7 +484,7 @@ def _decide_tma_global_strides_and_shape(
             next_stride = total_size
         else:
             next_stride = sorted_strides[i + 1]
-        sorted_shapes.append(tvm.tir.floordiv(next_stride, sorted_strides[i]))
+        sorted_shapes.append(tvm.tirx.floordiv(next_stride, sorted_strides[i]))
 
     # Reorder shapes to match raw_strides order (tma_g_strides)
     inverse_order = [0] * len(sorted_order)
@@ -687,13 +687,13 @@ def copy_tma_impl(
         best_tma_stride = None
         for tma_idx, tma_stride in enumerate(tma_strides):
             # Check shard_stride >= tma_stride via divisibility
-            is_smaller = ana.can_prove_equal(tvm.tir.floormod(shard_stride, tma_stride), 0)
+            is_smaller = ana.can_prove_equal(tvm.tirx.floormod(shard_stride, tma_stride), 0)
 
             if is_smaller:
                 if best_tma_stride is None:
                     best_tma_idx = tma_idx
                     best_tma_stride = tma_stride
-                elif ana.can_prove_equal(tvm.tir.floormod(tma_stride, best_tma_stride), 0):
+                elif ana.can_prove_equal(tvm.tirx.floormod(tma_stride, best_tma_stride), 0):
                     # tma_stride >= best_tma_stride, update
                     best_tma_idx = tma_idx
                     best_tma_stride = tma_stride
@@ -707,7 +707,7 @@ def copy_tma_impl(
             local_idx = shard_idx - g_buf_separators[dim]
             tma_idx, tma_stride = find_matching_tma_idx(shard.stride, tma_g_strides, analyzer)
             if tma_idx is not None:
-                multiplier = tvm.tir.floordiv(shard.stride, tma_stride)
+                multiplier = tvm.tirx.floordiv(shard.stride, tma_stride)
                 shard_to_tma[(dim, local_idx)] = (tma_idx, multiplier)
 
     # When swizzle or OOB detection creates TMA dimensions that don't
@@ -767,7 +767,7 @@ def copy_tma_impl(
                 s = _dim_shards[dim][local_idx][0]
                 tma_idx, tma_stride = find_matching_tma_idx(s, tma_g_strides, analyzer)
                 if tma_idx is not None:
-                    multiplier = tvm.tir.floordiv(s, tma_stride)
+                    multiplier = tvm.tirx.floordiv(s, tma_stride)
                     shard_to_tma[(dim, local_idx)] = (tma_idx, multiplier)
     else:
         g_buf_grouped_shards = g_buf_grouped.shard
@@ -803,9 +803,9 @@ def copy_tma_impl(
 
                 # Multi-radix decomposition
                 shard_coord = (
-                    tvm.tir.floormod(tvm.tir.floordiv(coord_value, divisor), shard.extent)
+                    tvm.tirx.floormod(tvm.tirx.floordiv(coord_value, divisor), shard.extent)
                     if local_idx > 0
-                    else tvm.tir.floordiv(coord_value, divisor)
+                    else tvm.tirx.floordiv(coord_value, divisor)
                 )
 
                 # Accumulate to matching TMA coordinate
@@ -822,7 +822,7 @@ def copy_tma_impl(
 
             tma_idx, tma_stride = find_matching_tma_idx(g_stride, tma_g_strides, analyzer)
             if tma_idx is not None:
-                multiplier = tvm.tir.floordiv(g_stride, tma_stride)
+                multiplier = tvm.tirx.floordiv(g_stride, tma_stride)
                 tma_coords[tma_idx] = tma_coords[tma_idx] + loop_var * multiplier
 
         return s_offset, reversed(tma_coords)

@@ -36,7 +36,7 @@ namespace builtin {
     static const Op& op = Op::Get("tirx." #OpName); \
     return op;                                      \
   }                                                 \
-  TVM_TIR_REGISTER_OP(#OpName)
+  TVM_TIRX_REGISTER_OP(#OpName)
 
 TIR_DEFINE_BUILTIN_FUNC(reinterpret)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))

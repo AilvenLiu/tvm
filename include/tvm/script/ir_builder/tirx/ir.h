@@ -23,7 +23,7 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/runtime/tensor.h>
 #include <tvm/script/ir_builder/base.h>
-#include <tvm/script/ir_builder/tir/frame.h>
+#include <tvm/script/ir_builder/tirx/frame.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
@@ -145,7 +145,7 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
                   ffi::String scope_slice_parent = "");
 
-void OpCall(tvm::tirx::tirx::OpCall op_call);
+void OpCall(tvm::tirx::OpCall op_call);
 
 /*!
  * \brief Create an ExecScopeFrame for execution scope contexts.
@@ -542,7 +542,7 @@ inline Var Handle(runtime::DataType dtype = runtime::DataType::Void(),
 
 inline Var TensormapHandle() { return tvm::tirx::Var("", PointerType(TensorMapType())); }
 
-#define TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName, DType)                                  \
+#define TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName, DType)                                 \
   inline PrimExpr FuncName(ffi::Optional<PrimExpr> expr = std::nullopt,                     \
                            bool is_size_var = false) {                                      \
     DataType dtype = DType;                                                                 \
@@ -609,7 +609,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

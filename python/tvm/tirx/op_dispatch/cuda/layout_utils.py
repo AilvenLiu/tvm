@@ -27,7 +27,7 @@ import operator
 from collections import defaultdict
 
 from tvm.arith import Analyzer
-from tvm.tir.layout import TileLayout
+from tvm.tirx.layout import TileLayout
 
 
 def get_sublayout_from_region(layout, buffer_shape, region_st, region_extent):

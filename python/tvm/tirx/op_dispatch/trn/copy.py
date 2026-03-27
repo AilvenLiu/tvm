@@ -18,14 +18,14 @@
 """Implementation of copy operator dispatchs."""
 
 from tvm.script import tirx as Tx
-from tvm.tir import PrimFunc
-from tvm.tir.stmt import OpCall
+from tvm.tirx import PrimFunc
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
     predicate,
     register_dispatch,
 )
+from tvm.tirx.stmt import OpCall
 
 from .common import init_analyzer, nki_dim
 from .dim_utils import get_ewise_dim_map

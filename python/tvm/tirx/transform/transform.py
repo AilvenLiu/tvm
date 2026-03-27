@@ -124,7 +124,7 @@ def UnrollLoop():
     return _ffi_api.UnrollLoop()  # type: ignore
 
 
-@_ffi.register_object("tir.transform.RemoveNoOpConfig")
+@_ffi.register_object("tirx.transform.RemoveNoOpConfig")
 class RemoveNoOpConfig(_ir.Attrs):
     """Config for remove no op pass"""
 
@@ -211,7 +211,7 @@ def CommonSubexprElim():
     return _ffi_api.CommonSubexprElim()  # type: ignore
 
 
-@_ffi.register_object("tir.transform.SimplifyConfig")
+@_ffi.register_object("tirx.transform.SimplifyConfig")
 class SimplifyConfig(_ir.Attrs):
     """Config for simplify pass"""
 

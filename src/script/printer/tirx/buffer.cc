@@ -199,7 +199,7 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
       // and the parser resolves that to a Buffer object rather than a PrimExpr value.
       PrimExpr addr = buffer->allocated_addr[0];
       AccessPath addr_p = buffer_p->Attr("allocated_addr")->ArrayItem(0);
-      if (const auto* bl = addr.as<tir::BufferLoadNode>()) {
+      if (const auto* bl = addr.as<tirx::BufferLoadNode>()) {
         // Ensure the buffer variable is defined (may emit a Tx.Buffer(...) statement).
         d->AsDoc<ExprDoc>(bl->buffer, addr_p->Attr("buffer"));
         // Get the variable name bound to this buffer.
@@ -492,9 +492,8 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::TileLayout>("",
-                                   [](tirx::TileLayout layout, AccessPath p, IRDocsifier d) -> Doc {
-                                     return PrintTileLayout(layout, d, p);
-                                   });
+                                    [](tirx::TileLayout layout, AccessPath p, IRDocsifier d)
+                                        -> Doc { return PrintTileLayout(layout, d, p); });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::ComposeLayout>(

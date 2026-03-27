@@ -31,9 +31,9 @@ from tvm.arith.analyzer import Analyzer
 from tvm.ir.expr import PrimExpr
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tir import BufferRegion, OpCall, PrimFunc
-from tvm.tir.expr import FloatImm
-from tvm.tir.layout import TileLayout
+from tvm.tirx import BufferRegion, OpCall, PrimFunc
+from tvm.tirx.expr import FloatImm
+from tvm.tirx.layout import TileLayout
 from tvm.tirx.op_dispatch import DispatchContext, fail
 from tvm.tirx.op_dispatch.dispatcher import predicate
 

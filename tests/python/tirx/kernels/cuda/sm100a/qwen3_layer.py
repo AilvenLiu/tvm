@@ -111,7 +111,7 @@ def _craft_pipeline(ext_mods: list[nn.ExternModule], dump_file_prefix: Path):
         seq = tvm.transform.Sequential(
             [
                 _DebugDump(f"{dump_file_prefix}-phase0.py", debug_dir, show_meta=False),
-                tvm.tir.transform.BindTarget(target),
+                tvm.tirx.transform.BindTarget(target),
                 DispatchKVCacheCreation(target, True, dict()),
                 BLASDispatch(target),
                 FuseAddRMSNorm(target=target),

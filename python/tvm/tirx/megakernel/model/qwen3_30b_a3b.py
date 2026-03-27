@@ -127,7 +127,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
 
             @Tx.prim_func(private=True)
             def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
-                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                Tx.func_attr({"op_pattern": 0, "tirx.noalias": True})
                 batch_size = Tx.int64()
                 lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")  # noqa: E501
                 compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))  # noqa: E501
@@ -141,7 +141,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
 
             @Tx.prim_func(private=True)
             def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
-                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                Tx.func_attr({"op_pattern": 0, "tirx.noalias": True})
                 batch_size = Tx.int64()
                 res = Tx.match_buffer(var_res, (batch_size, Tx.int64(mk.HIDDEN_SIZE)), "float16")
                 compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(mk.HIDDEN_SIZE)))
@@ -568,7 +568,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
 
             @Tx.prim_func(private=True)
             def cast(var_lv4: Tx.handle, var_compute: Tx.handle):
-                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                Tx.func_attr({"op_pattern": 0, "tirx.noalias": True})
                 batch_size = Tx.int64()
                 lv4 = Tx.match_buffer(var_lv4, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)), "float16")  # noqa: E501
                 compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(1), Tx.int64(mk.VOCAB_SIZE)))  # noqa: E501
@@ -582,7 +582,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(
 
             @Tx.prim_func(private=True)
             def cast_res(var_res: Tx.handle, var_compute: Tx.handle):
-                Tx.func_attr({"op_pattern": 0, "tir.noalias": True})
+                Tx.func_attr({"op_pattern": 0, "tirx.noalias": True})
                 batch_size = Tx.int64()
                 res = Tx.match_buffer(var_res, (batch_size, Tx.int64(mk.HIDDEN_SIZE)), "float16")
                 compute = Tx.match_buffer(var_compute, (batch_size, Tx.int64(mk.HIDDEN_SIZE)))

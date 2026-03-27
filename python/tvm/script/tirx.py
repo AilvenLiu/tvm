@@ -21,21 +21,21 @@ from typing import TYPE_CHECKING, Any
 
 from tvm.tirx.warp_role import WarpgroupRole, WarpRole  # noqa: F401
 
-from . import tir as _tir
-from .ir_builder.tir import tirx as _ir_builder_tirx
-from .ir_builder.tir.ir import elected  # noqa: F401
-from .ir_builder.tir.tirx import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import  # noqa: F403
+from .ir_builder.tirx import tirx as _ir_builder_tirx
+from .ir_builder.tirx.ir import elected  # noqa: F401
+from .ir_builder.tirx.tirx import *  # pylint: disable=redefined-builtin,unused-wildcard-import,wildcard-import  # noqa: F403
+from .parser import tirx as _tir
 
 if TYPE_CHECKING:
     # Statically expose all T-namespace attributes (cuda, ptx, nvshmem, nki,
     # meta_var, exec scope helpers, scalar ops, etc.) so that type checkers
     # and IDEs can resolve Tx.cuda.xxx, Tx.meta_var, etc.
     # At runtime these are copied dynamically via the globals() loop below.
-    from .tir import *  # type: ignore[assignment]  # noqa: F403
+    from .parser.tirx import *  # type: ignore[assignment]  # noqa: F403
 
 
 def _is_buffer_or_region(x):
-    from tvm.tir import Buffer, BufferRegion  # pylint: disable=import-outside-toplevel
+    from tvm.tirx import Buffer, BufferRegion  # pylint: disable=import-outside-toplevel
 
     return isinstance(x, (Buffer, BufferRegion))  # noqa: UP038
 
@@ -111,10 +111,10 @@ def __getattr__(name: str) -> Callable[..., Any]:
     if name.startswith("_"):
         raise AttributeError(f"module 'tvm.script.tirx' has no attribute {name!r}")
 
-    from tvm.tir import Buffer
+    from tvm.tirx import Buffer
     from tvm.tirx.operator.op import GenericOp
 
-    from .ir_builder.tir.tirx import _to_region, f_insert
+    from .ir_builder.tirx.tirx import _to_region, f_insert
 
     def _generic_op(*args, workspace=None, dispatch=None, **kwargs):
         workspace = workspace or {}
