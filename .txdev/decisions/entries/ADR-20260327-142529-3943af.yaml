@@ -1,0 +1,50 @@
+content:
+  details: 'During the tir->tirx rename, LetStmt was a wrapper function that:
+
+    1. Accepted (var, value, body) with backward-compat 3-arg form
+
+    2. Created SeqStmt([Bind, body]) with compatibility attributes
+
+    3. Tagged the result with _legacy_let for stmt_functor dispatch
+
+
+    Replacing it with `LetStmt = Bind` seemed like a simplification but
+
+    silently broke the 3-arg calling convention because Bind''s third
+
+    parameter is `span`, not `body`.
+
+
+    Rule: During a namespace rename, if a symbol is a function (not just a
+
+    class/type), read its implementation before deciding whether an alias
+
+    suffices. If the function has any wrapping logic, conditional branches,
+
+    or extra parameters beyond the target constructor, it must be preserved
+
+    as a function.
+
+
+    This applies broadly to any backward-compat shim in __init__.py files --
+
+    they exist for a reason and should not be "simplified" without understanding
+
+    all callers.
+
+    '
+  summary: When renaming a namespace (tir->tirx), keep wrapper functions that add
+    behavior (like LetStmt's body->SeqStmt wrapping) instead of replacing them with
+    simple aliases.
+created: '2026-03-27'
+id: ADR-20260327-142529-3943af
+scope:
+- repo
+tags:
+- rebase
+- backward-compat
+- api-evolution
+- tirx
+- namespace
+title: Preserve backward-compat wrapper functions during namespace rename, don't alias
+updated: '2026-03-27'

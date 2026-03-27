@@ -431,6 +431,33 @@ entries:
   - policy
   title: Exclude agent metadata directories from ASF license header requirements
   updated: '2026-03-26'
+- created: '2026-03-27'
+  id: ADR-20260327-142529-3943af
+  path: entries/ADR-20260327-142529-3943af.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - backward-compat
+  - api-evolution
+  - tirx
+  - namespace
+  title: Preserve backward-compat wrapper functions during namespace rename, don't
+    alias
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: ADR-20260327-142529-6acc98
+  path: entries/ADR-20260327-142529-6acc98.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - namespace
+  - import
+  - backward-compat
+  - python
+  title: Use tir = tirx aliases for internal backward-compat, not re-exports
+  updated: '2026-03-27'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -448,6 +475,7 @@ tags:
   - ADR-20260326-004750-de4733
   api-evolution:
   - ADR-20260228-0002
+  - ADR-20260327-142529-3943af
   architecture:
   - ADR-20260307-231252-f0561c
   - ADR-20260308-232603-16186a
@@ -466,6 +494,9 @@ tags:
   - ADR-20260326-203453-b77baa
   assert_structural_equal:
   - ADR-20260227-0001
+  backward-compat:
+  - ADR-20260327-142529-3943af
+  - ADR-20260327-142529-6acc98
   baseline:
   - ADR-20260319-174407-e52e2f
   bench:
@@ -527,6 +558,8 @@ tags:
   - ADR-20260326-004750-de4733
   golden:
   - ADR-20260227-0001
+  import:
+  - ADR-20260327-142529-6acc98
   infrastructure:
   - ADR-20260319-022448-7cc00e
   intrinsic:
@@ -550,6 +583,9 @@ tags:
   - ADR-20260320-002326-d2fa6d
   module-split:
   - ADR-20260308-232603-16186a
+  namespace:
+  - ADR-20260327-142529-3943af
+  - ADR-20260327-142529-6acc98
   op-schedule:
   - ADR-20260301-0002
   - ADR-20260301-0003
@@ -583,11 +619,15 @@ tags:
   pytest:
   - ADR-20260306-195314-450625
   - ADR-20260319-022448-398b11
+  python:
+  - ADR-20260327-142529-6acc98
   range:
   - ADR-20260326-004750-de4733
   rebase:
   - ADR-20260228-0002
   - ADR-20260301-0001
+  - ADR-20260327-142529-3943af
+  - ADR-20260327-142529-6acc98
   refactor:
   - ADR-20260228-0003
   - ADR-20260307-231252-f0561c
@@ -633,6 +673,7 @@ tags:
   - ADR-20260227-0001
   tirx:
   - ADR-20260301-0003
+  - ADR-20260327-142529-3943af
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   tma:

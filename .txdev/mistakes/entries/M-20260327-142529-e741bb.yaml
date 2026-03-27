@@ -1,0 +1,24 @@
+content:
+  details: "The user noted the pre-rebase suite had 1900+ passing tests, but the\n\
+    post-rebase run reported 1781 passed, 0 failed. The decrease was not\nflagged\
+    \ or investigated. The missing ~128 tests were kernel configs from\n4 tirx-kernels\
+    \ files with broken imports, silently swallowed by the\nkernel registry's bare\
+    \ except.\n\nThe correct response when test count decreases after a refactor:\n\
+    1. Run `--collect-only` and compare against baseline\n2. Check for collection\
+    \ errors/warnings (pytest -W error::ImportWarning)\n3. Never assume fewer tests\
+    \ = \"some were removed upstream\" without verifying\n4. The user explicitly asked\
+    \ \"where did the missing tests go?\" -- this\n   should have been my first question\
+    \ too\n"
+  summary: Test count dropped from ~1900+ to 1781 after rebase but this was not investigated,
+    hiding 128 broken kernel test configs.
+created: '2026-03-27'
+id: M-20260327-142529-e741bb
+scope:
+- repo
+tags:
+- testing
+- verification
+- thoroughness
+- tirx-kernels
+title: Accepted test count decrease without investigation
+updated: '2026-03-27'

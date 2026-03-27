@@ -1,0 +1,29 @@
+content:
+  details: "The bulk migration command `sed -i 's/tvm\\.tir\\./tvm.tirx./g'` across\n\
+    tirx-kernels successfully updated 25 files with `tvm.tir.layout`,\n`tvm.tir.bench.utils`,\
+    \ etc. But 4 files used a different pattern:\n`from tvm.script import tir as T`\
+    \ (importing the parser module via\ntvm.script, not via tvm.tir.*).\n\nThe registry's\
+    \ discover_kernels() uses bare `except Exception: continue`\nwhich silently swallowed\
+    \ these ImportErrors, making it appear that the\nkernels simply didn't exist.\
+    \ This hid ~49 kernel test configs and caused\nthe test count to drop from 1909\
+    \ to 1781 without any visible failures.\n\nPrevention checklist for namespace\
+    \ renames across repos:\n1. grep for ALL patterns: `tvm.tir.`, `import tir`, `from.*import\
+    \ tir`\n2. After sed, verify each module imports successfully with a quick\n \
+    \  `python -c \"import module\"` loop\n3. Compare test collection count before/after\
+    \ with `--collect-only`\n4. Be suspicious of any test count decrease -- investigate,\
+    \ don't accept\n"
+  summary: sed 's/tvm\.tir\./tvm.tirx./g' only caught module-path imports but missed
+    `from tvm.script import tir as T` (parser import pattern), leaving 4 files broken.
+created: '2026-03-27'
+id: M-20260327-142529-6d1726
+scope:
+- repo
+tags:
+- rebase
+- import
+- cross-repo
+- tirx-kernels
+- sed
+- thoroughness
+title: Bulk sed missed `from tvm.script import tir as T` pattern in tirx-kernels
+updated: '2026-03-27'

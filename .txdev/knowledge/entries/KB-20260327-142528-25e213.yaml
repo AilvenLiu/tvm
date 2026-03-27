@@ -1,0 +1,27 @@
+content:
+  details: '
+
+
+    CAVEAT: discover_kernels() uses bare `except Exception: continue` in its
+
+    module scan loop. Broken kernel imports are silently skipped with no warning.
+
+    After any namespace rename or import refactor, verify all expected kernels
+
+    are discovered by comparing --collect-only counts or importing each module
+
+    individually. A decreased test count with 0 failures is the telltale sign.'
+  summary: Auto-discover kernel modules via KERNEL_META attribute + pkgutil.iter_modules,
+    enabling a single thin test wrapper and unified bench CLI.
+created: '2026-03-27'
+id: KB-20260327-142528-25e213
+scope:
+- repo
+tags:
+- kernel
+- registry
+- testing
+- benchmarking
+- architecture
+title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+updated: '2026-03-27'

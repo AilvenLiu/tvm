@@ -1,0 +1,44 @@
+content:
+  details: 'During the tir->tirx rebase, the backward-compatible LetStmt function
+    in
+
+    tvm/tirx/__init__.py was replaced with a simple alias `LetStmt = Bind`.
+
+    The original function handled 3 arguments: LetStmt(var, value, body) by
+
+    creating SeqStmt([Bind, body]) with compatibility attributes (var, value,
+
+    body, _legacy_let). The alias made Bind() accept body as its span parameter,
+
+    silently discarding it.
+
+
+    This caused 35 test_copy_async failures that were initially misclassified
+
+    as "pre-existing" but were actually regressions. The user corrected this.
+
+
+    Prevention: When replacing a function with an alias during a namespace rename,
+
+    verify that the function''s signature matches the target. If the original has
+
+    extra arguments or wrapping logic, it cannot be replaced with a simple alias.
+
+    Always check the function body, not just the name.
+
+    '
+  summary: Replacing `LetStmt(var, value, body)` function with `LetStmt = Bind` alias
+    silently dropped the body parameter (treated as span), breaking copy_async golden
+    tests.
+created: '2026-03-27'
+id: M-20260327-142529-bcec6f
+scope:
+- repo
+tags:
+- rebase
+- backward-compat
+- python
+- correctness
+- tirx
+title: LetStmt = Bind alias silently dropped body argument, causing 35 test failures
+updated: '2026-03-27'

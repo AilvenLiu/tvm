@@ -417,6 +417,45 @@ entries:
   - data-integrity
   title: Stripping ASF headers from .txdev broke YAML structure
   updated: '2026-03-26'
+- created: '2026-03-27'
+  id: M-20260327-142529-6d1726
+  path: entries/M-20260327-142529-6d1726.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - import
+  - cross-repo
+  - tirx-kernels
+  - sed
+  - thoroughness
+  title: Bulk sed missed `from tvm.script import tir as T` pattern in tirx-kernels
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: M-20260327-142529-bcec6f
+  path: entries/M-20260327-142529-bcec6f.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - backward-compat
+  - python
+  - correctness
+  - tirx
+  title: LetStmt = Bind alias silently dropped body argument, causing 35 test failures
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: M-20260327-142529-e741bb
+  path: entries/M-20260327-142529-e741bb.yaml
+  scope:
+  - repo
+  tags:
+  - testing
+  - verification
+  - thoroughness
+  - tirx-kernels
+  title: Accepted test count decrease without investigation
+  updated: '2026-03-27'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -426,6 +465,8 @@ tags:
   - M-20260301-0002
   assumptions:
   - M-20260319-022448-b1a13a
+  backward-compat:
+  - M-20260327-142529-bcec6f
   bench:
   - M-20260323-185836-4c16ff
   - M-20260323-185836-967c0e
@@ -458,11 +499,13 @@ tags:
   - M-20260322-182024-631109
   - M-20260325-174353-51abbb
   - M-20260326-030916-99f4b9
+  - M-20260327-142529-bcec6f
   cp_async:
   - M-20260326-004750-646f60
   cross-repo:
   - M-20260319-174407-01b7d3
   - M-20260326-004750-646f60
+  - M-20260327-142529-6d1726
   cuda:
   - M-20260326-030916-99f4b9
   - M-20260326-030916-a222d4
@@ -504,6 +547,7 @@ tags:
   import:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
+  - M-20260327-142529-6d1726
   intrinsic:
   - M-20260326-004750-646f60
   lambda:
@@ -549,6 +593,7 @@ tags:
   - M-20260308-232603-cf510d
   - M-20260322-182024-19635e
   - M-20260323-185836-374105
+  - M-20260327-142529-bcec6f
   quality:
   - M-20260228-0001
   quoting:
@@ -557,6 +602,8 @@ tags:
   - M-20260227-0002
   rebase:
   - M-20260228-0002
+  - M-20260327-142529-6d1726
+  - M-20260327-142529-bcec6f
   refactor:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
@@ -574,6 +621,8 @@ tags:
   - M-20260306-195314-50a55c
   - M-20260308-232603-9a9463
   - M-20260317-211411-dfb881
+  sed:
+  - M-20260327-142529-6d1726
   shared-memory:
   - M-20260307-231252-423c4d
   shell:
@@ -600,9 +649,12 @@ tags:
   - M-20260323-185836-4c16ff
   - M-20260324-171756-5d4c5e
   - M-20260325-174353-4a9cda
+  - M-20260327-142529-e741bb
   thoroughness:
   - M-20260317-211411-dfb881
   - M-20260326-004750-646f60
+  - M-20260327-142529-6d1726
+  - M-20260327-142529-e741bb
   thread-block:
   - M-20260326-030916-99f4b9
   thunderkittens:
@@ -611,8 +663,11 @@ tags:
   - M-20260301-0002
   - M-20260308-232603-9a9463
   - M-20260317-211411-dfb881
+  - M-20260327-142529-bcec6f
   tirx-kernels:
   - M-20260326-004750-646f60
+  - M-20260327-142529-6d1726
+  - M-20260327-142529-e741bb
   tvmscript:
   - M-20260322-182024-631109
   txdev:
@@ -627,6 +682,7 @@ tags:
   - M-20260319-174407-26e7d3
   - M-20260322-182024-19635e
   - M-20260325-174353-4a9cda
+  - M-20260327-142529-e741bb
   warnings:
   - M-20260306-195314-50a55c
   warp:

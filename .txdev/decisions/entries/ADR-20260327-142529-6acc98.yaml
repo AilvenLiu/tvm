@@ -1,0 +1,45 @@
+content:
+  details: 'Several files in the tir repo (op.py, kv_cache.py, pipeline.py,
+
+    lower_call_tir_device.py) reference `tir.convert()`, `tir.IntImm`,
+
+    `tir.transform.LowerWarpMemory()`, etc. Rather than updating every
+
+    internal reference to `tirx.X`, we add a single alias after imports:
+
+
+    ```python
+
+    from tvm import tirx
+
+    tir = tirx  # backward-compat alias
+
+    ```
+
+
+    This minimizes diff size and reduces risk of missing call sites.
+
+    The alias must be placed after all imports to avoid E402 lint errors.
+
+
+    For `from tvm.script import tir as T` in tirx-kernels, the fix is
+
+    `from tvm.script import tirx as T` (keeping T as the alias name
+
+    since the code uses T.prim_func, T.handle, etc. throughout).
+
+    '
+  summary: For files that internally reference `tir.X` after the tir->tirx rename,
+    add `tir = tirx` alias after imports rather than changing every call site.
+created: '2026-03-27'
+id: ADR-20260327-142529-6acc98
+scope:
+- repo
+tags:
+- rebase
+- namespace
+- import
+- backward-compat
+- python
+title: Use tir = tirx aliases for internal backward-compat, not re-exports
+updated: '2026-03-27'

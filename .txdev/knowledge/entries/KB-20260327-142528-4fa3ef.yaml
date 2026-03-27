@@ -1,0 +1,29 @@
+content:
+  details: "When apache/tvm renames tir/ to tirx/, these import patterns must ALL\
+    \ be updated:\n\n1. `from tvm.tir.X import Y` -> `from tvm.tirx.X import Y`\n\
+    \   (caught by `sed 's/tvm\\.tir\\./tvm.tirx./g'`)\n\n2. `import tvm.tir` -> `import\
+    \ tvm.tirx`\n   (caught by `sed 's/import tvm\\.tir/import tvm.tirx/g'`)\n\n3.\
+    \ `from tvm.script import tir as T` -> `from tvm.script import tirx as T`\n  \
+    \ (NOT caught by pattern 1 -- different path structure)\n\n4. `from tvm.script.parser\
+    \ import tir as T` -> `from tvm.script.parser import tirx as T`\n   (also not\
+    \ caught by pattern 1)\n\n5. C++ FFI prefixes: `\"tir.\"` -> `\"tirx.\"` in op\
+    \ registration, printer dispatch\n\nAdditionally, several Python files need `tir\
+    \ = tirx` backward-compat aliases\nfor internal references like `tir.convert()`,\
+    \ `tir.IntImm`, etc.\n\nThe `ir_usage` tracking in utils.h must stay as `\"tir\"\
+    ` (not `\"tirx\"`)\nbecause the HeaderWrapper checks for `\"tir\"` to decide which\
+    \ imports to emit.\n"
+  summary: The tir->tirx rename affects 5 distinct import patterns, each requiring
+    different sed/grep strategies.
+created: '2026-03-27'
+id: KB-20260327-142528-4fa3ef
+scope:
+- repo
+tags:
+- rebase
+- namespace
+- import
+- tirx
+- tirx-kernels
+- migration
+title: 'tir->tirx namespace rename: full import pattern catalog'
+updated: '2026-03-27'

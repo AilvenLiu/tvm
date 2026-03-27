@@ -1,0 +1,25 @@
+content:
+  details: "The kernel auto-discovery in tirx_kernels/registry.py line 53-54:\n```python\n\
+    except Exception:\n    continue\n```\nThis catches ALL exceptions during module\
+    \ import, including ImportError,\nSyntaxError, and AttributeError. A kernel file\
+    \ with a broken import\nsimply doesn't appear in the registry -- no warning, no\
+    \ error, no log.\n\nImpact: After the tir->tirx rename, 4 kernel files had broken\
+    \ imports\nbut produced zero visible errors. The only signal was a decreased test\n\
+    count (1781 vs 1909), which was easy to miss.\n\nDebugging: To check for silently-broken\
+    \ kernels, import each module\nindividually:\n```python\nfor mod in ['tirx_kernels.loss.cross_entropy',\
+    \ ...]:\n    importlib.import_module(mod)\n```\nOr compare `--collect-only` counts\
+    \ before and after changes.\n"
+  summary: 'discover_kernels() in tirx_kernels/registry.py uses bare `except Exception:
+    continue`, hiding broken kernel modules from test discovery.'
+created: '2026-03-27'
+id: KB-20260327-142528-4a9323
+scope:
+- repo
+tags:
+- tirx-kernels
+- registry
+- testing
+- debugging
+- import
+title: tirx-kernels discover_kernels() silently swallows import errors
+updated: '2026-03-27'

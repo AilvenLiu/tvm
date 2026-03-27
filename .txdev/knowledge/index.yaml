@@ -587,6 +587,46 @@ entries:
   - asf-header
   title: Exclude .txdev and .claude from pre-commit at three layers
   updated: '2026-03-26'
+- created: '2026-03-27'
+  id: KB-20260327-142528-25e213
+  path: entries/KB-20260327-142528-25e213.yaml
+  scope:
+  - repo
+  tags:
+  - kernel
+  - registry
+  - testing
+  - benchmarking
+  - architecture
+  title: Kernel registry auto-discovery pattern for unified test/bench infrastructure
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-142528-4a9323
+  path: entries/KB-20260327-142528-4a9323.yaml
+  scope:
+  - repo
+  tags:
+  - tirx-kernels
+  - registry
+  - testing
+  - debugging
+  - import
+  title: tirx-kernels discover_kernels() silently swallows import errors
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-142528-4fa3ef
+  path: entries/KB-20260327-142528-4fa3ef.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - namespace
+  - import
+  - tirx
+  - tirx-kernels
+  - migration
+  title: 'tir->tirx namespace rename: full import pattern catalog'
+  updated: '2026-03-27'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -603,6 +643,7 @@ tags:
   architecture:
   - KB-20260308-232603-d83e44
   - KB-20260319-022448-901600
+  - KB-20260327-142528-25e213
   asf-header:
   - KB-20260326-203453-d526a0
   assert_structural_equal:
@@ -628,6 +669,7 @@ tags:
   - KB-20260319-174406-349680
   - KB-20260324-171756-7ab04c
   - KB-20260324-171756-cea50a
+  - KB-20260327-142528-25e213
   buffer:
   - KB-20260322-182024-e7c4c2
   - KB-20260325-174353-b5e171
@@ -674,6 +716,7 @@ tags:
   - KB-20260317-211410-c51a41
   debugging:
   - KB-20260301-0001
+  - KB-20260327-142528-4a9323
   dispatch:
   - KB-20260325-174353-cf8a51
   dsl:
@@ -703,6 +746,8 @@ tags:
   - KB-20260308-232603-18dfc3
   - KB-20260308-232603-205e85
   - KB-20260308-232603-d83e44
+  - KB-20260327-142528-4a9323
+  - KB-20260327-142528-4fa3ef
   imports:
   - KB-20260322-201254-ba181e
   intrinsic:
@@ -716,6 +761,7 @@ tags:
   kernel:
   - KB-20260301-0001
   - KB-20260319-022448-901600
+  - KB-20260327-142528-25e213
   kwargs:
   - KB-20260301-0002
   layout:
@@ -743,6 +789,9 @@ tags:
   - KB-20260322-201254-ba181e
   migration:
   - KB-20260326-004750-bc6d9b
+  - KB-20260327-142528-4fa3ef
+  namespace:
+  - KB-20260327-142528-4fa3ef
   noqa:
   - KB-20260301-0003
   - KB-20260322-182024-1738c4
@@ -805,6 +854,8 @@ tags:
   - KB-20260320-002326-24c511
   range:
   - KB-20260326-004750-e4d4b4
+  rebase:
+  - KB-20260327-142528-4fa3ef
   recovery:
   - KB-20260228-0003
   refactor:
@@ -818,6 +869,8 @@ tags:
   - KB-20260326-030915-290626
   registry:
   - KB-20260319-022448-901600
+  - KB-20260327-142528-25e213
+  - KB-20260327-142528-4a9323
   rg:
   - KB-20260228-0004
   round-trip:
@@ -853,6 +906,8 @@ tags:
   - KB-20260319-022448-901600
   - KB-20260319-022448-dec2c4
   - KB-20260322-201254-ba181e
+  - KB-20260327-142528-25e213
+  - KB-20260327-142528-4a9323
   thread-block:
   - KB-20260326-030915-be19fc
   thunderkittens:
@@ -868,12 +923,15 @@ tags:
   - KB-20260306-195314-a33c27
   - KB-20260317-211410-3d3076
   - KB-20260317-211410-c51a41
+  - KB-20260327-142528-4fa3ef
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511
   - KB-20260322-201254-ba181e
   - KB-20260324-171756-7ab04c
   - KB-20260326-004750-bc6d9b
+  - KB-20260327-142528-4a9323
+  - KB-20260327-142528-4fa3ef
   tma:
   - KB-20260227-0002
   - KB-20260227-0003
