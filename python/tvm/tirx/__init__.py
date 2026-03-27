@@ -31,8 +31,27 @@ from .expr import Call, CallEffectKind, Let, IterVar, CommReducer
 
 from .stmt import Stmt, Bind, AssertStmt, ForKind, For, While
 
-# Legacy alias: LetStmt was folded into Bind (which now accepts an optional body)
-LetStmt = Bind
+
+def LetStmt(var, value, body=None, span=None):
+    """Backward-compatible LetStmt constructor.
+
+    New IR represents let as leaf `Bind`. This helper keeps the old
+    `LetStmt(var, value, body)` surface by lowering to `SeqStmt([Bind, body])`
+    while tagging the SeqStmt for stmt_functor compatibility dispatch.
+    """
+    if body is None:
+        return Bind(var, value, span)
+
+    bind = Bind(var, value, span)
+    let_seq = SeqStmt([bind, body], span)
+    # Python-side compatibility fields used by stmt_functor.
+    let_seq.var = var
+    let_seq.value = value
+    let_seq.body = body
+    let_seq._legacy_let = True
+    return let_seq
+
+
 from .stmt import (
     BufferStore,
     AllocBuffer,
