@@ -1,0 +1,23 @@
+content:
+  details: "## Lesson\n\nThe LetStmt() backward-compat wrapper was introduced as a\
+    \ correct short-term\nmeasure during the namespace rename. However, it persisted\
+    \ beyond the initial\nrebase and required a dedicated cleanup pass to remove.\n\
+    \n## Guidelines\n\n1. When adding a compat wrapper, create a follow-up task/issue\
+    \ for removal\n2. Mark the wrapper with a comment noting when it can be removed\
+    \ (e.g.,\n   \"Remove after all callers migrate to Bind\")\n3. Compat wrappers\
+    \ that alter node semantics (like converting a leaf to a tree\n   node) are higher\
+    \ priority for removal than simple renames\n4. Cross-repo compat (tir + tirx-kernels)\
+    \ requires coordinated removal\n"
+  summary: When introducing a backward-compat wrapper during a migration, pair it
+    with a follow-up task to remove it. Wrappers that outlive their purpose accumulate
+    hidden complexity.
+created: '2026-03-27'
+id: ADR-20260327-170120-e3803a
+scope:
+- repo
+tags:
+- backward-compat
+- api-evolution
+- process
+title: Backward-compat wrappers should have explicit removal timelines
+updated: '2026-03-27'

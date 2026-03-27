@@ -1,0 +1,40 @@
+content:
+  details: "## Context\n\nDuring the tir-to-tirx namespace rename, a backward-compat\
+    \ `LetStmt()` wrapper\nfunction was introduced to preserve the old `LetStmt(var,\
+    \ value, body)` calling\nconvention on top of the new leaf `Bind(var, value, span)`\
+    \ node. This was the\nright call at the time (ADR-20260327-142529-3943af).\n\n\
+    ## Decision\n\nRemove the compat wrapper entirely and migrate all callers to the\
+    \ new pattern:\n\n- Old: `LetStmt(var, value, body)` (wrapper created SeqStmt\
+    \ internally)\n- New: `SeqStmt([Bind(var, value), body])` (caller constructs SeqStmt\
+    \ explicitly)\n\nRetain only the trivial alias `LetStmt = Bind` for code that\
+    \ uses the old name\nwithout the body argument.\n\n## Scope of changes\n\n1. `tirx/__init__.py`\
+    \ — replaced 18-line wrapper with `LetStmt = Bind` alias\n2. `tirx/stmt.py` —\
+    \ simplified `Bind.__init__` to `(var, value, span)` only\n3. `tirx/stmt_functor.py`\
+    \ — removed `visit_let_stmt_` dispatch, legacy detection\n4. `relax/transform/static_horizontal_fusion.py`\
+    \ — removed dead `visit_let_stmt_`\n   and legacy `hasattr` fallbacks\n5. All\
+    \ test callers migrated from `LetStmt(v, val, body)` to `SeqStmt([Bind(...), body])`\n\
+    6. Cross-repo: `tirx-kernels/sketch/visualize/parser.py` adapted to leaf Bind\n\
+    \n## Rationale\n\n- Compat wrappers that paper over semantic differences (leaf\
+    \ vs tree node) create\n  hidden coupling between old calling conventions and\
+    \ new IR structure\n- The wrapper's SeqStmt creation was invisible to callers,\
+    \ making the IR structure\n  surprising when inspected\n- stmt_functor's legacy\
+    \ detection (`_legacy_let` tag, `hasattr(op, 'body')`) added\n  complexity to\
+    \ a hot path\n- All callers were within the controlled codebase, making a clean\
+    \ migration feasible\n"
+  summary: Backward-compat LetStmt() wrapper removed. All callers migrated to SeqStmt([Bind(var,
+    value), body]) pattern. The original decision to preserve the wrapper during the
+    namespace rename was correct as a short-term measure, but the wrapper was intentionally
+    removed once all callers were migrated.
+created: '2026-03-27'
+id: ADR-20260327-170120-2d4805
+scope:
+- repo
+tags:
+- rebase
+- backward-compat
+- api-evolution
+- tirx
+- stmt-functor
+- migration
+title: Remove LetStmt backward-compat wrapper; enforce leaf Bind + SeqStmt pattern
+updated: '2026-03-27'

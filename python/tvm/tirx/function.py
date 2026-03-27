@@ -70,7 +70,7 @@ class PrimFunc(BaseFunc, Scriptable):
         span=None,
     ):
         # Legacy compatibility: expand body-carrying leaf stmt wrappers
-        # (e.g. DeclBuffer/AllocBuffer/LetStmt forms) into SeqStmt form.
+        # (e.g. DeclBuffer/AllocBuffer forms) into SeqStmt form.
         from .stmt import _normalize_legacy_stmt
 
         body = _normalize_legacy_stmt(body)

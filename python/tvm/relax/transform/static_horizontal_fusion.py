@@ -404,7 +404,6 @@ class EventPrimFuncHelper(StmtExprMutator):
     def _extract_entry_payload(
         stmt: Stmt,
     ) -> tuple[list[Stmt], list[tuple[Var, PrimExpr, object]]] | None:
-        # New form: SeqStmt([prefix..., Bind..., entry_mark])
         if EventPrimFuncHelper._is_mark(stmt, "entry_mark"):
             return ([], [])
         if isinstance(stmt, SeqStmt) and len(stmt.seq) >= 1:
@@ -417,15 +416,6 @@ class EventPrimFuncHelper(StmtExprMutator):
                 binds.append((bind_stmt.var, bind_stmt.value, bind_stmt.span))
             binds.reverse()
             return (seq, binds)
-
-        # Legacy form: LetStmt(var, value, body=...entry_mark...)
-        binds = []
-        cur = stmt
-        while hasattr(cur, "var") and hasattr(cur, "value") and hasattr(cur, "body"):
-            binds.append((cur.var, cur.value, cur.span))
-            cur = cur.body
-        if binds and EventPrimFuncHelper._is_mark(cur, "entry_mark"):
-            return ([], binds)
         return None
 
     def visit_seqstmt_(self, op):
@@ -725,15 +715,6 @@ class DuplicateVarReplacer(StmtExprMutator):
         self.vars[op.var] = T.Var("var", dtype=op.value.dtype, span=op.var.span)
         value = self.visit_expr(op.value)
         return Bind(self.vars[op.var], value, op.span)
-
-    def visit_let_stmt_(self, op):
-        if not hasattr(op, "body"):
-            return self.visit_bind_(op)
-        assert op.var not in self.vars
-        self.vars[op.var] = T.Var("var", dtype=op.value.dtype, span=op.var.span)
-        value = self.visit_expr(op.value)
-        body = self.visit_stmt(op.body)
-        return _prepend_bind(body, self.vars[op.var], value, op.span)
 
     def visit_for_(self, op):
         assert op.loop_var not in self.vars
@@ -1059,10 +1040,6 @@ class DependencyHandler(StmtExprMutator):
             bind_stmt, mark_stmt = stmt.seq
             if isinstance(bind_stmt, Bind) and self._is_entry_mark(mark_stmt):
                 return (bind_stmt.var, bind_stmt.value, bind_stmt.span)
-        # Legacy LetStmt(var, value, body=entry_mark) compatibility.
-        if hasattr(stmt, "var") and hasattr(stmt, "value") and hasattr(stmt, "body"):
-            if self._is_entry_mark(stmt.body):
-                return (stmt.var, stmt.value, stmt.span)
         return None
 
     def _build_entry_mark_with_bindings(self, bindings: list[tuple[Var, PrimExpr, object]]) -> Stmt:

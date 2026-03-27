@@ -62,11 +62,10 @@ class ASTPrinter(StmtVisitor):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        self.log.add("LetStmt")
+    def visit_bind_(self, op):
+        self.log.add("Bind")
         self.log.push_scope()
         self.visit_expr(op.value)
-        self.visit_stmt(op.body)
         self.log.pop_scope()
 
     def visit_attr_(self, op):
@@ -232,9 +231,9 @@ class ASTPrinterMutator(StmtMutator):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        result = super().visit_let_(op)
-        self.log.add("LetStmt")
+    def visit_bind_(self, op):
+        result = super().visit_bind_(op)
+        self.log.add("Bind")
         return result
 
     def visit_attr_(self, op):
@@ -377,10 +376,10 @@ class StmtExprASTPrinter(StmtExprVisitor):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        self.log.add("LetStmt")
+    def visit_bind_(self, op):
+        self.log.add("Bind")
         self.log.push_scope()
-        super().visit_let_(op)
+        super().visit_bind_(op)
         self.log.pop_scope()
 
     def visit_attr_(self, op):
@@ -508,9 +507,9 @@ class StmtExprMutatorPrinter(StmtExprMutator):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        result = super().visit_let_(op)
-        self.log.add("LetStmt")
+    def visit_bind_(self, op):
+        result = super().visit_bind_(op)
+        self.log.add("Bind")
         return result
 
     def visit_attr_(self, op):
@@ -632,8 +631,8 @@ def create_test_statements():
     # Evaluate
     evaluate_stmt = tir.Evaluate(add_expr)
 
-    # LetStmt
-    let_stmt = tir.LetStmt(x, int_imm, evaluate_stmt)
+    # Bind + SeqStmt (was LetStmt)
+    let_stmt = tir.SeqStmt([tir.Bind(x, int_imm), evaluate_stmt])
 
     # For loop
     for_loop = tir.For(x, 0, 10, tir.ForKind.SERIAL, evaluate_stmt)
@@ -701,12 +700,22 @@ def test_evaluate():
 
 
 def test_let():
-    """Test let statement."""
+    """Test let statement (Bind + SeqStmt)."""
     let_stmt = create_test_statements()["let"]
     basic_check(
         let_stmt,
-        "\n".join(["LetStmt", "\tIntImm", "\tEvaluate", "\t\tAdd", "\t\t\tVar", "\t\t\tIntImm"]),
-        "\n".join(["IntImm", "Var", "IntImm", "Add", "Evaluate", "LetStmt"]),
+        "\n".join(
+            [
+                "SeqStmt",
+                "\tBind",
+                "\t\tIntImm",
+                "\tEvaluate",
+                "\t\tAdd",
+                "\t\t\tVar",
+                "\t\t\tIntImm",
+            ]
+        ),
+        "\n".join(["IntImm", "Bind", "Var", "IntImm", "Add", "Evaluate", "SeqStmt"]),
     )
 
 

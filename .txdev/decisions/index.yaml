@@ -458,6 +458,31 @@ entries:
   - python
   title: Use tir = tirx aliases for internal backward-compat, not re-exports
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: ADR-20260327-170120-2d4805
+  path: entries/ADR-20260327-170120-2d4805.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - backward-compat
+  - api-evolution
+  - tirx
+  - stmt-functor
+  - migration
+  title: Remove LetStmt backward-compat wrapper; enforce leaf Bind + SeqStmt pattern
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: ADR-20260327-170120-e3803a
+  path: entries/ADR-20260327-170120-e3803a.yaml
+  scope:
+  - repo
+  tags:
+  - backward-compat
+  - api-evolution
+  - process
+  title: Backward-compat wrappers should have explicit removal timelines
+  updated: '2026-03-27'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -476,6 +501,8 @@ tags:
   api-evolution:
   - ADR-20260228-0002
   - ADR-20260327-142529-3943af
+  - ADR-20260327-170120-2d4805
+  - ADR-20260327-170120-e3803a
   architecture:
   - ADR-20260307-231252-f0561c
   - ADR-20260308-232603-16186a
@@ -497,6 +524,8 @@ tags:
   backward-compat:
   - ADR-20260327-142529-3943af
   - ADR-20260327-142529-6acc98
+  - ADR-20260327-170120-2d4805
+  - ADR-20260327-170120-e3803a
   baseline:
   - ADR-20260319-174407-e52e2f
   bench:
@@ -579,6 +608,8 @@ tags:
   - ADR-20260317-211411-5664ea
   meta-var:
   - ADR-20260326-004750-3e9972
+  migration:
+  - ADR-20260327-170120-2d4805
   module-rename:
   - ADR-20260320-002326-d2fa6d
   module-split:
@@ -611,6 +642,8 @@ tags:
   - ADR-20260228-0001
   - ADR-20260301-0001
   - ADR-20260326-203453-b77baa
+  process:
+  - ADR-20260327-170120-e3803a
   proton:
   - ADR-20260323-185836-4f44fc
   - ADR-20260323-185836-cff692
@@ -628,6 +661,7 @@ tags:
   - ADR-20260301-0001
   - ADR-20260327-142529-3943af
   - ADR-20260327-142529-6acc98
+  - ADR-20260327-170120-2d4805
   refactor:
   - ADR-20260228-0003
   - ADR-20260307-231252-f0561c
@@ -643,6 +677,8 @@ tags:
   - ADR-20260325-174353-f8ad92
   stdout:
   - ADR-20260324-171756-41723a
+  stmt-functor:
+  - ADR-20260327-170120-2d4805
   sync:
   - ADR-20260326-030916-ac4a46
   syntax:
@@ -674,6 +710,7 @@ tags:
   tirx:
   - ADR-20260301-0003
   - ADR-20260327-142529-3943af
+  - ADR-20260327-170120-2d4805
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   tma:

@@ -627,6 +627,29 @@ entries:
   - migration
   title: 'tir->tirx namespace rename: full import pattern catalog'
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-170120-40cb7e
+  path: entries/KB-20260327-170120-40cb7e.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - stmt-functor
+  - code-cleanup
+  title: stmt_functor legacy dispatch cleanup checklist
+  updated: '2026-03-27'
+- created: '2026-03-27'
+  id: KB-20260327-170120-a4aad4
+  path: entries/KB-20260327-170120-a4aad4.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - stmt-functor
+  - migration
+  - ir-nodes
+  title: 'LetStmt-to-Bind migration pattern: SeqStmt([Bind(var, value), body])'
+  updated: '2026-03-27'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -678,6 +701,8 @@ tags:
   - KB-20260325-174353-b5e171
   claude:
   - KB-20260326-203453-d526a0
+  code-cleanup:
+  - KB-20260327-170120-40cb7e
   codegen:
   - KB-20260227-0002
   - KB-20260301-0001
@@ -756,6 +781,8 @@ tags:
   - KB-20260326-030915-290626
   ir:
   - KB-20260301-0001
+  ir-nodes:
+  - KB-20260327-170120-a4aad4
   json-file:
   - KB-20260324-171756-cea50a
   kernel:
@@ -790,6 +817,7 @@ tags:
   migration:
   - KB-20260326-004750-bc6d9b
   - KB-20260327-142528-4fa3ef
+  - KB-20260327-170120-a4aad4
   namespace:
   - KB-20260327-142528-4fa3ef
   noqa:
@@ -892,6 +920,9 @@ tags:
   - KB-20260317-211410-3d3076
   - KB-20260325-174353-b5e171
   - KB-20260326-030915-12829a
+  stmt-functor:
+  - KB-20260327-170120-40cb7e
+  - KB-20260327-170120-a4aad4
   syntax:
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
@@ -924,6 +955,8 @@ tags:
   - KB-20260317-211410-3d3076
   - KB-20260317-211410-c51a41
   - KB-20260327-142528-4fa3ef
+  - KB-20260327-170120-40cb7e
+  - KB-20260327-170120-a4aad4
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511

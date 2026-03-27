@@ -65,10 +65,6 @@ def _normalize_legacy_stmt(stmt: Stmt | None) -> Stmt | None:
     prefix: list[Stmt] = []
     cur = stmt
     while True:
-        if isinstance(cur, Bind) and hasattr(cur, "body"):
-            prefix.append(Bind(cur.var, cur.value, cur.span))
-            cur = cur.body
-            continue
         if isinstance(cur, DeclBuffer) and hasattr(cur, "body"):
             prefix.append(DeclBuffer(cur.buffer, cur.span))
             cur = cur.body
@@ -115,59 +111,13 @@ class Bind(Stmt):
     value: PrimExpr
     span: Span | None
 
-    def __init__(self, var: Var, value: PrimExpr, *args, **kwargs) -> None:
-        body: Stmt | None = None
-        span: Span | None = None
-
-        if len(args) == 1:
-            arg0 = args[0]
-            if isinstance(arg0, Stmt):
-                body = arg0
-            elif arg0 is None or isinstance(arg0, Span):
-                span = arg0
-            else:
-                raise TypeError(
-                    "Bind expects (var, value[, span]) or legacy (var, value, body[, span])"
-                )
-        elif len(args) == 2:
-            body, span = args
-            if body is not None and not isinstance(body, Stmt):
-                raise TypeError("Legacy Bind/LetStmt body must be a Stmt or None")
-            if span is not None and not isinstance(span, Span):
-                raise TypeError("Bind span must be a Span or None")
-        elif len(args) > 2:
-            raise TypeError(
-                "Bind expects (var, value[, span]) or legacy (var, value, body[, span])"
-            )
-
-        if kwargs:
-            invalid_keys = set(kwargs.keys()) - {"body", "span"}
-            if invalid_keys:
-                raise TypeError(f"Unexpected keyword arguments for Bind: {invalid_keys}")
-            if "body" in kwargs:
-                kw_body = kwargs["body"]
-                if kw_body is not None and not isinstance(kw_body, Stmt):
-                    raise TypeError("Bind body must be a Stmt or None")
-                if body is not None and kw_body is not None and body is not kw_body:
-                    raise TypeError("Bind body specified by both args and kwargs")
-                body = kw_body if kw_body is not None else body
-            if "span" in kwargs:
-                kw_span = kwargs["span"]
-                if kw_span is not None and not isinstance(kw_span, Span):
-                    raise TypeError("Bind span must be a Span or None")
-                if span is not None and kw_span is not None and span is not kw_span:
-                    raise TypeError("Bind span specified by both args and kwargs")
-                span = kw_span if kw_span is not None else span
-
+    def __init__(self, var: Var, value: PrimExpr, span: Span | None = None) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.Bind,
             var,
             value,
             span,  # type: ignore
         )
-        # Legacy LetStmt compatibility. Body is carried on python side only.
-        if body is not None:
-            self.body = body
 
 
 @tvm_ffi.register_object("tirx.AssertStmt")

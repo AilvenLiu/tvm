@@ -1,0 +1,24 @@
+content:
+  details: "## Checklist for removing a legacy stmt dispatch\n\n1. **_dispatch_map**\
+    \ in `StmtFunctor.__init__`: remove the entry\n2. **visit_stmt** legacy detection:\
+    \ remove `hasattr`/tag checks that\n   reroute modern nodes to legacy visitor\
+    \ methods\n3. **Visitor methods**: remove from all three classes:\n   - `StmtFunctor`\
+    \ (abstract/default)\n   - `StmtVisitor` (read-only traversal)\n   - `StmtMutator`\
+    \ (rewriting traversal)\n4. **Downstream consumers**: grep for the old `visit_*_`\
+    \ method name\n   across all repos — callers in op_dispatch, transforms, and external\n\
+    \   repos (tirx-kernels) may override or call the removed method\n5. **Fallback\
+    \ code**: search for `hasattr(node, 'var')` or\n   `hasattr(node, 'body')` patterns\
+    \ that detect legacy node shapes\n"
+  summary: 'When removing a legacy stmt type from stmt_functor, clean up all four
+    touch points: dispatch map, visit_stmt detection, visitor methods (3 classes),
+    and downstream code using hasattr fallbacks.'
+created: '2026-03-27'
+id: KB-20260327-170120-40cb7e
+scope:
+- repo
+tags:
+- tirx
+- stmt-functor
+- code-cleanup
+title: stmt_functor legacy dispatch cleanup checklist
+updated: '2026-03-27'

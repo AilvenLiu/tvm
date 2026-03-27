@@ -1,0 +1,40 @@
+content:
+  details: '
+
+    ## Resolution (2026-03-27)
+
+
+    The backward-compat wrapper was removed entirely rather than fixed. All callers
+
+    were migrated to the explicit `SeqStmt([Bind(var, value), body])` pattern, and
+
+    `Bind.__init__` was simplified to accept only `(var, value, span)`.
+
+
+    The root cause — a simple alias `LetStmt = Bind` silently reinterpreting the
+
+    third argument as `span` instead of `body` — reinforced that compat shims which
+
+    change parameter semantics are strictly more dangerous than those that only
+
+    rename. The wrapper function approach was correct for the initial rebase, but
+
+    should have been removed sooner to avoid the failure window.
+
+    '
+  summary: Replacing `LetStmt(var, value, body)` function with `LetStmt = Bind` alias
+    silently dropped the body parameter (treated as span), breaking copy_async golden
+    tests.
+created: '2026-03-27'
+id: M-20260327-170120-886c27
+scope:
+- repo
+tags:
+- rebase
+- backward-compat
+- python
+- correctness
+- tirx
+- resolved
+title: LetStmt = Bind alias silently dropped body argument, causing 35 test failures
+updated: '2026-03-27'

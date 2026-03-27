@@ -34,7 +34,6 @@ class StmtFunctor:
     def __init__(self):
         self._dispatch_map = {
             "tirx.Bind": self.visit_bind_,
-            "tirx.LetStmt": self.visit_let_stmt_,
             "tirx.AttrStmt": self.visit_attr_,
             "tirx.IfThenElse": self.visit_if_then_else_,
             "tirx.For": self.visit_for_,
@@ -84,13 +83,6 @@ class StmtFunctor:
             key = key[:-4]  # Remove the "Node" suffix
 
         key = "tirx." + key
-        # Legacy LetStmt compatibility: represent LetStmt as either:
-        # 1) Bind + python-side body
-        # 2) SeqStmt([Bind, body]) tagged by tvm.tirx.LetStmt helper
-        if key == "tirx.Bind" and hasattr(stmt, "body"):
-            key = "tirx.LetStmt"
-        if key == "tirx.SeqStmt" and hasattr(stmt, "_legacy_let"):
-            key = "tirx.LetStmt"
         if key in self._dispatch_map:
             return self._dispatch_map[key](stmt)
 
@@ -99,10 +91,6 @@ class StmtFunctor:
     def visit_stmt_default_(self, op):
         """Default visitor implementation for statements."""
         raise NotImplementedError(f"Do not have a default for {op.__class__.__name__}")
-
-    def visit_let_stmt_(self, op):
-        """Compatibility visitor for LetStmt nodes."""
-        return self.visit_bind_(op)
 
     def visit_bind_(self, op):
         """Visitor for Bind nodes."""
@@ -239,14 +227,6 @@ class StmtVisitor(StmtFunctor):
     def visit_bind_(self, op):
         """Visitor implementation for Bind."""
         self.visit_expr(op.value)
-
-    def visit_let_stmt_(self, op):
-        """Compatibility visitor implementation for LetStmt."""
-        if hasattr(op, "body"):
-            self.visit_expr(op.value)
-            self.visit_stmt(op.body)
-            return
-        self.visit_bind_(op)
 
     def visit_attr_(self, op):
         """Visitor implementation for AttrStmt."""
@@ -423,16 +403,6 @@ class StmtMutator(StmtFunctor):
             return op
 
         return tvm.tirx.Bind(op.var, value, op.span)
-
-    def visit_let_stmt_(self, op):
-        """Compatibility mutator implementation for LetStmt."""
-        if hasattr(op, "body"):
-            value = self.visit_expr(op.value)
-            body = self.visit_stmt(op.body)
-            if value is op.value and body is op.body:
-                return op
-            return tvm.tirx.LetStmt(op.var, value, body, op.span)
-        return self.visit_bind_(op)
 
     def visit_attr_(self, op):
         """Mutator implementation for AttrStmt."""

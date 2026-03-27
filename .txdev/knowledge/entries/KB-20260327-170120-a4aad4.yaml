@@ -1,0 +1,31 @@
+content:
+  details: "## Migration pattern\n\nOld (LetStmt as tree node with body):\n```python\n\
+    tir.LetStmt(var, value, body)\n```\n\nNew (Bind as leaf + explicit SeqStmt):\n\
+    ```python\ntir.SeqStmt([tir.Bind(var, value), body])\n```\n\nFor chained lets\
+    \ like `LetStmt(v1, e1, LetStmt(v2, e2, body))`:\n```python\ntir.SeqStmt([tir.Bind(v1,\
+    \ e1), tir.Bind(v2, e2), body])\n```\nSeqStmt flattens nested SeqStmts, so this\
+    \ works naturally.\n\n## stmt_functor changes\n\n- Remove `\"tirx.LetStmt\"` from\
+    \ `_dispatch_map`\n- Remove `visit_let_stmt_` methods from StmtFunctor, StmtVisitor,\
+    \ StmtMutator\n- Bind is dispatched as `\"tirx.Bind\"` → `visit_bind_`\n- No legacy\
+    \ detection needed (no `_legacy_let` tag, no `hasattr(op, 'body')`)\n\n## Traversal\
+    \ order change\n\nOld LetStmt traversal (pre-order): `LetStmt > value > body`\n\
+    New SeqStmt+Bind traversal (pre-order): `SeqStmt > Bind > value > body`\n\nThis\
+    \ affects expected output in stmt_functor tests. Example:\n```\nOld: LetStmt,\
+    \ IntImm, Evaluate, Add, Var, IntImm\nNew: SeqStmt, Bind, IntImm, Evaluate, Add,\
+    \ Var, IntImm\n```\n\n## Cross-repo impact\n\nAny code with `visit_let_stmt_`\
+    \ needs updating:\n- `tirx-kernels/sketch/visualize/parser.py` — rename to `visit_bind_`,\n\
+    \  simplify from scoped body-visiting to leaf-only value inspection\n"
+  summary: When migrating from LetStmt(var, value, body) to leaf Bind, replace with
+    SeqStmt([Bind(var, value), body]). Update stmt_functor visitors from visit_let_stmt_
+    to visit_bind_ and adjust expected traversal order.
+created: '2026-03-27'
+id: KB-20260327-170120-a4aad4
+scope:
+- repo
+tags:
+- tirx
+- stmt-functor
+- migration
+- ir-nodes
+title: 'LetStmt-to-Bind migration pattern: SeqStmt([Bind(var, value), body])'
+updated: '2026-03-27'

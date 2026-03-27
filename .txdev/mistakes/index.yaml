@@ -456,6 +456,20 @@ entries:
   - tirx-kernels
   title: Accepted test count decrease without investigation
   updated: '2026-03-27'
+- created: '2026-03-27'
+  id: M-20260327-170120-886c27
+  path: entries/M-20260327-170120-886c27.yaml
+  scope:
+  - repo
+  tags:
+  - rebase
+  - backward-compat
+  - python
+  - correctness
+  - tirx
+  - resolved
+  title: LetStmt = Bind alias silently dropped body argument, causing 35 test failures
+  updated: '2026-03-27'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -467,6 +481,7 @@ tags:
   - M-20260319-022448-b1a13a
   backward-compat:
   - M-20260327-142529-bcec6f
+  - M-20260327-170120-886c27
   bench:
   - M-20260323-185836-4c16ff
   - M-20260323-185836-967c0e
@@ -500,6 +515,7 @@ tags:
   - M-20260325-174353-51abbb
   - M-20260326-030916-99f4b9
   - M-20260327-142529-bcec6f
+  - M-20260327-170120-886c27
   cp_async:
   - M-20260326-004750-646f60
   cross-repo:
@@ -594,6 +610,7 @@ tags:
   - M-20260322-182024-19635e
   - M-20260323-185836-374105
   - M-20260327-142529-bcec6f
+  - M-20260327-170120-886c27
   quality:
   - M-20260228-0001
   quoting:
@@ -604,6 +621,7 @@ tags:
   - M-20260228-0002
   - M-20260327-142529-6d1726
   - M-20260327-142529-bcec6f
+  - M-20260327-170120-886c27
   refactor:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
@@ -614,6 +632,8 @@ tags:
   - M-20260317-211411-ba6927
   requirements:
   - M-20260227-0001
+  resolved:
+  - M-20260327-170120-886c27
   scope-control:
   - M-20260228-0002
   - M-20260301-0001
@@ -664,6 +684,7 @@ tags:
   - M-20260308-232603-9a9463
   - M-20260317-211411-dfb881
   - M-20260327-142529-bcec6f
+  - M-20260327-170120-886c27
   tirx-kernels:
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726

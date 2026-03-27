@@ -135,7 +135,7 @@ def _count_tma_ops(impl):
 
 
 def _build_expected_host_init(dtype, encode_args):
-    """Build expected host_init LetStmt for cuTensorMapEncodeTiled.
+    """Build expected host_init Bind+SeqStmt for cuTensorMapEncodeTiled.
 
     encode_args is a list of ints: the numeric arguments to cuTensorMapEncodeTiled
     after (tensormap, dtype_str, ndim, A_ptr). The full call is:
@@ -161,10 +161,8 @@ def _build_expected_host_init(dtype, encode_args):
     )
     encode_call = tvm.tirx.Call("int32", tvm.ir.Op.get("tirx.tvm_call_packed"), call_args)
     replace_point = OpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
-    return tvm.tirx.LetStmt(
-        A_tensormap,
-        stack_alloca,
-        tvm.tirx.SeqStmt([tvm.tirx.Evaluate(encode_call), replace_point]),
+    return tvm.tirx.SeqStmt(
+        [tvm.tirx.Bind(A_tensormap, stack_alloca), tvm.tirx.Evaluate(encode_call), replace_point]
     )
 
 
