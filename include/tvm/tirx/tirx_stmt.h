@@ -69,9 +69,9 @@ class ScopeOpCallNode : public StmtNode {
 class ScopeOpCall : public Stmt {
  public:
   TVM_DLL ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
-                     ffi::Map<ffi::String, Buffer> workspace = {},
-                     ffi::Map<ffi::String, ffi::Any> config = {},
-                     ffi::Optional<ffi::String> dispatch = std::nullopt);
+                      ffi::Map<ffi::String, Buffer> workspace = {},
+                      ffi::Map<ffi::String, ffi::Any> config = {},
+                      ffi::Optional<ffi::String> dispatch = std::nullopt);
 
   static bool IsValidOpCallArgType(const ffi::Any& arg);
 

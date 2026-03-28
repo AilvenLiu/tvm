@@ -23,8 +23,8 @@ from tvm.tirx import (
     BufferStore,
     DeclBuffer,
     PrimExpr,
-    Stmt,
     ScopeOpCall,
+    Stmt,
     Var,
     decl_buffer,
 )

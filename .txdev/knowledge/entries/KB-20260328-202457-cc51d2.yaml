@@ -1,0 +1,38 @@
+content:
+  details: 'When each op had its own single file, helper duplication was less visible.
+
+    After splitting into per-op folders with utils.py files, identical helper
+
+    functions became obvious across ops:
+
+
+    - `match_scope()` (glob-lite scope matching) -- duplicated 4x in binary/unary/reduction/copy
+
+    - `get_thread_cnt()` (thread count from exec scope) -- duplicated 2x in binary/unary
+
+    - `sm_version_ok()` (SM version predicate) -- duplicated 2x in binary/reduction
+
+    - `exec_scope_ok()` -- duplicated in reduction (already existed in exec_scope_utils.py)
+
+
+    Consolidating these into `cuda/common.py` removed ~40 lines and eliminated
+
+    divergence risk. Key pattern: after any file-split refactor, immediately
+
+    audit the resulting utils.py files for cross-op duplicates before merging.
+
+    '
+  summary: After splitting dispatch files into per-op folders, review all utils.py
+    for duplicated helpers and consolidate into shared modules (cuda/common.py, exec_scope_utils.py)
+    before merging.
+created: '2026-03-28'
+id: KB-20260328-202457-cc51d2
+scope:
+- repo
+tags:
+- refactor
+- dedup
+- dispatch
+- code-quality
+title: Consolidate duplicated per-op helpers into shared modules early
+updated: '2026-03-28'

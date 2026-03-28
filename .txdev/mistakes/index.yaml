@@ -520,6 +520,18 @@ entries:
   title: Assuming failing imports came from current worktree without verifying module
     origin
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: M-20260328-202457-411293
+  path: entries/M-20260328-202457-411293.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - ruff
+  - git
+  - workflow
+  title: Ruff auto-fix creates unstaged changes that fail the next commit
+  updated: '2026-03-28'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -607,6 +619,7 @@ tags:
   - M-20260228-0001
   - M-20260228-0003
   - M-20260327-185547-3913ba
+  - M-20260328-202457-411293
   golden:
   - M-20260227-0002
   - M-20260227-0003
@@ -659,6 +672,7 @@ tags:
   - M-20260301-0001
   - M-20260326-203453-e6e5be
   - M-20260328-001753-acf9c3
+  - M-20260328-202457-411293
   process:
   - M-20260228-0001
   - M-20260228-0003
@@ -700,6 +714,7 @@ tags:
   - M-20260327-170120-886c27
   ruff:
   - M-20260328-001753-acf9c3
+  - M-20260328-202457-411293
   scope-control:
   - M-20260228-0002
   - M-20260301-0001
@@ -788,6 +803,7 @@ tags:
   - M-20260306-195314-50a55c
   - M-20260319-022448-da2fb0
   - M-20260327-185547-c88284
+  - M-20260328-202457-411293
   xdist:
   - M-20260319-022448-dbe043
   yaml:

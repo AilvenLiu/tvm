@@ -19,6 +19,7 @@
 
 import functools
 import operator
+import re
 from enum import Enum
 
 from tvm.arith.analyzer import Analyzer
@@ -245,3 +246,40 @@ def copy_vec_load_impl(
     else:
         fail(f"unsupported exec_scope {sctx.exec_scope.name}")
     return impl
+
+
+def match_scope(scope: str | None, pattern: str) -> bool:
+    """Glob-lite scope matching: 'shared*' => prefix match; otherwise exact.
+
+    Returns True when scope is None (meaning "any scope is fine").
+    """
+    if scope is None:
+        return True
+    if pattern.endswith("*"):
+        return scope.startswith(pattern[:-1])
+    return scope == pattern
+
+
+def get_thread_cnt(sctx: DispatchContext) -> int | None:
+    """Get thread count for the current execution scope."""
+    scope_name = sctx.exec_scope.name
+    if scope_name == "cta":
+        return sctx.launch_params["threadIdx.x"].dom.extent
+    if scope_name == "warpgroup":
+        return 128
+    if scope_name == "warp":
+        return 32
+    if scope_name == "thread":
+        return 1
+    return None
+
+
+def sm_version_ok(
+    op: ScopeOpCall, sctx: DispatchContext, min_version: int
+) -> tuple[bool, str | None]:
+    """Check if SM version >= min_version. Usable as a dispatch predicate."""
+    target_arch = sctx.target.arch if hasattr(sctx.target, "arch") else ""
+    sm_match = re.match(r"sm_(\d+)", target_arch)
+    sm_version = int(sm_match.group(1)) if sm_match else 0
+    ok = sm_version >= min_version
+    return (ok, None if ok else f"sm_version {sm_version} < {min_version}")

@@ -1,0 +1,34 @@
+content:
+  details: 'When splitting a single-file module (e.g. `binary.py`) into a package
+
+    (`binary/__init__.py` + sub-modules), Python''s import system treats them
+
+    identically. Callers using `from .binary import *` or `from .binary import X`
+
+    require zero changes. This makes the refactor safe for side-effect-only
+
+    imports (like `@register_dispatch` registrations) -- the `__init__.py` just
+
+    needs to import each variant sub-module to trigger registration.
+
+
+    Confirmed in this feature: all 16 dispatch files (9 CUDA + 7 TRN) were split
+
+    from modules to packages with no import path changes required in `cuda/__init__.py`
+
+    or `trn/__init__.py`.
+
+    '
+  summary: Replacing a Python module `foo.py` with a package `foo/__init__.py` preserves
+    all `from .foo import *` import sites without changes.
+created: '2026-03-28'
+id: KB-20260328-202457-a633e5
+scope:
+- repo
+tags:
+- python
+- import
+- refactor
+- dispatch
+title: Python module-to-package split preserves import paths
+updated: '2026-03-28'

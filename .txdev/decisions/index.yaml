@@ -522,6 +522,30 @@ entries:
   - tirx-kernels
   title: Validate and normalize TIRX_KERNELS_PATH in pytest environment setup
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: ADR-20260328-202457-68d643
+  path: entries/ADR-20260328-202457-68d643.yaml
+  scope:
+  - repo
+  tags:
+  - dispatch
+  - architecture
+  - dedup
+  - helpers
+  title: Cross-op shared helpers in cuda/common.py, not per-op utils.py
+  updated: '2026-03-28'
+- created: '2026-03-28'
+  id: ADR-20260328-202457-dea4b8
+  path: entries/ADR-20260328-202457-dea4b8.yaml
+  scope:
+  - repo
+  tags:
+  - dispatch
+  - architecture
+  - file-structure
+  - consistency
+  title: Uniform folder structure for all dispatch ops, including single-variant ops
+  updated: '2026-03-28'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -558,6 +582,8 @@ tags:
   - ADR-20260325-174353-f8ad92
   - ADR-20260326-030916-5826a7
   - ADR-20260327-185547-d8244c
+  - ADR-20260328-202457-68d643
+  - ADR-20260328-202457-dea4b8
   asf-header:
   - ADR-20260326-203453-b77baa
   assert_structural_equal:
@@ -605,6 +631,8 @@ tags:
   compatibility:
   - ADR-20260228-0002
   - ADR-20260228-0003
+  consistency:
+  - ADR-20260328-202457-dea4b8
   correctness:
   - ADR-20260326-030916-ac4a46
   cp_async:
@@ -620,21 +648,29 @@ tags:
   - ADR-20260326-030916-ac4a46
   decision:
   - ADR-20260328-005952-4cf57e
+  dedup:
+  - ADR-20260328-202457-68d643
   design-pattern:
   - ADR-20260319-022448-4d7f83
   device-op:
   - ADR-20260328-001753-19aa69
   dispatch:
   - ADR-20260325-174353-f8ad92
+  - ADR-20260328-202457-68d643
+  - ADR-20260328-202457-dea4b8
   dsl:
   - ADR-20260317-211411-a47556
   - ADR-20260322-182024-efa75b
   ffi:
   - ADR-20260327-185547-d8244c
+  file-structure:
+  - ADR-20260328-202457-dea4b8
   for-loop:
   - ADR-20260326-004750-de4733
   golden:
   - ADR-20260227-0001
+  helpers:
+  - ADR-20260328-202457-68d643
   import:
   - ADR-20260327-142529-6acc98
   infrastructure:

@@ -95,7 +95,7 @@ def _make_tma_call(
     from tvm.tirx import Var
     from tvm.tirx.exec_scope import ExecScope
     from tvm.tirx.operator.scope_op import CopyAsync
-    from tvm.tirx.operator.scope_op_dispatch.cuda.copy_async import copy_tma_impl
+    from tvm.tirx.operator.scope_op_dispatch.cuda.copy_async.utils import copy_tma_impl
     from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
     from tvm.tirx.stmt import BufferRegion
 

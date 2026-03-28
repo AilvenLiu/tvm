@@ -1,0 +1,23 @@
+content:
+  details: "After splitting dispatch files, a clear two-tier helper hierarchy emerged:\n\
+    \n1. **cuda/common.py** (cross-op): match_scope, get_thread_cnt, sm_version_ok,\n\
+    \   get_st_extent, get_vec_len, validate_copy_op, get_indices, etc.\n2. **cuda/<op>/utils.py**\
+    \ (op-specific): op_table definitions, op-specific\n   arg parsing (_unary_args,\
+    \ _reduction_args), op-specific validation logic.\n\nAdditionally, **cuda/exec_scope_utils.py**\
+    \ holds exec_scope_ok and\nthread_selector -- scope-related utilities that aren't\
+    \ general enough for\ncommon.py but are shared across ops.\n\nRule: if a helper\
+    \ is used by more than one op folder, it goes in common.py\nor an existing *_utils.py.\
+    \ Per-op utils.py should never duplicate cross-op\nlogic.\n"
+  summary: Helpers used by 2+ ops (match_scope, get_thread_cnt, sm_version_ok) belong
+    in cuda/common.py; per-op utils.py is only for op-specific logic.
+created: '2026-03-28'
+id: ADR-20260328-202457-68d643
+scope:
+- repo
+tags:
+- dispatch
+- architecture
+- dedup
+- helpers
+title: Cross-op shared helpers in cuda/common.py, not per-op utils.py
+updated: '2026-03-28'

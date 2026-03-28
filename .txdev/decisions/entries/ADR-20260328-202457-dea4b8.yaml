@@ -1,0 +1,26 @@
+content:
+  details: "Decision: use `op_name/{__init__.py, utils.py, variant.py}` for every\
+    \ op,\neven single-variant ops like fma (only has local.py) or gemm_async (only\n\
+    has tcgen05.py).\n\nAlternatives considered:\n- Keep single-variant ops as flat\
+    \ files: rejected because mixed flat/folder\n  layout creates cognitive overhead\
+    \ and requires remembering which ops are\n  flat vs folders. Also makes adding\
+    \ a second variant a structural change.\n- Prefix-based naming (binary_shared.py,\
+    \ binary_local.py): rejected because\n  it doesn't scale and doesn't provide a\
+    \ natural place for shared helpers.\n\nThe uniform approach means every op follows\
+    \ the same pattern: `__init__.py`\ndoes side-effect imports, `utils.py` holds\
+    \ op-specific helpers, and each\nvariant file contains one dispatch registration\
+    \ block. This was validated\nacross 16 dispatch files (9 CUDA + 7 TRN).\n"
+  summary: All ops use folder-per-op structure (with __init__.py, utils.py, variant
+    files) even when they only have one dispatch variant, for consistency and future
+    extensibility.
+created: '2026-03-28'
+id: ADR-20260328-202457-dea4b8
+scope:
+- repo
+tags:
+- dispatch
+- architecture
+- file-structure
+- consistency
+title: Uniform folder structure for all dispatch ops, including single-variant ops
+updated: '2026-03-28'

@@ -1,0 +1,32 @@
+content:
+  details: 'During this feature''s consolidation commit, ruff format removed extra
+    blank
+
+    lines in binary/utils.py as an auto-fix. The commit failed because the
+
+    auto-fixed content was left as an unstaged modification. The workflow''s
+
+    automatic commit retry also failed for the same reason.
+
+
+    Fix: after a pre-commit hook auto-fixes files, always `git add` the modified
+
+    files before retrying the commit. Check `git diff` (unstaged) after a failed
+
+    commit to see if hooks modified any files.
+
+    '
+  summary: When pre-commit ruff auto-fixes files (e.g. removing extra blank lines),
+    changes are unstaged. Must re-stage before retrying the commit, otherwise the
+    same hook failure repeats.
+created: '2026-03-28'
+id: M-20260328-202457-411293
+scope:
+- repo
+tags:
+- pre-commit
+- ruff
+- git
+- workflow
+title: Ruff auto-fix creates unstaged changes that fail the next commit
+updated: '2026-03-28'

@@ -725,6 +725,30 @@ entries:
   - debugging
   title: Pytest path hygiene for tirx-kernels during multi-repo development
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: KB-20260328-202457-a633e5
+  path: entries/KB-20260328-202457-a633e5.yaml
+  scope:
+  - repo
+  tags:
+  - python
+  - import
+  - refactor
+  - dispatch
+  title: Python module-to-package split preserves import paths
+  updated: '2026-03-28'
+- created: '2026-03-28'
+  id: KB-20260328-202457-cc51d2
+  path: entries/KB-20260328-202457-cc51d2.yaml
+  scope:
+  - repo
+  tags:
+  - refactor
+  - dedup
+  - dispatch
+  - code-quality
+  title: Consolidate duplicated per-op helpers into shared modules early
+  updated: '2026-03-28'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -778,6 +802,8 @@ tags:
   - KB-20260326-203453-d526a0
   code-cleanup:
   - KB-20260327-170120-40cb7e
+  code-quality:
+  - KB-20260328-202457-cc51d2
   codegen:
   - KB-20260227-0002
   - KB-20260301-0001
@@ -822,8 +848,12 @@ tags:
   - KB-20260301-0001
   - KB-20260327-142528-4a9323
   - KB-20260328-005952-3f5549
+  dedup:
+  - KB-20260328-202457-cc51d2
   dispatch:
   - KB-20260325-174353-cf8a51
+  - KB-20260328-202457-a633e5
+  - KB-20260328-202457-cc51d2
   dsl:
   - KB-20260301-0004
   - KB-20260317-211410-6e13ad
@@ -856,6 +886,7 @@ tags:
   - KB-20260308-232603-d83e44
   - KB-20260327-142528-4a9323
   - KB-20260327-142528-4fa3ef
+  - KB-20260328-202457-a633e5
   imports:
   - KB-20260322-201254-ba181e
   intrinsic:
@@ -970,6 +1001,7 @@ tags:
   - KB-20260308-232603-205e85
   - KB-20260317-211410-e366ed
   - KB-20260320-002326-24c511
+  - KB-20260328-202457-a633e5
   pythonpath:
   - KB-20260328-005952-3f5549
   range:
@@ -987,6 +1019,8 @@ tags:
   - KB-20260327-185547-0a74c4
   - KB-20260327-185547-89e579
   - KB-20260327-185547-e51f21
+  - KB-20260328-202457-a633e5
+  - KB-20260328-202457-cc51d2
   registration:
   - KB-20260307-231252-72bc64
   - KB-20260326-030915-290626
