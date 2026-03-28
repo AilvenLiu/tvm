@@ -1,0 +1,31 @@
+content:
+  details: "Alternatives considered:\n\n1. **Five separate C++ intrinsics** (cuda_copy_128b,\
+    \ cuda_copy_64b, etc.):\n   Each would need its own declaration in builtin.h,\
+    \ registration in builtin.cc,\n   Python function in op.py, and codegen function.\
+    \ 5x the C++ boilerplate for\n   functionally identical code parameterized only\
+    \ by width.\n\n2. **Single intrinsic with num_bytes parameter** (chosen):\n  \
+    \ One C++ declaration (cuda_copy_bytes), one registration, one codegen function\n\
+    \   that dispatches on num_bytes to select the C++ type. Five Python convenience\n\
+    \   wrappers provide the typed API. CUDANamespace exposes only the typed wrappers\n\
+    \   (Tx.cuda.copy_128b through Tx.cuda.copy_8b).\n\nDecision: Option 2. It follows\
+    \ the established cuda_warp_reduce/cuda_warp_sum precedent.\nThe base intrinsic\
+    \ name `cuda_copy_bytes` was chosen over `cuda_copy` because `copy` alone\nis\
+    \ too generic and could be confused with TMA copy_async or the high-level Tx.copy()\
+    \ DSL call.\n\nThe user-facing API omits Tx.cuda.copy_bytes (the base) to avoid\
+    \ accidental misuse with\ninvalid num_bytes values. Only the typed wrappers are\
+    \ exposed in TVMScript namespace.\n"
+  summary: Chose one registered C++ intrinsic (cuda_copy_bytes) parameterized by num_bytes
+    over five separate intrinsics (cuda_copy_128b, etc.) — minimizes C++ surface while
+    keeping typed Python/TVMScript wrappers.
+created: '2026-03-28'
+id: ADR-20260328-001753-19aa69
+scope:
+- repo
+tags:
+- tirx
+- intrinsic
+- codegen
+- device-op
+- api-design
+title: 'cuda_copy_bytes: single intrinsic with num_bytes dispatch, not per-width ops'
+updated: '2026-03-28'

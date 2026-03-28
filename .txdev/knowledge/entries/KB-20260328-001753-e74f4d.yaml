@@ -1,0 +1,30 @@
+content:
+  details: "When a device op has multiple typed variants (e.g., copy at different\
+    \ widths, reduce with\ndifferent ops), use the single-base-intrinsic + convenience-wrapper\
+    \ pattern:\n\n1. Register ONE intrinsic in C++ and Python (e.g., `cuda_copy_bytes(dst,\
+    \ src, num_bytes)`)\n2. Add Python-only convenience wrappers (e.g., `cuda_copy_128b(dst,\
+    \ src)` calls\n   `cuda_copy_bytes(dst, src, 16)`)\n3. In CUDANamespace, expose\
+    \ only the typed wrappers (`Tx.cuda.copy_128b`), not the base\n4. In codegen,\
+    \ the `@register_codegen` function dispatches on the parameter to select the\n\
+    \   right C++ type and generate a unique function name\n\nThis follows the existing\
+    \ `cuda_warp_reduce`/`cuda_warp_sum` pattern. Benefits:\n- Only one C++ op declaration\
+    \ and registration needed\n- Codegen deduplication is natural (function name encodes\
+    \ the variant)\n- User-facing API is clean typed names without exposing raw parameters\n\
+    \nExample from cuda_copy_bytes:\n- Base: `cuda_copy_bytes(dst, src, num_bytes)`\
+    \ — registered in C++\n- Wrappers: `cuda_copy_128b`, `cuda_copy_64b`, `cuda_copy_32b`,\
+    \ `cuda_copy_16b`, `cuda_copy_8b`\n- Codegen maps num_bytes -> C++ type: {16:\
+    \ uint4, 8: uint2, 4: unsigned int, 2: unsigned short, 1: unsigned char}\n"
+  summary: Register one base intrinsic with a dispatch parameter, then add Python-only
+    convenience wrappers for each variant — avoids C++ registration explosion.
+created: '2026-03-28'
+id: KB-20260328-001753-e74f4d
+scope:
+- repo
+tags:
+- tir
+- tirx
+- intrinsic
+- codegen
+- pattern
+title: Convenience wrapper pattern for device op variants
+updated: '2026-03-28'

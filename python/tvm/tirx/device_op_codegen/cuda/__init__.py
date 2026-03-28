@@ -39,6 +39,7 @@ The ops are split into logical groups:
 from . import (
     barrier,
     cp_async,
+    cuda_copy,
     cuda_reduce,
     cuda_sync,
     math,

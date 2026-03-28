@@ -395,6 +395,9 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_warp_reduce)
 TIR_DEFINE_BUILTIN_FUNC(cuda_cta_reduce)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_copy_bytes)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(cuda_warp_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

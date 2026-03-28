@@ -858,6 +858,15 @@ TVM_DLL const Op& cuda_warp_reduce();
 TVM_DLL const Op& cuda_cta_reduce();
 
 /*!
+ * \brief Typed load/store copy of num_bytes bytes.
+ *
+ * cuda_copy_bytes(dst, src, num_bytes) copies num_bytes bytes from src to dst
+ * using a single typed load/store (uint4, uint2, unsigned int, etc.).
+ * num_bytes must be one of {1, 2, 4, 8, 16}.
+ */
+TVM_DLL const Op& cuda_copy_bytes();
+
+/*!
  * \brief tvm intrinsic for cuda warp sync instruction
  */
 TVM_DLL const Op& cuda_warp_sync();

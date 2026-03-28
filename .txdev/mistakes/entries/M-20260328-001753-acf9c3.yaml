@@ -1,0 +1,55 @@
+content:
+  details: 'When adding ruff-check to tirx-kernels'' pre-commit config, the initial
+    run reported ~2600
+
+    errors. Investigation showed ~1400 were from `references/repos/` (third-party
+    git submodules
+
+    like cutlass, flashinfer) and `kernel-evolution/` (versioned kernel snapshots).
+
+
+    Root cause: ruff''s `respect_gitignore = true` default only skips .gitignore''d
+    paths.
+
+    Git submodules are tracked (not ignored), so ruff lints them. The `select` config
+    correctly
+
+    limited rules but couldn''t help with third-party code that violates any rule.
+
+
+    Symptoms that point to this: B-series and SIM-series violations appearing despite
+    not being
+
+    in the `select` list — these came from submodule directories that had their own
+    ruff/flake8
+
+    configs or no config at all.
+
+
+    Fix: Add `extend-exclude = ["references/", "kernel-evolution/"]` to `[tool.ruff]`
+    in
+
+    pyproject.toml. This immediately dropped errors from ~1400 to 8 (all auto-fixable
+    RUF100).
+
+
+    Lesson: When enabling a linter on a repo with submodules or vendored code, always
+    add
+
+    extend-exclude for those directories FIRST before debugging individual rule violations.
+
+    '
+  summary: When enabling ruff-check in tirx-kernels, 1400+ false errors came from
+    references/repos/ (git submodules) and kernel-evolution/ (versioned snapshots)
+    because ruff lints all Python files by default.
+created: '2026-03-28'
+id: M-20260328-001753-acf9c3
+scope:
+- repo
+tags:
+- ruff
+- pre-commit
+- tirx-kernels
+- linting
+title: Ruff linter picks up git submodules and snapshot directories without extend-exclude
+updated: '2026-03-28'

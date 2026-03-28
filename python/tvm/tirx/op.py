@@ -3024,6 +3024,57 @@ def cuda_cta_min(value, num_warps, scratch):
     return cuda_cta_reduce(value, "min", num_warps, scratch)
 
 
+def cuda_copy_bytes(dst, src, num_bytes):
+    """Typed load/store copy of ``num_bytes`` bytes.
+
+    Copies ``num_bytes`` bytes from ``src`` to ``dst`` using a single
+    typed load/store instruction.  Codegen selects the appropriate C++
+    vector type (``uint4``, ``uint2``, ``unsigned int``, etc.).
+
+    Parameters
+    ----------
+    dst : Var
+        Destination pointer.
+
+    src : Var
+        Source pointer.
+
+    num_bytes : int
+        Number of bytes to copy.  Must be one of {1, 2, 4, 8, 16}.
+
+    Returns
+    -------
+    call : PrimExpr
+        A void call expression.
+    """
+    return call_intrin("void", "tirx.cuda_copy_bytes", dst, src, num_bytes)
+
+
+def cuda_copy_128b(dst, src):
+    """Convenience wrapper: ``cuda_copy_bytes(dst, src, 16)`` — copies 128 bits."""
+    return cuda_copy_bytes(dst, src, 16)
+
+
+def cuda_copy_64b(dst, src):
+    """Convenience wrapper: ``cuda_copy_bytes(dst, src, 8)`` — copies 64 bits."""
+    return cuda_copy_bytes(dst, src, 8)
+
+
+def cuda_copy_32b(dst, src):
+    """Convenience wrapper: ``cuda_copy_bytes(dst, src, 4)`` — copies 32 bits."""
+    return cuda_copy_bytes(dst, src, 4)
+
+
+def cuda_copy_16b(dst, src):
+    """Convenience wrapper: ``cuda_copy_bytes(dst, src, 2)`` — copies 16 bits."""
+    return cuda_copy_bytes(dst, src, 2)
+
+
+def cuda_copy_8b(dst, src):
+    """Convenience wrapper: ``cuda_copy_bytes(dst, src, 1)`` — copies 8 bits."""
+    return cuda_copy_bytes(dst, src, 1)
+
+
 def cuda_warp_sync():
     """TVM intrinsic to synchronize threads within the current warp.
 

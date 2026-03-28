@@ -495,6 +495,20 @@ entries:
   - architecture
   title: Two-phase ordering for bidirectional type rename in shared namespace
   updated: '2026-03-27'
+- created: '2026-03-28'
+  id: ADR-20260328-001753-19aa69
+  path: entries/ADR-20260328-001753-19aa69.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - intrinsic
+  - codegen
+  - device-op
+  - api-design
+  title: 'cuda_copy_bytes: single intrinsic with num_bytes dispatch, not per-width
+    ops'
+  updated: '2026-03-28'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -510,6 +524,7 @@ tags:
   - ADR-20260325-174353-029f36
   - ADR-20260326-004750-3e9972
   - ADR-20260326-004750-de4733
+  - ADR-20260328-001753-19aa69
   api-evolution:
   - ADR-20260228-0002
   - ADR-20260327-142529-3943af
@@ -571,6 +586,7 @@ tags:
   codegen:
   - ADR-20260326-030916-5826a7
   - ADR-20260326-030916-ac4a46
+  - ADR-20260328-001753-19aa69
   commands:
   - ADR-20260324-171756-b03f0f
   compatibility:
@@ -591,6 +607,8 @@ tags:
   - ADR-20260326-030916-ac4a46
   design-pattern:
   - ADR-20260319-022448-4d7f83
+  device-op:
+  - ADR-20260328-001753-19aa69
   dispatch:
   - ADR-20260325-174353-f8ad92
   dsl:
@@ -608,6 +626,7 @@ tags:
   - ADR-20260319-022448-7cc00e
   intrinsic:
   - ADR-20260325-174353-029f36
+  - ADR-20260328-001753-19aa69
   json:
   - ADR-20260324-171756-41723a
   kernel:
@@ -729,6 +748,7 @@ tags:
   - ADR-20260301-0003
   - ADR-20260327-142529-3943af
   - ADR-20260327-170120-2d4805
+  - ADR-20260328-001753-19aa69
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   tma:

@@ -1,0 +1,37 @@
+content:
+  details: "Full registration stack for a new TIR/TIRX CUDA intrinsic (e.g., cuda_warp_reduce,\n\
+    cuda_cta_reduce, cuda_copy_bytes):\n\n1. **python/tvm/tirx/op.py** (or tir/op.py):\
+    \ Define Python function calling\n   `call_intrin(dtype, \"tirx.<op_name>\", *args)`.\
+    \ Scalars become IntImm/FloatImm,\n   strings become StringImm. Add convenience\
+    \ wrappers if needed (e.g., cuda_copy_128b\n   calls cuda_copy_bytes with num_bytes=16).\n\
+    \n2. **python/tvm/script/ir_builder/tirx/ir.py** (or tir/ir.py): Register in\n\
+    \   CUDANamespace.__init__ as `self.<name> = _op_wrapper(_tir_op.<func>)`. This\
+    \ enables\n   `Tx.cuda.<name>(...)` in TVMScript.\n\n3. **include/tvm/tirx/builtin.h**\
+    \ (or tir/builtin.h): Add C++ declaration\n   `TVM_DLL const Op& <op_name>();`.\n\
+    \n4. **src/tirx/op/builtin.cc** (or tir/op/builtin.cc): Register with\n   `TIR_DEFINE_BUILTIN_FUNC(<op_name>).set_attr<TCallEffectKind>(...)`.\n\
+    \   Use kOpaque for side-effectful ops (prevents reordering/elimination/duplication).\n\
+    \n5. **python/tvm/tirx/device_op_codegen/cuda/<file>.py** (or tir/...): Implement\n\
+    \   `@register_codegen(\"<op_name>\")` that generates inline CUDA via\n   `cuda_func_call(func_name,\
+    \ *args, source_code=src, return_type=dtype)`. The function\n   name should encode\
+    \ parameters (e.g., `tvm_builtin_copy_128b`) for deduplication.\n\nAlso update\
+    \ `device_op_codegen/cuda/__init__.py` to import the new codegen module\n(side-effect\
+    \ import for registration).\n\nAfter C++ changes (steps 3-4), rebuild TVM with\
+    \ `cmake --build . -j$(nproc)`.\n\nNote: The pattern is the same for both `tir.*`\
+    \ and `tirx.*` namespaces — just swap\nthe directory prefix. Current new ops use\
+    \ the `tirx` namespace.\n"
+  summary: 'Adding a new TIR/TIRX intrinsic requires changes in 5 layers: op.py (Python
+    def) -> ir.py (CUDANamespace) -> builtin.h (C++ decl) -> builtin.cc (C++ registration
+    with TCallEffectKind) -> device_op_codegen/cuda/ (codegen via @register_codegen).
+    Pattern applies to both tir.* and tirx.* namespaces.'
+created: '2026-03-28'
+id: KB-20260328-001753-bd867c
+scope:
+- repo
+tags:
+- tir
+- intrinsic
+- codegen
+- registration
+- how-to
+title: 'TIR intrinsic registration stack: full 5-layer checklist'
+updated: '2026-03-28'

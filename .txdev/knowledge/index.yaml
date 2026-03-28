@@ -686,6 +686,32 @@ entries:
   - ffi
   title: Two-phase rename strategy for namespace collision avoidance
   updated: '2026-03-27'
+- created: '2026-03-28'
+  id: KB-20260328-001753-bd867c
+  path: entries/KB-20260328-001753-bd867c.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - intrinsic
+  - codegen
+  - registration
+  - how-to
+  title: 'TIR intrinsic registration stack: full 5-layer checklist'
+  updated: '2026-03-28'
+- created: '2026-03-28'
+  id: KB-20260328-001753-e74f4d
+  path: entries/KB-20260328-001753-e74f4d.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - tirx
+  - intrinsic
+  - codegen
+  - pattern
+  title: Convenience wrapper pattern for device op variants
+  updated: '2026-03-28'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -745,6 +771,8 @@ tags:
   - KB-20260326-030915-12829a
   - KB-20260326-030915-290626
   - KB-20260326-030915-be19fc
+  - KB-20260328-001753-bd867c
+  - KB-20260328-001753-e74f4d
   compatibility:
   - KB-20260301-0005
   copy:
@@ -804,6 +832,7 @@ tags:
   - KB-20260317-211410-c51a41
   how-to:
   - KB-20260326-030915-290626
+  - KB-20260328-001753-bd867c
   import:
   - KB-20260227-0003
   - KB-20260302-015214-9e29ce
@@ -819,6 +848,8 @@ tags:
   - KB-20260325-174353-9b4386
   - KB-20260326-004750-bc6d9b
   - KB-20260326-030915-290626
+  - KB-20260328-001753-bd867c
+  - KB-20260328-001753-e74f4d
   ir:
   - KB-20260301-0001
   ir-nodes:
@@ -881,6 +912,8 @@ tags:
   - KB-20260317-211410-e366ed
   - KB-20260325-174353-9679e0
   - KB-20260326-004750-e4d4b4
+  pattern:
+  - KB-20260328-001753-e74f4d
   pip:
   - KB-20260320-002326-24c511
   pipeline:
@@ -940,6 +973,7 @@ tags:
   registration:
   - KB-20260307-231252-72bc64
   - KB-20260326-030915-290626
+  - KB-20260328-001753-bd867c
   registry:
   - KB-20260319-022448-901600
   - KB-20260327-142528-25e213
@@ -997,6 +1031,8 @@ tags:
   tir:
   - KB-20260227-0001
   - KB-20260326-030915-290626
+  - KB-20260328-001753-bd867c
+  - KB-20260328-001753-e74f4d
   tirx:
   - KB-20260301-0002
   - KB-20260301-0003
@@ -1008,6 +1044,7 @@ tags:
   - KB-20260327-142528-4fa3ef
   - KB-20260327-170120-40cb7e
   - KB-20260327-170120-a4aad4
+  - KB-20260328-001753-e74f4d
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511
