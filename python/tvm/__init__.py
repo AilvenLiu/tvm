@@ -75,8 +75,8 @@ if not _RUNTIME_ONLY:
 # raise proper error message when user run the package using
 # an older version of the python
 
-# tvm.tirx
-from .tirx import megakernel
+# tvm.tirx / tvm.megakernel
+from . import megakernel
 from .tirx import op_dispatch
 
 

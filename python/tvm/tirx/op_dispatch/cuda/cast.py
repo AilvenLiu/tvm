@@ -37,7 +37,7 @@ from tvm.tirx.op_dispatch import (
     predicate,
     register_dispatch,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import get_indices, get_st_extent, get_vec_len
 from .layout_utils import (
@@ -389,7 +389,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
 # canonical layout signatures, at warp/warpgroup/cta/cluster scope.
 # Higher priority than thread_wise — preferred when layout partition is valid.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.warp():
 #         Tx.cast(dst_view[0:16, 0:128], src_view[0:16, 0:128])
 #         # src: local float16, dst: local float32, both WGMMA layout
@@ -423,7 +423,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
             "validate_cast_local_view",
             lambda op, sctx: (
                 validate_cast_local_view(
-                    OpCall.downcast(op).output, OpCall.downcast(op).input, sctx
+                    ScopeOpCall.downcast(op).output, ScopeOpCall.downcast(op).input, sctx
                 ),
                 "validate_cast_local_view failed",
             ),
@@ -437,8 +437,8 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
         ),
     ],
 )
-def cast_dispatch_local_view(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
-    op_call = OpCall.downcast(op_call)
+def cast_dispatch_local_view(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
+    op_call = ScopeOpCall.downcast(op_call)
     return cast_local_view_impl(op_call.output, op_call.input, sctx)
 
 
@@ -447,7 +447,7 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: DispatchContext) -> PrimFunc
 # When: both dst and src are local-scope TileLayout buffers, at thread scope.
 # Fallback when local_view is not applicable (wrong scope or layout).
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.thread():
 #         Tx.cast(dst_local[0:16, 0:16], src_local[0:16, 0:16])
 #         # src: local float16 (16,16), dst: local float32 (16,16)
@@ -467,7 +467,9 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: DispatchContext) -> PrimFunc
         predicate(
             "validate_cast_op",
             lambda op, sctx: (
-                validate_cast_op(OpCall.downcast(op).output, OpCall.downcast(op).input, sctx),
+                validate_cast_op(
+                    ScopeOpCall.downcast(op).output, ScopeOpCall.downcast(op).input, sctx
+                ),
                 "validate_cast_op failed",
             ),
         ),
@@ -480,6 +482,6 @@ def cast_dispatch_local_view(op_call: OpCall, sctx: DispatchContext) -> PrimFunc
         ),
     ],
 )
-def cast_dispatch_thread_wise(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
-    op_call = OpCall.downcast(op_call)
+def cast_dispatch_thread_wise(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
+    op_call = ScopeOpCall.downcast(op_call)
     return cast_thread_wise_impl(op_call.output, op_call.input, sctx)

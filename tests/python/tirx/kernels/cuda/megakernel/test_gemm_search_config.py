@@ -27,15 +27,15 @@ from tirx_kernels.megakernel.gemm_search_config import (
 
 import tvm
 import tvm.testing
-from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.kernels import SplitKReduceTile
-from tvm.tirx.megakernel.utils import static_scheduler
-from tvm.tirx.megakernel.utils.config import (
+from tvm.megakernel.kernels import SplitKReduceTile
+from tvm.megakernel.utils import static_scheduler
+from tvm.megakernel.utils.config import (
     JobType,
     KernelConfig,
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import ceildiv, get_source, pack_into_32bit
+from tvm.megakernel.utils.utils import ceildiv, get_source, pack_into_32bit
+from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)

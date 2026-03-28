@@ -30,9 +30,9 @@ namespace tvm {
 namespace tirx {
 
 /*!
- * \brief TIRX OpCall stmt.
+ * \brief TIRX ScopeOpCall stmt.
  */
-class OpCallNode : public StmtNode {
+class ScopeOpCallNode : public StmtNode {
  public:
   // tvm::Op which corresponds to the TIRX operator.
   tvm::Op op;
@@ -51,32 +51,32 @@ class OpCallNode : public StmtNode {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<OpCallNode>()
-        .def_ro("op", &OpCallNode::op)
-        .def_ro("args", &OpCallNode::args)
-        .def_ro("workspace", &OpCallNode::workspace)
-        .def_ro("config", &OpCallNode::config)
-        .def_ro("dispatch", &OpCallNode::dispatch);
+    refl::ObjectDef<ScopeOpCallNode>()
+        .def_ro("op", &ScopeOpCallNode::op)
+        .def_ro("args", &ScopeOpCallNode::args)
+        .def_ro("workspace", &ScopeOpCallNode::workspace)
+        .def_ro("config", &ScopeOpCallNode::config)
+        .def_ro("dispatch", &ScopeOpCallNode::dispatch);
   }
 
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.OpCall", OpCallNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScopeOpCall", ScopeOpCallNode, StmtNode);
 };
 
 /*!
- * \brief Managed reference to OpCallNode
- * \sa OpCallNode
+ * \brief Managed reference to ScopeOpCallNode
+ * \sa ScopeOpCallNode
  */
-class OpCall : public Stmt {
+class ScopeOpCall : public Stmt {
  public:
-  TVM_DLL OpCall(tvm::Op op, ffi::Array<ffi::Any> args,
-                 ffi::Map<ffi::String, Buffer> workspace = {},
-                 ffi::Map<ffi::String, ffi::Any> config = {},
-                 ffi::Optional<ffi::String> dispatch = std::nullopt);
+  TVM_DLL ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
+                     ffi::Map<ffi::String, Buffer> workspace = {},
+                     ffi::Map<ffi::String, ffi::Any> config = {},
+                     ffi::Optional<ffi::String> dispatch = std::nullopt);
 
   static bool IsValidOpCallArgType(const ffi::Any& arg);
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(OpCall, Stmt, OpCallNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScopeOpCall, Stmt, ScopeOpCallNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeOpCallNode);
 };
 
 }  // namespace tirx

@@ -193,7 +193,7 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   return SBlockFrame(n);
 }
 
-void OpCall(tvm::tirx::OpCall op_call) { AddToParent(op_call); }
+void ScopeOpCall(tvm::tirx::ScopeOpCall op_call) { AddToParent(op_call); }
 
 ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name,
                               ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
@@ -984,7 +984,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.ExecScopeFrameSlice", ExecScopeFrameSlice)
       .def("script.ir_builder.tirx.Block", Block)
       .def("script.ir_builder.tirx.ExecScopeBlock", ExecScopeBlock)
-      .def("script.ir_builder.tirx.OpCall", OpCall)
+      .def("script.ir_builder.tirx.ScopeOpCall", ScopeOpCall)
       .def("script.ir_builder.tirx.World", World)
       .def("script.ir_builder.tirx.Kernel", Kernel)
       .def("script.ir_builder.tirx.Cluster", Cluster)

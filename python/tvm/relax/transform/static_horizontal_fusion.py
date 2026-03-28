@@ -28,6 +28,13 @@ import tvm
 from tvm import relax
 from tvm.ir import load_json, save_json
 from tvm.ir.module import IRModule
+from tvm.megakernel.utils.base import SemaphoreBase, SmemManager, TileSchedulerBase
+from tvm.megakernel.utils.config import (
+    JobType,
+    KernelConfig,
+    map_job_type_to_profile_event_type,
+)
+from tvm.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.relax.expr import Expr, ShapeExpr
 from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
@@ -50,13 +57,6 @@ from tvm.tirx import (
 )
 from tvm.tirx.analysis import verify_tirx_well_formed
 from tvm.tirx.bench.utils import CudaProfiler
-from tvm.tirx.megakernel.utils.base import SemaphoreBase, SmemManager, TileSchedulerBase
-from tvm.tirx.megakernel.utils.config import (
-    JobType,
-    KernelConfig,
-    map_job_type_to_profile_event_type,
-)
-from tvm.tirx.megakernel.utils.utils import any_sync, pack_into_32bit
 from tvm.tirx.operator import KernelReplacePoint
 from tvm.tirx.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point

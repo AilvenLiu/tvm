@@ -26,11 +26,11 @@ from tirx_kernels.megakernel.moe_full_layer import (
 
 import tvm
 import tvm.testing
-from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.utils.config import (
+from tvm.megakernel.utils.config import (
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import get_source
+from tvm.megakernel.utils.utils import get_source
+from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
@@ -621,7 +621,7 @@ if __name__ == "__main__":
     if "dynamic" in testing_scheduler:
         print("\nCompiling dynamic scheduler module...")
         mega_dynamic_module = mega_kernel_wrapper.get_module("dynamic")
-        from tvm.tirx.megakernel.utils.common import get_source
+        from tvm.megakernel.utils.common import get_source
 
         src, lib_dynamic = get_source(mega_dynamic_module)
         print(src)

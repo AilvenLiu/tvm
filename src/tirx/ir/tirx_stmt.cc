@@ -29,16 +29,18 @@
 namespace tvm {
 namespace tirx {
 
-TVM_FFI_STATIC_INIT_BLOCK() { OpCallNode::RegisterReflection(); }
+TVM_FFI_STATIC_INIT_BLOCK() { ScopeOpCallNode::RegisterReflection(); }
 
-// OpCall
-OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
-               ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
+// ScopeOpCall
+ScopeOpCall::ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
+                       ffi::Map<ffi::String, Buffer> workspace,
+                       ffi::Map<ffi::String, ffi::Any> config,
+                       ffi::Optional<ffi::String> dispatch) {
   // Check if the op is a TIRX op.
   static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-  TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 1) << "Only TIRX ops can be used in tirx::OpCall";
-  // Construct the OpCall.
-  ObjectPtr<OpCallNode> n = ffi::make_object<OpCallNode>();
+  TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 1) << "Only TIRX ops can be used in tirx::ScopeOpCall";
+  // Construct the ScopeOpCall.
+  ObjectPtr<ScopeOpCallNode> n = ffi::make_object<ScopeOpCallNode>();
   n->op = std::move(op);
   n->args = std::move(args);
   n->workspace = std::move(workspace);
@@ -50,16 +52,17 @@ OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buff
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
-      "tirx.OpCall",
+      "tirx.ScopeOpCall",
       [](tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
          ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
-        return OpCall(op, args, workspace, config, dispatch);
+        return ScopeOpCall(op, args, workspace, config, dispatch);
       });
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.OpCallCopyHandle", [](const OpCall& op) { return OpCall(op); });
+  refl::GlobalDef().def("tirx.ScopeOpCallCopyHandle",
+                        [](const ScopeOpCall& op) { return ScopeOpCall(op); });
 }
 
 }  // namespace tirx

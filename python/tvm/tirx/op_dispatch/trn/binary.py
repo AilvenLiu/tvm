@@ -23,7 +23,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tirx import BufferRegion, FloatImm, PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from ..common import MapOpType
 from .common import init_analyzer, nki_dim
@@ -231,7 +231,7 @@ def try_find_inst_nary(
 
 
 def binary_trn(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:

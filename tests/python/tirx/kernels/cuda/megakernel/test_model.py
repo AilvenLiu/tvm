@@ -49,18 +49,18 @@ from tqdm import tqdm
 
 import tvm
 from tvm import dlight, relax
-from tvm.relax import register_pipeline
-from tvm.relax.frontend import nn
-from tvm.runtime import ShapeTuple
-from tvm.runtime import disco as di
-from tvm.tirx.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
-from tvm.tirx.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
-from tvm.tirx.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
-from tvm.tirx.megakernel.utils.config import (
+from tvm.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
+from tvm.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
+from tvm.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
+from tvm.megakernel.utils.config import (
     llama3_1b_config,
     qwen3_30b_a3b_config,
     qwen3_32b_config,
 )
+from tvm.relax import register_pipeline
+from tvm.relax.frontend import nn
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
 
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
@@ -73,7 +73,7 @@ def test(args):
     target = tvm.target.Target("cuda")
 
     # profiler
-    # for detailed config, modify in /python/tvm/tirx/megakernel/support.py
+    # for detailed config, modify in /python/tvm/megakernel/utils/support.py
     PROFILER_ON = args.profiler_on
     MAX_BATCH_SIZE = 128
     # model config

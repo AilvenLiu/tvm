@@ -31,16 +31,16 @@ from tvm.tirx.op_dispatch import (
     predicate,
     register_dispatch,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import get_indices, get_st_extent
 
 
 def validate_deepgemm_permute_dims(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> bool:
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     if isinstance(op_call.buffer, Buffer):
         buffer: Buffer = op_call.buffer
         extent = buffer.shape
@@ -65,10 +65,10 @@ def validate_deepgemm_permute_dims(
 
 
 def vectorized_permute_dims_last_2d_impl(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     if isinstance(op_call.buffer, Buffer):
         buffer: Buffer = op_call.buffer
         extent = shape = buffer.shape
@@ -125,7 +125,7 @@ def vectorized_permute_dims_last_2d_impl(
 # When: shared-memory buffer with TileLayout, permutation swaps only the last
 # 2 dimensions (e.g. [0,1,3,2] for 4D), at warp scope. In-place transpose.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.warp():
 #         Tx.permute_dims(A_smem[0:64, 0:64], order=[1, 0])
 #         # A_smem: shared float16 (64, 64), in-place transpose
@@ -160,5 +160,5 @@ def vectorized_permute_dims_last_2d_impl(
         )
     ],
 )
-def permute_dims_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def permute_dims_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     return vectorized_permute_dims_last_2d_impl(op, sctx)

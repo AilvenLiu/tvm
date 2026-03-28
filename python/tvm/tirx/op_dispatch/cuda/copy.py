@@ -35,7 +35,7 @@ from tvm.tirx import Buffer, PrimFunc
 from tvm.tirx.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.op_dispatch.dispatcher import fail, predicate, register_dispatch
 from tvm.tirx.op_dispatch.registry import DispatchContext
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import (
     CopyInstType,
@@ -50,14 +50,14 @@ from .tma_utils import SwizzleMode, get_swizzle_mode_from_layout
 
 
 def copy_default_impl(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
     """Schedule copy operation
     The implementation serves as a fallback for copy operations that uses a single thread
     to move data element by element.
     """
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
 
     src: Buffer = src_buffer_region.buffer
@@ -141,11 +141,11 @@ def _match_scope(scope: str, pattern: str) -> bool:
 
 
 def _scope_allowed(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     allowed_pairs: Iterable[tuple[str, str]] = DEFAULT_ALLOWED_PAIRS,
 ):
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     src_scope = src_buffer_region.buffer.scope()
     dst_scope = dst_buffer_region.buffer.scope()
@@ -162,13 +162,13 @@ def _scope_allowed(
     return True, None
 
 
-def _is_valid_copy(op_call: OpCall, sctx: DispatchContext):
+def _is_valid_copy(op_call: ScopeOpCall, sctx: DispatchContext):
     return (validate_copy_op(op_call, sctx), "validate_copy_op failed")
 
 
-def _vec_len_possible(op_call: OpCall, sctx: DispatchContext):
+def _vec_len_possible(op_call: ScopeOpCall, sctx: DispatchContext):
     # mirror get_vec_len inputs
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     if sctx.exec_scope.name == "cta":
         tx = sctx.launch_params["threadIdx.x"].dom.extent
@@ -199,7 +199,7 @@ def _vec_len_possible(op_call: OpCall, sctx: DispatchContext):
 # When: copy between global↔shared, global↔local, or shared↔local, and the
 # layout allows vectorized access (vec_len > 1 for the element type).
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.cta():
 #         Tx.copy(A_smem[0:64, 0:64], A[0:64, 0:64])
 #         # A: global float16, A_smem: shared float16
@@ -222,7 +222,7 @@ def _vec_len_possible(op_call: OpCall, sctx: DispatchContext):
         predicate("vec_len", _vec_len_possible),
     ],
 )
-def copy_schedule_vec_load(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_schedule_vec_load(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     # Delegate to the fast vectorized path
     return copy_vec_load_impl(op_call, sctx, CopyInstType.NORMAL)
 
@@ -246,13 +246,15 @@ def copy_schedule_vec_load(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
         predicate("exec_scope", exec_scope_ok, expected_scopes=["cta", "thread"]),
     ],
 )
-def copy_schedule_default(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_schedule_default(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     # Conservative scalar fallback
     return copy_default_impl(op_call, sctx)
 
 
-def copy_tmem_local_impl(op_call: OpCall, sctx: DispatchContext, async_op=False) -> PrimFunc | None:
-    op_call = OpCall.downcast(op_call)
+def copy_tmem_local_impl(
+    op_call: ScopeOpCall, sctx: DispatchContext, async_op=False
+) -> PrimFunc | None:
+    op_call = ScopeOpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
@@ -344,7 +346,7 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: DispatchContext, async_op=False)
 # When: one buffer is in tmem (tensor memory, Blackwell SM100+) and the other
 # is in local scope, at warpgroup exec scope.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.warpgroup():
 #         Tx.copy(acc_local[0:16, 0:128], acc_tmem[0:16, 0:128])
 #
@@ -363,11 +365,13 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: DispatchContext, async_op=False)
         ),
     ],
 )
-def copy_schedule_tmem_local(op_call: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def copy_schedule_tmem_local(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     return copy_tmem_local_impl(op_call, sctx)
 
 
-def copy_smem_tmem_impl(op_call: OpCall, sctx: DispatchContext, async_op=False) -> PrimFunc | None:
+def copy_smem_tmem_impl(
+    op_call: ScopeOpCall, sctx: DispatchContext, async_op=False
+) -> PrimFunc | None:
     """Schedule SMEM -> TMEM copy using tcgen05.cp.
 
     This implements the copy from shared memory to tensor memory using the tcgen05.cp
@@ -541,7 +545,7 @@ def copy_smem_tmem_impl(op_call: OpCall, sctx: DispatchContext, async_op=False) 
     return impl
 
 
-def _is_valid_smem_tmem_copy(op_call: OpCall, sctx: DispatchContext):
+def _is_valid_smem_tmem_copy(op_call: ScopeOpCall, sctx: DispatchContext):
     """Validate smem->tmem copy operation.
 
     Unlike generic copy validation, this allows different dtypes as long as
@@ -581,7 +585,7 @@ def _is_valid_smem_tmem_copy(op_call: OpCall, sctx: DispatchContext):
     return True, None
 
 
-def _single_thread_exec(op_call: OpCall, sctx: DispatchContext):
+def _single_thread_exec(op_call: ScopeOpCall, sctx: DispatchContext):
     """Check if execution scope is single-thread."""
     exec_scope = sctx.exec_scope.name
     ok = exec_scope == "thread"
@@ -593,7 +597,7 @@ def _single_thread_exec(op_call: OpCall, sctx: DispatchContext):
 # When: src is shared memory, dst is tensor memory (Blackwell SM100+),
 # at single-thread exec scope.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     Tx.copy(acc_tmem[0:16, 0:128], A_smem[0:16, 0:128])
 #
 # After (tcgen05.cp with descriptor encoding):
@@ -608,5 +612,5 @@ def _single_thread_exec(op_call: OpCall, sctx: DispatchContext):
         predicate("exec_scope", _single_thread_exec),
     ],
 )
-def copy_schedule_smem_tmem(op_call: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def copy_schedule_smem_tmem(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     return copy_smem_tmem_impl(op_call, sctx, async_op=False)

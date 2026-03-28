@@ -33,7 +33,7 @@ from .ir import alloc_buffer, attr, decl_buffer, meta_class
 def _to_region(buffer: BufferRegion | Buffer):
     if isinstance(buffer, Buffer):
         # If this buffer was created from a BufferRegion assignment (e.g. via
-        # partition(select=...)), use the original region so that the OpCall
+        # partition(select=...)), use the original region so that the ScopeOpCall
         # references the root buffer rather than the matched sub-buffer.
         source_region = getattr(buffer, "_source_region", None)
         if source_region is not None:
@@ -49,7 +49,7 @@ def _wrap_elem_in_tuple(e):
     return (e,)
 
 
-f_insert = _ffi_api.OpCall  # pylint: disable=no-member
+f_insert = _ffi_api.ScopeOpCall  # pylint: disable=no-member
 
 
 def zero(

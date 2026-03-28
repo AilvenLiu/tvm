@@ -35,7 +35,7 @@ from tvm.tirx.op_dispatch.cuda.tma_utils import (
     tma_atom_shape,
     tma_shared_layout,
 )
-from tvm.tirx.stmt import DeclBuffer, OpCall
+from tvm.tirx.stmt import DeclBuffer, ScopeOpCall
 from tvm.tirx.stmt_functor import StmtExprVisitor
 
 # ===========================================================================
@@ -85,7 +85,7 @@ def _make_tma_call(
     dtype="float16",
     direction="g2s",
 ):
-    """Construct OpCall + DispatchContext and call copy_tma_impl.
+    """Construct ScopeOpCall + DispatchContext and call copy_tma_impl.
 
     Returns (impl, host_init_stmts) on success, raises DispatchFail on failure.
     impl is the device-side PrimFunc, host_init_stmts is a list of Stmt
@@ -160,7 +160,7 @@ def _build_expected_host_init(dtype, encode_args):
         + [IntImm("int32", v) for v in encode_args[1:]]
     )
     encode_call = tvm.tirx.Call("int32", tvm.ir.Op.get("tirx.tvm_call_packed"), call_args)
-    replace_point = OpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
+    replace_point = ScopeOpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
     return tvm.tirx.SeqStmt(
         [tvm.tirx.Bind(A_tensormap, stack_alloca), tvm.tirx.Evaluate(encode_call), replace_point]
     )
@@ -1805,7 +1805,7 @@ def test_copy_tma_dynamic_cta_mask(dtype):
     Verifies that a TIR expression (depending on Tx.cta_id) used as cta_mask in
     copy_async compiles through the full TIRX pipeline without crashing.
     Previously, lower_tirx_scope_ids replaced scope-ID vars via Substitute,
-    but Substitute didn't visit OpCall.config values, leaving stale var
+    but Substitute didn't visit ScopeOpCall.config values, leaving stale var
     references that caused MakePackedAPI to fail with:
         "variables [...] are used, but are not passed in as API arguments"
     """

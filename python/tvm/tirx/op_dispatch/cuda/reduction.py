@@ -36,7 +36,7 @@ from tvm.tirx import BufferRegion, PrimFunc
 from tvm.tirx.layout import TileLayout, laneid
 from tvm.tirx.op_dispatch import DispatchContext, fail
 from tvm.tirx.op_dispatch.dispatcher import predicate, register_dispatch
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from ..common import ReduceOpType
 from .common import get_indices, get_st_extent, next_power_of_2
@@ -60,9 +60,11 @@ def reduce_default_value_table(dtype):
     }
 
 
-def _reduction_args(op: OpCall) -> tuple[BufferRegion, BufferRegion, tuple[int, ...], bool, dict]:
+def _reduction_args(
+    op: ScopeOpCall,
+) -> tuple[BufferRegion, BufferRegion, tuple[int, ...], bool, dict]:
     """Parse ReduceOp -> (dst, src, reduce_axes, accum, config)."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     dst = op.output
     src = op.input
     reduce_axes = tuple(int(a) for a in op.reduce_axes)
@@ -72,12 +74,12 @@ def _reduction_args(op: OpCall) -> tuple[BufferRegion, BufferRegion, tuple[int, 
 
 
 def _match_reduction_storage_scope(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
     expected_scope: list[str],
 ) -> tuple[bool, str | None]:
     """Check that dst and src scopes match one of the expected patterns."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     dst_scope = op.output.buffer.scope()
     src_scope = op.input.buffer.scope()
 
@@ -213,14 +215,14 @@ def _validate_reduction_layout(
 
 
 def validate_reduction_shared(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     """Validate reduction in shared memory."""
     if sctx.exec_scope.name not in ["cta", "warpgroup", "warp", "thread"]:
         return False, f"unsupported exec_scope {sctx.exec_scope.name} for shared reduction"
 
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     dst, src = op.output.buffer, op.input.buffer
     if not (src.scope().startswith("shared") and dst.scope().startswith("shared")):
         return False, "expected shared scope for both src and dst"
@@ -327,11 +329,11 @@ def _gen_warp_shuffle_reduce(src, dst, reduce_width, local_elems, accum, op_type
 
 
 def validate_reduction_local(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     """Validate reduction in local memory."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     dst_br, src_br = op.output, op.input
     dst, src = dst_br.buffer, src_br.buffer
 
@@ -865,7 +867,7 @@ def _emit_reduction_local_thread_3input_maxmin(
 
 
 def reduction_shared_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: ReduceOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -885,7 +887,7 @@ def reduction_shared_impl(
 
 
 def reduction_local_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: ReduceOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -944,19 +946,19 @@ def reduction_local_impl(
         fail(f"unsupported exec_scope {sctx.exec_scope.name} for reduction_local_impl")
 
 
-def _exec_scope_ok(op: OpCall, sctx: DispatchContext, expected_scopes: list[str]):
+def _exec_scope_ok(op: ScopeOpCall, sctx: DispatchContext, expected_scopes: list[str]):
     ok = sctx.exec_scope.name in expected_scopes
     return (ok, None if ok else f"exec_scope {sctx.exec_scope.name} not in {expected_scopes}")
 
 
-def _dtype_ok(op: OpCall, sctx: DispatchContext, expected_dtype: str):
-    op = OpCall.downcast(op)
+def _dtype_ok(op: ScopeOpCall, sctx: DispatchContext, expected_dtype: str):
+    op = ScopeOpCall.downcast(op)
     dtype = op.input.buffer.dtype
     ok = dtype == expected_dtype
     return (ok, None if ok else f"dtype {dtype} != {expected_dtype}")
 
 
-def _sm_version_ok(op: OpCall, sctx: DispatchContext, min_version: int):
+def _sm_version_ok(op: ScopeOpCall, sctx: DispatchContext, min_version: int):
     target_arch = sctx.target.arch if hasattr(sctx.target, "arch") else ""
     sm_match = re.match(r"sm_(\d+)", target_arch)
     sm_version = int(sm_match.group(1)) if sm_match else 0
@@ -964,31 +966,31 @@ def _sm_version_ok(op: OpCall, sctx: DispatchContext, min_version: int):
     return (ok, None if ok else f"sm_version {sm_version} < {min_version}")
 
 
-def _reduction_len_ok(op: OpCall, sctx: DispatchContext, min_len: int):
-    op = OpCall.downcast(op)
+def _reduction_len_ok(op: ScopeOpCall, sctx: DispatchContext, min_len: int):
+    op = ScopeOpCall.downcast(op)
     src_extent = [r.extent for r in op.input.region]
     reduction_len = functools.reduce(operator.mul, src_extent, 1)
     ok = reduction_len >= min_len
     return (ok, None if ok else f"reduction_len {reduction_len} < {min_len}")
 
 
-def _dst_len_ok(op: OpCall, sctx: DispatchContext, expected_len: int):
-    op = OpCall.downcast(op)
+def _dst_len_ok(op: ScopeOpCall, sctx: DispatchContext, expected_len: int):
+    op = ScopeOpCall.downcast(op)
     dst_extent = [r.extent for r in op.output.region]
     dst_len = functools.reduce(operator.mul, dst_extent, 1)
     ok = dst_len == expected_len
     return (ok, None if ok else f"dst_len {dst_len} != {expected_len}")
 
 
-def _src_ndim_ok(op: OpCall, sctx: DispatchContext, expected_ndim: int):
-    op = OpCall.downcast(op)
+def _src_ndim_ok(op: ScopeOpCall, sctx: DispatchContext, expected_ndim: int):
+    op = ScopeOpCall.downcast(op)
     src_extent = [r.extent for r in op.input.region]
     ok = len(src_extent) == expected_ndim
     return (ok, None if ok else f"src ndim {len(src_extent)} != {expected_ndim}")
 
 
-def _local_scope_match(op: OpCall, sctx: DispatchContext):
-    op = OpCall.downcast(op)
+def _local_scope_match(op: ScopeOpCall, sctx: DispatchContext):
+    op = ScopeOpCall.downcast(op)
     src, dst = op.input.buffer, op.output.buffer
     ok = all(
         [src.scope() == "local", dst.scope() == "local", src.dtype == dst.dtype, sctx.is_cuda()]
@@ -1009,13 +1011,13 @@ _optimized_local_reduction_predicates = [
 ]
 
 
-def _sm100_packed_add_sum_impl(op: OpCall, op_type: ReduceOpType, sctx: DispatchContext):
-    op = OpCall.downcast(op)
+def _sm100_packed_add_sum_impl(op: ScopeOpCall, op_type: ReduceOpType, sctx: DispatchContext):
+    op = ScopeOpCall.downcast(op)
     return _emit_reduction_local_thread_packed_add_sum(op.output, op.input, op.accum, op_type, sctx)
 
 
-def _sm100_3input_maxmin_impl(op: OpCall, op_type: ReduceOpType, sctx: DispatchContext):
-    op = OpCall.downcast(op)
+def _sm100_3input_maxmin_impl(op: ScopeOpCall, op_type: ReduceOpType, sctx: DispatchContext):
+    op = ScopeOpCall.downcast(op)
     return _emit_reduction_local_thread_3input_maxmin(op.output, op.input, op.accum, op_type, sctx)
 
 
@@ -1035,7 +1037,7 @@ _optimized_impl_table = {
 # When: thread scope, all local buffers, float32, 1D src with len >= 8,
 # SM100+ (uses packed PTX instructions not available on older GPUs).
 #
-# Before (OpCall — sum example):
+# Before (ScopeOpCall — sum example):
 #     with Tx.thread():
 #         Tx.sum(dst_local[0:1], src_local[0:32])   # float32, reduce 32 → 1
 #
@@ -1151,9 +1153,9 @@ for op_name, op_type in [
         when=_optimized_local_reduction_predicates,
     )
     def _optimized_dispatch(
-        op: OpCall, sctx: DispatchContext, _impl=optimized_impl, _op_type=op_type
+        op: ScopeOpCall, sctx: DispatchContext, _impl=optimized_impl, _op_type=op_type
     ) -> PrimFunc:
-        op = OpCall.downcast(op)
+        op = ScopeOpCall.downcast(op)
         return _impl(op, _op_type, sctx)
 
     # Register shared memory dispatch
@@ -1171,8 +1173,8 @@ for op_name, op_type in [
             predicate("shared_valid", validate_reduction_shared),
         ],
     )
-    def _shared_dispatch(op: OpCall, sctx: DispatchContext, _op_type=op_type) -> PrimFunc:
-        op = OpCall.downcast(op)
+    def _shared_dispatch(op: ScopeOpCall, sctx: DispatchContext, _op_type=op_type) -> PrimFunc:
+        op = ScopeOpCall.downcast(op)
         return reduction_shared_impl(op, _op_type, sctx)
 
     # Register local memory dispatch
@@ -1190,6 +1192,6 @@ for op_name, op_type in [
             predicate("local_valid", validate_reduction_local),
         ],
     )
-    def _local_dispatch(op: OpCall, sctx: DispatchContext, _op_type=op_type) -> PrimFunc:
-        op = OpCall.downcast(op)
+    def _local_dispatch(op: ScopeOpCall, sctx: DispatchContext, _op_type=op_type) -> PrimFunc:
+        op = ScopeOpCall.downcast(op)
         return reduction_local_impl(op, _op_type, sctx)

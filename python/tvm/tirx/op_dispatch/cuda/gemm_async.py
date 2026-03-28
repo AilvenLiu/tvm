@@ -33,7 +33,7 @@ from tvm.tirx import PrimFunc
 from tvm.tirx.layout import ComposeLayout, R, S, TCol, TileLayout, TLane
 from tvm.tirx.op_dispatch import DispatchContext, predicate, register_dispatch
 from tvm.tirx.operator.op import KernelReplacePoint
-from tvm.tirx.stmt import AllocBuffer, Evaluate, OpCall, SeqStmt
+from tvm.tirx.stmt import AllocBuffer, Evaluate, SeqStmt, ScopeOpCall
 
 from .common import get_st_extent, smem_desc_add_16B_offset
 from .exec_scope_utils import single_thread
@@ -148,7 +148,7 @@ def _choose_mma_tile(M, N, cta_group, MMA_N_MIN):
     return M_mma, N_mma
 
 
-def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     """Schedule an asynchronous GEMM operation using tcgen05.mma (Blackwell Tensor Core).
 
     Computes C = A @ B (with optional transpose on A/B and accumulation).
@@ -158,7 +158,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
     so that only one thread in the warp issues the MMA instruction.
 
     Args:
-        op_call: The OpCall containing:
+        op_call: The ScopeOpCall containing:
             Regular (6 args):
             - args[0:3]: C, A, B buffer regions
             - args[3:6]: transA, transB, accum flags
@@ -180,7 +180,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
         AssertionError: If shape/layout constraints are not satisfied.
     """
     warp_scope = sctx.exec_scope.name == "warp"
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     is_block_scaled = op_call.is_block_scaled
 
     C_buffer_region: tvm.tirx.BufferRegion = op_call.output
@@ -717,7 +717,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
 # When: gemm_async op at single-thread exec scope on Blackwell (SM100+).
 # Requires A in smem (with TMA-compatible swizzle layout) or tmem, B in smem, accum in tmem.
 #
-# Before (OpCall — regular MMA):
+# Before (ScopeOpCall — regular MMA):
 #     Tx.gemm_async(C_tmem[0:64, 0:256], A_smem[0:64, 0:64], B_smem[0:256, 0:64])
 #     # A: shared float16, B: shared float16, C: tmem float32
 #
@@ -728,7 +728,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
 #         M=64, N=256, MMA_K=64, transA=False, transB=True, cta_group=1)
 #     Tx.ptx.tcgen05.mma(descA_buf[0], descB_buf[0], descI_local)
 #
-# Before (OpCall — block-scaled fp8 MMA):
+# Before (ScopeOpCall — block-scaled fp8 MMA):
 #     Tx.gemm_async(C_tmem, A_smem, B_smem,
 #                   scale_A=SFA_tmem, scale_B=SFB_tmem)
 #     # A/B: shared float8_e4m3, SFA/SFB: tmem float8_e8m0fnu
@@ -755,5 +755,5 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
         ),
     ],
 )
-def gemm_async_dispatch_tcgen05(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def gemm_async_dispatch_tcgen05(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return gemm_async_tcgen05_impl(op_call, sctx)

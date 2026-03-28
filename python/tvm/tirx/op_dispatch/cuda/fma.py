@@ -35,7 +35,7 @@ import operator
 import re
 
 from tvm.script import tirx as Tx
-from tvm.tirx import BufferRegion, OpCall, PrimExpr, PrimFunc
+from tvm.tirx import BufferRegion, PrimExpr, PrimFunc, ScopeOpCall
 from tvm.tirx.expr import FloatImm
 from tvm.tirx.op_dispatch import DispatchContext
 from tvm.tirx.op_dispatch.dispatcher import predicate
@@ -44,7 +44,7 @@ from .common import get_indices, get_st_extent
 
 
 def _validate_fma(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     if len(op_call.args) != 4:
@@ -62,7 +62,7 @@ def _validate_fma(
 
 
 def _match_local_scope(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     output = op_call.args[0]
@@ -81,7 +81,7 @@ def _match_local_scope(
 
 
 def _validate_fma_local(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     scope = sctx.exec_scope.name
@@ -112,7 +112,7 @@ def _can_use_packed_f32x2(op_call, sctx):
 
 
 def _fma_local_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> PrimFunc:
     output_br, inp_br = op.args[0], op.args[1]
@@ -318,5 +318,5 @@ from tvm.tirx.op_dispatch import register_dispatch  # noqa: E402
         predicate("local_valid", _validate_fma_local),
     ],
 )
-def _fma_local_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def _fma_local_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return _fma_local_impl(op, sctx)

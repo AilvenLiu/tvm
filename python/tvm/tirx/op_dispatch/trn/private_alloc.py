@@ -32,11 +32,11 @@ from tvm.tirx.operator.op import (
     UnaryOpWithBiasScale,
     UnaryReduce,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 
 def alloc_const_bias_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Any]:
     bias = op.bias if op.bias is not None else FloatImm(op.dsts[0].buffer.dtype, 0.0)
     if "const_bias" in op.workspace:
@@ -68,7 +68,7 @@ def alloc_const_bias_trn(
 
 
 def alloc_partial_reduce_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Any]:
     if "partial_reduce" in op.workspace:
         return {}
@@ -88,7 +88,7 @@ def alloc_partial_reduce_trn(
 
 
 def alloc_identity_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Any]:
     if "identity" in op.workspace:
         return {}
@@ -118,7 +118,7 @@ def alloc_identity_trn(
 
 
 def alloc_acc_psum_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Any]:
     if "acc_psum" in op.workspace or op.dsts[0].buffer.scope() == "trn.psum":
         return {}
@@ -136,7 +136,7 @@ def alloc_acc_psum_trn(
 
 
 def alloc_copy_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Buffer]:
     src_region = op.srcs[0]
     dst_region = op.dsts[0]
@@ -153,7 +153,7 @@ def alloc_copy_trn(
 
 
 def alloc_unary_reduce_trn(
-    op: OpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
+    op: ScopeOpCall, buffer_dict: dict[Any, tuple[Buffer, Stmt | None]], sctx: DispatchContext
 ) -> dict[str, Buffer]:
     if "max_inst_size" in op.config:
         partial_reduce_dict = alloc_partial_reduce_trn(op, buffer_dict, sctx)

@@ -22,8 +22,8 @@ import torch
 from tirx_kernels.megakernel.lm_head import LMHeadLayer, prepare_data
 
 import tvm
+from tvm.megakernel.utils.utils import get_source_func
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.megakernel.utils.utils import get_source_func
 
 
 def test(batch_size, N, K, mod):

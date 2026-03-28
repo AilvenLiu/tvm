@@ -145,7 +145,7 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
                   ffi::String scope_slice_parent = "");
 
-void OpCall(tvm::tirx::OpCall op_call);
+void ScopeOpCall(tvm::tirx::ScopeOpCall op_call);
 
 /*!
  * \brief Create an ExecScopeFrame for execution scope contexts.

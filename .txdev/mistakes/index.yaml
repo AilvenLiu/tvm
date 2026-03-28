@@ -506,6 +506,20 @@ entries:
   - linting
   title: Ruff linter picks up git submodules and snapshot directories without extend-exclude
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: M-20260328-005952-98bd91
+  path: entries/M-20260328-005952-98bd91.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - mistake
+  - pytest
+  - verification
+  - tirx-kernels
+  title: Assuming failing imports came from current worktree without verifying module
+    origin
+  updated: '2026-03-28'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -619,6 +633,8 @@ tags:
   - M-20260317-211411-ba6927
   migration:
   - M-20260322-182024-631109
+  mistake:
+  - M-20260328-005952-98bd91
   op-schedule:
   - M-20260301-0003
   - M-20260302-015214-5390a0
@@ -651,6 +667,7 @@ tags:
   pytest:
   - M-20260306-195314-50a55c
   - M-20260319-022448-dbe043
+  - M-20260328-005952-98bd91
   python:
   - M-20260228-0002
   - M-20260308-232603-cf510d
@@ -730,6 +747,8 @@ tags:
   - M-20260326-030916-99f4b9
   thunderkittens:
   - M-20260323-185836-967c0e
+  tir:
+  - M-20260328-005952-98bd91
   tirx:
   - M-20260301-0002
   - M-20260308-232603-9a9463
@@ -742,6 +761,7 @@ tags:
   - M-20260327-142529-e741bb
   - M-20260327-185547-3913ba
   - M-20260328-001753-acf9c3
+  - M-20260328-005952-98bd91
   tvmscript:
   - M-20260322-182024-631109
   txdev:
@@ -757,6 +777,7 @@ tags:
   - M-20260322-182024-19635e
   - M-20260325-174353-4a9cda
   - M-20260327-142529-e741bb
+  - M-20260328-005952-98bd91
   warnings:
   - M-20260306-195314-50a55c
   warp:

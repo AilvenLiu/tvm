@@ -1,0 +1,23 @@
+content:
+  details: 'In this feature, tir tests failed with ModuleNotFoundError for tvm.tirx.megakernel
+    even though the active worktree already migrated imports to tvm.megakernel. Root
+    cause was import source mismatch: pytest loaded /home/bohanhou/tirx-kernels (stale
+    source checkout) instead of the active worktree under /home/bohanhou/txdev/features/.../repos/tirx-kernels.
+    Reliable triage pattern: (1) source test env script, (2) run python -c ''import
+    tirx_kernels; print(tirx_kernels.__file__)'', (3) compare the path with the expected
+    worktree, and (4) only then debug code-level imports. This avoids spending time
+    patching correct code for an environment-level mismatch.'
+  summary: When running tir tests that import tirx_kernels, validate package source
+    path first; stale editable installs can produce false failures.
+created: '2026-03-28'
+id: KB-20260328-005952-3f5549
+scope:
+- repo
+tags:
+- tir
+- pytest
+- tirx-kernels
+- pythonpath
+- debugging
+title: Pytest path hygiene for tirx-kernels during multi-repo development
+updated: '2026-03-28'

@@ -21,12 +21,12 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tirx import Buffer
 from tvm.tirx.op_dispatch import DispatchContext
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import smem_desc_add_16B_offset
 
 
-def validate_gemm_op(op_call: OpCall, sctx: DispatchContext) -> bool:
+def validate_gemm_op(op_call: ScopeOpCall, sctx: DispatchContext) -> bool:
     """Sanity check for gemm op"""
     C_buffer_region, A_buffer_region, B_buffer_region = op_call.args[:3]
     C: Buffer = C_buffer_region.buffer

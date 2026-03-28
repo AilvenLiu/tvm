@@ -1,0 +1,23 @@
+content:
+  details: 'The first response to megakernel import failures focused on code changes,
+    but the actual issue was that Python resolved tirx_kernels from a stale editable
+    checkout outside the active worktree. This delayed resolution and triggered repeated
+    reruns with the same false failure mode. Preventive rule: before fixing import-related
+    test errors in a multi-repo setup, always verify module origin using module.__file__
+    and confirm PYTHONPATH precedence. If path mismatch exists, fix environment resolution
+    first, then rerun tests.'
+  summary: I initially treated import failures as code regressions before checking
+    where Python actually imported tirx_kernels from.
+created: '2026-03-28'
+id: M-20260328-005952-98bd91
+scope:
+- repo
+tags:
+- tir
+- mistake
+- pytest
+- verification
+- tirx-kernels
+title: Assuming failing imports came from current worktree without verifying module
+  origin
+updated: '2026-03-28'

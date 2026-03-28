@@ -26,7 +26,7 @@ from tvm.runtime import DataType
 from tvm.script import tirx as Tx
 from tvm.tirx import Buffer, BufferRegion, PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 
 def next_power_of_2(x: int) -> int:
@@ -82,7 +82,7 @@ class CopyInstType(Enum):
 
 
 def validate_copy_op(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,  # pylint: disable=unused-argument
 ) -> bool:
     """Sanity check for copy op"""
@@ -152,7 +152,7 @@ def get_vec_len(
 
 
 def copy_vec_load_impl(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     inst_type: CopyInstType,
 ) -> PrimFunc | None:

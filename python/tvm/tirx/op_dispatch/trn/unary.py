@@ -21,7 +21,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tirx import BufferRegion, FloatImm, PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from ..common import MapOpType
 from .binary import try_find_inst_nary
@@ -196,7 +196,7 @@ def generate_unary_func(
 
 
 def unary_trn(
-    op: OpCall,
+    op: ScopeOpCall,
     unary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -245,7 +245,7 @@ def unary_trn(
 
 
 def unary_with_bias_scale_trn(
-    op: OpCall,
+    op: ScopeOpCall,
     unary_op: MapOpType = MapOpType.SQRT,
     sctx: DispatchContext = None,
 ) -> PrimFunc | None:

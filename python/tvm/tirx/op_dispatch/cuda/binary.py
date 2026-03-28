@@ -32,7 +32,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tirx import BufferRegion, OpCall, PrimExpr, PrimFunc
+from tvm.tirx import BufferRegion, PrimExpr, PrimFunc, ScopeOpCall
 from tvm.tirx.expr import FloatImm
 from tvm.tirx.layout import TileLayout, laneid
 from tvm.tirx.op_dispatch import DispatchContext, fail
@@ -76,7 +76,7 @@ def get_indices_zero_out(indices, src1_start, src1_extent, src2_start, src2_exte
 
 
 def _match_storage_scope(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     expected_scope: list[Literal["global", "shared*", "local"]],
 ) -> tuple[bool, str | None]:
@@ -113,7 +113,7 @@ def _match_storage_scope(
     )
 
 
-def _dtype_ok(op: OpCall, sctx: DispatchContext, expected_dtype: str):
+def _dtype_ok(op: ScopeOpCall, sctx: DispatchContext, expected_dtype: str):
     """Check if src buffer dtype matches."""
     dst, src1, src2 = op.args[:3]
     if dst.buffer.dtype != expected_dtype:
@@ -126,7 +126,7 @@ def _dtype_ok(op: OpCall, sctx: DispatchContext, expected_dtype: str):
     return (True, None)
 
 
-def _sm_version_ok(op: OpCall, sctx: DispatchContext, min_version: int):
+def _sm_version_ok(op: ScopeOpCall, sctx: DispatchContext, min_version: int):
     """Check if SM version >= min_version."""
     target_arch = sctx.target.arch if hasattr(sctx.target, "arch") else ""
     sm_match = re.match(r"sm_(\d+)", target_arch)
@@ -149,7 +149,7 @@ def _get_thread_cnt(sctx: DispatchContext) -> int | None:
 
 
 def _validate_binary(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
@@ -213,7 +213,7 @@ def _normalize_binary_args(
 
 
 def _try_prepare_binary_map(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     op_type: MapOpType,
     require_trivial_layout: bool,
     allow_no_layout: bool = False,
@@ -280,7 +280,7 @@ def _try_prepare_binary_map(
 
 
 def _infer_binary_vec_len(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     _dst: BufferRegion,
     _src1: BufferRegion,
@@ -307,7 +307,7 @@ def _infer_binary_vec_len(
 
 
 def _is_binary_local_packed_f32x2_case(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
 ) -> bool:
@@ -336,7 +336,7 @@ def _is_binary_local_packed_f32x2_case(
 
 
 def _is_binary_local_wgmma_row_red_view_case(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
 ) -> bool:
@@ -449,7 +449,7 @@ def _is_binary_local_wgmma_row_red_view_case(
 
 
 def _validate_binary_local_view_case(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
@@ -526,7 +526,7 @@ def _validate_binary_local_view_case(
 
 
 def validate_binary_shared(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
@@ -541,7 +541,7 @@ _BINARY_LOCAL_CASE_THREAD = "thread"
 
 
 def _classify_binary_local_case(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
 ) -> tuple[str | None, str | None]:
@@ -577,7 +577,7 @@ def _classify_binary_local_case(
 
 
 def validate_binary_local(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
@@ -586,7 +586,7 @@ def validate_binary_local(
 
 
 def _emit_binary_shared(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc:
@@ -663,7 +663,7 @@ def _emit_binary_shared(
 
 
 def _emit_binary_local_trivial_layout(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -717,7 +717,7 @@ def _emit_binary_local_trivial_layout(
 
 
 def _emit_binary_local_view(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -819,7 +819,7 @@ def _emit_binary_local_view(
 
 
 def _emit_binary_local_wgmma_row_red_view(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -846,7 +846,7 @@ def _emit_binary_local_wgmma_row_red_view(
 
     More layouts can be supported in the future.
     """
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     _dst: BufferRegion = op.output
     _src1: BufferRegion | FloatImm = op.lhs
     _src2: BufferRegion | FloatImm = op.rhs
@@ -1048,7 +1048,7 @@ def _emit_binary_local_wgmma_row_red_view(
 
 
 def _emit_binary_local_packed_f32x2(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -1123,7 +1123,7 @@ def _emit_binary_local_packed_f32x2(
 
 
 def binary_shared_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -1131,7 +1131,7 @@ def binary_shared_impl(
 
 
 def binary_local_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     binary_op: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -1159,7 +1159,7 @@ def binary_local_impl(
 # is a FloatImm constant — but only for commutative ops like add/mul).
 # Non-commutative ops (sub, fdiv) reject constant LHS.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.cta():
 #         A_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
 #         B_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
@@ -1240,7 +1240,7 @@ for _op_name, _op_type in {
             predicate("shared_valid", validate_binary_shared, op_type=_op_type),
         ],
     )
-    def _shared_dispatch(op: OpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
+    def _shared_dispatch(op: ScopeOpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
         return binary_shared_impl(op, _ty, sctx)
 
     @register_dispatch(
@@ -1254,5 +1254,5 @@ for _op_name, _op_type in {
             predicate("local_valid", validate_binary_local, op_type=_op_type),
         ],
     )
-    def _local_dispatch(op: OpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
+    def _local_dispatch(op: ScopeOpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
         return binary_local_impl(op, _ty, sctx)

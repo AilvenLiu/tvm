@@ -22,9 +22,9 @@ from tvm.tirx import (
     BufferRegion,
     BufferStore,
     DeclBuffer,
-    OpCall,
     PrimExpr,
     Stmt,
+    ScopeOpCall,
     Var,
     decl_buffer,
 )
@@ -160,7 +160,7 @@ class BufferReplacer(StmtExprMutator):
         args = list()
         for arg in op.args:
             args.append(arg)
-        return OpCall(
+        return ScopeOpCall(
             *args, op=op.op, workspace=new_workspace, config=new_config, dispatch=op.dispatch
         )
 
@@ -170,8 +170,8 @@ class KernelReplacePointSearcher(StmtMutator):
         super().__init__()
         self.body = body
 
-    def visit_op_call_(self, op: OpCall):
-        op = OpCall.downcast(op)
+    def visit_op_call_(self, op: ScopeOpCall):
+        op = ScopeOpCall.downcast(op)
         if isinstance(op, KernelReplacePoint):
             return self.body
         return super().visit_op_call_(op)

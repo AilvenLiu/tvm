@@ -30,7 +30,7 @@ from tvm.tirx.op_dispatch import (
     predicate,
     register_dispatch,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import init_analyzer
 from .dim_utils import normalize_and_group
@@ -107,7 +107,7 @@ def get_pf_dim_from_buffer_region(
     return p_dim, f_dim
 
 
-def matmul_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def matmul_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Schedule GEMM operation on Trainium."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
@@ -300,5 +300,5 @@ def matmul_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         )
     ],
 )
-def gemm_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def gemm_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return matmul_trn(op, sctx)

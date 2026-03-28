@@ -969,9 +969,9 @@ def normalize_const_arg(arg) -> PrimExpr:
     return arg
 
 
-@tvm_ffi.register_object("tirx.OpCall")
-class OpCall(Stmt):
-    """OpCall node.
+@tvm_ffi.register_object("tirx.ScopeOpCall")
+class ScopeOpCall(Stmt):
+    """ScopeOpCall node.
 
     Parameters
     ----------
@@ -995,7 +995,7 @@ class OpCall(Stmt):
     workspace: dict[str, Buffer]
     config: dict[str, Any]
     dispatch: str | None
-    _registry: ClassVar[dict[Op, type["OpCall"]]] = {}
+    _registry: ClassVar[dict[Op, type["ScopeOpCall"]]] = {}
 
     def __init__(
         self,
@@ -1010,18 +1010,20 @@ class OpCall(Stmt):
         if config is None:
             config = {}
         if op is None:
-            assert self.__class__ != OpCall, "Directly instantiating OpCall needs to specify the op"
+            assert self.__class__ != ScopeOpCall, (
+                "Directly instantiating ScopeOpCall needs to specify the op"
+            )
             op = self.__class__.op
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
-            _ffi_api.OpCall,
+            _ffi_api.ScopeOpCall,
             op,
             args,
             workspace,
             config,
             dispatch,  # pylint: disable=no-member
         )
-        casted_op = OpCall.downcast(self)
+        casted_op = ScopeOpCall.downcast(self)
         casted_op.validate()
 
     def __init_subclass__(cls, **kwargs):
@@ -1030,13 +1032,13 @@ class OpCall(Stmt):
             cls._registry[cls.op] = cls
 
     @classmethod
-    def downcast(cls, instance: "OpCall") -> "OpCall":
+    def downcast(cls, instance: "ScopeOpCall") -> "ScopeOpCall":
         subclass = cls._registry.get(instance.op)
         if subclass is None:
             return instance  # Unknown op: return as-is
         new_instance = subclass.__new__(subclass)
         new_instance.__init_handle_by_constructor__(
-            _ffi_api.OpCallCopyHandle,
+            _ffi_api.ScopeOpCallCopyHandle,
             instance,  # pylint: disable=no-member
         )
         return new_instance

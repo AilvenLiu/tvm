@@ -44,7 +44,7 @@ from .stmt import (
 from .stmt import SeqStmt
 from .stmt import IfThenElse, Evaluate, stmt_seq, stmt_list
 from .stmt import BufferRegion, MatchBufferRegion, SBlock, SBlockRealize
-from .stmt import OpCall, ExecScopeStmt
+from .stmt import ScopeOpCall, ExecScopeStmt
 
 from .function import PrimFunc, TensorIntrin, IndexMap
 
@@ -115,14 +115,13 @@ from .generic import add, subtract, multiply
 from .exec_scope import ExecScope, ExecScopeSlice, ScopeIdDef
 from .layout import TileLayout, Layout, SwizzleLayout, ComposeLayout
 from .predicate import Predicate
-from .async_structs import Pipeline, CopyPipeline
 from .expr_functor import ExprFunctor
 
 from . import transform
 from . import analysis
 from . import backend
 from . import stmt_functor
-from .device_op_codegen import cuda as _device_op_codegen_cuda  # register codegen FFI
+from .device_native_codegen import cuda as _device_native_codegen_cuda  # register codegen FFI
 from .build import build
 from .compilation_pipeline import get_tir_pipeline, get_default_tir_pipeline
 from .functor import PyStmtExprVisitor, PyStmtExprMutator

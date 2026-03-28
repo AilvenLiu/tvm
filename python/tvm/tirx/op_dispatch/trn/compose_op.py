@@ -19,7 +19,7 @@
 
 from tvm.ir import Op
 from tvm.script import tirx as Tx
-from tvm.tirx import BufferRegion, OpCall, PrimFunc
+from tvm.tirx import BufferRegion, PrimFunc, ScopeOpCall
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     predicate,
@@ -56,9 +56,9 @@ optype_table = {
 }
 
 
-def binary_reduce_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def binary_reduce_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate a TRN schedule for binary reduction operations."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     assert isinstance(op, BinaryReduce), f"invalid operator downcast: {op}"
 
     # Extract operation components
@@ -177,9 +177,9 @@ def binary_reduce_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
     return impl
 
 
-def unary_reduce_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def unary_reduce_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate a TRN schedule for unary reduction operations."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     assert isinstance(op, UnaryReduce), f"invalid operator downcast: {op}"
 
     # Extract operation components
@@ -300,9 +300,9 @@ def unary_reduce_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         return impl
 
 
-def binary_chain_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def binary_chain_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate a TRN schedule for binary chain operations."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     assert isinstance(op, BinaryChain), f"invalid operator downcast: {op}"
 
     # Extract operation components
@@ -378,14 +378,14 @@ def binary_chain_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
     return impl
 
 
-def reduce_negate_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def reduce_negate_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate a TRN schedule for reduce negate operations."""
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     assert isinstance(op, ReduceNegate), f"invalid operator downcast: {op}"
     return reduction_trn(op, optype_table[op.reduce_op], sctx, negate=True)
 
 
-def compose_op_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def compose_op_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate a TRN schedule for compose operations."""
     raise NotImplementedError(
         "Generic compose_op must be lowered to specific compose ops before operator-level passes"
@@ -408,7 +408,7 @@ def compose_op_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         )
     ],
 )
-def binary_reduce_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def binary_reduce_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return binary_reduce_trn(op, sctx)
 
 
@@ -427,7 +427,7 @@ def binary_reduce_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
         )
     ],
 )
-def unary_reduce_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def unary_reduce_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return unary_reduce_trn(op, sctx)
 
 
@@ -446,7 +446,7 @@ def unary_reduce_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
         )
     ],
 )
-def binary_chain_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def binary_chain_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return binary_chain_trn(op, sctx)
 
 
@@ -465,7 +465,7 @@ def binary_chain_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
         )
     ],
 )
-def reduce_negate_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def reduce_negate_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return reduce_negate_trn(op, sctx)
 
 
@@ -484,5 +484,5 @@ def reduce_negate_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
         )
     ],
 )
-def compose_op_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def compose_op_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return compose_op_trn(op, sctx)

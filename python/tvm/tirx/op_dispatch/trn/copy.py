@@ -25,7 +25,7 @@ from tvm.tirx.op_dispatch import (
     predicate,
     register_dispatch,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import init_analyzer, nki_dim
 from .dim_utils import get_ewise_dim_map
@@ -34,7 +34,7 @@ from .workspace_utils import check_workspace_buffer, largest_psum_per_bank, max_
 
 
 def transpose_schedule(
-    op: OpCall,
+    op: ScopeOpCall,
     inst_gen: InstructionGenerator,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -190,7 +190,7 @@ def transpose_schedule(
     return transpose_sbuf_output
 
 
-def copy_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def copy_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if sctx.exec_scope.name != "kernel":
@@ -304,5 +304,5 @@ def copy_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         )
     ],
 )
-def copy_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return copy_trn(op, sctx)

@@ -54,7 +54,7 @@ class StmtFunctor:
             "tirx.SBlock": self.visit_block_,
             "tirx.SBlockRealize": self.visit_block_realize_,
             "tirx.ExecScopeStmt": self.visit_exec_scope_stmt_,
-            "tirx.OpCall": self.visit_op_call_,
+            "tirx.ScopeOpCall": self.visit_op_call_,
             "tirx.AllocBuffer": self.visit_alloc_buffer_,
         }
 
@@ -73,10 +73,10 @@ class StmtFunctor:
         """
         if stmt is None:
             return None
-        if isinstance(stmt, tvm.tirx.OpCall):
-            # subclass of OpCall only exists in python side
+        if isinstance(stmt, tvm.tirx.ScopeOpCall):
+            # subclass of ScopeOpCall only exists in python side
             # and are not handled by dispatch map
-            key = "OpCall"
+            key = "ScopeOpCall"
         else:
             key = stmt.__class__.__name__
         if key.endswith("Node"):
@@ -177,7 +177,7 @@ class StmtFunctor:
         return self.visit_stmt_default_(op)
 
     def visit_op_call_(self, op):
-        """Visitor for OpCall nodes."""
+        """Visitor for ScopeOpCall nodes."""
         return self.visit_stmt_default_(op)
 
     def visit_buffer_region_(self, op):
@@ -339,7 +339,7 @@ class StmtVisitor(StmtFunctor):
         self.visit_stmt(op.body)
 
     def visit_op_call_(self, op):
-        """Visitor implementation for OpCall."""
+        """Visitor implementation for ScopeOpCall."""
         for arg in op.args:
             if isinstance(arg, PrimExpr):
                 self.visit_expr(arg)
@@ -782,7 +782,7 @@ class StmtMutator(StmtFunctor):
         return tvm.tirx.ExecScopeStmt(op.exec_scope, body, op.span)
 
     def visit_op_call_(self, op):
-        """Mutator implementation for OpCall."""
+        """Mutator implementation for ScopeOpCall."""
         new_args = []
         args_changed = False
 
@@ -817,7 +817,7 @@ class StmtMutator(StmtFunctor):
         if not args_changed and not config_changed:
             return op
 
-        return tvm.tirx.OpCall(
+        return tvm.tirx.ScopeOpCall(
             *new_args, op=op.op, workspace=op.workspace, config=new_config, dispatch=op.dispatch
         )
 

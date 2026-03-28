@@ -18,7 +18,7 @@
 """Implementation of select schedules."""
 
 from tvm.script import tirx as Tx
-from tvm.tirx import BufferRegion, FloatImm, OpCall, PrimFunc
+from tvm.tirx import BufferRegion, FloatImm, PrimFunc, ScopeOpCall
 from tvm.tirx.op_dispatch import (
     DispatchContext,
     fail,
@@ -32,12 +32,12 @@ from .dim_utils import get_ewise_dim_map
 from .instruction_generator import InstructionGenerator
 
 
-def select_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
+def select_trn(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate schedule for select operation on Trainium."""
     if sctx.exec_scope.name != "kernel":
         fail("requires kernel exec_scope for TRN select")
 
-    op = OpCall.downcast(op)
+    op = ScopeOpCall.downcast(op)
     assert isinstance(op, Select), f"{op} is not a Select"
 
     # Unpack operands
@@ -140,5 +140,5 @@ def select_trn(op: OpCall, sctx: DispatchContext) -> PrimFunc | None:
         )
     ],
 )
-def select_trn_dispatch(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def select_trn_dispatch(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return select_trn(op, sctx)

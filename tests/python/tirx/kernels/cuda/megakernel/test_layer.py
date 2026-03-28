@@ -27,11 +27,11 @@ from tirx_kernels.megakernel.layer import (
 
 import tvm
 import tvm.testing
-from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.megakernel.utils.config import (
+from tvm.megakernel.utils.config import (
     event_type_names,
 )
-from tvm.tirx.megakernel.utils.utils import get_source
+from tvm.megakernel.utils.utils import get_source
+from tvm.tirx.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)

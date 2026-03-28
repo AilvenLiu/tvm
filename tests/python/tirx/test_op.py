@@ -21,11 +21,11 @@ from tvm.ir import Op
 from tvm.script import tirx as T
 from tvm.script import tirx as Tx
 from tvm.tirx.buffer import decl_buffer
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 
 def _test(op: str, *args):
-    return OpCall(*args, op=Op.get("tirx." + op), workspace={}, config={})
+    return ScopeOpCall(*args, op=Op.get("tirx." + op), workspace={}, config={})
 
 
 def test_copy():
@@ -118,19 +118,19 @@ def test_tx_dynamic_op_in_prim_func():
         with T.kernel():
             Tx.copy_and_cast(B, A)
 
-    # Walk IR to find OpCall with op="tirx.copy_and_cast"
+    # Walk IR to find ScopeOpCall with op="tirx.copy_and_cast"
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, OpCall) and stmt.op == Op.get("tirx.copy_and_cast"):
+        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.copy_and_cast"):
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected OpCall with tirx.copy_and_cast not found"
+    assert found[0], "Expected ScopeOpCall with tirx.copy_and_cast not found"
 
 
 def test_tx_dynamic_op_with_workspace():
-    """Tx.some_op(..., workspace={...}) passes workspace to OpCall."""
+    """Tx.some_op(..., workspace={...}) passes workspace to ScopeOpCall."""
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle, B_ptr: T.handle, W_ptr: T.handle):
@@ -143,12 +143,12 @@ def test_tx_dynamic_op_with_workspace():
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, OpCall) and stmt.op == Op.get("tirx.custom_with_ws"):
+        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.custom_with_ws"):
             assert "tmp" in stmt.workspace
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected OpCall with workspace not found"
+    assert found[0], "Expected ScopeOpCall with workspace not found"
 
 
 def test_tx_existing_op_not_overridden():
@@ -164,15 +164,15 @@ def test_tx_existing_op_not_overridden():
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, OpCall) and stmt.op == Op.get("tirx.copy"):
+        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.copy"):
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected OpCall with tirx.copy not found"
+    assert found[0], "Expected ScopeOpCall with tirx.copy not found"
 
 
 def test_opcall_downcast_tolerant():
-    """OpCall.downcast returns instance as-is for unknown ops."""
+    """ScopeOpCall.downcast returns instance as-is for unknown ops."""
     from tvm.tirx.operator.op import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
@@ -180,7 +180,7 @@ def test_opcall_downcast_tolerant():
 
     op_call = GenericOp(B[0:64], A[0:64], op_name="totally_unknown_op")
     # downcast should not raise
-    result = OpCall.downcast(op_call)
+    result = ScopeOpCall.downcast(op_call)
     assert result is not None
 
 

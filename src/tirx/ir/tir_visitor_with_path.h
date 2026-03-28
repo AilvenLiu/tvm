@@ -127,7 +127,7 @@ class TIRVisitorWithPath
   void VisitStmt_(const EvaluateNode* op, ffi::reflection::AccessPath path) override;
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override;
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override;
-  void VisitStmt_(const tirx::OpCallNode* op, ffi::reflection::AccessPath path) override;
+  void VisitStmt_(const tirx::ScopeOpCallNode* op, ffi::reflection::AccessPath path) override;
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override;
 
   using ExprFunctor::VisitExpr;

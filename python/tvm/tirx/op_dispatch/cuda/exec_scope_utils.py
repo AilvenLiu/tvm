@@ -25,7 +25,7 @@ from tvm.script import tirx as Tx
 from tvm.tirx import PrimExpr, PrimFunc
 from tvm.tirx.exec_scope import ExecScopeSlice
 from tvm.tirx.op_dispatch import DispatchContext
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 
 def macro_or_prim_func(macro: Callable, need_macro: bool = False) -> Callable:
@@ -134,7 +134,7 @@ def thread_selector(sctx: DispatchContext, inner_impl, macro=False) -> Callable:
         )
 
 
-def single_thread(op_call: OpCall, sctx: DispatchContext) -> bool:
+def single_thread(op_call: ScopeOpCall, sctx: DispatchContext) -> bool:
     return (
         sctx.exec_scope.name == "thread"
         and isinstance(sctx.exec_scope, ExecScopeSlice)
@@ -146,7 +146,7 @@ def single_thread(op_call: OpCall, sctx: DispatchContext) -> bool:
 
 
 def exec_scope_ok(
-    op_call: OpCall, sctx: DispatchContext, expected_scopes: list[str]
+    op_call: ScopeOpCall, sctx: DispatchContext, expected_scopes: list[str]
 ) -> tuple[bool, str | None]:
     ok = sctx.exec_scope.name in expected_scopes
     return (ok, None if ok else f"unsupported exec_scope {sctx.exec_scope.name}")

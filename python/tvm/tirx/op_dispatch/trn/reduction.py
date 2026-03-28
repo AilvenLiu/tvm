@@ -20,7 +20,7 @@
 from tvm.script import tirx as Tx
 from tvm.tirx import PrimFunc
 from tvm.tirx.op_dispatch import DispatchContext, fail
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from ..common import ReduceOpType
 from .common import init_analyzer, nki_dim
@@ -67,7 +67,7 @@ def generate_intermediate_buffer(
 
 
 def reduction_trn(
-    op: OpCall,
+    op: ScopeOpCall,
     reduce_op: ReduceOpType,
     sctx: DispatchContext,
     negate: bool = False,

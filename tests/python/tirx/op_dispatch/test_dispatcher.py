@@ -128,17 +128,17 @@ def test_dispatch_raises_with_aggregated_reasons():
 
 
 def test_dispatch_prints_real_opcall_ir():
-    """Create a real OpCall via BufferRegions and ensure its IR is in the table."""
+    """Create a real ScopeOpCall via BufferRegions and ensure its IR is in the table."""
     _import_and_register()
     from tvm.ir import Op
     from tvm.tirx.buffer import decl_buffer
     from tvm.tirx.op_dispatch.dispatcher import run_dispatch
-    from tvm.tirx.stmt import OpCall
+    from tvm.tirx.stmt import ScopeOpCall
 
-    # Build a real TIRx OpCall: tirx.copy(A[0:64], B[0:64])
+    # Build a real TIRx ScopeOpCall: tirx.copy(A[0:64], B[0:64])
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="shared")
-    real_opcall = OpCall(A[0:64], B[0:64], op=Op.get("tirx.copy"), workspace={}, config={})
+    real_opcall = ScopeOpCall(A[0:64], B[0:64], op=Op.get("tirx.copy"), workspace={}, config={})
 
     # Force predicate rejection to trigger formatted error with opcall IR
     sctx = _DummySctx(target_kind="trn", exec_scope="warp")

@@ -36,7 +36,7 @@ from tvm.tirx.op_dispatch import (
     predicate,
     register_dispatch,
 )
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 from .common import (
     CopyInstType,
@@ -553,7 +553,7 @@ def _build_iteration_space(
 
 
 def copy_tma_impl(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: "DispatchContext",
 ) -> Optional["PrimFunc"]:
     """Schedule a copy between global <-> shared memory using CUDA TMA.
@@ -568,7 +568,7 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
     # ---------------------------------------------------------------------
-    op_call = OpCall.downcast(op_call)
+    op_call = ScopeOpCall.downcast(op_call)
     dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
@@ -912,7 +912,7 @@ def copy_tma_impl(
 # Succeeds for global↔shared copies where vectorization works; fails back
 # to TMA for single-thread scope or when cp.async doesn't apply.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.cta():
 #         Tx.copy_async(A_smem[0:64, 0:64], A[0:64, 0:64])
 #
@@ -935,7 +935,7 @@ def copy_tma_impl(
         ),
     ],
 )
-def copy_async_dispatch_cp_async(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_async_dispatch_cp_async(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
 
 
@@ -945,7 +945,7 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: DispatchContext) -> PrimFunc:
 # copies on Hopper+ (SM90+) where TMA hardware is available.
 # Falls back (DispatchFail) for scope pairs TMA can't handle.
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     Tx.copy_async(A_smem[0:128, 0:64], A[row:row+128, 0:64])
 #     # A: global float16, A_smem: shared float16 with 128B swizzle layout
 #
@@ -989,7 +989,7 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: DispatchContext) -> PrimFunc:
         ),
     ],
 )
-def copy_async_dispatch_tma(op: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_async_dispatch_tma(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return copy_tma_impl(op, sctx)
 
 
@@ -1025,7 +1025,7 @@ from .exec_scope_utils import exec_scope_ok  # noqa: E402
         ),
     ],
 )
-def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_async_schedule_tmem_local_async(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return copy_tmem_local_impl(op_call, sctx, async_op=True)
 
 
@@ -1042,5 +1042,5 @@ def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: DispatchContext)
         predicate("exec_scope", _single_thread_exec),
     ],
 )
-def copy_async_schedule_smem_tmem(op_call: OpCall, sctx: DispatchContext) -> PrimFunc:
+def copy_async_schedule_smem_tmem(op_call: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
     return copy_smem_tmem_impl(op_call, sctx, async_op=True)

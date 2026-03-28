@@ -509,6 +509,19 @@ entries:
   title: 'cuda_copy_bytes: single intrinsic with num_bytes dispatch, not per-width
     ops'
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: ADR-20260328-005952-4cf57e
+  path: entries/ADR-20260328-005952-4cf57e.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - decision
+  - testing
+  - pythonpath
+  - tirx-kernels
+  title: Validate and normalize TIRX_KERNELS_PATH in pytest environment setup
+  updated: '2026-03-28'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -605,6 +618,8 @@ tags:
   cuda:
   - ADR-20260326-030916-5826a7
   - ADR-20260326-030916-ac4a46
+  decision:
+  - ADR-20260328-005952-4cf57e
   design-pattern:
   - ADR-20260319-022448-4d7f83
   device-op:
@@ -689,6 +704,8 @@ tags:
   - ADR-20260319-022448-398b11
   python:
   - ADR-20260327-142529-6acc98
+  pythonpath:
+  - ADR-20260328-005952-4cf57e
   range:
   - ADR-20260326-004750-de4733
   rebase:
@@ -736,6 +753,7 @@ tags:
   - ADR-20260319-022448-4d7f83
   - ADR-20260319-022448-7cc00e
   - ADR-20260324-171756-b03f0f
+  - ADR-20260328-005952-4cf57e
   thermal:
   - ADR-20260323-185836-77eb2c
   third-party:
@@ -744,6 +762,7 @@ tags:
   - ADR-20260323-185836-77eb2c
   tir:
   - ADR-20260227-0001
+  - ADR-20260328-005952-4cf57e
   tirx:
   - ADR-20260301-0003
   - ADR-20260327-142529-3943af
@@ -751,6 +770,7 @@ tags:
   - ADR-20260328-001753-19aa69
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
+  - ADR-20260328-005952-4cf57e
   tma:
   - ADR-20260227-0002
   tmem:

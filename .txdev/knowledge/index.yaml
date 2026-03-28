@@ -712,6 +712,19 @@ entries:
   - pattern
   title: Convenience wrapper pattern for device op variants
   updated: '2026-03-28'
+- created: '2026-03-28'
+  id: KB-20260328-005952-3f5549
+  path: entries/KB-20260328-005952-3f5549.yaml
+  scope:
+  - repo
+  tags:
+  - tir
+  - pytest
+  - tirx-kernels
+  - pythonpath
+  - debugging
+  title: Pytest path hygiene for tirx-kernels during multi-repo development
+  updated: '2026-03-28'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -808,6 +821,7 @@ tags:
   debugging:
   - KB-20260301-0001
   - KB-20260327-142528-4a9323
+  - KB-20260328-005952-3f5549
   dispatch:
   - KB-20260325-174353-cf8a51
   dsl:
@@ -949,12 +963,15 @@ tags:
   - KB-20260228-0002
   - KB-20260306-195314-a33c27
   - KB-20260319-022448-dec2c4
+  - KB-20260328-005952-3f5549
   python:
   - KB-20260301-0005
   - KB-20260307-231252-72bc64
   - KB-20260308-232603-205e85
   - KB-20260317-211410-e366ed
   - KB-20260320-002326-24c511
+  pythonpath:
+  - KB-20260328-005952-3f5549
   range:
   - KB-20260326-004750-e4d4b4
   rebase:
@@ -1033,6 +1050,7 @@ tags:
   - KB-20260326-030915-290626
   - KB-20260328-001753-bd867c
   - KB-20260328-001753-e74f4d
+  - KB-20260328-005952-3f5549
   tirx:
   - KB-20260301-0002
   - KB-20260301-0003
@@ -1053,6 +1071,7 @@ tags:
   - KB-20260326-004750-bc6d9b
   - KB-20260327-142528-4a9323
   - KB-20260327-142528-4fa3ef
+  - KB-20260328-005952-3f5549
   tma:
   - KB-20260227-0002
   - KB-20260227-0003

@@ -250,7 +250,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  Stmt VisitStmt_(const tirx::OpCallNode* op) final {
+  Stmt VisitStmt_(const tirx::ScopeOpCallNode* op) final {
     ffi::Array<ffi::Any> args = op->args;
     args.MutateByApply([this](ffi::Any arg) -> ffi::Any { return VisitAny(arg); });
     if (args.same_as(op->args)) {

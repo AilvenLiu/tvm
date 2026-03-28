@@ -24,18 +24,18 @@ dispatch result.
 from tvm_ffi import register_global_func
 
 from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
-from tvm.tirx.stmt import OpCall
+from tvm.tirx.stmt import ScopeOpCall
 
 # Note: legacy `register_schedule` is intentionally removed.
 
 
 @register_global_func("tirx.f_op_dispatcher")
-def f_op_dispatcher(op_call: OpCall, sctx: DispatchContext):
+def f_op_dispatcher(op_call: ScopeOpCall, sctx: DispatchContext):
     """Find and return a schedule for the operator.
 
     Parameters
     ----------
-    op_call : OpCall
+    op_call : ScopeOpCall
         The operator to be scheduled
     sctx : DispatchContext
         The dispatch context

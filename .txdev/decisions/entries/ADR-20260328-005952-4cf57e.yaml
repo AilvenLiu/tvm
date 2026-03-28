@@ -1,0 +1,23 @@
+content:
+  details: 'During this cleanup, environment variable TIRX_KERNELS_PATH was set to
+    an invalid directory (.../tirx-kernels/kernels), which silently allowed Python
+    to import a stale editable package from another checkout. Decision: in tests/scripts/setup-pytest-env.sh,
+    treat TIRX_KERNELS_PATH as valid only if TIRX_KERNELS_PATH/tirx_kernels/__init__.py
+    exists; otherwise automatically use ../tirx-kernels when available, and prepend
+    the chosen path to PYTHONPATH. This keeps local and CI behavior deterministic
+    and prevents false regressions caused by accidental package shadowing.'
+  summary: The test environment script should accept TIRX_KERNELS_PATH only when it
+    points to a real tirx_kernels package, otherwise fall back to sibling worktree
+    path.
+created: '2026-03-28'
+id: ADR-20260328-005952-4cf57e
+scope:
+- repo
+tags:
+- tir
+- decision
+- testing
+- pythonpath
+- tirx-kernels
+title: Validate and normalize TIRX_KERNELS_PATH in pytest environment setup
+updated: '2026-03-28'

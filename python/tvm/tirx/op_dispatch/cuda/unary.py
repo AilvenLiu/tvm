@@ -31,7 +31,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.ir.expr import PrimExpr
 from tvm.runtime import DataType
 from tvm.script import tirx as Tx
-from tvm.tirx import BufferRegion, OpCall, PrimFunc
+from tvm.tirx import BufferRegion, PrimFunc, ScopeOpCall
 from tvm.tirx.expr import FloatImm
 from tvm.tirx.layout import TileLayout
 from tvm.tirx.op_dispatch import DispatchContext, fail
@@ -59,7 +59,7 @@ unary_op_table = {
 
 
 def _match_storage_scope(
-    op_call: OpCall,
+    op_call: ScopeOpCall,
     sctx: DispatchContext,
     expected_scope: list[Literal["global", "shared*", "local"]],
 ) -> tuple[bool, str | None]:
@@ -112,7 +112,7 @@ def get_thread_cnt(sctx: DispatchContext) -> int | None:
 
 
 def _unary_args(
-    op: OpCall,
+    op: ScopeOpCall,
 ) -> tuple[
     BufferRegion,
     BufferRegion | PrimExpr,
@@ -158,7 +158,7 @@ def _basic_shape_layout_dtype_checks(
 
 
 def _infer_unary_vec_len(
-    op: OpCall,
+    op: ScopeOpCall,
     _dst: BufferRegion,
     _src: BufferRegion | PrimExpr,
     _bias: BufferRegion | FloatImm | None,
@@ -222,7 +222,7 @@ def _classify_unary_local_case(
 
 
 def validate_unary_shared(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     _dst, _src, _bias, _scale = _unary_args(op)
@@ -281,7 +281,7 @@ def validate_unary_shared(
 
 
 def unary_shared_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -387,7 +387,7 @@ def unary_shared_impl(
 
 
 def validate_unary_local(
-    op: OpCall,
+    op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     _dst, _src, _bias, _scale = _unary_args(op)
@@ -505,7 +505,7 @@ def validate_unary_local(
 
 
 def _emit_unary_local_view_full(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: MapOpType,
     _dst: BufferRegion,
     _src: BufferRegion | PrimExpr,
@@ -591,7 +591,7 @@ def _emit_unary_local_view_full(
 
 
 def _emit_unary_local_view_sliced(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
     _dst: BufferRegion,
@@ -698,7 +698,7 @@ def _emit_unary_local_view_sliced(
 
 
 def _emit_unary_local_thread_wise(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: MapOpType,
     _dst: BufferRegion,
     _src: BufferRegion | PrimExpr,
@@ -775,7 +775,7 @@ def _emit_unary_local_thread_wise(
 
 
 def unary_local_impl(
-    op: OpCall,
+    op: ScopeOpCall,
     op_type: MapOpType,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
@@ -813,7 +813,7 @@ def unary_local_impl(
 # When: dst and src are both shared-memory TileLayout buffers with the same
 # canonical layout signature (i.e. same axis structure after canonicalize()).
 #
-# Before (OpCall):
+# Before (ScopeOpCall):
 #     with Tx.cta():
 #         A_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
 #         B_smem = Tx.alloc_buffer([32, 32], "float16", scope="shared", layout=...)
@@ -888,7 +888,7 @@ for _op_name, _op_type in {
             predicate("shared_valid", validate_unary_shared),
         ],
     )
-    def _shared_dispatch(op: OpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
+    def _shared_dispatch(op: ScopeOpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
         return unary_shared_impl(op, _ty, sctx)
 
     @register_dispatch(
@@ -901,5 +901,5 @@ for _op_name, _op_type in {
             predicate("local_valid", validate_unary_local),
         ],
     )
-    def _local_dispatch(op: OpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
+    def _local_dispatch(op: ScopeOpCall, sctx: DispatchContext, _ty=_op_type) -> PrimFunc:
         return unary_local_impl(op, _ty, sctx)

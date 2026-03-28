@@ -20,7 +20,7 @@
 from tvm.ir import Op
 from tvm.tirx import BufferRegion, FloatImm, IntImm, PrimExpr
 from tvm.tirx.predicate import Predicate
-from tvm.tirx.stmt import OpCall, _ffi_api, normalize_const_arg
+from tvm.tirx.stmt import ScopeOpCall, _ffi_api, normalize_const_arg
 
 
 def get_tirx_op(op_name: str):
@@ -33,12 +33,12 @@ class ArgProperty:
         self.index = index
 
     def __get__(self, obj, objtype=None):
-        assert obj is not None, "OpCall cannot be None"
+        assert obj is not None, "ScopeOpCall cannot be None"
         return obj.args[self.index]
 
 
 ### Base Operator Classes ###
-class UnaryOp(OpCall):
+class UnaryOp(ScopeOpCall):
     """Base class for unary operators: unary(output, input).
 
     Unary operators take a single input tensor and produce a single output tensor.
@@ -97,7 +97,7 @@ class UnaryOpWithBiasScale(UnaryOp):
         )
 
 
-class BinaryOp(OpCall):
+class BinaryOp(ScopeOpCall):
     """Base class for binary operators: binary(output, input0, input1).
 
     Binary operators take two input tensors and produce a single output tensor.
@@ -128,7 +128,7 @@ class BinaryOp(OpCall):
         )
 
 
-class ReduceOp(OpCall):
+class ReduceOp(ScopeOpCall):
     """Base class for reduction operators: reduce(output, input, reduce_axes, accum).
 
     Reduction operators reduce one or more dimensions of the input tensor.
@@ -210,7 +210,7 @@ class FDiv(BinaryOp):
     op = get_tirx_op("fdiv")
 
 
-class FMA(OpCall):
+class FMA(ScopeOpCall):
     """Fused multiply-add: output = input * scale + bias.
 
     fma(output, input, scale, bias)
@@ -258,7 +258,7 @@ class Cast(UnaryOp):
     op = get_tirx_op("cast")
 
 
-class Copy(OpCall):
+class Copy(ScopeOpCall):
     """Copy all elements from src to dst.
 
     Args:
@@ -292,7 +292,7 @@ class Copy(OpCall):
         )
 
 
-class CopyAsync(OpCall):
+class CopyAsync(ScopeOpCall):
     """Copy all elements from src to dst asynchronously.
 
     Args:
@@ -326,7 +326,7 @@ class CopyAsync(OpCall):
         )
 
 
-class Gemm(OpCall):
+class Gemm(ScopeOpCall):
     """General matrix multiplication: D = A * B * alpha + C * beta.
 
     Args:
@@ -381,7 +381,7 @@ class Gemm(OpCall):
         assert isinstance(self.beta, FloatImm), f"{self} expects FloatImm as beta, got {self.beta}"
 
 
-class GemmAsync(OpCall):
+class GemmAsync(ScopeOpCall):
     """General matrix multiplication asynchronously.
 
     Supports two arg layouts:
@@ -525,7 +525,7 @@ class Select(BinaryOp):
         )
 
 
-class KernelReplacePoint(OpCall):
+class KernelReplacePoint(ScopeOpCall):
     """A placeholder for kernel replacement points in TIR scheduling."""
 
     op = get_tirx_op("tvm_kernel_replace_point")
@@ -546,7 +546,7 @@ class KernelReplacePoint(OpCall):
 
 
 ### Compose Ops ###
-class BinaryReduce(OpCall):
+class BinaryReduce(ScopeOpCall):
     """Combine a binary operation with a reduction operation.
 
     binary_reduce(binary_output, reduce_output, binary_input1, binary_input2, binary_op, reduce_op, reduce_axes, )
@@ -588,7 +588,7 @@ class BinaryReduce(OpCall):
         )
 
 
-class UnaryReduce(OpCall):
+class UnaryReduce(ScopeOpCall):
     """Combine a unary operation with a reduction operation.
 
     unary_reduce(unary_output, reduce_output, unary_input, unary_op, reduce_op, bias, scale, reduce_axes)
@@ -630,7 +630,7 @@ class UnaryReduce(OpCall):
         )
 
 
-class BinaryChain(OpCall):
+class BinaryChain(ScopeOpCall):
     """Chain multiple binary operations together.
 
     binary_chain(output, data, operand0, operand1, op0, op1, reverse1)
@@ -699,7 +699,7 @@ class ReduceNegate(ReduceOp):
         )
 
 
-class ComposeOp(OpCall):
+class ComposeOp(ScopeOpCall):
     """Generic operator for composition of multiple operations.
 
     Must be lowered to specific compose operations before operator-level passes.
@@ -724,7 +724,7 @@ class ComposeOp(OpCall):
         )
 
 
-class PermuteDims(OpCall):
+class PermuteDims(ScopeOpCall):
     """Permute the tensor dimensions with given order."""
 
     op = get_tirx_op("permute_dims")
@@ -741,7 +741,7 @@ class PermuteDims(OpCall):
         pass
 
 
-class GenericOp(OpCall):
+class GenericOp(ScopeOpCall):
     """Generic operator for dynamically-resolved TIRx ops."""
 
     def __init__(self, *args, op_name=None, workspace=None, config=None, dispatch=None):
@@ -759,5 +759,5 @@ class GenericOp(OpCall):
             resolved_op = Op.get(tirx_name)
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
-            _ffi_api.OpCall, resolved_op, args, workspace, config, dispatch
+            _ffi_api.ScopeOpCall, resolved_op, args, workspace, config, dispatch
         )

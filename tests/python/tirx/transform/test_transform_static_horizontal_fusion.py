@@ -17,15 +17,15 @@
 import numpy as np
 
 import tvm
+import tvm.megakernel.utils.dynamic_scheduler as dynamic_scheduler
+import tvm.megakernel.utils.static_scheduler as static_scheduler
 import tvm.testing
-import tvm.tirx.megakernel.utils.dynamic_scheduler as dynamic_scheduler
-import tvm.tirx.megakernel.utils.static_scheduler as static_scheduler
 from tvm import relax
+from tvm.megakernel.utils.base import SmemManager
+from tvm.megakernel.utils.config import KernelConfig
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as Tx
-from tvm.tirx.megakernel.utils.base import SmemManager
-from tvm.tirx.megakernel.utils.config import KernelConfig
 
 SM_CNT = 148
 NUM_THREADS = 256
