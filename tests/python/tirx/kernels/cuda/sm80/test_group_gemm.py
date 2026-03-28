@@ -29,8 +29,8 @@ from triton import language as tl
 
 import tvm
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
+from tvm.tirx.bench import ProtonContext, bench
+from tvm.tirx.lang.tile_scheduler import ClusterPersistentScheduler2D
 
 test_configs = [
     {

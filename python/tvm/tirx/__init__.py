@@ -121,7 +121,9 @@ from . import transform
 from . import analysis
 from . import backend
 from . import stmt_functor
-from .device_native_codegen import cuda as _device_native_codegen_cuda  # register codegen FFI
+from .operator.device_native_codegen import (
+    cuda as _device_native_codegen_cuda,
+)  # register codegen FFI
 from .build import build
 from .compilation_pipeline import get_tir_pipeline, get_default_tir_pipeline
 from .functor import PyStmtExprVisitor, PyStmtExprMutator

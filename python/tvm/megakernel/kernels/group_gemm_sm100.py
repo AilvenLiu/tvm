@@ -20,7 +20,7 @@ from typing import Literal
 from tvm.megakernel.utils.base import SmemManager
 from tvm.megakernel.utils.config import F32_BYTES, KernelConfig
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TileLayout
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 

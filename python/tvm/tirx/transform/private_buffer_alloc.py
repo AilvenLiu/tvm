@@ -19,7 +19,7 @@
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tirx.buffer import Buffer
-from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
 from tvm.tirx.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, SeqStmt, Stmt, ScopeOpCall
 from tvm.tirx.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tirx.transform.common import seek_kernel_replace_point

@@ -24,7 +24,7 @@ import tvm
 from tvm.script import ir as I
 from tvm.script import tirx as Tx
 from tvm.tirx import PrimExpr
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.expr import Var
 
 from .config import KernelConfig, ProfileEventType

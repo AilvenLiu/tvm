@@ -20,7 +20,7 @@ from tvm.megakernel.utils.base import SmemManager, Tile
 from tvm.megakernel.utils.config import KernelConfig, ProfileEventType
 from tvm.megakernel.utils.utils import ceildiv
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 
 
 def upcast_size(dtype):

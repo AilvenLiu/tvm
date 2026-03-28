@@ -23,8 +23,8 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirx.bench.utils import CudaProfiler, ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirx.tile_scheduler import IndexedTripleTileScheduler
+from tvm.tirx.bench import CudaProfiler, ProtonContext, bench, export_to_perfetto_trace
+from tvm.tirx.lang.tile_scheduler import IndexedTripleTileScheduler
 
 
 class ProfileEventType(Enum):

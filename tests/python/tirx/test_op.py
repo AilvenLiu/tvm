@@ -67,7 +67,7 @@ def test_gemm():
 
 def test_generic_op_creates_op():
     """GenericOp auto-registers unknown ops."""
-    from tvm.tirx.operator.op import GenericOp
+    from tvm.tirx.operator.scope_op import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -79,7 +79,7 @@ def test_generic_op_creates_op():
 
 def test_generic_op_reuses_registered_op():
     """GenericOp reuses already-registered ops without error."""
-    from tvm.tirx.operator.op import GenericOp
+    from tvm.tirx.operator.scope_op import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -92,7 +92,7 @@ def test_generic_op_reuses_registered_op():
 
 def test_generic_op_with_existing_tirx_op():
     """GenericOp works with already-registered tirx ops (e.g., tirx.copy)."""
-    from tvm.tirx.operator.op import GenericOp
+    from tvm.tirx.operator.scope_op import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -173,7 +173,7 @@ def test_tx_existing_op_not_overridden():
 
 def test_opcall_downcast_tolerant():
     """ScopeOpCall.downcast returns instance as-is for unknown ops."""
-    from tvm.tirx.operator.op import GenericOp
+    from tvm.tirx.operator.scope_op import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -199,7 +199,7 @@ def test_buffer_replacer_no_shared_default():
 
 def test_permute_dims_buffer_property():
     """Regression test for F2: PermuteDims.buffer should return args[0], not recurse."""
-    from tvm.tirx.operator.op import PermuteDims
+    from tvm.tirx.operator.scope_op import PermuteDims
 
     A = decl_buffer((64, 64), "float32", scope="global")
     pd = PermuteDims(A[0:64, 0:64], [1, 0])

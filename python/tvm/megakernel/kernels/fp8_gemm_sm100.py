@@ -27,7 +27,7 @@ from tvm.megakernel.utils.config import (
 )
 from tvm.script import tirx as T
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TileLayout
 
 CTA_GROUP_GLOBAL = 2

@@ -19,7 +19,7 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from tvm.tirx.warp_role import WarpgroupRole, WarpRole  # noqa: F401
+from tvm.tirx.lang.warp_role import WarpgroupRole, WarpRole  # noqa: F401
 
 from .ir_builder.tirx import tirx as _ir_builder_tirx
 from .ir_builder.tirx.ir import elected  # noqa: F401
@@ -112,7 +112,7 @@ def __getattr__(name: str) -> Callable[..., Any]:
         raise AttributeError(f"module 'tvm.script.tirx' has no attribute {name!r}")
 
     from tvm.tirx import Buffer
-    from tvm.tirx.operator.op import GenericOp
+    from tvm.tirx.operator.scope_op import GenericOp
 
     from .ir_builder.tirx.tirx import _to_region, f_insert
 

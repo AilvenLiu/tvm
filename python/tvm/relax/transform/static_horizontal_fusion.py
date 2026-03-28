@@ -56,7 +56,7 @@ from tvm.tirx import (
     Var,
 )
 from tvm.tirx.analysis import verify_tirx_well_formed
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.operator import KernelReplacePoint
 from tvm.tirx.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point

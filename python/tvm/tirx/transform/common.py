@@ -30,7 +30,7 @@ from tvm.tirx import (
 )
 from tvm.tirx.buffer import Buffer
 from tvm.tirx.layout import Iter, TileLayout
-from tvm.tirx.operator.op import KernelReplacePoint
+from tvm.tirx.operator.scope_op import KernelReplacePoint
 from tvm.tirx.stmt_functor import StmtExprMutator, StmtMutator
 
 

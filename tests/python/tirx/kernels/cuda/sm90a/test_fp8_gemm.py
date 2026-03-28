@@ -21,8 +21,8 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
+from tvm.tirx.bench import ProtonContext, bench
+from tvm.tirx.lang.tile_scheduler import ClusterPersistentScheduler2D
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)

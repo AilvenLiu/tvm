@@ -957,7 +957,7 @@ def test_workspace_default_none():
     C = BufferRegion(C_buf, [tvm.ir.Range(0, 128)])
 
     # These should not crash when workspace is not provided (defaults to None)
-    from tvm.tirx.operator import op as tirx_op
+    from tvm.tirx.operator import scope_op as tirx_op
 
     op_br = tirx_op.BinaryReduce(
         B, C, A, B, tirx_op.get_tirx_op("add"), tirx_op.get_tirx_op("max"), (-1,)
@@ -1718,7 +1718,7 @@ def test_roundtrip_persistent_not_present():
 
 def test_warp_role():
     """WarpRole should emit if + warp + setmaxnreg."""
-    from tvm.tirx.warp_role import WarpRole
+    from tvm.tirx.lang.warp_role import WarpRole
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -1748,7 +1748,7 @@ def test_warp_role():
 
 def test_warpgroup_role():
     """WarpgroupRole should emit if + warpgroup scope + setmaxnreg."""
-    from tvm.tirx.warp_role import WarpgroupRole
+    from tvm.tirx.lang.warp_role import WarpgroupRole
 
     # fmt: off
     @Tx.prim_func(tirx=True)

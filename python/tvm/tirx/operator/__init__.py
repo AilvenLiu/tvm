@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .op import *
+from .scope_op import *
 
 __all__ = [
     "get_tirx_op",

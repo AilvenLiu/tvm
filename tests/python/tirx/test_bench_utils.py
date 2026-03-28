@@ -20,7 +20,7 @@ import pytest
 import torch
 
 import tvm.testing
-from tvm.tirx.bench.utils import _compute_groups, _parse_proton_tree, bench_tk
+from tvm.tirx.bench import _compute_groups, _parse_proton_tree, bench_tk
 
 # ── _parse_proton_tree ──────────────────────────────────────────────────────
 

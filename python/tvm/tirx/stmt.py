@@ -43,7 +43,7 @@ from .exec_scope import ExecScope
 from .expr import IterVar, StringImm, Var
 
 if TYPE_CHECKING:
-    from tvm.tirx.op_dispatch.dispatch_context import DispatchContext
+    from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
 
 
 @tvm_ffi.register_object("tirx.Stmt")

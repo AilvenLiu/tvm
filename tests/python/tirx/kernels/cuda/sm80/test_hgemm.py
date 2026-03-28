@@ -20,7 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import ProtonContext, bench
+from tvm.tirx.bench import ProtonContext, bench
 
 
 @pytest.mark.skip

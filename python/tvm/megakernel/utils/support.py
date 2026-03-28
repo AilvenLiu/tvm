@@ -39,7 +39,7 @@ from tvm.megakernel.utils.dynamic_scheduler import DynamicTileScheduler, MPMCQue
 from tvm.megakernel.utils.static_scheduler import StaticTileScheduler
 from tvm.megakernel.utils.utils import ceildiv, pack_into_32bit
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import export_to_perfetto_trace
+from tvm.tirx.bench import export_to_perfetto_trace
 
 
 def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_task_num):

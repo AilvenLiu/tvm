@@ -34,7 +34,7 @@ from tvm.megakernel.utils.utils import (
     while_ld_global_acquire,
 )
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 
 # notes: The following applies to decrement=False. The logic for True is similar.
 #        For semaphore with expected count = expected_cnt, we set it actual count = expected_cnt * (base + 1).  # noqa: E501

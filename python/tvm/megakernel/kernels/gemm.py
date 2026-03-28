@@ -22,10 +22,10 @@ from tvm.megakernel.utils.base import Barriers, SmemManager, Tile
 from tvm.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig, ProfileEventType
 from tvm.megakernel.utils.utils import ceildiv, mbarrier_try_wait
 from tvm.script import tirx as Tx
-from tvm.tirx.bench.utils import CudaProfiler
+from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.op_dispatch.cuda.tma_utils import SwizzleMode, tma_shared_layout
+from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode, tma_shared_layout
 
 
 class BarTMA2MMA(Barriers):
