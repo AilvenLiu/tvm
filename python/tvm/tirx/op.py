@@ -4028,6 +4028,56 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
         *coords,
     )
 
+def ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
+    dim, dst_ptr, bar, tensormap, cta_mask, cta_group, cache_hint, *coords
+):
+    """TVM intrinsic to call
+    cp.async.bulk.tensor.dim.shared::cluster.global.tile::gather4.mbarrier::complete_tx::bytes
+
+    Parameters
+    ----------
+    dim : int
+        The dimension of the source tensor.
+
+    dst_ptr : PrimExpr
+        The destination pointer to the shared memory.
+
+    bar : PrimExpr
+        The pointer to mbarrier variable.
+
+    tensormap: Var
+        The tensor map.
+
+    cta_mask : int
+        The mask of the cta for multicast.
+
+    cta_group : int
+        Must be either 1 or 2.
+
+    cache_hint : str
+        The cache hint.
+
+    coords : List[PrimExpr]
+        The TMA coordinates followed by the 4 gather row indices.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """  # noqa: E501
+    return call_intrin(
+        "",
+        "tirx.ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster",
+        dim,
+        dst_ptr,
+        bar,
+        tensormap,
+        cta_mask,
+        cta_group,
+        cache_hint,
+        *coords,
+    )
+
 
 def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, cache_hint, *coords):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group

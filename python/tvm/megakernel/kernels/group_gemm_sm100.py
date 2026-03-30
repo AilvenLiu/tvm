@@ -18,7 +18,7 @@
 from typing import Literal
 
 from tvm.megakernel.utils.base import SmemManager
-from tvm.megakernel.utils.config import F32_BYTES, KernelConfig
+from tvm.megakernel.utils.config import F16_BYTES, F32_BYTES, KernelConfig
 from tvm.script import tirx as Tx
 from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TileLayout
@@ -46,6 +46,13 @@ __forceinline__ __device__ void red_f32_v4(float* address, float* reg) {
 }
 """
 
+cp_async_mbarrier_arrive_noinc = """
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_mbarrier_arrive(void* barrier) {
+    unsigned int smem_int_ptr = __cvta_generic_to_shared(barrier);
+    asm volatile("cp.async.mbarrier.arrive.noinc.shared.b64 [%0];" :: "r"(smem_int_ptr));
+}
+"""
+
 
 ########################################################################
 # F16-lowM SM100 GroupGEMM Megakernel-Tile
@@ -53,6 +60,9 @@ __forceinline__ __device__ void red_f32_v4(float* address, float* reg) {
 
 
 class GroupGEMMTile(GemmTile):
+    CP_ASYNC_VEC_LEN = 16 // F16_BYTES
+    CP_ASYNC_COMMIT_CHUNK = 32
+
     def __init__(
         self,
         N,
@@ -66,6 +76,8 @@ class GroupGEMMTile(GemmTile):
         acc_output=False,
         prefetch_on=False,
         profiler_on=False,
+        use_cp_async_input=False,
+        use_tma_gather4=False,
     ):
         super().__init__(
             N,
@@ -87,11 +99,65 @@ class GroupGEMMTile(GemmTile):
         self.VEC_LEN = 16 // F32_BYTES
         self.BLK_M_candidate = [128, 64, 32]
         self.M_pad_size = max(self.BLK_M_candidate)
+        self.use_cp_async_input = use_cp_async_input
+        self.use_tma_gather4 = use_tma_gather4
+        # cp.async A path uses 32 lane-local noinc-arrives + 1 elected arrive.expect_tx for B TMA.
+        self.__class__.TMA2MMA_ARRIVE_COUNT = 33 if self.use_cp_async_input else 1
 
     def set_moe_info(self, expert_ids, routing_weights, sorted_token_ids):
         self.expert_ids = expert_ids
         self.routing_weights = routing_weights
         self.sorted_token_ids = sorted_token_ids
+
+    @Tx.inline
+    def _cp_async_load_A_tile(self, m_idx, ks, stage_k, tid, lane_id, A, mbar):
+        vec_len = Tx.meta_var(self.CP_ASYNC_VEC_LEN)
+        total_vec = Tx.meta_var(self.BLK_M * self.BLK_K // self.CP_ASYNC_VEC_LEN)
+        idx = Tx.alloc_buffer([1], "int32", scope="local")
+        commit_count = Tx.alloc_buffer([1], "int32", scope="local")
+        row_base = m_idx * self.M_pad_size
+        idx[0] = lane_id
+        commit_count[0] = 0
+        while idx[0] < total_vec:
+            offset = idx[0] * vec_len
+            row = offset // self.BLK_K
+            col = offset % self.BLK_K
+            row_global = row_base + row
+            row_global_safe = Tx.min(row_global, self.sorted_token_ids.shape[0] - 1)
+            row_in_bound = row_global < self.sorted_token_ids.shape[0]
+            token_linear = Tx.alloc_buffer([1], "int32", scope="local")
+            with Tx.thread():
+                tmp = self.sorted_token_ids[row_global_safe]
+                val = Tx.if_then_else(row_in_bound, tmp, self.numel)
+                token_linear[0] = Tx.min(Tx.max(val, 0), self.numel - 1)
+            stage_valid = stage_k + col + vec_len <= self.K
+            if stage_valid:
+                with Tx.thread():
+                    Tx.copy_async(
+                        self.A_smem[ks, row, col : col + vec_len],
+                        A[
+                            (token_linear[0] if self.acc_output else token_linear[0] // self.top_k),
+                            stage_k + col : stage_k + col + vec_len,
+                        ],
+                        dispatch="non-bulk-copy",
+                        vec_len=vec_len,
+                    )
+            else:
+                for v in Tx.serial(vec_len):
+                    if col + v < self.BLK_K:
+                        self.A_smem[ks, row, col + v] = Tx.cast(0, self.a_type)
+            idx[0] += 32
+            commit_count[0] += 1
+            if commit_count[0] == self.CP_ASYNC_COMMIT_CHUNK:
+                Tx.ptx.cp_async.commit_group()
+                commit_count[0] = 0
+        if commit_count[0] > 0:
+            Tx.ptx.cp_async.commit_group()
+        Tx.cuda.func_call(
+            "tvm_builtin_ptx_cp_async_mbarrier_arrive",
+            mbar,
+            source_code=cp_async_mbarrier_arrive_noinc,
+        )
 
     def _alloc_local(self, m_idx):
         super()._alloc_local(m_idx)
@@ -117,11 +183,72 @@ class GroupGEMMTile(GemmTile):
             else:
                 Tx.cuda.trap_when_assert_failed(False)
 
+    @Tx.inline
+    def _preload_tma_gather4_A(self, m_idx, lane_id):
+        for i in Tx.unroll(0, self.BLK_M // 32):
+            idx = i * 32 + lane_id
+            row_global = Tx.min(m_idx * self.M_pad_size + idx, self.sorted_token_ids.shape[0] - 1)
+            token_linear = self.sorted_token_ids[row_global]
+            self.smem_sorted_token_ids_gather4[idx] = Tx.min(Tx.max(token_linear, 0), self.numel - 1)
+        Tx.cuda.warp_sync()
+
+    @Tx.inline
+    def _tma_gather4_A(self, ks, A, m_idx, k_st, tma_config, tid, lane_id):
+        for rg in Tx.unroll(0, self.BLK_M // 8):
+            row_group = Tx.meta_var(rg * 8)
+            row_idx = Tx.alloc_buffer([8], "int32", scope="local")
+            if self.acc_output:
+                for r in Tx.vectorized(4):
+                    row_idx[r] = self.smem_sorted_token_ids_gather4[row_group + r]
+                for r in Tx.vectorized(4):
+                    row_idx[r + 4] = self.smem_sorted_token_ids_gather4[row_group + r + 4]
+            else:
+                for r in Tx.vectorized(4):
+                    row_idx[r] = self.smem_sorted_token_ids_gather4[row_group + r] // self.top_k
+                for r in Tx.vectorized(4):
+                    row_idx[r + 4] = self.smem_sorted_token_ids_gather4[row_group + r + 4] // self.top_k
+
+            Tx.ptx.cp_async.bulk.tensor.g2c_tile_gather4(
+                2,
+                self.A_smem.ptr_to([ks, row_group, 0]),
+                tma_config["mbar"],
+                tma_config["tensormap"],
+                0,
+                tma_config["cta_group"],
+                tma_config["cache_hint"],
+                k_st,
+                row_idx[0],
+                row_idx[1],
+                row_idx[2],
+                row_idx[3],
+            )
+            Tx.ptx.cp_async.bulk.tensor.g2c_tile_gather4(
+                2,
+                self.A_smem.ptr_to([ks, row_group + 4, 4 * (2 ** self.SWIZZLE)]),
+                tma_config["mbar"],
+                tma_config["tensormap"],
+                0,
+                tma_config["cta_group"],
+                tma_config["cache_hint"],
+                k_st,
+                row_idx[4],
+                row_idx[5],
+                row_idx[6],
+                row_idx[7],
+            )
+
     @classmethod
     def class_init(cls, smem_manager: SmemManager):
         super().class_init(smem_manager)
         cls.smem_sorted_token_ids = smem_manager.alloc(
             [cls.MAX_BLK_M], "int32", name="smem_sorted_token_ids", method="persistent"
+        )
+        cls.smem_sorted_token_ids_gather4 = smem_manager.alloc(
+            [cls.MAX_BLK_M],
+            "int32",
+            name="smem_sorted_token_ids_gather4",
+            method="persistent",
+            align=16,
         )
         cls.smem_routing_weights = smem_manager.alloc(
             [cls.MAX_BLK_M], "float32", name="smem_routing_weights", method="persistent"
@@ -258,6 +385,7 @@ class GroupGEMMTile(GemmTile):
         routing_weights,
         sorted_token_ids,
         valid_num_tokens,
+        A_tensormap=None,
         profiler=None,
     ):
         self.set_moe_info(expert_ids, routing_weights, sorted_token_ids)
@@ -275,13 +403,19 @@ class GroupGEMMTile(GemmTile):
             Tx.thread_id([256], parent="cta")
             if num_tokens_in_block <= 32:
                 self.set_BLK_M(32)
-                GemmTile._run(self, m_idx, n_idx, k_idx, A, B, output, profiler)
+                GemmTile._run(
+                    self, m_idx, n_idx, k_idx, A, B, output, profiler, A_tensormap=A_tensormap
+                )
             elif num_tokens_in_block <= 64:
                 self.set_BLK_M(64)
-                GemmTile._run(self, m_idx, n_idx, k_idx, A, B, output, profiler)
+                GemmTile._run(
+                    self, m_idx, n_idx, k_idx, A, B, output, profiler, A_tensormap=A_tensormap
+                )
             else:
                 self.set_BLK_M(128)
-                GemmTile._run(self, m_idx, n_idx, k_idx, A, B, output, profiler)
+                GemmTile._run(
+                    self, m_idx, n_idx, k_idx, A, B, output, profiler, A_tensormap=A_tensormap
+                )
             self.smem_manager.advance()
 
 

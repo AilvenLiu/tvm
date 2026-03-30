@@ -146,12 +146,19 @@ __forceinline__ __device__ void {func_name}() {{
 #################### TMA (cp.async.bulk.tensor)
 
 
-@register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
-def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
+def _codegen_cp_async_bulk_tensor_global_to_cluster(
+    dim, dst_ptr, bar, tensormap, *args, tile_mode="tile"
+):
     dim = int(dim)
     cta_mask, cta_group, cache_hint = args[0], int(args[1]), args[2]
     coords = args[3:]
-    if len(coords) != dim:
+    if tile_mode == "tile_gather4":
+        if dim != 2 or len(coords) != 5:
+            raise ValueError(
+                "tile_gather4 requires dim=2 and 5 coordinate expressions "
+                f"(got dim={dim}, coords={len(coords)})."
+            )
+    elif len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
         )
@@ -166,12 +173,13 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     is_multicast = not is_unicast
 
     func_name = (
-        f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
+        f"ptx_cp_async_bulk_tensor_global_to_cluster_{tile_mode}_{dim}d"
         + ("_multicast" if is_multicast else "")
         + (f"_cta_group_{cta_group}" if cta_group == 2 else "")
         + (f"_{cache_hint}" if cache_hint != "" else "")
     )
-    coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
+    coord_count = len(coords) if tile_mode == "tile_gather4" else dim
+    coord_arg_list = ", ".join([f"int coord{i}" for i in range(coord_count)])
 
     # The operand indices are different for unicast vs. multicast
     coord_arg_start = 3
@@ -179,8 +187,12 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
         coord_arg_start += 1
     if cache_hint != "":
         coord_arg_start += 1
-    coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(dim)]) + "}"
-    coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
+    if tile_mode == "tile_gather4":
+        coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(coord_count)]) + "}"
+        coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(coord_count)])
+    else:
+        coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(dim)]) + "}"
+        coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
 
     def is_sm100_or_higher():
         target = tvm.target.Target.current()
@@ -203,6 +215,8 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     else:
         cache_hint_str = ""
 
+    tile_modifier = ".tile::gather4" if tile_mode == "tile_gather4" else ""
+
     if is_multicast:
         cache_hint_operand = ", %4" if cache_hint != "" else ""
         cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
@@ -213,7 +227,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
   uint16_t cta_mask = static_cast<uint16_t>(cta_mask_arg);
   __asm__ __volatile__(
-    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}{cache_hint_str}"
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global{tile_modifier}.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}{cache_hint_str}"
     " [%0], [%1, {coord_arg_template}], [%2], %3{cache_hint_operand};"
     :
     : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr), "h"(cta_mask){cache_hint_value},
@@ -231,7 +245,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
   unsigned int bar_addr = __cvta_generic_to_shared(bar);
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
   __asm__ __volatile__(
-    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes{cta_group_str}{cache_hint_str}"
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global{tile_modifier}.mbarrier::complete_tx::bytes{cta_group_str}{cache_hint_str}"
     " [%0], [%1, {coord_arg_template}], [%2]{cache_hint_operand};"
     :
     : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr){cache_hint_value},
@@ -247,6 +261,20 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
         )
     else:
         return cuda_func_call(func_name, dst_ptr, bar, tensormap, *coords, source_code=source_code)
+
+
+@register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
+def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
+    return _codegen_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args)
+
+
+@register_codegen("ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster")
+def codegen_ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
+    dim, dst_ptr, bar, tensormap, *args
+):
+    return _codegen_cp_async_bulk_tensor_global_to_cluster(
+        dim, dst_ptr, bar, tensormap, *args, tile_mode="tile_gather4"
+    )
 
 
 @register_codegen("ptx_cp_async_bulk_tensor_shared_to_global")

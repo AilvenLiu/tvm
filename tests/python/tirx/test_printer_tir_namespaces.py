@@ -357,6 +357,12 @@ def test_printer_ptx_cp_async_tensor():
         'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 0, 0, 0, 1, "")',
     )
     _assert_print(
+        tir.op.ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
+            2, tmap, 0, tmap, 0, 0, 0, 0, 1, ""
+        ),
+        'tm = T.handle()\nT.ptx.cp_async.bulk.tensor.g2c_tile_gather4(2, tm, 0, tm, 0, 0, 0, 0, 1, "", 0, 1, "")',
+    )
+    _assert_print(
         tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, 0, 0, 0, ""),
         'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, tm, 0, 0, 0, "")',
     )

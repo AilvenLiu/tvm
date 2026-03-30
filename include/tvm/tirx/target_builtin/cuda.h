@@ -260,6 +260,18 @@ TVM_DLL const Op& ptx_bar_sync();
 TVM_DLL const Op& ptx_cp_async_bulk_tensor_global_to_cluster();
 
 /*!
+ * \brief tvm intrinsic to call
+ * cp.async.bulk.tensor.dim.shared::cluster.global.tile::gather4.mbarrier::complete_tx::bytes
+ *
+ * TMA alignment requirement:
+ * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
+ *
+ * ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(int dim, PrimExpr dst_ptr, PrimExpr bar_ptr, Var
+ * tensormap_ptr, int...coords, int cta_mask, int cta_group, string cache_hint)
+ */
+TVM_DLL const Op& ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster();
+
+/*!
  * \brief tvm instrinsics to call
  * cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
  *

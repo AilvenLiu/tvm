@@ -76,7 +76,13 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
     )
 
 
-def push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=False):
+def push_moe_tasks(
+    central_queue,
+    batch_size,
+    config,
+    insert_wait_etensor_init=False,
+    use_cp_async_input=False,
+):
     MOE_BLK_M = 128
     gating_blk_m = 128
     for m_idx in range(ceildiv(batch_size, gating_blk_m)):
@@ -87,9 +93,12 @@ def push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=F
             central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
     for m_idx in range(KernelConfig.SM_NUMBER):
         central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
-    central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
-    for m_idx in range(KernelConfig.SM_NUMBER):
-        central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
+    if use_cp_async_input:
+        central_queue.append((0, 0, 0, JobType.MOE_TOKEN_DISPATCH.value))
+    else:
+        central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
+        for m_idx in range(KernelConfig.SM_NUMBER):
+            central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
     max_num_tokens_padded = get_max_num_tokens_padded(
         batch_size, config["NUM_EXPERTS_PER_TOK"], config["NUM_EXPERTS"], MOE_BLK_M
     )
@@ -336,7 +345,11 @@ def generate_etensor_unmatched_dim(i, dim_len, in_par_size, out_par_size):
 
 
 def generate_exec_queue_moe(
-    batch_size, config, etensor_num, scheduler: Literal["static", "dynamic"]
+    batch_size,
+    config,
+    etensor_num,
+    scheduler: Literal["static", "dynamic"],
+    use_cp_async_input=False,
 ):
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
@@ -347,7 +360,13 @@ def generate_exec_queue_moe(
         # init etensor
         for i in range(etensor_num):
             central_queue.append((i, 0, 0, JobType.INIT_ETENSOR.value))
-        push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=True)
+        push_moe_tasks(
+            central_queue,
+            batch_size,
+            config,
+            insert_wait_etensor_init=True,
+            use_cp_async_input=use_cp_async_input,
+        )
         tile_idx = 0
 
         while len(central_queue) > 0:

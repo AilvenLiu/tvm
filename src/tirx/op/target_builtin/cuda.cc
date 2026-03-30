@@ -117,6 +117,9 @@ TIRX_DEFINE_BUILTIN_FUNC(ptx_bar_sync)
 TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_tensor_global_to_cluster)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_tensor_shared_to_global)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

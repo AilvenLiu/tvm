@@ -2615,6 +2615,9 @@ class CpAsyncBulkTensorNamespace:
 
     def __init__(self):
         self.g2c = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster)
+        self.g2c_tile_gather4 = _op_wrapper(
+            _tir_op.ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster
+        )
         self.s2g = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_shared_to_global)
         self.s2g_reduce = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_shared_to_global_reduce)
         self.g2c_prefetch = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch)

@@ -70,6 +70,7 @@ class GemmTile(Tile):
     TMEM_LD_SIZE = 8
     N_COLS = 512
     SWIZZLE = 3
+    TMA2MMA_ARRIVE_COUNT = 1
     SMEM_SIZE = (
         SMEM_PIPE_DEPTH * MAX_BLK_M * BLK_K * F16_BYTES
         + SMEM_PIPE_DEPTH * BLK_N * BLK_K * F16_BYTES
@@ -121,6 +122,8 @@ class GemmTile(Tile):
         self.low_batch = low_batch
         self.prefetch_on = prefetch_on
         self.profiler_on = profiler_on
+        self.use_cp_async_input = False
+        self.use_tma_gather4 = False
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
@@ -220,7 +223,7 @@ class GemmTile(Tile):
             Tx.ptx.tcgen05.alloc(Tx.address_of(cls.tmem_addr[0]), n_cols=cls.N_COLS, cta_group=1)
             Tx.cuda.warp_sync()
         # init mbarrier and phase
-        cls.tma2mma_bar.init(1)
+        cls.tma2mma_bar.init(cls.TMA2MMA_ARRIVE_COUNT)
         cls.mma2ld_bar.init(1)
         cls.mma2tma_bar.init(1)
         cls.ld2mma_bar.init(KernelConfig.CTA_GROUP * 128)
@@ -371,67 +374,150 @@ class GemmTile(Tile):
                 self.smem_manager.arrive_specific(lane_id, self.output_smem, 0)
 
     @Tx.inline
-    def _run(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
+    def _run(
+        self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler = None, A_tensormap=None
+    ):
         with Tx.cta():
             Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = Tx.thread_id([32], parent="warp")
-            Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             with Tx.cta():
                 Tx.attr({"tirx.scope_partition": True})
                 with Tx.warpgroup()[1:2]:
                     if warp_id == 3:
-                        # GMEM -> SMEM  (tma)
-                        @Tx.inline
-                        def tma_stage(ks, k_st, first_stage):
-                            self.mma2tma_bar.wait(ks, self.phase[0])
-                            B_tma_config = Tx.meta_var(
-                                {
-                                    "dispatch": "tma",
-                                    "cta_group": KernelConfig.CTA_GROUP,
-                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
-                                    "cache_hint": "evict_first" if self.low_batch else "",
-                                }
-                            )
-                            A_tma_config = Tx.meta_var(
-                                {
-                                    "dispatch": "tma",
-                                    "cta_group": KernelConfig.CTA_GROUP,
-                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
-                                    "cache_hint": "evict_last" if self.low_batch else "",
-                                }
-                            )
-                            if self.profiler_on:
-                                profiler.start(ProfileEventType.TMA, lane_id == 0)
-                            if first_stage:
-                                self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
-                            self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, A_tma_config)
-                            if not self.prefetch_on and first_stage:
-                                self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
-                            self._tma(
-                                ks,
-                                B,
-                                "B",
-                                n_idx * self.BLK_N,
-                                k_st,
-                                B_tma_config,
-                                predicate=tvm.tirx.Not(self.prefetch_on and first_stage),
-                            )
-                            if self.profiler_on:
-                                profiler.end(ProfileEventType.TMA, lane_id == 0)
-                            self.tma2mma_bar.arrive(
-                                ks,
-                                KernelConfig.CTA_GROUP
-                                * self.BLK_K
-                                * (self.BLK_M + self.BLK_N)
-                                * F16_BYTES,
-                            )
+                        if self.use_tma_gather4:
+                            # GMEM -> SMEM (A: tma gather4, B: tma)
+                            @Tx.inline
+                            def tma_gather4_stage(ks, k_st, first_stage):
+                                self.mma2tma_bar.wait(ks, self.phase[0])
+                                B_tma_config = Tx.meta_var(
+                                    {
+                                        "dispatch": "tma",
+                                        "cta_group": KernelConfig.CTA_GROUP,
+                                        "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                        "cache_hint": "evict_first" if self.low_batch else "",
+                                    }
+                                )
+                                A_tma_config = Tx.meta_var(
+                                    {
+                                        "dispatch": "tma",
+                                        "cta_group": KernelConfig.CTA_GROUP,
+                                        "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                        "cache_hint": "evict_last" if self.low_batch else "",
+                                        "tile_mode": "tile_gather4",
+                                        "box_dim": [1, self.BLK_K],
+                                        "tensormap": A_tensormap,
+                                    }
+                                )
+                                if self.profiler_on:
+                                    profiler.start(ProfileEventType.TMA, lane_id == 0)
+                                if first_stage:
+                                    self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
+                                self._tma_gather4_A(ks, A, m_idx, k_st, A_tma_config, tid, lane_id)
+                                if not self.prefetch_on and first_stage:
+                                    self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
+                                self._tma(
+                                    ks,
+                                    B,
+                                    "B",
+                                    n_idx * self.BLK_N,
+                                    k_st,
+                                    B_tma_config,
+                                    predicate=tvm.tirx.Not(self.prefetch_on and first_stage),
+                                )
+                                if self.profiler_on:
+                                    profiler.end(ProfileEventType.TMA, lane_id == 0)
+                                self.tma2mma_bar.arrive(
+                                    ks,
+                                    KernelConfig.CTA_GROUP
+                                    * self.BLK_K
+                                    * (self.BLK_M + self.BLK_N)
+                                    * F16_BYTES,
+                                )
 
-                        with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                            self._preload_tma_gather4_A(m_idx, lane_id)
+                            with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                                k_offset = k_idx * self.TILE_K
+                                for ko in Tx.serial(self.PIPE_CIRCLE_NUM):
+                                    for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
+                                        tma_gather4_stage(
+                                            ks,
+                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
+                                            ko == 0,
+                                        )
+                                    self.phase[0] = self.phase[0] ^ 1
+                                if self.PIPE_REMAIN_NUM > 0:
+                                    for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
+                                        tma_gather4_stage(
+                                            ks,
+                                            (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks)
+                                            * self.BLK_K
+                                            + k_offset,
+                                            self.PIPE_CIRCLE_NUM == 0,
+                                        )
+                                    # for unaligned cases
+                                    for ks in Tx.unroll(self.PIPE_REMAIN_NUM, self.SMEM_PIPE_DEPTH):
+                                        self.mma2tma_bar.wait(ks, self.phase[0])
+                                        self.tma2mma_bar.arrive_only(ks)
+                                    self.phase[0] = self.phase[0] ^ 1
+                        elif self.use_cp_async_input:
+                            # GMEM -> SMEM  (A: cp.async, B: tma)
+                            @Tx.inline
+                            def cp_async_stage(ks, k_st, first_stage):
+                                bytes_per_B_stage = Tx.meta_var(
+                                    KernelConfig.CTA_GROUP * self.BLK_K * self.BLK_N * F16_BYTES
+                                )
+                                B_tma_config = Tx.meta_var(
+                                    {
+                                        "dispatch": "tma",
+                                        "cta_group": KernelConfig.CTA_GROUP,
+                                        "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                        "cache_hint": "evict_first" if self.low_batch else "",
+                                    }
+                                )
+                                self.mma2tma_bar.wait(ks, self.phase[0])
+                                with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                                    if self.profiler_on:
+                                        profiler.start(ProfileEventType.TMA, lane_id == 0)
+                                    if first_stage:
+                                        self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
+                                self._cp_async_load_A_tile(
+                                    m_idx,
+                                    ks,
+                                    k_st,
+                                    tid,
+                                    lane_id,
+                                    A,
+                                    self.tma2mma_bar.mbar.ptr_to([ks]),
+                                )
+                                Tx.cuda.warp_sync()
+                                with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                                    if not self.prefetch_on and first_stage:
+                                        self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
+                                    if self.prefetch_on:
+                                        self.tma2mma_bar.arrive(
+                                            ks, Tx.if_then_else(first_stage, 0, bytes_per_B_stage)
+                                        )
+                                    else:
+                                        self.tma2mma_bar.arrive(ks, bytes_per_B_stage)
+                                    self._tma(
+                                        ks,
+                                        B,
+                                        "B",
+                                        n_idx * self.BLK_N,
+                                        k_st,
+                                        B_tma_config,
+                                        predicate=tvm.tirx.Not(self.prefetch_on and first_stage),
+                                    )
+                                    if self.profiler_on:
+                                        profiler.end(ProfileEventType.TMA, lane_id == 0)
+                                Tx.cuda.warp_sync()
+
                             k_offset = k_idx * self.TILE_K
                             for ko in Tx.serial(self.PIPE_CIRCLE_NUM):
                                 for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
-                                    tma_stage(
+                                    cp_async_stage(
                                         ks,
                                         (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
                                         ko == 0,
@@ -439,10 +525,9 @@ class GemmTile(Tile):
                                 self.phase[0] = self.phase[0] ^ 1
                             if self.PIPE_REMAIN_NUM > 0:
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
-                                    tma_stage(
+                                    cp_async_stage(
                                         ks,
-                                        (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks)
-                                        * self.BLK_K
+                                        (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K
                                         + k_offset,
                                         self.PIPE_CIRCLE_NUM == 0,
                                     )
@@ -450,8 +535,80 @@ class GemmTile(Tile):
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM, self.SMEM_PIPE_DEPTH):
                                     self.mma2tma_bar.wait(ks, self.phase[0])
                                     self.tma2mma_bar.arrive_only(ks)
+                                    with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                                        self.tma2mma_bar.arrive_only(ks)
                                 self.phase[0] = self.phase[0] ^ 1
+                        else:
+                            # GMEM -> SMEM  (tma)
+                            @Tx.inline
+                            def tma_stage(ks, k_st, first_stage):
+                                self.mma2tma_bar.wait(ks, self.phase[0])
+                                B_tma_config = Tx.meta_var(
+                                    {
+                                        "dispatch": "tma",
+                                        "cta_group": KernelConfig.CTA_GROUP,
+                                        "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                        "cache_hint": "evict_first" if self.low_batch else "",
+                                    }
+                                )
+                                A_tma_config = Tx.meta_var(
+                                    {
+                                        "dispatch": "tma",
+                                        "cta_group": KernelConfig.CTA_GROUP,
+                                        "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                        "cache_hint": "evict_last" if self.low_batch else "",
+                                    }
+                                )
+                                if self.profiler_on:
+                                    profiler.start(ProfileEventType.TMA, lane_id == 0)
+                                if first_stage:
+                                    self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
+                                self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, A_tma_config)
+                                if not self.prefetch_on and first_stage:
+                                    self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
+                                self._tma(
+                                    ks,
+                                    B,
+                                    "B",
+                                    n_idx * self.BLK_N,
+                                    k_st,
+                                    B_tma_config,
+                                    predicate=tvm.tirx.Not(self.prefetch_on and first_stage),
+                                )
+                                if self.profiler_on:
+                                    profiler.end(ProfileEventType.TMA, lane_id == 0)
+                                self.tma2mma_bar.arrive(
+                                    ks,
+                                    KernelConfig.CTA_GROUP
+                                    * self.BLK_K
+                                    * (self.BLK_M + self.BLK_N)
+                                    * F16_BYTES,
+                                )
 
+                            with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+                                k_offset = k_idx * self.TILE_K
+                                for ko in Tx.serial(self.PIPE_CIRCLE_NUM):
+                                    for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
+                                        tma_stage(
+                                            ks,
+                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
+                                            ko == 0,
+                                        )
+                                    self.phase[0] = self.phase[0] ^ 1
+                                if self.PIPE_REMAIN_NUM > 0:
+                                    for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
+                                        tma_stage(
+                                            ks,
+                                            (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks)
+                                            * self.BLK_K
+                                            + k_offset,
+                                            self.PIPE_CIRCLE_NUM == 0,
+                                        )
+                                    # for unaligned cases
+                                    for ks in Tx.unroll(self.PIPE_REMAIN_NUM, self.SMEM_PIPE_DEPTH):
+                                        self.mma2tma_bar.wait(ks, self.phase[0])
+                                        self.tma2mma_bar.arrive_only(ks)
+                                    self.phase[0] = self.phase[0] ^ 1
                         Tx.ptx.bar.sync(13, 64)  # notify warp 6 to release smem chunks
 
                     elif warp_id == 0:
@@ -507,15 +664,19 @@ class GemmTile(Tile):
                             # wait for the tmem result to be consumed
                             self.ld2mma_bar.wait(self.tmem_idx, self.tmem_phase)
                             Tx.ptx.tcgen05.fence.after_thread_sync()
-                            mbar_try_wait(0, self.phase[0])
+                            if self.use_cp_async_input:
+                                self.wait_complete = False
+                            else:
+                                mbar_try_wait(0, self.phase[0])
 
                             for ko in Tx.serial(self.PIPE_CIRCLE_NUM):
                                 for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
                                     # wait tma
-                                    if not self.wait_complete:
+                                    if self.use_cp_async_input:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
-                                        # Tx.ptx.tcgen05.fence.after_thread_sync()
-                                    if (
+                                    elif not self.wait_complete:
+                                        self.tma2mma_bar.wait(ks, self.phase[0])
+                                    if (not self.use_cp_async_input) and (
                                         self.PIPE_REMAIN_NUM > 0
                                         or ko != self.PIPE_REMAIN_NUM - 1
                                         or ks != self.SMEM_PIPE_DEPTH - 1
@@ -531,10 +692,11 @@ class GemmTile(Tile):
 
                             if self.PIPE_REMAIN_NUM > 0:
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
-                                    if not self.wait_complete:
+                                    if self.use_cp_async_input:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
-                                        # Tx.ptx.tcgen05.fence.after_thread_sync()
-                                    if ks != self.PIPE_REMAIN_NUM - 1:
+                                    elif not self.wait_complete:
+                                        self.tma2mma_bar.wait(ks, self.phase[0])
+                                    if (not self.use_cp_async_input) and ks != self.PIPE_REMAIN_NUM - 1:
                                         mbar_try_wait(
                                             (ks + 1) % self.SMEM_PIPE_DEPTH, self.phase[0]
                                         )
@@ -608,7 +770,19 @@ class GemmTile(Tile):
                             profiler.end(ProfileEventType.TMA, lane_id == 0)
 
     @Tx.inline
-    def run(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler = None):
+    def run(
+        self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler = None, A_tensormap=None
+    ):
         self._alloc_local(m_idx)
-        self._run(m_idx, n_idx, k_idx, A, B, output, profiler)
+        self._run(m_idx, n_idx, k_idx, A, B, output, profiler, A_tensormap=A_tensormap)
         self.smem_manager.advance()
+
+    def _cp_async_load_A_tile(self, m_idx, ks, stage_k, tid, lane_id, A, mbar):
+        raise RuntimeError("cp.async input path is not implemented for this tile.")
+
+    @Tx.inline
+    def _preload_tma_gather4_A(self, m_idx, tid_in_wg):
+        pass
+
+    def _tma_gather4_A(self, ks, A, m_idx, k_st, tma_config, tid, lane_id):
+        raise RuntimeError("tma gather4 input path is not implemented for this tile.")

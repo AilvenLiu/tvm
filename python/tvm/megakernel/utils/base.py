@@ -119,11 +119,16 @@ class SmemManager:
         self.persistent_pool_allocator.move_base_to(self.chunk_size * self.chunk_num)
         self.exist_bufs = {}
         self.fusion_mode = fusion_mode
-        self.pool_allocator = {
+        self._pool_allocators = {
             "persistent": self.persistent_pool_allocator,
             "shared": self.reguler_pool_allocator,
             "exclusive": self.reguler_pool_allocator,
         }
+
+    @property
+    def pool_allocator(self):
+        # Default shared allocator for compatibility with existing kernels.
+        return self.reguler_pool_allocator
 
     def _inner_alloc(self):
         # notes: these smem will never be overwritten by any tasks
@@ -180,7 +185,7 @@ class SmemManager:
             else:
                 self.exist_bufs[name] = 1
         assert "shared" in scope
-        pool_allocator = self.pool_allocator[method]
+        pool_allocator = self._pool_allocators[method]
         beg = pool_allocator.offset
         if align > 0:
             beg = (beg + align - 1) // align * align
