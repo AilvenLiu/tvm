@@ -36,6 +36,63 @@ from ..core.doc import from_doc
 from ..tirx.entry import inline
 
 
+def slice_buffer_from_region(br: BufferRegion) -> Buffer:
+    """Create a matched DeclBuffer from a BufferRegion.
+
+    Slices the layout (if present) or computes elem_offset for the sub-region,
+    producing a DeclBuffer that views the same underlying data.
+    """
+    import functools  # pylint: disable=import-outside-toplevel
+
+    buf = br.buffer
+    region = br.region
+    new_shape = [r.extent for r in region]
+    sliced_layout = None
+    if buf.layout is not None:
+        range_pairs = [(r.min, r.min + r.extent) for r in region]
+        sliced_layout = buf.layout.slice(list(buf.shape), range_pairs)
+    if sliced_layout is not None:
+        return T.decl_buffer(
+            new_shape,
+            buf.dtype,
+            buf.data,
+            buf.strides,
+            buf.elem_offset,
+            None,
+            buf.scope(),
+            buf.data_alignment,
+            buf.offset_factor,
+            "",
+            buf.axis_separators,
+            sliced_layout,
+        )
+    # Fallback: compute elem_offset for default/no layout
+    strides = []
+    for i in range(len(buf.shape)):
+        stride = functools.reduce(
+            lambda x, y: x * y, buf.shape[i + 1 :], tvm.tirx.const(1, "int32")
+        )
+        strides.append(stride)
+    offset = tvm.tirx.const(0, "int32")
+    for i, r in enumerate(region):
+        offset = offset + r.min * strides[i]
+    new_elem_offset = buf.elem_offset + offset
+    return T.decl_buffer(
+        new_shape,
+        buf.dtype,
+        buf.data,
+        buf.strides,
+        new_elem_offset,
+        None,
+        buf.scope(),
+        buf.data_alignment,
+        buf.offset_factor,
+        "",
+        buf.axis_separators,
+        buf.layout,
+    )
+
+
 def bind_with_value(self: Parser, node: doc.expr, var_name: str, value: Any) -> Any:
     """Value binding methods when parsing with statement.
     e.g. binding i, j, k with T.grid(128, 128, 128), when parsing
@@ -148,62 +205,7 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
             "Use T.meta_var([...]) for Python-level values, or pass inline as *[...].",
         )
     elif isinstance(value, BufferRegion):
-        import functools  # pylint: disable=import-outside-toplevel
-
-        buf = value.buffer
-        region = value.region
-        new_shape = [r.extent for r in region]
-        # Try layout.slice() for new layout
-        sliced_layout = None
-        if buf.layout is not None:
-            range_pairs = [(r.min, r.min + r.extent) for r in region]
-            sliced_layout = buf.layout.slice(list(buf.shape), range_pairs)
-        if sliced_layout is not None:
-            new_buf = T.decl_buffer(
-                new_shape,
-                buf.dtype,
-                buf.data,
-                buf.strides,
-                buf.elem_offset,
-                None,
-                buf.scope(),
-                buf.data_alignment,
-                buf.offset_factor,
-                "",
-                buf.axis_separators,
-                sliced_layout,
-            )
-        else:
-            # Fallback: compute elem_offset for default/no layout
-            strides = []
-            for i in range(len(buf.shape)):
-                stride = functools.reduce(
-                    lambda x, y: x * y, buf.shape[i + 1 :], tvm.tirx.const(1, "int32")
-                )
-                strides.append(stride)
-            offset = tvm.tirx.const(0, "int32")
-            for i, r in enumerate(region):
-                offset = offset + r.min * strides[i]
-            new_elem_offset = buf.elem_offset + offset
-            new_buf = T.decl_buffer(
-                new_shape,
-                buf.dtype,
-                buf.data,
-                buf.strides,
-                new_elem_offset,
-                None,
-                buf.scope(),
-                buf.data_alignment,
-                buf.offset_factor,
-                "",
-                buf.axis_separators,
-                buf.layout,
-            )
-        # Preserve the original BufferRegion so that chained partition()
-        # can trace back to the root buffer instead of the matched sub-buffer.
-        new_buf._source_region = value
-        IRBuilder.name(var_name, new_buf)
-        return new_buf
+        return value
     elif isinstance(value, Frame):
         value.add_callback(partial(value.__exit__, None, None, None))
         res = value.__enter__()

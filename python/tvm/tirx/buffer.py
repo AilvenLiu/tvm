@@ -28,6 +28,60 @@ from tvm.runtime import Object, Scriptable, convert
 from . import _ffi_api
 
 
+class _PartitionAccessor:
+    """Accessor returned by ``Buffer.partition``.
+
+    Supports two calling conventions:
+    - ``A.partition(tile_shape=..., select=...)``  → DeclBuffer or BufferRegion
+    - ``A.partition[0:32, 0:64]``                  → DeclBuffer (matched buffer from slice)
+    """
+
+    def __init__(self, buf):
+        self._buf = buf
+
+    def __call__(self, *, tile_shape=None, num_tiles=None, select=None):
+        return self._buf._partition_impl(tile_shape=tile_shape, num_tiles=num_tiles, select=select)
+
+    def __getitem__(self, indices):
+        from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
+
+        br = self._buf[indices]
+        if not isinstance(br, BufferRegion):
+            raise TypeError(f"Expected BufferRegion from __getitem__, got {type(br)}")
+        from tvm.script.parser.tirx.parser import (  # pylint: disable=import-outside-toplevel
+            slice_buffer_from_region,
+        )
+
+        return slice_buffer_from_region(br)
+
+
+class _SubRegionAccessor:
+    """Accessor returned by ``Buffer.subregion`` and ``BufferRegion.subregion``.
+
+    Supports two calling conventions:
+    - ``A.subregion(tile_shape=..., select=...)``  → BufferRegion
+    - ``A.subregion[0:32, 0:64]``                  → BufferRegion (delegates to __getitem__)
+    """
+
+    def __init__(self, source):
+        self._source = source
+
+    def __call__(self, *, tile_shape=None, num_tiles=None, select=None):
+        from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
+
+        if isinstance(self._source, BufferRegion):
+            return self._source._sub_region(
+                tile_shape=tile_shape, num_tiles=num_tiles, select=select
+            )
+        # Buffer source — delegate to _partition_impl (which returns BufferRegion when select given)
+        return self._source._partition_impl(
+            tile_shape=tile_shape, num_tiles=num_tiles, select=select
+        )
+
+    def __getitem__(self, indices):
+        return self._source[indices]
+
+
 @tvm_ffi.register_object("tirx.Buffer")
 class Buffer(Object, Scriptable):
     """Symbolic data buffer in TVM.
@@ -446,22 +500,31 @@ class Buffer(Object, Scriptable):
             new_layout,
         )
 
-    def partition(self, *, tile_shape=None, num_tiles=None, select=None):
+    @property
+    def partition(self):
+        """Return a partition accessor supporting both call and subscript syntax.
+
+        - ``A.partition(tile_shape=..., select=...)``  → DeclBuffer (grid-view or selected tile)
+        - ``A.partition[0:32, 0:64]``                  → DeclBuffer (matched buffer from slice)
+        """
+        return _PartitionAccessor(self)
+
+    @property
+    def subregion(self):
+        """Return a subregion accessor supporting both call and subscript syntax.
+
+        - ``A.subregion(tile_shape=..., select=...)``  → BufferRegion
+        - ``A.subregion[0:32, 0:64]``                  → BufferRegion
+        """
+        return _SubRegionAccessor(self)
+
+    def _partition_impl(self, *, tile_shape=None, num_tiles=None, select=None):
         """Partition buffer into a grid of tiles.
 
         Exactly one of tile_shape or num_tiles must be provided.
         - Without select: returns DeclBuffer with shape (*grid, *tile) and strides.
         - With select: returns BufferRegion on the original buffer for the tile
           at the given coordinate.
-
-        Parameters
-        ----------
-        tile_shape : tuple of int/PrimExpr, optional
-            Each tile's size. Grid dims derived as shape // tile_shape.
-        num_tiles : tuple of int/PrimExpr, optional
-            Grid dimensions. Tile size derived as shape // num_tiles.
-        select : tuple of int/PrimExpr, optional
-            Tile coordinate. If given, returns a BufferRegion on the original buffer.
         """
         if (tile_shape is None) == (num_tiles is None):
             raise ValueError("specify exactly one of tile_shape or num_tiles")
@@ -475,20 +538,6 @@ class Buffer(Object, Scriptable):
 
         if select is not None:
             from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
-
-            # If this buffer was created from a BufferRegion (via bind_assign_value),
-            # compose the partition offset with the source region so the result
-            # references the root buffer, not this intermediate matched buffer.
-            source_region = getattr(self, "_source_region", None)
-            if source_region is not None:
-                new_region = []
-                for i, r in enumerate(source_region.region):
-                    if i < ndim:
-                        new_start = r.min + select[i] * tile_sizes[i]
-                        new_region.append(Range.from_min_extent(new_start, tile_sizes[i]))
-                    else:
-                        new_region.append(r)
-                return BufferRegion(source_region.buffer, new_region)
 
             region = []
             for i in range(len(self.shape)):

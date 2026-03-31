@@ -32,12 +32,6 @@ from .ir import alloc_buffer, attr, decl_buffer, meta_class
 
 def _to_region(buffer: BufferRegion | Buffer):
     if isinstance(buffer, Buffer):
-        # If this buffer was created from a BufferRegion assignment (e.g. via
-        # partition(select=...)), use the original region so that the ScopeOpCall
-        # references the root buffer rather than the matched sub-buffer.
-        source_region = getattr(buffer, "_source_region", None)
-        if source_region is not None:
-            return source_region
         return buffer[[slice(None, None, None) for _ in range(len(buffer.shape))]]
     assert isinstance(buffer, BufferRegion)
     return buffer

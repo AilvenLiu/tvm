@@ -674,22 +674,13 @@ class BufferRegion(Object, Scriptable):
             new_region.append(self.region[i])
         return BufferRegion(self.buffer, new_region)
 
-    def partition(self, *, tile_shape=None, num_tiles=None, select=None):
-        """Sub-partition this buffer region into tiles and select one.
+    def _sub_region(self, *, tile_shape=None, num_tiles=None, select=None):
+        """Compute a sub-region of this buffer region.
 
-        Enables chaining: ``buf.partition(select=...).partition(select=...)``.
-
-        Parameters
-        ----------
-        tile_shape : tuple of int/PrimExpr, optional
-            Each tile's size. Exactly one of tile_shape or num_tiles must be given.
-        num_tiles : tuple of int/PrimExpr, optional
-            Grid dimensions. Tile size derived as extent // num_tiles.
-        select : tuple of int/PrimExpr
-            Tile coordinate (required).
+        select is required. Returns a new BufferRegion on the same root buffer.
         """
         if select is None:
-            raise ValueError("BufferRegion.partition() requires select")
+            raise ValueError("BufferRegion.subregion() requires select")
         if (tile_shape is None) == (num_tiles is None):
             raise ValueError("specify exactly one of tile_shape or num_tiles")
         ndim = len(tile_shape) if tile_shape is not None else len(num_tiles)
@@ -705,6 +696,21 @@ class BufferRegion(Object, Scriptable):
             else:
                 new_region.append(r)
         return BufferRegion(self.buffer, new_region)
+
+    def partition(self, *, tile_shape=None, num_tiles=None, select=None):
+        """Sub-partition this buffer region (compatibility wrapper for _sub_region)."""
+        return self._sub_region(tile_shape=tile_shape, num_tiles=num_tiles, select=select)
+
+    @property
+    def subregion(self):
+        """Return a subregion accessor supporting both call and subscript syntax.
+
+        - ``br.subregion(tile_shape=..., select=...)``  → BufferRegion
+        - ``br.subregion[0:32, 0:64]``                  → BufferRegion
+        """
+        from .buffer import _SubRegionAccessor  # pylint: disable=import-outside-toplevel
+
+        return _SubRegionAccessor(self)
 
 
 @tvm_ffi.register_object("tirx.MatchBufferRegion")

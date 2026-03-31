@@ -1111,7 +1111,7 @@ def test_lower_tirx_dedup_tensormap():
             mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 for loop_vars in range(1):
-                    s_buf_w_offset = A_smem2[-2048:0]
+                    s_buf_w_offset = A_smem2.partition[-2048:0]
                     Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 for loop_vars in range(1):
@@ -1168,7 +1168,7 @@ def test_lower_tirx_keep_different_tensormaps():
             mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=512, scope="shared.dyn", layout=None)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 for loop_vars in range(1):
-                    s_buf_w_offset = A_smem2[-1024:-512]
+                    s_buf_w_offset = A_smem2.partition[-1024:-512]
                     Tx.ptx.cp_async.bulk.tensor.g2c(2, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap_1, 0, 1, "", 0, 0)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 for loop_vars in range(1):
