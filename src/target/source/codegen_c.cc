@@ -1213,6 +1213,8 @@ void CodeGenC::VisitStmt_(const ForNode* op) {
 
 void CodeGenC::VisitStmt_(const WhileNode* op) {
   PrintIndent();
+  stream << "#pragma unroll 1\n";
+  PrintIndent();
   stream << "while (1) {\n";
   int while_scope = BeginScope();
   std::string cond = PrintExpr(op->condition);
