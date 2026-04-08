@@ -81,6 +81,11 @@ TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk)
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
+TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_shared_to_cluster)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque))
+    .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
+                                         Integer(ScriptDtypePrintLocation::kFirst));
+
 TIRX_DEFINE_BUILTIN_FUNC(ptx_cp_async_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

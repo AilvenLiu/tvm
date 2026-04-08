@@ -2602,6 +2602,7 @@ class CpAsyncBulkNamespace:
         self.commit_group = _op_wrapper(_tir_op.ptx_cp_async_bulk_commit_group)
         self.wait_group = _op_wrapper(_tir_op.ptx_cp_async_bulk_wait_group)
         self.tensor = CpAsyncBulkTensorNamespace()
+        self.s2c = _op_wrapper(_tir_op.ptx_cp_async_bulk_shared_to_cluster)
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async_bulk)(*args, **kwds)

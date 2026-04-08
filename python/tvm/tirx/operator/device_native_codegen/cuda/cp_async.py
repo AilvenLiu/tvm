@@ -424,6 +424,34 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
     return cuda_func_call(func_name, src_ptr, tensormap, *coords, source_code=source_code)
 
 
+#################### Non-TMA bulk copy (shared::cta -> shared::cluster)
+
+
+@register_codegen("ptx_cp_async_bulk_shared_to_cluster")
+def codegen_ptx_cp_async_bulk_shared_to_cluster(dst_ptr, src_ptr, size, mbar):
+    func_name = "ptx_cp_async_bulk_shared_to_cluster"
+    # dst_ptr and mbar are shared::cluster addresses (uint64) from mapa instruction.
+    # src_ptr is a generic shared::cta pointer that needs __cvta_generic_to_shared.
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(uint64_t dst, void* src, int size, uint64_t mbar) {{
+  unsigned int dst_addr = static_cast<unsigned int>(dst);
+  unsigned int src_addr = __cvta_generic_to_shared(src);
+  unsigned int mbar_addr = static_cast<unsigned int>(mbar);
+  __asm__ __volatile__(
+    "cp.async.bulk.shared::cluster.shared::cta.mbarrier::complete_tx::bytes"
+    " [%0], [%1], %2, [%3];\\n"
+    :
+    : "r"(dst_addr), "r"(src_addr), "r"(size), "r"(mbar_addr)
+    : "memory"
+  );
+}}
+"""
+    return cuda_func_call(func_name, dst_ptr, src_ptr, size, mbar, source_code=source_code)
+
+
+#################### Commit/Wait groups
+
+
 @register_codegen("ptx_cp_async_bulk_commit_group")
 def codegen_ptx_cp_async_bulk_tensor_commit_group():
     func_name = "ptx_cp_async_bulk_tensor_commit_group"

@@ -23,6 +23,7 @@ with before/after IR examples.
 """
 
 from .cp_async import *
+from .dsmem import *
 from .smem_tmem import *
 from .tma import *
 from .tmem_local import *

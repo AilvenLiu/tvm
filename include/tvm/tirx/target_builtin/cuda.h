@@ -168,6 +168,16 @@ TVM_DLL const Op& ptx_cp_async();
 TVM_DLL const Op& ptx_cp_async_bulk();
 
 /*!
+ * \brief tvm intrinsics for ptx async bulk copy from shared::cta to shared::cluster
+ *
+ * void ptx_cp_async_bulk_shared_to_cluster(Expr dst_ptr,
+ *                                          Expr src_ptr,
+ *                                          Expr size,
+ *                                          Expr mbar);
+ */
+TVM_DLL const Op& ptx_cp_async_bulk_shared_to_cluster();
+
+/*!
  * \brief tvm intrinsics for ptx async copy commit and wait.
  *
  * void ptx_cp_async_commit_group();

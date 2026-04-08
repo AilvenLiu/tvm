@@ -3703,6 +3703,41 @@ def ptx_cp_async_bulk(
     )
 
 
+def ptx_cp_async_bulk_shared_to_cluster(dst_ptr, src_ptr, size, mbar):
+    """PTX cp.async.bulk.shared::cluster.shared::cta.mbarrier::complete_tx::bytes
+
+    Asynchronous bulk copy from executing CTA's shared memory to a remote
+    CTA's shared memory within the same cluster.
+
+    Parameters
+    ----------
+    dst_ptr : PrimExpr
+        Destination pointer in shared::cluster address space (remote CTA).
+
+    src_ptr : PrimExpr
+        Source pointer in shared::cta address space (local CTA).
+
+    size : PrimExpr
+        Number of bytes to copy (must be multiple of 16).
+
+    mbar : PrimExpr
+        Mbarrier object pointer for completion signaling.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tirx.ptx_cp_async_bulk_shared_to_cluster",
+        dst_ptr,
+        src_ptr,
+        size,
+        mbar,
+    )
+
+
 def ptx_cp_async_mbarrier_arrive(barrier_id):
     """TVM intrinsic for ptx async copy barrier using cp.async.mbarrier.arrive
     https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-cp-async-mbarrier-arrive
