@@ -740,6 +740,16 @@ class PermuteDims(ScopeOpCall):
         """Validate that the operator has the correct number and types of arguments."""
         pass
 
+    @property
+    def srcs(self) -> list[PrimExpr]:
+        """Get the source expressions (inputs) of the operator."""
+        return [self.buffer]
+
+    @property
+    def dsts(self) -> list[PrimExpr]:
+        """Get the destination expressions (outputs) of the operator."""
+        return [self.buffer]
+
 
 class GenericOp(ScopeOpCall):
     """Generic operator for dynamically-resolved TIRx ops."""
