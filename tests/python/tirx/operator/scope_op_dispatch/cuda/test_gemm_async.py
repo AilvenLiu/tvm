@@ -430,6 +430,138 @@ def test_gemm_tcgen05_cta_group_2(task):
         np.testing.assert_allclose(C_tvm.numpy(), C_ref, atol=1e-3, rtol=1e-3)
 
 
+def test_gemm_tcgen05_cta_group_2_layout_b():
+    """Test cta_group=2 with Layout B (2x2 datapath, M=128 total, 64 per CTA).
+
+    TMEM uses the 2x2 layout: logical (64, N) with shard (64, 2, N//2):(1@TLane, 64@TLane, 1@TCol).
+    Physical readback via a (128, N//2) buffer aliasing the same TMEM allocation.
+    """
+    M_per_cta = 64
+    N_logical = 128
+    N_half = N_logical // 2
+    K = 64
+    A_dtype = "float16"
+    B_dtype = "float16"
+    C_dtype = "float32"
+    swizzle_mode = 3
+
+    A_shape = (M_per_cta, K)
+    B_shape = (N_half, K)  # per CTA: N_logical // cta_group
+    C_shape = (M_per_cta * 2, N_logical)  # global output
+
+    A_elem_bytes = tvm.runtime.DataType(A_dtype).bits // 8
+    B_elem_bytes = tvm.runtime.DataType(B_dtype).bits // 8
+    C_elem_32b = 4 // (tvm.runtime.DataType(C_dtype).bits // 8)
+    cols_alloc = max(32, next_power_of_2(N_half // C_elem_32b))
+
+    A_layout = tma_shared_layout(A_dtype, swizzle_mode, A_shape)
+    B_layout = tma_shared_layout(B_dtype, swizzle_mode, B_shape)
+
+    # Both CTAs issue TMA copies; mbarrier expects total from both CTAs.
+    per_cta_bytes = (
+        functools.reduce(operator.mul, A_shape, 1) * A_elem_bytes
+        + functools.reduce(operator.mul, B_shape, 1) * B_elem_bytes
+    )
+    total_bytes = per_cta_bytes * 2
+
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def gemm_async(A_ptr: Tx.handle, B_ptr: Tx.handle, C_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (M_per_cta * 2, K), A_dtype)
+        B = Tx.match_buffer(B_ptr, (N_logical, K), B_dtype)
+        C = Tx.match_buffer(C_ptr, C_shape, C_dtype)
+
+        with Tx.kernel():
+            cbx, cby = Tx.cta_id([2, 1], parent="cluster")
+            Tx.cta_id([2], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            tid_in_wg = Tx.thread_id([128], parent="warpgroup")
+
+            A_smem = Tx.alloc_buffer(A_shape, A_dtype, scope="shared", layout=A_layout)
+            B_smem = Tx.alloc_buffer(B_shape, B_dtype, scope="shared", layout=B_layout)
+            tmem_addr = Tx.alloc_shared([1], "uint32")
+            tma_mbar = Tx.alloc_shared([1], "uint64")
+            mma_mbar = Tx.alloc_shared([1], "uint64")
+
+            ptr: Tx.let[Tx.Var(name="ptr", dtype=PointerType(PrimType("uint64")))] = Tx.reinterpret("handle", Tx.ptx.map_shared_rank(tma_mbar.ptr_to([0]), 0))  # noqa: E501
+            tma_mbar_cta_0 = Tx.decl_buffer([1], "uint64", data=ptr, scope="shared")
+
+            with Tx.thread()[0:1]:
+                Tx.ptx.mbarrier.init(tma_mbar.ptr_to([0]), 1)
+                Tx.ptx.mbarrier.init(mma_mbar.ptr_to([0]), 1)
+
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=cols_alloc, cta_group=2)
+            # Logical TMEM buffer: (64, N_logical) with 2x2 shard layout
+            tmem = Tx.decl_buffer((M_per_cta, N_logical), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(M_per_cta, 2, N_half) : (1 @ TLane, 64 @ TLane, 1 @ TCol)]))  # noqa: E501
+            # Physical TMEM view for readback: (128, N_half) standard layout
+            tmem_phys = Tx.decl_buffer((128, N_half), C_dtype, scope="tmem", allocated_addr=tmem_addr[0], layout=TileLayout(S[(128, N_half) : (1 @ TLane, 1 @ TCol)]))  # noqa: E501
+            Tx.ptx.fence.mbarrier_init()
+            Tx.ptx.fence.proxy_async("shared::cta")
+            Tx.cuda.cta_sync()
+            Tx.cuda.cluster_sync()
+
+            tma_args = Tx.meta_var({"dispatch": "tma", "mbar": tma_mbar_cta_0.ptr_to([0]), "cta_group": 2})  # noqa: E501
+            with Tx.thread()[0:1]:
+                # CTA cbx loads its portion of A and B
+                Tx.copy_async(A_smem[0:M_per_cta, 0:K], A[cbx * M_per_cta:(cbx + 1) * M_per_cta, 0:K], **tma_args)  # noqa: E501
+                Tx.copy_async(B_smem[0:N_half, 0:K], B[cbx * N_half:(cbx + 1) * N_half, 0:K], **tma_args)  # noqa: E501
+                if cbx == 0:
+                    Tx.ptx.mbarrier.arrive.expect_tx(tma_mbar.ptr_to([0]), total_bytes)
+
+            if cbx == 0:
+                Tx.ptx.mbarrier.try_wait(tma_mbar.ptr_to([0]), 0)
+                Tx.ptx.tcgen05.fence.after_thread_sync()
+                Tx.cuda.cta_sync()
+                with Tx.thread()[0:1]:
+                    Tx.gemm_async(tmem[0:M_per_cta, 0:N_logical], A_smem[0:M_per_cta, 0:K], B_smem[0:N_half, 0:K], dispatch="tcgen05", cta_group=2)  # noqa: E501
+                    Tx.ptx.tcgen05.commit(mma_mbar.ptr_to([0]), cta_group=2, cta_mask=3)
+            Tx.ptx.mbarrier.try_wait(mma_mbar.ptr_to([0]), 0)
+            Tx.ptx.tcgen05.fence.after_thread_sync()
+            Tx.cuda.cta_sync()
+
+            # Readback from physical TMEM view (128 rows x N_half cols)
+            # Warps 0,1 (rows 0-63): first N half for M rows 0-63
+            # Warps 2,3 (rows 64-127): second N half for M rows 0-63
+            C_reg = Tx.alloc_local(N_half, dtype=C_dtype)
+            C_view = C_reg.view(128, N_half, layout=TileLayout(S[(128, N_half) : (1 @ axis_tid_in_wg, 1)]))  # noqa: E501
+            with Tx.warpgroup()[0:1]:
+                Tx.copy(C_view[:, :], tmem_phys[0:128, 0:N_half])
+            Tx.cuda.cta_sync()
+
+            # Write to global: thread t holds M_row = t%64, N_half_idx = t//64
+            with Tx.thread():
+                n_off = (tid_in_wg // 64) * N_half
+                Tx.copy(C[cbx * M_per_cta + tid_in_wg % 64, n_off : n_off + N_half], C_reg[:])
+            Tx.cuda.cta_sync()
+
+            with Tx.warp()[0:1]:
+                Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
+                Tx.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=2)
+    # fmt: on
+
+    dev = tvm.cuda(0)
+    np.random.seed(0)
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": gemm_async})
+        mod.show()
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        A_np = np.random.randn(M_per_cta * 2, K).astype(A_dtype)
+        B_np = np.random.randn(N_logical, K).astype(B_dtype)
+        C_np = np.zeros(C_shape, dtype=C_dtype)
+        A_tvm = tvm.runtime.tensor(A_np, dev)
+        B_tvm = tvm.runtime.tensor(B_np, dev)
+        C_tvm = tvm.runtime.tensor(C_np, dev)
+        mod["main"](A_tvm, B_tvm, C_tvm)
+
+        # Reference: C = A @ B.T
+        C_ref = A_np.astype(np.float32) @ B_np.astype(np.float32).T
+        np.testing.assert_allclose(C_tvm.numpy(), C_ref, atol=1e-3, rtol=1e-3)
+
+
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 @pytest.mark.parametrize(
     "task",

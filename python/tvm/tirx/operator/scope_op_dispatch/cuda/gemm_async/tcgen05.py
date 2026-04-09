@@ -125,17 +125,21 @@ def _validate_sf_tmem_layout(slice_layout, rows, sf_K_total, sf_mma_k, name):
 def _choose_mma_tile(M, N, cta_group, MMA_N_MIN):
     """Select per-instruction (M_mma, N_mma) for tcgen05 tile decomposition.
 
-    M_mma: largest valid M that divides M.
-      Valid values: {128, 64} for cta_group=1, {256, 128} for cta_group=2.
+    M is per-CTA M.  valid_M lists valid *descriptor* M values (total across
+    the CTA group).  We compute M_total = M * cta_group and pick the largest
+    descriptor M that divides it, then return M_mma = M_desc // cta_group.
+
     N_mma: if N <= 256 and N % MMA_N_MIN == 0, use N directly.
       Otherwise, largest valid N_mma <= 256 that divides N and is divisible by MMA_N_MIN.
     """
+    M_total = M * cta_group
     valid_M = [128, 64] if cta_group == 1 else [256, 128]
-    M_mma = next((m for m in valid_M if M % m == 0), None)
-    assert M_mma is not None, (
-        f"tcgen05: M={M} not divisible by any valid MMA M for cta_group={cta_group} "
-        f"(valid: {valid_M})"
+    M_desc = next((m for m in valid_M if M_total % m == 0), None)
+    assert M_desc is not None, (
+        f"tcgen05: M_total={M_total} (M={M}, cta_group={cta_group}) not divisible by "
+        f"any valid descriptor M (valid: {valid_M})"
     )
+    M_mma = M_desc // cta_group
 
     if N <= 256 and N % MMA_N_MIN == 0:
         N_mma = N
@@ -317,6 +321,7 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
 
     M = int(C_extent[-2])
     N = int(C_extent[-1])
+    is_2x2 = M == 64 and cta_group == 2
 
     # Majorness (a_mn_major / b_mn_major) is determined later by
     # compute_canonical_params via dual-atom matching on the physical
@@ -488,8 +493,14 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
             f"tcgen05: SFB K extent={SFB_K_total} must be in {valid_sfb_K}"
         )
 
-    # Check C's sliced layout: (M, N):(1@TLane, 1@TCol), allow offset
-    base = TileLayout(S[(M, N) : (1 @ TLane, 1 @ TCol)])
+    # Check C's sliced layout, allow offset.
+    # 4x1 layout: (M, N):(1@TLane, 1@TCol)
+    # 2x2 layout: (M, 2, N//2):(1@TLane, 64@TLane, 1@TCol)
+    if is_2x2:
+        N_half = N // 2
+        base = TileLayout(S[(M, 2, N_half) : (1 @ TLane, 64 @ TLane, 1 @ TCol)])
+    else:
+        base = TileLayout(S[(M, N) : (1 @ TLane, 1 @ TCol)])
     expected_c_layout = TileLayout.from_iters(
         base.shard, base.replica, C_slice_layout.offset
     ).canonicalize()
@@ -640,6 +651,10 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
         # distinct SF (i.e. sfa_elems_per_ki > 0 so each ki advances to a new element)
         needs_sf_id = sfa_sf_mma_k < SFA_elem_per_col and sfa_elems_per_ki > 0 and descI is None
 
+    # Physical TMEM columns per MMA N tile.
+    # 2x2 layout (Layout B): each MMA tile spans N_mma/2 physical columns (other half in rows 64-127).
+    N_mma_phys_cols = N_mma // 2 if is_2x2 else N_mma
+
     # Build main_impl: descA_in is None when A is in TMEM (ignored by _a_operand).
     # fmt: off
     if is_block_scaled:
@@ -660,7 +675,7 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
                     if needs_sf_id:
                         sf_id = Tx.meta_var(analyzer.simplify(tvm.tirx.floormod(sfa_tcol, SFA_elem_per_col)))  # noqa: E501
                         Tx.cuda.runtime_instr_desc(Tx.address_of(descI_in), sf_id)
-                    tmem_col = tmem_offset_32b + ni * (N_mma // C_elem_per_32b)
+                    tmem_col = tmem_offset_32b + ni * (N_mma_phys_cols // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma.block_scale(
                             C_type, A_type, B_type, SFA_type, SFB_type,
@@ -678,7 +693,7 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
                     a_val = _a_operand(mi, ki, descA_in)
                     descB_val = _b_desc_val(descB_in, ni, ki)
                     should_accum = tvm.tirx.any(ki != 0, accum_expr)
-                    tmem_col = tmem_offset_32b + ni * (N_mma // C_elem_per_32b)
+                    tmem_col = tmem_offset_32b + ni * (N_mma_phys_cols // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma(
                             "float32", A_type, B_type,
