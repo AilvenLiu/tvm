@@ -1,0 +1,25 @@
+content:
+  details: The new `PoolAllocator.alloc_mma` API allocates shared buffers with an
+    MMA-compatible layout inferred from `(shape, dtype)`. `swizzle_mode="auto"` maps
+    to `SwizzleMode.SWIZZLE_128B_ATOM`, which covers the common fp16/bf16/fp8/fp32/nvfp4
+    TMA load cases. Use an explicit `SwizzleMode`, such as `SWIZZLE_64B_ATOM`, for
+    epilogue/writeback buffers that intentionally need a smaller atom, and use `swizzle_mode="none"`
+    only when a row-major allocation is required. Do not migrate non-TMA layouts such
+    as SF row-major layouts, TMEM layouts, descriptor layouts, or register view layouts
+    to `alloc_mma`.
+  summary: Use `pool.alloc_mma(shape, dtype, swizzle_mode=...)` for MMA-compatible
+    shared-memory buffers instead of hand-building `ComposeLayout(SwizzleLayout(...),
+    TileLayout(...))`.
+created: '2026-04-10'
+id: KB-20260410-182244-318c05
+scope:
+- repo
+tags:
+- tirx
+- layout
+- mma
+- smem
+- allocator
+- swizzle
+title: Use PoolAllocator.alloc_mma for TMA/MMA shared buffers
+updated: '2026-04-10'

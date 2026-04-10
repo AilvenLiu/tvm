@@ -1070,9 +1070,9 @@ def test_lower_preferred_cluster():
 
 def test_lower_tirx_dedup_tensormap():
     """Two identical TMA copy_async calls from the same global buffer should share one tensormap."""
-    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import tma_shared_layout
+    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import mma_shared_layout
 
-    shared_layout = tma_shared_layout("float16", 3, (8, 256))
+    shared_layout = mma_shared_layout("float16", 3, (8, 256))
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
@@ -1124,10 +1124,10 @@ def test_lower_tirx_dedup_tensormap():
 
 def test_lower_tirx_keep_different_tensormaps():
     """Same global buffer but different smem shapes should get separate tensormaps."""
-    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import tma_shared_layout
+    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import mma_shared_layout
 
-    layout_8x64 = tma_shared_layout("float16", 3, (8, 64))
-    layout_8x128 = tma_shared_layout("float16", 3, (8, 128))
+    layout_8x64 = mma_shared_layout("float16", 3, (8, 64))
+    layout_8x128 = mma_shared_layout("float16", 3, (8, 128))
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)
@@ -1182,10 +1182,10 @@ def test_lower_tirx_keep_different_tensormaps():
 def test_lower_tirx_dedup_smem_descriptor():
     """Two gemm_async calls using the same smem buffers should share descriptors."""
     from tvm.tirx.layout import S, TCol, TileLayout, TLane
-    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import tma_shared_layout
+    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import mma_shared_layout
 
-    A_layout = tma_shared_layout("float16", 3, (128, 64))
-    B_layout = tma_shared_layout("float16", 3, (128, 64))
+    A_layout = mma_shared_layout("float16", 3, (128, 64))
+    B_layout = mma_shared_layout("float16", 3, (128, 64))
 
     # fmt: off
     @Tx.prim_func(private=True, tirx=True)

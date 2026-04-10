@@ -546,6 +546,20 @@ entries:
   - consistency
   title: Uniform folder structure for all dispatch ops, including single-variant ops
   updated: '2026-03-28'
+- created: '2026-04-10'
+  id: ADR-20260410-182244-433bb3
+  path: entries/ADR-20260410-182244-433bb3.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - api-design
+  - layout
+  - mma
+  - smem
+  - swizzle
+  title: Default alloc_mma to 128B swizzle with explicit escape hatches
+  updated: '2026-04-10'
 tags:
   API:
   - ADR-20260323-185836-cff692
@@ -562,6 +576,7 @@ tags:
   - ADR-20260326-004750-3e9972
   - ADR-20260326-004750-de4733
   - ADR-20260328-001753-19aa69
+  - ADR-20260410-182244-433bb3
   api-evolution:
   - ADR-20260228-0002
   - ADR-20260327-142529-3943af
@@ -685,6 +700,8 @@ tags:
   - ADR-20260319-022448-398b11
   - ADR-20260319-022448-4d7f83
   - ADR-20260319-022448-7cc00e
+  layout:
+  - ADR-20260410-182244-433bb3
   list-comprehension:
   - ADR-20260326-004750-3e9972
   logging:
@@ -695,6 +712,8 @@ tags:
   - ADR-20260326-004750-3e9972
   migration:
   - ADR-20260327-170120-2d4805
+  mma:
+  - ADR-20260410-182244-433bb3
   module-rename:
   - ADR-20260320-002326-d2fa6d
   module-split:
@@ -763,12 +782,15 @@ tags:
   - ADR-20260323-185836-cff692
   smem:
   - ADR-20260322-182024-efa75b
+  - ADR-20260410-182244-433bb3
   smem-descriptor:
   - ADR-20260325-174353-f8ad92
   stdout:
   - ADR-20260324-171756-41723a
   stmt-functor:
   - ADR-20260327-170120-2d4805
+  swizzle:
+  - ADR-20260410-182244-433bb3
   sync:
   - ADR-20260326-030916-ac4a46
   syntax:
@@ -804,6 +826,7 @@ tags:
   - ADR-20260327-142529-3943af
   - ADR-20260327-170120-2d4805
   - ADR-20260328-001753-19aa69
+  - ADR-20260410-182244-433bb3
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   - ADR-20260328-005952-4cf57e

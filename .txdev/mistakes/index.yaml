@@ -532,6 +532,34 @@ entries:
   - workflow
   title: Ruff auto-fix creates unstaged changes that fail the next commit
   updated: '2026-03-28'
+- created: '2026-04-10'
+  id: M-20260410-182244-030f70
+  path: entries/M-20260410-182244-030f70.yaml
+  scope:
+  - repo
+  tags:
+  - pre-commit
+  - ruff
+  - git
+  - workflow
+  - ruff-format
+  - commit-sync
+  title: Ruff auto-fix creates unstaged changes that fail the next commit
+  updated: '2026-04-10'
+- created: '2026-04-10'
+  id: M-20260410-182244-61efe4
+  path: entries/M-20260410-182244-61efe4.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - ptx
+  - codegen
+  - mbarrier
+  - testing
+  - cuda
+  title: Direct PTX codegen tests may use pointer forms not seen in runtime lowering
+  updated: '2026-04-10'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -570,6 +598,9 @@ tags:
   codegen:
   - M-20260326-030916-99f4b9
   - M-20260326-030916-a222d4
+  - M-20260410-182244-61efe4
+  commit-sync:
+  - M-20260410-182244-030f70
   correctness:
   - M-20260301-0001
   - M-20260307-231252-423c4d
@@ -588,6 +619,7 @@ tags:
   cuda:
   - M-20260326-030916-99f4b9
   - M-20260326-030916-a222d4
+  - M-20260410-182244-61efe4
   data-integrity:
   - M-20260326-203453-e6e5be
   deadlock:
@@ -620,6 +652,7 @@ tags:
   - M-20260228-0003
   - M-20260327-185547-3913ba
   - M-20260328-202457-411293
+  - M-20260410-182244-030f70
   golden:
   - M-20260227-0002
   - M-20260227-0003
@@ -644,6 +677,7 @@ tags:
   - M-20260328-001753-acf9c3
   mbarrier:
   - M-20260317-211411-ba6927
+  - M-20260410-182244-61efe4
   migration:
   - M-20260322-182024-631109
   mistake:
@@ -673,9 +707,12 @@ tags:
   - M-20260326-203453-e6e5be
   - M-20260328-001753-acf9c3
   - M-20260328-202457-411293
+  - M-20260410-182244-030f70
   process:
   - M-20260228-0001
   - M-20260228-0003
+  ptx:
+  - M-20260410-182244-61efe4
   pyproject:
   - M-20260306-195314-50a55c
   pytest:
@@ -715,6 +752,9 @@ tags:
   ruff:
   - M-20260328-001753-acf9c3
   - M-20260328-202457-411293
+  - M-20260410-182244-030f70
+  ruff-format:
+  - M-20260410-182244-030f70
   scope-control:
   - M-20260228-0002
   - M-20260301-0001
@@ -753,6 +793,7 @@ tags:
   - M-20260324-171756-5d4c5e
   - M-20260325-174353-4a9cda
   - M-20260327-142529-e741bb
+  - M-20260410-182244-61efe4
   thoroughness:
   - M-20260317-211411-dfb881
   - M-20260326-004750-646f60
@@ -770,6 +811,7 @@ tags:
   - M-20260317-211411-dfb881
   - M-20260327-142529-bcec6f
   - M-20260327-170120-886c27
+  - M-20260410-182244-61efe4
   tirx-kernels:
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726
@@ -804,6 +846,7 @@ tags:
   - M-20260319-022448-da2fb0
   - M-20260327-185547-c88284
   - M-20260328-202457-411293
+  - M-20260410-182244-030f70
   xdist:
   - M-20260319-022448-dbe043
   yaml:

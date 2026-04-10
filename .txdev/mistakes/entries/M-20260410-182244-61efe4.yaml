@@ -1,0 +1,23 @@
+content:
+  details: 'The full tirx test suite exposed a DSMEM compile failure in `ptx_cp_async_bulk_shared_to_cluster`:
+    the runtime lowering path passed a mapped shared::cluster mbarrier address as
+    `uint64_t`, but direct codegen tests passed a local shared mbarrier pointer. A
+    generated helper that accepted only `uint64_t mbar` failed NVCC type checking
+    for the direct tests. The robust pattern is to factor the implementation to an
+    address-taking helper and provide overloads for both `uint64_t` mapped addresses
+    and `void*` shared pointers, converting the pointer form with `__cvta_generic_to_shared`.'
+  summary: Generated CUDA helper signatures must cover both runtime-lowered argument
+    forms and direct builtin-test argument forms.
+created: '2026-04-10'
+id: M-20260410-182244-61efe4
+scope:
+- repo
+tags:
+- tirx
+- ptx
+- codegen
+- mbarrier
+- testing
+- cuda
+title: Direct PTX codegen tests may use pointer forms not seen in runtime lowering
+updated: '2026-04-10'

@@ -1,0 +1,24 @@
+content:
+  details: The allocator API intentionally centralizes the common shared-memory MMA
+    layout boilerplate. `swizzle_mode="auto"` chooses `SwizzleMode.SWIZZLE_128B_ATOM`
+    because the migrated kernels overwhelmingly used 128B atoms for TMA/MMA staging
+    buffers, and dtype-specific `per_element` should be derived inside the layout
+    helper rather than repeated at each kernel allocation site. The API still accepts
+    explicit `SwizzleMode` values for special cases such as 64B epilogue/writeback
+    buffers, and `swizzle_mode="none"` for row-major allocations. This keeps the default
+    concise for common kernels while avoiding hidden policy decisions for known exceptions.
+  summary: '`PoolAllocator.alloc_mma` defaults to 128B MMA swizzle inference and keeps
+    explicit swizzle and no-swizzle escape hatches.'
+created: '2026-04-10'
+id: ADR-20260410-182244-433bb3
+scope:
+- repo
+tags:
+- tirx
+- api-design
+- layout
+- mma
+- smem
+- swizzle
+title: Default alloc_mma to 128B swizzle with explicit escape hatches
+updated: '2026-04-10'

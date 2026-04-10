@@ -35,9 +35,9 @@ from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.operator.scope_op_dispatch.cuda.gemm_async import sf_tmem_layout
 from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
-    tma_atom_layout,
-    tma_atom_shape,
-    tma_shared_layout,
+    mma_atom_layout,
+    mma_atom_shape,
+    mma_shared_layout,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ def _mid_stage_layout(dtype, swizzle_mode, shape):
     """Build SMEM layout for shape (D0, stages, D1) where the middle dim
     (stages) has the highest stride and the [D0, D1] subspace uses the
     standard swizzle atom.  E.g. shape=(128, 3, 64) → stages stride 8192."""
-    base_2d = tma_shared_layout(dtype, swizzle_mode, (shape[0], shape[-1]))
+    base_2d = mma_shared_layout(dtype, swizzle_mode, (shape[0], shape[-1]))
     return base_2d.tile_to(shape, [shape[0], 1, shape[-1]])
 
 
@@ -69,8 +69,8 @@ def _mn_major_layout(dtype, swizzle_mode, shape):
     """
     from tvm.tirx.layout import ComposeLayout
 
-    swizzle_atom = tma_atom_layout(dtype, swizzle_mode)
-    base_shape = tma_atom_shape(dtype, swizzle_mode)  # 2D: [8, T*s]
+    swizzle_atom = mma_atom_layout(dtype, swizzle_mode)
+    base_shape = mma_atom_shape(dtype, swizzle_mode)  # 2D: [8, T*s]
     swapped = [base_shape[1], base_shape[0]]  # [T*s, 8]
     # Stride-reversed tile: first dim (T*s) contiguous, second dim (8) has stride T*s
     mn_tile = TileLayout(S[tuple(swapped) : (1, swapped[0])])
@@ -195,8 +195,8 @@ def test_gemm_tcgen05_cta_group_1(task):
     C_elem_bytes = tvm.runtime.DataType(C_dtype).bits // 8
     C_elem_32b = 4 // C_elem_bytes
     cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
-    A_layout = tma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
-    B_layout = tma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
+    A_layout = mma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
+    B_layout = mma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
 
     r_gmem_A = list(slice(0, A_shape[i]) for i in range(len(A_shape)))
     r_gmem_B = list(slice(0, B_shape[i]) for i in range(len(B_shape)))
@@ -323,8 +323,8 @@ def test_gemm_tcgen05_cta_group_2(task):
 
     A_shape_per_cta = get_shape_per_cta(A_shape, transA)
     B_shape_per_cta = get_shape_per_cta(B_shape, transB)
-    A_layout = tma_shared_layout(A_dtype, A_swizzle_mode, A_shape_per_cta)
-    B_layout = tma_shared_layout(B_dtype, B_swizzle_mode, B_shape_per_cta)
+    A_layout = mma_shared_layout(A_dtype, A_swizzle_mode, A_shape_per_cta)
+    B_layout = mma_shared_layout(B_dtype, B_swizzle_mode, B_shape_per_cta)
 
     r_smem_A_in = list(slice(0, A_shape_per_cta[i]) for i in range(len(A_shape_per_cta)))
     r_smem_B_in = list(slice(0, B_shape_per_cta[i]) for i in range(len(B_shape_per_cta)))
@@ -454,8 +454,8 @@ def test_gemm_tcgen05_cta_group_2_layout_b():
     C_elem_32b = 4 // (tvm.runtime.DataType(C_dtype).bits // 8)
     cols_alloc = max(32, next_power_of_2(N_half // C_elem_32b))
 
-    A_layout = tma_shared_layout(A_dtype, swizzle_mode, A_shape)
-    B_layout = tma_shared_layout(B_dtype, swizzle_mode, B_shape)
+    A_layout = mma_shared_layout(A_dtype, swizzle_mode, A_shape)
+    B_layout = mma_shared_layout(B_dtype, swizzle_mode, B_shape)
 
     # Both CTAs issue TMA copies; mbarrier expects total from both CTAs.
     per_cta_bytes = (
@@ -604,8 +604,8 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
     C_elem_32b = 4 // C_elem_bytes
     cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
 
-    A_layout = tma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
-    B_layout = tma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
+    A_layout = mma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
+    B_layout = mma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
 
     r_gmem_A = list(slice(0, A_shape[i]) for i in range(len(A_shape)))
     r_gmem_B = list(slice(0, B_shape[i]) for i in range(len(B_shape)))
@@ -798,8 +798,8 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
     A_shape_per_cta = get_shape_per_cta(A_shape, transA)
     B_shape_per_cta = get_shape_per_cta(B_shape, transB)
-    A_layout = tma_shared_layout(A_dtype, A_swizzle_mode, A_shape_per_cta)
-    B_layout = tma_shared_layout(B_dtype, B_swizzle_mode, B_shape_per_cta)
+    A_layout = mma_shared_layout(A_dtype, A_swizzle_mode, A_shape_per_cta)
+    B_layout = mma_shared_layout(B_dtype, B_swizzle_mode, B_shape_per_cta)
 
     r_smem_A_in = list(slice(0, A_shape_per_cta[i]) for i in range(len(A_shape_per_cta)))
     r_smem_B_in = list(slice(0, B_shape_per_cta[i]) for i in range(len(B_shape_per_cta)))
@@ -996,10 +996,10 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
     C_elem_32b = 4 // C_elem_bytes
     cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
 
-    A_uint8_layout = tma_shared_layout("uint8", 3, A_packed_shape)
-    B_uint8_layout = tma_shared_layout("uint8", 3, B_packed_shape)
-    A_fp4_layout = tma_shared_layout("float4_e2m1fn", 3, A_fp4_shape)
-    B_fp4_layout = tma_shared_layout("float4_e2m1fn", 3, B_fp4_shape)
+    A_uint8_layout = mma_shared_layout("uint8", 3, A_packed_shape)
+    B_uint8_layout = mma_shared_layout("uint8", 3, B_packed_shape)
+    A_fp4_layout = mma_shared_layout("float4_e2m1fn", 3, A_fp4_shape)
+    B_fp4_layout = mma_shared_layout("float4_e2m1fn", 3, B_fp4_shape)
 
     total_bytes = M * (K // 2) + N * (K // 2)
 
@@ -1173,10 +1173,10 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
     C_elem_32b = 4 // C_elem_bytes
     cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
 
-    A_uint8_layout = tma_shared_layout("uint8", 3, A_packed_per_cta)
-    B_uint8_layout = tma_shared_layout("uint8", 3, B_packed_per_cta)
-    A_fp4_layout = tma_shared_layout("float4_e2m1fn", 3, A_fp4_per_cta)
-    B_fp4_layout = tma_shared_layout("float4_e2m1fn", 3, B_fp4_per_cta)
+    A_uint8_layout = mma_shared_layout("uint8", 3, A_packed_per_cta)
+    B_uint8_layout = mma_shared_layout("uint8", 3, B_packed_per_cta)
+    A_fp4_layout = mma_shared_layout("float4_e2m1fn", 3, A_fp4_per_cta)
+    B_fp4_layout = mma_shared_layout("float4_e2m1fn", 3, B_fp4_per_cta)
 
     total_bytes = M_total * (K // 2) + N_total * (K // 2)
 
@@ -1374,8 +1374,8 @@ def test_gemm_block_scaled_fp8_sf_id():
     C_elem_32b = 4 // C_elem_bytes
     cols_alloc = max(32, next_power_of_2(C_shape[1] // C_elem_32b))
 
-    A_layout = tma_shared_layout(A_dtype, 3, A_shape)
-    B_layout = tma_shared_layout(B_dtype, 3, B_shape)
+    A_layout = mma_shared_layout(A_dtype, 3, A_shape)
+    B_layout = mma_shared_layout(B_dtype, 3, B_shape)
 
     total_bytes = (
         functools.reduce(operator.mul, A_shape, 1) * A_elem_bytes
@@ -1727,12 +1727,12 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
     A_layout = (
         A_swizzle_mode
         if not isinstance(A_swizzle_mode, int)
-        else tma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
+        else mma_shared_layout(A_dtype, A_swizzle_mode, A_shape)
     )
     B_layout = (
         B_swizzle_mode
         if not isinstance(B_swizzle_mode, int)
-        else tma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
+        else mma_shared_layout(B_dtype, B_swizzle_mode, B_shape)
     )
 
     r_gmem_A = list(slice(0, A_shape[i]) for i in range(len(A_shape)))
@@ -1885,8 +1885,8 @@ def test_gemm_tcgen05_tmem_a(task):
 
     A_smem_shape = (M, K)
     B_smem_shape = (N, K)
-    A_layout = tma_shared_layout(A_dtype, swizzle_mode, A_smem_shape)
-    B_layout = tma_shared_layout(B_dtype, swizzle_mode, B_smem_shape)
+    A_layout = mma_shared_layout(A_dtype, swizzle_mode, A_smem_shape)
+    B_layout = mma_shared_layout(B_dtype, swizzle_mode, B_smem_shape)
 
     total_bytes = M * K * A_elem_bytes + N * K * B_elem_bytes
 

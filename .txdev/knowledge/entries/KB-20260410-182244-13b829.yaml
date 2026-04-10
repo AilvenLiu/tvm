@@ -1,0 +1,26 @@
+content:
+  details: 'This feature renamed the public CUDA shared-memory layout helpers from
+    TMA-centric names to MMA-centric names in the current `tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils`
+    module: `mma_shared_layout`, `mma_atom_layout`, and `mma_atom_shape`. The old
+    `tma_shared_layout`, `tma_atom_layout`, and `tma_atom_shape` names are retained
+    as compatibility aliases. The helper still computes the swizzle parameters from
+    dtype and swizzle mode, then tiles/canonicalizes the result; callers should continue
+    treating the result as a general Layout rather than assuming a specific concrete
+    subclass.'
+  summary: The canonical MMA shared-memory layout helpers are `mma_shared_layout`,
+    `mma_atom_layout`, and `mma_atom_shape`; legacy `tma_*` names remain aliases,
+    and callers should still not assume a single concrete Layout subclass.
+created: '2026-04-10'
+id: KB-20260410-182244-13b829
+scope:
+- repo
+tags:
+- tma
+- layout
+- copy_async
+- import
+- refactor
+- mma
+- alloc_mma
+title: tma_shared_layout return type varies
+updated: '2026-04-10'

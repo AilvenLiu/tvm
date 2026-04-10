@@ -34,8 +34,8 @@ class SwizzleMode(Enum):
     SWIZZLE_128B_ATOM = 3
 
 
-def tma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayout:
-    """Generate the TMA atom layout given dtype and swizzle mode."""
+def mma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayout:
+    """Generate the MMA-compatible shared-memory atom layout."""
     bits = tvm.DataType(dtype).bits
     if isinstance(swizzle_mode, int):
         swizzle_mode = SwizzleMode(swizzle_mode)
@@ -46,8 +46,8 @@ def tma_atom_layout(dtype: str, swizzle_mode: SwizzleMode | int) -> SwizzleLayou
     )
 
 
-def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int] | None = None):
-    """Generate the TMA atom shape given dtype and swizzle mode."""
+def mma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int] | None = None):
+    """Generate the MMA-compatible shared-memory atom shape."""
     bits = tvm.DataType(dtype).bits
     if isinstance(swizzle_mode, int):
         swizzle_mode = SwizzleMode(swizzle_mode)
@@ -63,8 +63,8 @@ def tma_atom_shape(dtype: str, swizzle_mode: SwizzleMode | int, shape: list[int]
     return atom_shape
 
 
-def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> Layout:
-    """Generate the TMA layout for the shared memory given shape and dtype.
+def mma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> Layout:
+    """Generate the MMA-compatible shared-memory layout for shape and dtype.
 
     It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
     """
@@ -72,11 +72,17 @@ def tma_shared_layout(dtype: str, swizzle_mode: SwizzleMode | int, shape) -> Lay
         swizzle_mode = SwizzleMode(swizzle_mode)
     if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
         return TileLayout(S[tuple(shape)]).canonicalize()
-    atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
-    layout = tma_atom_layout(dtype, swizzle_mode)
+    atom_shape = mma_atom_shape(dtype, swizzle_mode, shape)
+    layout = mma_atom_layout(dtype, swizzle_mode)
     tile_to_shape = copy.copy(atom_shape)
     tile_to_shape[-2] = shape[-2]
     return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).canonicalize()
+
+
+# Backward-compatible aliases kept during the alloc_mma migration.
+tma_atom_layout = mma_atom_layout
+tma_atom_shape = mma_atom_shape
+tma_shared_layout = mma_shared_layout
 
 
 def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):

@@ -25,7 +25,7 @@ from tvm.script import tirx as Tx
 from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode, tma_shared_layout
+from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode, mma_shared_layout
 
 
 class BarTMA2MMA(Barriers):
@@ -128,12 +128,12 @@ class GemmTile(Tile):
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
         self.M_pad_size = BLK_M
-        self.A_layout = tma_shared_layout(
+        self.A_layout = mma_shared_layout(
             a_type,
             SwizzleMode.SWIZZLE_128B_ATOM,
             (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
         )
-        self.B_layout = tma_shared_layout(
+        self.B_layout = mma_shared_layout(
             b_type, SwizzleMode.SWIZZLE_128B_ATOM, (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K)
         )
         self.D_layout = Tx.TileLayout(
@@ -443,7 +443,8 @@ class GemmTile(Tile):
                                     for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
                                         tma_gather4_stage(
                                             ks,
-                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
+                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K
+                                            + k_offset,
                                             ko == 0,
                                         )
                                     self.phase[0] = self.phase[0] ^ 1
@@ -527,7 +528,8 @@ class GemmTile(Tile):
                                 for ks in Tx.unroll(self.PIPE_REMAIN_NUM):
                                     cp_async_stage(
                                         ks,
-                                        (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K
+                                        (self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks)
+                                        * self.BLK_K
                                         + k_offset,
                                         self.PIPE_CIRCLE_NUM == 0,
                                     )
@@ -591,7 +593,8 @@ class GemmTile(Tile):
                                     for ks in Tx.unroll(self.SMEM_PIPE_DEPTH):
                                         tma_stage(
                                             ks,
-                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K + k_offset,
+                                            (ko * self.SMEM_PIPE_DEPTH + ks) * self.BLK_K
+                                            + k_offset,
                                             ko == 0,
                                         )
                                     self.phase[0] = self.phase[0] ^ 1
@@ -696,7 +699,9 @@ class GemmTile(Tile):
                                         self.tma2mma_bar.wait(ks, self.phase[0])
                                     elif not self.wait_complete:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
-                                    if (not self.use_cp_async_input) and ks != self.PIPE_REMAIN_NUM - 1:
+                                    if (
+                                        not self.use_cp_async_input
+                                    ) and ks != self.PIPE_REMAIN_NUM - 1:
                                         mbar_try_wait(
                                             (ks + 1) % self.SMEM_PIPE_DEPTH, self.phase[0]
                                         )

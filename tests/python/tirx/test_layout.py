@@ -24,6 +24,11 @@ import pytest
 import tvm
 from tvm.arith import Analyzer
 from tvm.ir import assert_structural_equal
+from tvm.ir.type import PointerType, PrimType
+from tvm.script import tirx as Tx
+from tvm.script.ir_builder import IRBuilder
+from tvm.script.ir_builder import tirx as Tx_builder
+from tvm.tirx import Var
 from tvm.tirx.layout import (
     Axis,
     ComposeLayout,
@@ -42,7 +47,11 @@ from tvm.tirx.layout import (
     wgid,
     wid_in_wg,
 )
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode, tma_shared_layout
+from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+    SwizzleMode,
+    mma_shared_layout,
+    tma_shared_layout,
+)
 
 
 def test_axis():
@@ -1333,9 +1342,9 @@ def test_tile_to():
     case1()
 
 
-def test_tma_shared_layout():
+def test_mma_shared_layout():
     def case1():
-        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (64, 256))
+        layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (64, 256))
         layout_expected = ComposeLayout(
             SwizzleLayout(3, 3, 3, swizzle_inner=True),
             TileLayout(S[(64, 4, 64) : (64, 4096, 1)]),
@@ -1345,7 +1354,7 @@ def test_tma_shared_layout():
     case1()
 
     def case2():
-        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (3, 64, 256))
+        layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (3, 64, 256))
         layout_expected = ComposeLayout(
             SwizzleLayout(3, 3, 3, swizzle_inner=True),
             TileLayout(S[(3, 64, 4, 64) : (16384, 64, 4096, 1)]),
@@ -1355,7 +1364,7 @@ def test_tma_shared_layout():
     case2()
 
     def case3():
-        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_64B_ATOM, (3, 64, 256))
+        layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_64B_ATOM, (3, 64, 256))
         layout_expected = ComposeLayout(
             SwizzleLayout(3, 2, 3, swizzle_inner=True),
             TileLayout(S[(3, 64, 8, 32) : (16384, 32, 2048, 1)]),
@@ -1363,6 +1372,43 @@ def test_tma_shared_layout():
         assert_structural_equal(layout, layout_expected)
 
     case3()
+
+
+def test_tma_shared_layout_alias():
+    shape = (3, 64, 256)
+    layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, shape)
+    alias_layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, shape)
+    assert_structural_equal(alias_layout, layout)
+
+
+def test_pool_allocator_alloc_mma():
+    def alloc_layout(shape, dtype, swizzle_mode="auto"):
+        with IRBuilder():
+            with Tx_builder.prim_func():
+                pool = Tx.PoolAllocator(Var("smem_ptr", PointerType(PrimType("uint8"))))
+                buf = pool.alloc_mma(shape, dtype, swizzle_mode=swizzle_mode)
+        return buf.layout
+
+    cases = [
+        ("uint8", (3, 64, 256)),
+        ("float16", (3, 64, 256)),
+        ("bfloat16", (3, 64, 256)),
+        ("float32", (3, 64, 256)),
+        ("float4_e2m1fn", (3, 64, 256)),
+    ]
+    for dtype, shape in cases:
+        layout = alloc_layout(shape, dtype)
+        expected = mma_shared_layout(dtype, SwizzleMode.SWIZZLE_128B_ATOM, shape)
+        assert_structural_equal(layout, expected)
+
+    shape = (3, 64, 256)
+    layout_64b = alloc_layout(shape, "float32", SwizzleMode.SWIZZLE_64B_ATOM)
+    expected_64b = mma_shared_layout("float32", SwizzleMode.SWIZZLE_64B_ATOM, shape)
+    assert_structural_equal(layout_64b, expected_64b)
+
+    layout_none = alloc_layout(shape, "float16", "none")
+    expected_none = mma_shared_layout("float16", SwizzleMode.SWIZZLE_NONE, shape)
+    assert_structural_equal(layout_none, expected_none)
 
 
 def test_storage():

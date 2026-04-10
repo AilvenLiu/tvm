@@ -26,8 +26,8 @@ from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TCol, TileLayout, T
 from tvm.tirx.operator.scope_op_dispatch.cuda.common import next_power_of_2
 from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
     SwizzleMode,
-    tma_atom_shape,
-    tma_shared_layout,
+    mma_atom_shape,
+    mma_shared_layout,
 )
 
 ml_dtypes_dict = {
@@ -535,7 +535,7 @@ def test_smem2tmem(task):
 
     # Swizzle compatibility check
     if swizzle_mode > 0:
-        atom_shape = tma_atom_shape(dtype, SwizzleMode(swizzle_mode))
+        atom_shape = mma_atom_shape(dtype, SwizzleMode(swizzle_mode))
         atom_cols = atom_shape[-1]
         if WIDTH < atom_cols or WIDTH % atom_cols != 0:
             pytest.skip(f"WIDTH {WIDTH} not compatible with swizzle mode {swizzle_mode}")
@@ -562,7 +562,7 @@ def test_smem2tmem(task):
         tmem_n_cols = max(32, next_power_of_2(width_32b))
 
     if swizzle_mode > 0:
-        smem_layout = tma_shared_layout(dtype, SwizzleMode(swizzle_mode), smem_shape)
+        smem_layout = mma_shared_layout(dtype, SwizzleMode(swizzle_mode), smem_shape)
     else:
         smem_layout = TileLayout(S[smem_rows, VEC_LEN]).tile_to(smem_shape, (smem_rows, VEC_LEN))
     local_view = TileLayout(S[(128, WIDTH) : (1 @ tid_in_wg, 1)])

@@ -188,7 +188,9 @@ def _codegen_cp_async_bulk_tensor_global_to_cluster(
     if cache_hint != "":
         coord_arg_start += 1
     if tile_mode == "tile_gather4":
-        coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(coord_count)]) + "}"
+        coord_arg_template = (
+            "{%" + ", %".join([str(coord_arg_start + i) for i in range(coord_count)]) + "}"
+        )
         coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(coord_count)])
     else:
         coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(dim)]) + "}"
@@ -430,13 +432,15 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
 @register_codegen("ptx_cp_async_bulk_shared_to_cluster")
 def codegen_ptx_cp_async_bulk_shared_to_cluster(dst_ptr, src_ptr, size, mbar):
     func_name = "ptx_cp_async_bulk_shared_to_cluster"
-    # dst_ptr and mbar are shared::cluster addresses (uint64) from mapa instruction.
+    # dst_ptr is a shared::cluster address (uint64) from mapa instruction.
+    # mbar may already be mapped (uint64) or may be a local shared pointer in
+    # direct builtin tests.
     # src_ptr is a generic shared::cta pointer that needs __cvta_generic_to_shared.
     source_code = f"""
-__forceinline__ __device__ void {func_name}(uint64_t dst, void* src, int size, uint64_t mbar) {{
+__forceinline__ __device__ void {func_name}_impl(
+    uint64_t dst, void* src, int size, unsigned int mbar_addr) {{
   unsigned int dst_addr = static_cast<unsigned int>(dst);
   unsigned int src_addr = __cvta_generic_to_shared(src);
-  unsigned int mbar_addr = static_cast<unsigned int>(mbar);
   __asm__ __volatile__(
     "cp.async.bulk.shared::cluster.shared::cta.mbarrier::complete_tx::bytes"
     " [%0], [%1], %2, [%3];\\n"
@@ -444,6 +448,14 @@ __forceinline__ __device__ void {func_name}(uint64_t dst, void* src, int size, u
     : "r"(dst_addr), "r"(src_addr), "r"(size), "r"(mbar_addr)
     : "memory"
   );
+}}
+__forceinline__ __device__ void {func_name}(
+    uint64_t dst, void* src, int size, uint64_t mbar) {{
+  {func_name}_impl(dst, src, size, static_cast<unsigned int>(mbar));
+}}
+__forceinline__ __device__ void {func_name}(
+    uint64_t dst, void* src, int size, void* mbar) {{
+  {func_name}_impl(dst, src, size, __cvta_generic_to_shared(mbar));
 }}
 """
     return cuda_func_call(func_name, dst_ptr, src_ptr, size, mbar, source_code=source_code)

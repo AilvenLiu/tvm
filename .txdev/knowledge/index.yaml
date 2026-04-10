@@ -749,6 +749,35 @@ entries:
   - code-quality
   title: Consolidate duplicated per-op helpers into shared modules early
   updated: '2026-03-28'
+- created: '2026-04-10'
+  id: KB-20260410-182244-13b829
+  path: entries/KB-20260410-182244-13b829.yaml
+  scope:
+  - repo
+  tags:
+  - tma
+  - layout
+  - copy_async
+  - import
+  - refactor
+  - mma
+  - alloc_mma
+  title: tma_shared_layout return type varies
+  updated: '2026-04-10'
+- created: '2026-04-10'
+  id: KB-20260410-182244-318c05
+  path: entries/KB-20260410-182244-318c05.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - layout
+  - mma
+  - smem
+  - allocator
+  - swizzle
+  title: Use PoolAllocator.alloc_mma for TMA/MMA shared buffers
+  updated: '2026-04-10'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -756,8 +785,12 @@ tags:
   - KB-20260323-185836-2fe7e7
   alloc-local:
   - KB-20260322-182024-e7c4c2
+  alloc_mma:
+  - KB-20260410-182244-13b829
   allocated_addr:
   - KB-20260325-174353-9679e0
+  allocator:
+  - KB-20260410-182244-318c05
   annotation:
   - KB-20260322-182024-1738c4
   api:
@@ -819,6 +852,7 @@ tags:
   copy_async:
   - KB-20260227-0002
   - KB-20260227-0003
+  - KB-20260410-182244-13b829
   copy_tma_impl:
   - KB-20260227-0001
   correctness:
@@ -887,6 +921,7 @@ tags:
   - KB-20260327-142528-4a9323
   - KB-20260327-142528-4fa3ef
   - KB-20260328-202457-a633e5
+  - KB-20260410-182244-13b829
   imports:
   - KB-20260322-201254-ba181e
   intrinsic:
@@ -909,6 +944,8 @@ tags:
   - KB-20260301-0002
   layout:
   - KB-20260227-0003
+  - KB-20260410-182244-13b829
+  - KB-20260410-182244-318c05
   lint:
   - KB-20260228-0001
   - KB-20260301-0003
@@ -934,6 +971,9 @@ tags:
   - KB-20260326-004750-bc6d9b
   - KB-20260327-142528-4fa3ef
   - KB-20260327-170120-a4aad4
+  mma:
+  - KB-20260410-182244-13b829
+  - KB-20260410-182244-318c05
   namespace:
   - KB-20260327-142528-4fa3ef
   - KB-20260327-185547-89e579
@@ -1021,6 +1061,7 @@ tags:
   - KB-20260327-185547-e51f21
   - KB-20260328-202457-a633e5
   - KB-20260328-202457-cc51d2
+  - KB-20260410-182244-13b829
   registration:
   - KB-20260307-231252-72bc64
   - KB-20260326-030915-290626
@@ -1056,9 +1097,12 @@ tags:
   - KB-20260317-211410-3d3076
   - KB-20260325-174353-b5e171
   - KB-20260326-030915-12829a
+  - KB-20260410-182244-318c05
   stmt-functor:
   - KB-20260327-170120-40cb7e
   - KB-20260327-170120-a4aad4
+  swizzle:
+  - KB-20260410-182244-318c05
   syntax:
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
@@ -1097,6 +1141,7 @@ tags:
   - KB-20260327-170120-40cb7e
   - KB-20260327-170120-a4aad4
   - KB-20260328-001753-e74f4d
+  - KB-20260410-182244-318c05
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511
@@ -1111,6 +1156,7 @@ tags:
   - KB-20260227-0003
   - KB-20260302-015214-9e29ce
   - KB-20260308-232603-18dfc3
+  - KB-20260410-182244-13b829
   triage:
   - KB-20260306-195314-a33c27
   tvm:

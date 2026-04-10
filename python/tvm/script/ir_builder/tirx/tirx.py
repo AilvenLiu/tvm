@@ -1288,6 +1288,14 @@ def select(
 _POOL_UNSET = object()
 
 
+def _auto_swizzle_mode(dtype):
+    """Select the default MMA swizzle mode for a shared-memory allocation."""
+    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode
+
+    del dtype
+    return SwizzleMode.SWIZZLE_128B_ATOM
+
+
 @meta_class
 class PoolAllocator:
     """Bump allocator over a contiguous shared memory region.
@@ -1346,6 +1354,33 @@ class PoolAllocator:
         if self._owns_buffer:
             self.max_offset = self.offset if self.offset > self.max_offset else self.max_offset
         return res
+
+    def alloc_mma(
+        self,
+        shape,
+        dtype="float16",
+        swizzle_mode="auto",
+        align=1024,
+        name=None,
+    ) -> Buffer:
+        """Allocate MMA-compatible shared memory with an inferred swizzle layout."""
+        from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+            SwizzleMode,
+            mma_shared_layout,
+        )
+
+        if isinstance(swizzle_mode, str):
+            if swizzle_mode == "auto":
+                swizzle_mode = _auto_swizzle_mode(dtype)
+            elif swizzle_mode == "none":
+                swizzle_mode = SwizzleMode.SWIZZLE_NONE
+            else:
+                raise ValueError(
+                    f"Unsupported swizzle_mode={swizzle_mode!r}; expected 'auto', 'none', "
+                    "or SwizzleMode"
+                )
+        layout = mma_shared_layout(dtype, swizzle_mode, shape)
+        return self.alloc(shape, dtype, align=align, layout=layout, name=name)
 
     def move_base_to(self, offset):
         self.offset = offset

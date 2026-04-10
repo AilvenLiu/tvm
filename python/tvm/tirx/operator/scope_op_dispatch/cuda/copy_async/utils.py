@@ -31,7 +31,7 @@ from tvm.tirx.operator.scope_op_dispatch import (
 )
 from tvm.tirx.stmt import ScopeOpCall
 
-from ..tma_utils import SwizzleMode, get_swizzle_mode_from_layout, tma_atom_shape
+from ..tma_utils import SwizzleMode, get_swizzle_mode_from_layout, mma_atom_shape
 
 
 def find_contiguous_region(layout: TileLayout) -> tuple:
@@ -326,7 +326,7 @@ def _decide_box_dim(
 
     # Step 8: Verify atom divisibility (only for swizzled layouts)
     if swizzle_mode != SwizzleMode.SWIZZLE_NONE:
-        atom_shape = tma_atom_shape(s_buf.dtype, swizzle_mode)
+        atom_shape = mma_atom_shape(s_buf.dtype, swizzle_mode)
         atom_total = atom_shape[0] * atom_shape[-1]
         if contiguous_extent % atom_total != 0:
             raise ValueError(

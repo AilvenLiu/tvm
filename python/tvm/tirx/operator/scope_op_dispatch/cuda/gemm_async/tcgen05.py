@@ -37,7 +37,7 @@ from tvm.tirx.stmt import AllocBuffer, Evaluate, ScopeOpCall, SeqStmt
 
 from ..common import get_st_extent, smem_desc_add_16B_offset
 from ..exec_scope_utils import single_thread
-from ..tma_utils import SwizzleMode, tma_atom_layout, tma_atom_shape
+from ..tma_utils import SwizzleMode, mma_atom_layout, mma_atom_shape
 
 
 def sf_tmem_layout(rows, sf_mma_k, K, dtype="float8_e8m0fnu"):
@@ -337,7 +337,7 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
     #
     # Priority: MN-major atom match → definitively MN-major (column-major SMEM).
     # K-major atom match → use extent matching to determine semantic majorness,
-    # since tma_shared_layout creates K-major layouts for both [M,K] and [K,M].
+    # since mma_shared_layout creates K-major layouts for both [M,K] and [K,M].
     def compute_canonical_params(buf, buf_region, dtype, is_transposed):
         """Compute descriptor parameters from buffer layout.
 
@@ -382,8 +382,8 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
             SwizzleMode.SWIZZLE_64B_ATOM,
             SwizzleMode.SWIZZLE_32B_ATOM,
         ):
-            swizzle_atom = tma_atom_layout(dtype, mode)
-            base_shape = tma_atom_shape(dtype, mode)  # [8, T*s]
+            swizzle_atom = mma_atom_layout(dtype, mode)
+            base_shape = mma_atom_shape(dtype, mode)  # [8, T*s]
             swapped_shape = [base_shape[1], base_shape[0]]  # [T*s, 8]
 
             # MN-major atom: compose SwizzleLayout with stride-reversed TileLayout
@@ -652,7 +652,8 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
         needs_sf_id = sfa_sf_mma_k < SFA_elem_per_col and sfa_elems_per_ki > 0 and descI is None
 
     # Physical TMEM columns per MMA N tile.
-    # 2x2 layout (Layout B): each MMA tile spans N_mma/2 physical columns (other half in rows 64-127).
+    # 2x2 layout (Layout B): each MMA tile spans N_mma/2 physical columns
+    # and uses rows 64-127 for the other half.
     N_mma_phys_cols = N_mma // 2 if is_2x2 else N_mma
 
     # Build main_impl: descA_in is None when A is in TMEM (ignored by _a_operand).

@@ -1,0 +1,23 @@
+content:
+  details: 'This failure pattern repeated during the alloc_mma rollout: commit sync
+    failed because ruff-format modified several tirx-kernels files, and a later tir
+    pre-commit run modified `cp_async.py`. The fix was to inspect the worktree, accept
+    or refine the hook edits, then rerun `pre-commit run --files ...` until it no
+    longer modified files. Before any commit retry, check `git status --short`; if
+    hook edits remain unstaged, stage them or the next commit attempt will fail the
+    same way.'
+  summary: When pre-commit ruff or ruff-format auto-fixes files, rerun the hook until
+    stable and re-stage the modified files before retrying the commit.
+created: '2026-04-10'
+id: M-20260410-182244-030f70
+scope:
+- repo
+tags:
+- pre-commit
+- ruff
+- git
+- workflow
+- ruff-format
+- commit-sync
+title: Ruff auto-fix creates unstaged changes that fail the next commit
+updated: '2026-04-10'

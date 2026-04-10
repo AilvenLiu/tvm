@@ -27,19 +27,19 @@ from tvm.ir.type import TensorMapType
 from tvm.script import tirx as Tx
 from tvm.tirx import IntImm, StringImm, Var
 from tvm.tirx.exec_scope import ExecScope
-from tvm.tirx.layout import Axis, S, TCol, TileLayout, TLane, tid_in_wg
+from tvm.tirx.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 from tvm.tirx.operator.scope_op import CopyAsync
 from tvm.tirx.operator.scope_op_dispatch.cuda.common import next_power_of_2
 from tvm.tirx.operator.scope_op_dispatch.cuda.copy_async.dsmem import copy_dsmem_impl
-from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
-from tvm.tirx.operator.scope_op_dispatch.dispatcher import DispatchFail
 from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
     SwizzleMode,
-    tma_atom_layout,
-    tma_atom_shape,
-    tma_shared_layout,
+    mma_atom_layout,
+    mma_atom_shape,
+    mma_shared_layout,
 )
+from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.operator.scope_op_dispatch.dispatcher import DispatchFail
 from tvm.tirx.stmt import DeclBuffer, ScopeOpCall
 from tvm.tirx.stmt_functor import StmtExprVisitor
 
@@ -719,7 +719,7 @@ TMA_G2S_CASES = [
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float16", 3, (8, 256)),
+        mma_shared_layout("float16", 3, (8, 256)),
         "float16", "g2s-2d-8x256", id="g2s-2d-8x256",
     ),
     # Task 1: (64,256) → 3D shared (3,64,256), region s=(1:2,...), swizzle_len=3, fp16
@@ -727,7 +727,7 @@ TMA_G2S_CASES = [
         (64, 256), ((0, 64), (0, 256)),
         (3, 64, 256), ((1, 2), (0, 64), (0, 256)),
         TileLayout(S[64, 256]),
-        tma_shared_layout("float16", 3, (3, 64, 256)),
+        mma_shared_layout("float16", 3, (3, 64, 256)),
         "float16", "g2s-3d-shared-64x256", id="g2s-3d-shared-64x256",
     ),
     # Task 2: (32,512) custom atom tile layout, swizzle_len=3, fp16
@@ -736,8 +736,8 @@ TMA_G2S_CASES = [
         (32, 512), ((0, 32), (0, 512)),
         TileLayout(S[32, 512]),
         (
-            tma_atom_layout("float16", 3)
-            .tile_to((16, 256), tma_atom_shape("float16", 3))
+            mma_atom_layout("float16", 3)
+            .tile_to((16, 256), mma_atom_shape("float16", 3))
             .tile_to((32, 512), (16, 256))
         ),
         "float16", "g2s-2d-32x512-atom", id="g2s-2d-32x512-atom",
@@ -747,7 +747,7 @@ TMA_G2S_CASES = [
         (8192, 8192), ((0, 128), (0, 64)),
         (128, 64), ((0, 128), (0, 64)),
         TileLayout(S[8192, 8192]),
-        tma_shared_layout("float16", 3, (128, 64)),
+        mma_shared_layout("float16", 3, (128, 64)),
         "float16", "g2s-2d-partial-8192", id="g2s-2d-partial-8192",
     ),
     # --- From test_copy_g2s_cta_tma_load with other swizzle_len ---
@@ -756,7 +756,7 @@ TMA_G2S_CASES = [
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float16", 2, (8, 256)),
+        mma_shared_layout("float16", 2, (8, 256)),
         "float16", "g2s-2d-8x256-swizzle2", id="g2s-2d-8x256-swizzle2",
     ),
     # swizzle_len=1
@@ -764,7 +764,7 @@ TMA_G2S_CASES = [
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float16", 1, (8, 256)),
+        mma_shared_layout("float16", 1, (8, 256)),
         "float16", "g2s-2d-8x256-swizzle1", id="g2s-2d-8x256-swizzle1",
     ),
     # swizzle_len=0
@@ -772,7 +772,7 @@ TMA_G2S_CASES = [
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float16", 0, (8, 256)),
+        mma_shared_layout("float16", 0, (8, 256)),
         "float16", "g2s-2d-8x256-swizzle0", id="g2s-2d-8x256-swizzle0",
     ),
     # --- From test_copy_g2s_cta_tma_load with other dtypes ---
@@ -780,42 +780,42 @@ TMA_G2S_CASES = [
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("int8", 3, (8, 256)),
+        mma_shared_layout("int8", 3, (8, 256)),
         "int8", "g2s-2d-8x256-int8", id="g2s-2d-8x256-int8",
     ),
     pytest.param(
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("bfloat16", 3, (8, 256)),
+        mma_shared_layout("bfloat16", 3, (8, 256)),
         "bfloat16", "g2s-2d-8x256-bf16", id="g2s-2d-8x256-bf16",
     ),
     pytest.param(
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float32", 3, (8, 256)),
+        mma_shared_layout("float32", 3, (8, 256)),
         "float32", "g2s-2d-8x256-fp32", id="g2s-2d-8x256-fp32",
     ),
     pytest.param(
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("uint8", 3, (8, 256)),
+        mma_shared_layout("uint8", 3, (8, 256)),
         "uint8", "g2s-2d-8x256-uint8", id="g2s-2d-8x256-uint8",
     ),
     pytest.param(
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float8_e4m3fn", 3, (8, 256)),
+        mma_shared_layout("float8_e4m3fn", 3, (8, 256)),
         "float8_e4m3fn", "g2s-2d-8x256-fp8e4m3", id="g2s-2d-8x256-fp8e4m3",
     ),
     pytest.param(
         (8, 256), ((0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[8, 256]),
-        tma_shared_layout("float8_e5m2", 3, (8, 256)),
+        mma_shared_layout("float8_e5m2", 3, (8, 256)),
         "float8_e5m2", "g2s-2d-8x256-fp8e5m2", id="g2s-2d-8x256-fp8e5m2",
     ),
     # --- From test_copy_g2s_cta_tma_load_multi_phase (per-phase slice) ---
@@ -823,14 +823,14 @@ TMA_G2S_CASES = [
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("float16", 3, (8, 256)),
+        mma_shared_layout("float16", 3, (8, 256)),
         "float16", "g2s-multiphase-3x8x256", id="g2s-multiphase-3x8x256",
     ),
     pytest.param(
         (5, 64, 256), ((0, 1), (0, 64), (0, 256)),
         (64, 256), ((0, 64), (0, 256)),
         TileLayout(S[5, 64, 256]),
-        tma_shared_layout("float16", 3, (64, 256)),
+        mma_shared_layout("float16", 3, (64, 256)),
         "float16", "g2s-multiphase-5x64x256", id="g2s-multiphase-5x64x256",
     ),
     pytest.param(
@@ -838,8 +838,8 @@ TMA_G2S_CASES = [
         (32, 512), ((0, 32), (0, 512)),
         TileLayout(S[7, 32, 512]),
         (
-            tma_atom_layout("float16", 3)
-            .tile_to((16, 256), tma_atom_shape("float16", 3))
+            mma_atom_layout("float16", 3)
+            .tile_to((16, 256), mma_atom_shape("float16", 3))
             .tile_to((32, 512), (16, 256))
         ),
         "float16", "g2s-multiphase-7x32x512-atom", id="g2s-multiphase-7x32x512-atom",
@@ -850,7 +850,7 @@ TMA_G2S_CASES = [
         (128, 64), ((0, 128), (0, 64)),
         (2, 2, 128, 64), ((0, 1), (0, 1), (0, 128), (0, 64)),
         TileLayout(S[128, 64]).canonicalize(),
-        tma_shared_layout("float16", 3, (2, 2, 128, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (2, 2, 128, 64)).canonicalize(),
         "float16", "g2s-edge-4d-shared-128x64", id="g2s-edge-4d-shared-128x64",
     ),
     # (128,64) g, partial g=(64:88, 0:64) → (2,2,24,64) s
@@ -858,7 +858,7 @@ TMA_G2S_CASES = [
         (128, 64), ((64, 64 + 24), (0, 64)),
         (2, 2, 24, 64), ((0, 1), (0, 1), (0, 24), (0, 64)),
         TileLayout(S[128, 64]).canonicalize(),
-        tma_shared_layout("float16", 3, (2, 2, 24, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (2, 2, 24, 64)).canonicalize(),
         "float16", "g2s-edge-partial-offset", id="g2s-edge-partial-offset",
     ),
     # (256,64) g, region g=(128:256,...) → (256,64) s, region s=(0:128,...)
@@ -866,7 +866,7 @@ TMA_G2S_CASES = [
         (256, 64), ((128, 256), (0, 64)),
         (256, 64), ((0, 128), (0, 64)),
         TileLayout(S[256, 64]).canonicalize(),
-        tma_shared_layout("float16", 3, (256, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (256, 64)).canonicalize(),
         "float16", "g2s-edge-large-region", id="g2s-edge-large-region",
     ),
     # --- From test_copy_g2s_tma_4d_axis_reorder ---
@@ -874,14 +874,14 @@ TMA_G2S_CASES = [
         (2, 128, 8, 64), ((0, 1), (0, 128), (0, 1), (0, 64)),
         (1, 1, 128, 64), ((0, 1), (0, 1), (0, 128), (0, 64)),
         TileLayout(S[2, 128, 8, 64]).canonicalize(),
-        tma_shared_layout("float16", 3, (1, 1, 128, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (1, 1, 128, 64)).canonicalize(),
         "float16", "g2s-4d-reorder-a", id="g2s-4d-reorder-a",
     ),
     pytest.param(
         (4, 64, 4, 128), ((0, 1), (0, 64), (0, 1), (0, 128)),
         (1, 1, 64, 128), ((0, 1), (0, 1), (0, 64), (0, 128)),
         TileLayout(S[4, 64, 4, 128]).canonicalize(),
-        tma_shared_layout("float16", 3, (1, 1, 64, 128)).canonicalize(),
+        mma_shared_layout("float16", 3, (1, 1, 64, 128)).canonicalize(),
         "float16", "g2s-4d-reorder-b", id="g2s-4d-reorder-b",
     ),
     # --- From test_copy_g2s_tma_partial_region_3d_shared ---
@@ -889,14 +889,14 @@ TMA_G2S_CASES = [
         (128, 256), ((0, 32), (0, 64)),
         (6, 128, 64), ((0, 1), (0, 32), (0, 64)),
         TileLayout(S[128, 256]).canonicalize(),
-        tma_shared_layout("float16", 3, (6, 128, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (6, 128, 64)).canonicalize(),
         "float16", "g2s-partial-3d-shared-a", id="g2s-partial-3d-shared-a",
     ),
     pytest.param(
         (256, 512), ((0, 64), (0, 64)),
         (4, 256, 64), ((1, 2), (0, 64), (0, 64)),
         TileLayout(S[256, 512]).canonicalize(),
-        tma_shared_layout("float16", 3, (4, 256, 64)).canonicalize(),
+        mma_shared_layout("float16", 3, (4, 256, 64)).canonicalize(),
         "float16", "g2s-partial-3d-shared-b", id="g2s-partial-3d-shared-b",
     ),
     # --- From test_copy_tma_multidim_partition ---
@@ -904,14 +904,14 @@ TMA_G2S_CASES = [
         (2, 2, 128, 64), ((0, 1), (0, 1), (0, 128), (0, 64)),
         (128, 64), ((0, 128), (0, 64)),
         TileLayout(S[2, 2, 128, 64]).canonicalize(),
-        tma_shared_layout("float16", 3, (128, 64)),
+        mma_shared_layout("float16", 3, (128, 64)),
         "float16", "g2s-multidim-4d-a", id="g2s-multidim-4d-a",
     ),
     pytest.param(
         (4, 64, 4, 128), ((0, 1), (0, 64), (0, 1), (0, 128)),
         (64, 128), ((0, 64), (0, 128)),
         TileLayout(S[4, 64, 4, 128]).canonicalize(),
-        tma_shared_layout("float16", 3, (64, 128)),
+        mma_shared_layout("float16", 3, (64, 128)),
         "float16", "g2s-multidim-4d-b", id="g2s-multidim-4d-b",
     ),
     # --- From test_copy_tma_3d_contiguous ---
@@ -946,14 +946,14 @@ TMA_S2G_CASES = [
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("float16", 3, (8, 256)),
+        mma_shared_layout("float16", 3, (8, 256)),
         "float16", "s2g-multiphase-3x8x256", id="s2g-multiphase-3x8x256",
     ),
     pytest.param(
         (5, 64, 256), ((0, 1), (0, 64), (0, 256)),
         (64, 256), ((0, 64), (0, 256)),
         TileLayout(S[5, 64, 256]),
-        tma_shared_layout("float16", 3, (64, 256)),
+        mma_shared_layout("float16", 3, (64, 256)),
         "float16", "s2g-multiphase-5x64x256", id="s2g-multiphase-5x64x256",
     ),
     pytest.param(
@@ -961,8 +961,8 @@ TMA_S2G_CASES = [
         (32, 512), ((0, 32), (0, 512)),
         TileLayout(S[7, 32, 512]),
         (
-            tma_atom_layout("float16", 3)
-            .tile_to((16, 256), tma_atom_shape("float16", 3))
+            mma_atom_layout("float16", 3)
+            .tile_to((16, 256), mma_atom_shape("float16", 3))
             .tile_to((32, 512), (16, 256))
         ),
         "float16", "s2g-multiphase-7x32x512-atom", id="s2g-multiphase-7x32x512-atom",
@@ -972,14 +972,14 @@ TMA_S2G_CASES = [
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("float16", 2, (8, 256)),
+        mma_shared_layout("float16", 2, (8, 256)),
         "float16", "s2g-multiphase-3x8x256-swizzle2", id="s2g-multiphase-3x8x256-swizzle2",
     ),
     pytest.param(
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("float16", 0, (8, 256)),
+        mma_shared_layout("float16", 0, (8, 256)),
         "float16", "s2g-multiphase-3x8x256-swizzle0", id="s2g-multiphase-3x8x256-swizzle0",
     ),
     # S2G with different dtypes
@@ -987,14 +987,14 @@ TMA_S2G_CASES = [
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("int8", 3, (8, 256)),
+        mma_shared_layout("int8", 3, (8, 256)),
         "int8", "s2g-multiphase-3x8x256-int8", id="s2g-multiphase-3x8x256-int8",
     ),
     pytest.param(
         (3, 8, 256), ((0, 1), (0, 8), (0, 256)),
         (8, 256), ((0, 8), (0, 256)),
         TileLayout(S[3, 8, 256]),
-        tma_shared_layout("float32", 3, (8, 256)),
+        mma_shared_layout("float32", 3, (8, 256)),
         "float32", "s2g-multiphase-3x8x256-fp32", id="s2g-multiphase-3x8x256-fp32",
     ),
 ]
@@ -1293,7 +1293,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
                 8,  # thread count per CTA
                 TileLayout(S[8, 256]),  # A_layout
                 TileLayout(S[8, 256]),  # B_layout
-                lambda dtype: tma_shared_layout(dtype, 3, (8, 256)),
+                lambda dtype: mma_shared_layout(dtype, 3, (8, 256)),
             ),
             id="g2s-2d-basic",
         ),
@@ -1307,7 +1307,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
                 8,
                 TileLayout(S[3, 8, 256]),
                 TileLayout(S[3, 8, 256]),
-                lambda dtype: tma_shared_layout(dtype, 3, (8, 256)),
+                lambda dtype: mma_shared_layout(dtype, 3, (8, 256)),
             ),
             id="g2s-3d-pipeline",
         ),
@@ -1321,7 +1321,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
                 128,
                 TileLayout(S[2, 2, 128, 64]).canonicalize(),
                 TileLayout(S[2, 2, 128, 64]).canonicalize(),
-                lambda dtype: tma_shared_layout(dtype, 3, (128, 64)),
+                lambda dtype: mma_shared_layout(dtype, 3, (128, 64)),
             ),
             id="g2s-4d-unit-dims",
         ),
@@ -1470,7 +1470,7 @@ def test_copy_tma_gpu_smoke_s2g(dtype):
     thread_cnt = 8
     n = g_shape[0]
 
-    shared_layout = tma_shared_layout(dtype, 3, s_shape)
+    shared_layout = mma_shared_layout(dtype, 3, s_shape)
 
     smem_bytes = functools.reduce(lambda acc, e: acc * e, s_shape, 1)
     smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
@@ -1614,7 +1614,7 @@ def test_smem2tmem_async(task):
 
     # Swizzle compatibility check
     if swizzle_mode > 0:
-        atom_shape = tma_atom_shape(dtype, SwizzleMode(swizzle_mode))
+        atom_shape = mma_atom_shape(dtype, SwizzleMode(swizzle_mode))
         atom_cols = atom_shape[-1]
         if WIDTH < atom_cols or WIDTH % atom_cols != 0:
             pytest.skip(f"WIDTH {WIDTH} not compatible with swizzle mode {swizzle_mode}")
@@ -1641,7 +1641,7 @@ def test_smem2tmem_async(task):
         tmem_n_cols = max(32, next_power_of_2(width_32b))
 
     if swizzle_mode > 0:
-        smem_layout = tma_shared_layout(dtype, SwizzleMode(swizzle_mode), smem_shape)
+        smem_layout = mma_shared_layout(dtype, SwizzleMode(swizzle_mode), smem_shape)
     else:
         smem_layout = TileLayout(S[smem_rows, VEC_LEN]).tile_to(smem_shape, (smem_rows, VEC_LEN))
     local_view = TileLayout(S[(128, WIDTH) : (1 @ tid_in_wg, 1)])
@@ -1937,29 +1937,46 @@ def _count_s2c_ops(impl):
 # GPU correctness (all non-fail cases) uses src_spec as the layout for both CTAs.
 DSMEM_CONFIGS = [
     pytest.param(
-        (128, 64), "float16", S[128, 64], S[128, 64], 1,
+        (128, 64),
+        "float16",
+        S[128, 64],
+        S[128, 64],
+        1,
         id="contiguous-2d",
     ),
     pytest.param(
-        (256,), "float16", S[256], S[256], 1,
+        (256,),
+        "float16",
+        S[256],
+        S[256],
+        1,
         id="contiguous-1d",
     ),
     # Stride gap: inner 128 contiguous, outer stride=256 (gap) → 8 bulk copies
     pytest.param(
-        (8, 128), "float16",
-        S[(8, 128) : (256, 1)], S[(8, 128) : (256, 1)], 8,
+        (8, 128),
+        "float16",
+        S[(8, 128) : (256, 1)],
+        S[(8, 128) : (256, 1)],
+        8,
         id="stride-gap",
     ),
     # Different outer strides → 8 bulk copies in dispatch
     pytest.param(
-        (8, 128), "float16",
-        S[(8, 128) : (256, 1)], S[(8, 128) : (512, 1)], 8,
+        (8, 128),
+        "float16",
+        S[(8, 128) : (256, 1)],
+        S[(8, 128) : (512, 1)],
+        8,
         id="partial-contiguity-diff-stride",
     ),
     # Incompatible: row-major vs column-major → DispatchFail
     pytest.param(
-        (4, 64), "float16",
-        S[4, 64], S[(4, 64) : (1, 4)], "fail",
+        (4, 64),
+        "float16",
+        S[4, 64],
+        S[(4, 64) : (1, 4)],
+        "fail",
         id="incompatible-row-vs-col",
     ),
 ]
@@ -2091,13 +2108,9 @@ def test_dsmem_dispatch_missing_config():
     sctx = DispatchContext(target, ExecScope.create("thread"), {}, {})
 
     with pytest.raises(DispatchFail, match="remote_cta_id"):
-        copy_dsmem_impl(
-            CopyAsync(br, br, config={"mbar": Var("m", "handle")}), sctx
-        )
+        copy_dsmem_impl(CopyAsync(br, br, config={"mbar": Var("m", "handle")}), sctx)
     with pytest.raises(DispatchFail, match="mbar"):
-        copy_dsmem_impl(
-            CopyAsync(br, br, config={"remote_cta_id": IntImm("int32", 1)}), sctx
-        )
+        copy_dsmem_impl(CopyAsync(br, br, config={"remote_cta_id": IntImm("int32", 1)}), sctx)
 
 
 if __name__ == "__main__":
