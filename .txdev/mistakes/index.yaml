@@ -560,13 +560,30 @@ entries:
   - cuda
   title: Direct PTX codegen tests may use pointer forms not seen in runtime lowering
   updated: '2026-04-10'
+- created: '2026-04-11'
+  id: M-20260411-190132-4dc261
+  path: entries/M-20260411-190132-4dc261.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - tmem
+  - allocator
+  - api-design
+  - simplification
+  title: Do not invent a second buffer abstraction when the allocator can return decl_buffer
+  updated: '2026-04-11'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
+  allocator:
+  - M-20260411-190132-4dc261
   annotation:
   - M-20260322-182024-631109
   api:
   - M-20260301-0002
+  api-design:
+  - M-20260411-190132-4dc261
   assumptions:
   - M-20260319-022448-b1a13a
   backward-compat:
@@ -768,6 +785,8 @@ tags:
   - M-20260307-231252-423c4d
   shell:
   - M-20260228-0003
+  simplification:
+  - M-20260411-190132-4dc261
   smem:
   - M-20260325-174353-51abbb
   - M-20260326-030916-a222d4
@@ -812,6 +831,7 @@ tags:
   - M-20260327-142529-bcec6f
   - M-20260327-170120-886c27
   - M-20260410-182244-61efe4
+  - M-20260411-190132-4dc261
   tirx-kernels:
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726
@@ -819,6 +839,8 @@ tags:
   - M-20260327-185547-3913ba
   - M-20260328-001753-acf9c3
   - M-20260328-005952-98bd91
+  tmem:
+  - M-20260411-190132-4dc261
   tvmscript:
   - M-20260322-182024-631109
   txdev:

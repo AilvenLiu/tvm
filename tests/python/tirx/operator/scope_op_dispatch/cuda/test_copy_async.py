@@ -2038,7 +2038,7 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
             Tx.thread_id([1], parent="cta")
 
             with Tx.cta():
-                pool = Tx.PoolAllocator()
+                pool = Tx.SMEMPool()
                 # src_smem: CTA 0 writes here, dispatch reads from here
                 src_raw = pool.alloc([src_phys], dtype, align=128)
                 src_smem = Tx.decl_buffer(

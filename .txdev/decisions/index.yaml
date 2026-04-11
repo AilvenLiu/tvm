@@ -560,11 +560,27 @@ entries:
   - swizzle
   title: Default alloc_mma to 128B swizzle with explicit escape hatches
   updated: '2026-04-10'
+- created: '2026-04-11'
+  id: ADR-20260411-190132-ca1334
+  path: entries/ADR-20260411-190132-ca1334.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - tmem
+  - allocator
+  - api-design
+  - parse-time
+  - naming
+  title: TMEMPool mirrors SMEMPool and keeps fence or sync logic at kernel callsites
+  updated: '2026-04-11'
 tags:
   API:
   - ADR-20260323-185836-cff692
   alloc-local:
   - ADR-20260322-182024-efa75b
+  allocator:
+  - ADR-20260411-190132-ca1334
   api:
   - ADR-20260228-0003
   api-design:
@@ -577,6 +593,7 @@ tags:
   - ADR-20260326-004750-de4733
   - ADR-20260328-001753-19aa69
   - ADR-20260410-182244-433bb3
+  - ADR-20260411-190132-ca1334
   api-evolution:
   - ADR-20260228-0002
   - ADR-20260327-142529-3943af
@@ -722,6 +739,8 @@ tags:
   - ADR-20260327-142529-3943af
   - ADR-20260327-142529-6acc98
   - ADR-20260327-185547-d8244c
+  naming:
+  - ADR-20260411-190132-ca1334
   op-schedule:
   - ADR-20260301-0002
   - ADR-20260301-0003
@@ -730,6 +749,8 @@ tags:
   - ADR-20260308-232603-d77714
   packaging:
   - ADR-20260320-002326-d2fa6d
+  parse-time:
+  - ADR-20260411-190132-ca1334
   parser:
   - ADR-20260228-0002
   - ADR-20260322-182024-3e7d62
@@ -827,6 +848,7 @@ tags:
   - ADR-20260327-170120-2d4805
   - ADR-20260328-001753-19aa69
   - ADR-20260410-182244-433bb3
+  - ADR-20260411-190132-ca1334
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   - ADR-20260328-005952-4cf57e
@@ -834,6 +856,7 @@ tags:
   - ADR-20260227-0002
   tmem:
   - ADR-20260322-182024-efa75b
+  - ADR-20260411-190132-ca1334
   tooling:
   - ADR-20260228-0001
   - ADR-20260324-171756-b03f0f

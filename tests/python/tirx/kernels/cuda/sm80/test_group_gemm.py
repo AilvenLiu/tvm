@@ -273,7 +273,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
             lane_id = Tx.thread_id([32], parent="warp")
 
             buf = Tx.alloc_shared([SMEM_SIZE * WARP_GROUP_COUNT], "uint8", scope="shared.dyn")
-            pool = Tx.PoolAllocator(buf.data)
+            pool = Tx.SMEMPool(buf.data)
             A_smem = pool.alloc([NUM_STAGES *  BLK_M * BLK_K], "float16", align=16)
             B_smem = pool.alloc([NUM_STAGES *  BLK_N * BLK_K], "float16", align=16)
             pool.move_base_to(0)

@@ -109,8 +109,8 @@ class SmemManager:
         self.chunk_num = smem_max_bytes // chunk_size
         assert self.chunk_num <= 32
         self.ptr = ptr
-        self.reguler_pool_allocator = Tx.PoolAllocator(ptr)
-        self.persistent_pool_allocator = Tx.PoolAllocator(None if fusion_mode else ptr)
+        self.reguler_pool_allocator = Tx.SMEMPool(ptr)
+        self.persistent_pool_allocator = Tx.SMEMPool(None if fusion_mode else ptr)
         self.tiles = {}  # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]  # noqa: E501
         self.runtime_tile_chunk_count = {}
         self.bufs = {}  # buf -> (split, beg, size, method)

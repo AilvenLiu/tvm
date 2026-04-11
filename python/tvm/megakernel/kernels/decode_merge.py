@@ -96,7 +96,7 @@ class DecodeMergeTile(Tile):
         self.o_tmp = Tx.alloc_local([self.vec_size], "float32", name="o_tmp")
 
     @Tx.inline
-    def init(self, pool_allocator: Tx.PoolAllocator):
+    def init(self, pool_allocator: Tx.SMEMPool):
         self.alloc_buffer(pool_allocator)
 
     @Tx.inline

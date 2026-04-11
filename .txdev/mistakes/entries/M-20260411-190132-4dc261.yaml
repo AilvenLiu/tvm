@@ -1,0 +1,25 @@
+content:
+  details: 'The initial implementation tried to model TMEM through a separate TMEMPartition
+    layer with alloc_at, borrow_as or alias helpers, shape metadata, slice helpers,
+    and allocator-managed typed views. That made the API diverge from the already
+    successful shared-memory allocator pattern, increased callsite verbosity, and
+    created unnecessary formatting and review churn because kernels were no longer
+    dealing with ordinary buffers. The merged design was much simpler: mirror SMEMPool,
+    let alloc() return decl_buffer, use move_base_to() for physical placement escape
+    hatches, and keep only TMEM-specific lifetime handling inside the pool. Next time,
+    start from the closest existing allocator abstraction in the repo and require
+    every extra API surface to justify why a plain decl_buffer is insufficient.'
+  summary: The first TMEMPool design added TMEMPartition, pool-owned views, and extra
+    indexing APIs that duplicated decl_buffer behavior and created avoidable churn.
+created: '2026-04-11'
+id: M-20260411-190132-4dc261
+scope:
+- repo
+tags:
+- tirx
+- tmem
+- allocator
+- api-design
+- simplification
+title: Do not invent a second buffer abstraction when the allocator can return decl_buffer
+updated: '2026-04-11'

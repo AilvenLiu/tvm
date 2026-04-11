@@ -28,6 +28,7 @@ from tvm.tirx.predicate import Predicate
 
 from . import _ffi_api, frame
 from .ir import alloc_buffer, attr, decl_buffer, meta_class
+from .tmem_pool import TMEMPool
 
 
 def _to_region(buffer: BufferRegion | Buffer):
@@ -38,7 +39,7 @@ def _to_region(buffer: BufferRegion | Buffer):
 
 
 def _wrap_elem_in_tuple(e):
-    if isinstance(e, (tuple, list)):  # noqa: UP038
+    if isinstance(e, tuple | list):
         return e
     return (e,)
 
@@ -1297,7 +1298,7 @@ def _auto_swizzle_mode(dtype):
 
 
 @meta_class
-class PoolAllocator:
+class SMEMPool:
     """Bump allocator over a contiguous shared memory region.
 
     Parameters
@@ -1480,7 +1481,8 @@ def permute_dims(
 
 
 __all__ = [
-    "PoolAllocator",
+    "SMEMPool",
+    "TMEMPool",
     "add",
     "binary_chain",
     "binary_reduce",

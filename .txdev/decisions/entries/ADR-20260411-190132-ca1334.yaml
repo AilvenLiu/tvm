@@ -1,0 +1,28 @@
+content:
+  details: The adopted TMEM API intentionally mirrors SMEMPool instead of defining
+    a separate persistent partition abstraction. alloc(shape, dtype, layout=None,
+    cols=None) returns a standard TMEM decl_buffer, move_base_to(col) handles non-sequential
+    physical placement such as FA4 fp16 aliases or nvfp4 overlap windows, and commit()
+    or dealloc() only manage the tcgen05 hardware lifetime. Fence, sync, and zero-address
+    assertions stay at kernel callsites because their placement depends on each kernel's
+    full resource initialization order rather than on TMEM alone. For staged indexing,
+    TMEMRegion is only parse-time sugar layered on top of an already allocated buffer.
+    As part of the same cleanup, the shared-memory allocator is named SMEMPool and
+    the old PoolAllocator compatibility alias is removed once in-tree callsites are
+    migrated.
+  summary: 'TMEMPool follows the SMEMPool mental model: alloc returns decl_buffer,
+    move_base_to handles physical placement, and only TMEM hardware lifetime stays
+    in the pool.'
+created: '2026-04-11'
+id: ADR-20260411-190132-ca1334
+scope:
+- repo
+tags:
+- tirx
+- tmem
+- allocator
+- api-design
+- parse-time
+- naming
+title: TMEMPool mirrors SMEMPool and keeps fence or sync logic at kernel callsites
+updated: '2026-04-11'

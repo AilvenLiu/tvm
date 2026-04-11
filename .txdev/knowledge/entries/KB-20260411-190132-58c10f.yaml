@@ -1,0 +1,26 @@
+content:
+  details: 'During the FA4 TMEM helper refactor, inline helpers that returned buffers
+    or consumed Python tuple plans ran into parser and type-system limits, including
+    buffer-return type mismatches, for-loop shape restrictions, and list-indexing
+    failures against parser Vars. The stable pattern was to keep the abstraction parse-time
+    but not force it through @Tx.inline: use @meta_class for structured helper objects
+    such as TMEMRegion or fp16-on-f32 scratch wrappers, and use plain Python helper
+    functions that emit Tx ops directly. When a helper needs local scratch storage,
+    allocate it explicitly with Tx.alloc_buffer(..., scope="local") instead of relying
+    on annotated local buffer declarations inside the helper body.'
+  summary: '@Tx.inline is not suitable for helpers that need to return buffers or
+    iterate Python tuple configs; use @meta_class wrappers or plain parse-time Python
+    helpers instead.'
+created: '2026-04-11'
+id: KB-20260411-190132-58c10f
+scope:
+- repo
+tags:
+- tirx
+- tmem
+- parse-time
+- helpers
+- inline
+- meta-class
+title: Use meta_class or plain parse-time helpers when inline helpers need buffers
+updated: '2026-04-11'

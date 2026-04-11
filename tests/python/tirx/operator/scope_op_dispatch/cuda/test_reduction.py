@@ -950,7 +950,7 @@ def test_reduction_warp_shuffle_multi_warp_loop():
             thread_id = Tx.meta_var(ty * BDX + tx)
 
             with Tx.cta():
-                pool = Tx.PoolAllocator()
+                pool = Tx.SMEMPool()
                 sum_smem = pool.alloc([BDY], "float32")
                 pool.commit()
 
