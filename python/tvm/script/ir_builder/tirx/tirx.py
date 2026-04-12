@@ -1414,6 +1414,10 @@ class SMEMPool:
             attr_frame.__enter__()
 
 
+# Backward-compatible alias used by existing kernels.
+PoolAllocator = SMEMPool
+
+
 def reshape(buffer: Buffer, shape: list[PrimExpr]):
     # auto-infer the shape if shape has only one -1
     # for example, if buffer.shape is (1024, 1024) and shape is (128, -1, 2), then the new shape will be (128, 4, 2)  # noqa: E501
@@ -1481,6 +1485,7 @@ def permute_dims(
 
 
 __all__ = [
+    "PoolAllocator",
     "SMEMPool",
     "TMEMPool",
     "add",

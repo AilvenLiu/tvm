@@ -34,14 +34,14 @@ After (scheduled PrimFunc, spatial_len=6, reduction_len=4):
         for red in range(4):
             B_local[spa] = B_local[spa] + A_local[spa * 4 + red]
 
-(B) Warp scope -- layout-driven reduction with optional shfl_xor
+(B) Warp/Warpgroup scope -- layout-driven reduction
     (_emit_reduction_local_view):
     Requires TileLayout with valid thread-partition. Decomposes layout to
     identify thread-local elements, then optionally shuffles partial sums.
 
-    thread_reduce=False: local-only, no shuffle.
-    thread_reduce=True: local reduction + cross-thread shfl_xor steps.
-    accum=True + shuffle: saves old dst before reduce+shuffle, combines after.
+    thread_reduce=False: local-only, no shuffle (warp and warpgroup).
+    thread_reduce=True: local reduction + cross-thread shfl_xor steps (warp only).
+    accum=True + shuffle: saves old dst before reduce+shuffle, combines after (warp only).
 
 Before:
     with Tx.warp():
@@ -170,7 +170,13 @@ def validate_reduction_local(
 
     if sctx.exec_scope.name == "thread":
         return True, None  # thread-wise reduction
-    elif sctx.exec_scope.name == "warp":
+    elif sctx.exec_scope.name in ["warp", "warpgroup"]:
+        if sctx.exec_scope.name != "warp" and op.config.get("thread_reduce", False):
+            return (
+                False,
+                "thread_reduce=True is only supported in warp scope; "
+                "warpgroup local reduction is thread-local only",
+            )
         # VIEW: need layouts and layout analysis
         if not (src.layout and dst.layout):
             return False, "layouts required for view-based local reduction"
@@ -185,12 +191,13 @@ def validate_reduction_local(
         src_st, src_extent = get_st_extent(src_br)
         dst_st, dst_extent = get_st_extent(dst_br)
 
-        # Check for laneid shard->replica shuffle reduce pattern first.
-        # This pattern has laneid in dst replica (broadcast), which the
-        # general validation below would reject.
-        shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
-        if shuffle_info is not None:
-            return True, None
+        if sctx.exec_scope.name == "warp":
+            # Check for laneid shard->replica shuffle reduce pattern first.
+            # This pattern has laneid in dst replica (broadcast), which the
+            # general validation below would reject.
+            shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
+            if shuffle_info is not None:
+                return True, None
 
         for layout, buf, st, ext, name in [
             (src.layout, src, src_st, src_extent, "src"),
@@ -411,20 +418,26 @@ def reduction_local_impl(
         return _emit_reduction_local_thread_wise(
             dst_br, src_br, accum, op_type, reduce_dims, spatial_dims
         )
-    elif sctx.exec_scope.name == "warp":
+    elif sctx.exec_scope.name in ["warp", "warpgroup"]:
         src = src_br.buffer
         dst = dst_br.buffer
 
-        # --- Try laneid shard->replica shuffle reduce ---
-        shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
-        if shuffle_info is not None:
-            reduce_width, local_elems = shuffle_info
-            if op_type not in _REDUCE_OP_TO_STR:
-                fail(f"unsupported reduce op: {op_type}")
-            dtype = src.dtype
-            init_value = reduce_default_value_table(dtype).get(op_type)
-            return _gen_warp_shuffle_reduce(
-                src, dst, reduce_width, local_elems, accum, op_type, init_value
+        if sctx.exec_scope.name == "warp":
+            # --- Try laneid shard->replica shuffle reduce ---
+            shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
+            if shuffle_info is not None:
+                reduce_width, local_elems = shuffle_info
+                if op_type not in _REDUCE_OP_TO_STR:
+                    fail(f"unsupported reduce op: {op_type}")
+                dtype = src.dtype
+                init_value = reduce_default_value_table(dtype).get(op_type)
+                return _gen_warp_shuffle_reduce(
+                    src, dst, reduce_width, local_elems, accum, op_type, init_value
+                )
+        elif config.get("thread_reduce", False):
+            fail(
+                "thread_reduce=True is only supported in warp scope; "
+                "warpgroup local reduction is thread-local only"
             )
 
         # --- Existing WGMMA layout path below ---

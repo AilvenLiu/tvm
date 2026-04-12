@@ -1,0 +1,22 @@
+content:
+  details: 'The initial implementation attempted wg-source to flat-scalar reduction
+    paths (`Tx.max`/`Tx.sum`) and also explored thread-local fallbacks, but review
+    feedback clarified the intended contract: wg-level dispatch is for element-wise
+    ops, while reduction destinations remain per-thread scalar buffers under `with
+    Tx.thread()`. This created avoidable churn in dispatch code and kernels. Next
+    time, lock an explicit op-by-op compatibility matrix before coding (allowed layouts
+    for dst/src per op) and encode it in tests first.'
+  summary: I implemented mixed reduction dispatch too early and had to roll it back
+    after review clarified that reductions must stay per-thread scalar.
+created: '2026-04-11'
+id: M-20260411-224052-4d6171
+scope:
+- repo
+tags:
+- tirx
+- dispatch
+- reduction
+- scope-control
+- review
+title: Extending wg dispatch to reduction before locking op boundaries
+updated: '2026-04-11'

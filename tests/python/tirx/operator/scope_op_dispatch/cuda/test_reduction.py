@@ -20,7 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tirx.layout import R, S, TileLayout, laneid
+from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
 
 
 @pytest.mark.parametrize(
@@ -1014,6 +1014,59 @@ def test_reduction_warp_shuffle_multi_warp_loop():
         # Each iteration: sum across all N threads
         B_ref = A_np.astype("float64").sum(axis=1).astype("float32")
         tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-3)
+
+
+@pytest.mark.parametrize("op_name", ["sum", "max"])
+def test_reduction_warpgroup_wg_local_layout(op_name):
+    rows, cols = 128, 16
+    dtype = "float32"
+    dev = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (rows, cols), dtype, layout=TileLayout(S[(rows, cols)]))
+        B = Tx.match_buffer(B_ptr, (rows, 1), dtype, layout=TileLayout(S[(rows, 1)]))
+
+        with Tx.kernel():
+            _bx = Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            tid = Tx.thread_id([rows], parent="warpgroup")
+
+            src = Tx.alloc_buffer((rows, cols), dtype, scope="local", layout=wg_local_layout(cols))
+            dst = Tx.alloc_buffer((rows, 1), dtype, scope="local", layout=wg_local_layout(1))
+
+            with Tx.thread():
+                src_local = src.local(cols)
+                for i in Tx.serial(cols):
+                    src_local[i] = A[tid, i]
+
+            with Tx.warpgroup():
+                if op_name == "sum":
+                    Tx.sum(dst, src, axes=[-1], accum=False)
+                else:
+                    Tx.max(dst, src, axes=[-1], accum=False)
+
+            with Tx.thread():
+                dst_local = dst.local(1)
+                B[tid, 0] = dst_local[0]
+
+    with target:
+        np.random.seed(0)
+        A_np = np.random.rand(rows, cols).astype(dtype)
+        B_np = np.zeros((rows, 1), dtype=dtype)
+        A_dev = tvm.runtime.tensor(A_np, dev)
+        B_dev = tvm.runtime.tensor(B_np, dev)
+
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod(A_dev, B_dev)
+
+        if op_name == "sum":
+            B_ref = A_np.sum(axis=1, keepdims=True)
+        else:
+            B_ref = A_np.max(axis=1, keepdims=True)
+        tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-5)
 
 
 if __name__ == "__main__":

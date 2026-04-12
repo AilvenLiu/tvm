@@ -47,6 +47,11 @@ _LOCAL_CASE_VIEW_SLICED = "view_sliced"
 _LOCAL_CASE_THREAD_WISE = "thread_wise"
 
 
+def _has_nontrivial_layout(buf: Buffer) -> bool:
+    layout = buf.layout
+    return layout is not None and not layout.is_trivial()
+
+
 def _classify_cast_local_case(
     dst_region: BufferRegion,
     src_region: BufferRegion,
@@ -81,84 +86,111 @@ def validate_cast_local_view(
     if not (
         src.scope() == "local"
         and dst.scope() == "local"
-        and src.layout
-        and dst.layout
         and sctx.is_cuda()
         and sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"]
     ):
         return False
 
+    src_has_layout = _has_nontrivial_layout(src)
+    dst_has_layout = _has_nontrivial_layout(dst)
+    if not (src_has_layout or dst_has_layout):
+        return False
+
     analyzer = Analyzer()
-
-    src_region_extents = [r.extent for r in src_buffer_region.region]
-    dst_region_extents = [r.extent for r in dst_buffer_region.region]
-    if len(src_region_extents) != len(dst_region_extents):
-        return False
-    if not all(
-        analyzer.can_prove_equal(s, d) for s, d in zip(src_region_extents, dst_region_extents)
-    ):
-        return False
-    if (
-        (src.layout.size() != dst.layout.size())
-        or src.layout.is_swizzle()
-        or dst.layout.is_swizzle()
-    ):
-        return False
-    if not isinstance(src.layout, TileLayout) or not isinstance(dst.layout, TileLayout):
-        return False
-    if not getattr(src.layout, "shard", None) or not getattr(dst.layout, "shard", None):
-        return False
-
     src_st, src_extent = get_st_extent(src_buffer_region)
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
 
-    for layout, buf, st, ext in [
-        (src.layout, src, src_st, src_extent),
-        (dst.layout, dst, dst_st, dst_extent),
-    ]:
+    def _validate_layout_partition(layout, buf, st, ext) -> tuple[bool, tuple | None]:
+        if layout.is_swizzle():
+            return False, None
+        if not isinstance(layout, TileLayout):
+            return False, None
+        if not getattr(layout, "shard", None):
+            return False, None
+        if not any(it.axis.is_thread() for it in layout.shard):
+            return False, None
         for it in layout.shard:
             if it.axis.is_thread() and analyzer.can_prove_equal(it.stride, 0):
-                return False
+                return False, None
         replica = getattr(layout, "replica", None) or []
         if any(it.axis.is_thread() for it in replica):
+            return False, None
+        local_info = get_local_region(layout, list(buf.shape), st, ext)
+        if local_info is None:
+            return False, None
+        return True, local_info
+
+    if src_has_layout and dst_has_layout:
+        src_region_extents = [r.extent for r in src_buffer_region.region]
+        dst_region_extents = [r.extent for r in dst_buffer_region.region]
+        if len(src_region_extents) != len(dst_region_extents):
             return False
-        if get_local_region(layout, list(buf.shape), st, ext) is None:
+        if not all(
+            analyzer.can_prove_equal(s, d) for s, d in zip(src_region_extents, dst_region_extents)
+        ):
+            return False
+        if src.layout.size() != dst.layout.size():
             return False
 
-    # Slice → Canonicalize
-    src_sliced = get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
-    dst_sliced = get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
+        src_ok, _ = _validate_layout_partition(src.layout, src, src_st, src_extent)
+        if not src_ok:
+            return False
+        dst_ok, _ = _validate_layout_partition(dst.layout, dst, dst_st, dst_extent)
+        if not dst_ok:
+            return False
 
-    src_can = src_sliced.canonicalize() if hasattr(src_sliced, "canonicalize") else src_sliced
-    dst_can = dst_sliced.canonicalize() if hasattr(dst_sliced, "canonicalize") else dst_sliced
+        # Slice -> Canonicalize
+        src_sliced = get_sublayout_from_region(src.layout, src.shape, src_st, src_extent)
+        dst_sliced = get_sublayout_from_region(dst.layout, dst.shape, dst_st, dst_extent)
 
-    src_sig = layout_signature(src_can)
-    dst_sig = layout_signature(dst_can)
+        src_can = src_sliced.canonicalize() if hasattr(src_sliced, "canonicalize") else src_sliced
+        dst_can = dst_sliced.canonicalize() if hasattr(dst_sliced, "canonicalize") else dst_sliced
 
-    # Here check the canonicalized layouts are semantically equal.
-    if not sig_equal(analyzer, src_sig, dst_sig):
-        return False
+        src_sig = layout_signature(src_can)
+        dst_sig = layout_signature(dst_can)
 
-    # Resolve thread vars once; reuse for launch count check
-    thread_vars_list = []
-    thr_extents = []
-    for it in src_sliced.shard:
-        if it.axis.is_thread():
-            var = resolve_thread_var(it.axis, sctx)
-            if var is None:
-                return False
-            thread_vars_list.append(var)
-            thr_extents.append(it.extent)
+        # Here check the canonicalized layouts are semantically equal.
+        if not sig_equal(analyzer, src_sig, dst_sig):
+            return False
 
-    if thread_vars_list and "threadIdx.x" in sctx.launch_params:
-        expected = functools.reduce(operator.mul, thr_extents, 1)
-        actual = sctx.launch_params["threadIdx.x"].dom.extent
-        if len(set(id(v) for v in thread_vars_list)) == 1:
-            if thread_vars_list[0] is sctx.launch_params["threadIdx.x"].var:
-                if not analyzer.can_prove_equal(actual, expected):
+        # Resolve thread vars once; reuse for launch count check
+        thread_vars_list = []
+        thr_extents = []
+        for it in src_sliced.shard:
+            if it.axis.is_thread():
+                var = resolve_thread_var(it.axis, sctx)
+                if var is None:
                     return False
+                thread_vars_list.append(var)
+                thr_extents.append(it.extent)
 
-    return True
+        if thread_vars_list and "threadIdx.x" in sctx.launch_params:
+            expected = functools.reduce(operator.mul, thr_extents, 1)
+            actual = sctx.launch_params["threadIdx.x"].dom.extent
+            if len(set(id(v) for v in thread_vars_list)) == 1:
+                if thread_vars_list[0] is sctx.launch_params["threadIdx.x"].var:
+                    if not analyzer.can_prove_equal(actual, expected):
+                        return False
+        return True
+
+    if src_has_layout:
+        src_ok, src_local_info = _validate_layout_partition(src.layout, src, src_st, src_extent)
+        if not src_ok:
+            return False
+        assert src_local_info is not None
+        _, _, src_local_ext = src_local_info
+        src_local_total = functools.reduce(operator.mul, src_local_ext, 1)
+        dst_total = functools.reduce(operator.mul, dst_extent, 1)
+        return analyzer.can_prove_equal(src_local_total, dst_total)
+
+    dst_ok, dst_local_info = _validate_layout_partition(dst.layout, dst, dst_st, dst_extent)
+    if not dst_ok:
+        return False
+    assert dst_local_info is not None
+    _, _, dst_local_ext = dst_local_info
+    dst_local_total = functools.reduce(operator.mul, dst_local_ext, 1)
+    src_total = functools.reduce(operator.mul, src_extent, 1)
+    return analyzer.can_prove_equal(dst_local_total, src_total)
 
 
 def _emit_cast_local_view_full(
@@ -253,6 +285,60 @@ def _emit_cast_local_view_sliced(
     return impl
 
 
+def _emit_cast_local_view_src_layout_to_flat(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    src_local_info,
+) -> PrimFunc | None:
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+
+    src_local_shape, src_local_st, src_local_ext = src_local_info
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+    local_total = functools.reduce(operator.mul, src_local_ext, 1)
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with Tx.thread():
+            src_local = src.local(*src_local_shape)
+            for s in Tx.serial(0, local_total):
+                fused = Tx.meta_var(s)
+                src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
+                dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                dst[tuple(dst_indices)] = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
+    # fmt: on
+
+    return impl
+
+
+def _emit_cast_local_view_flat_to_dst_layout(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    dst_local_info,
+) -> PrimFunc | None:
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+
+    dst_local_shape, dst_local_st, dst_local_ext = dst_local_info
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    local_total = functools.reduce(operator.mul, dst_local_ext, 1)
+
+    # fmt: off
+    @Tx.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with Tx.thread():
+            dst_local = dst.local(*dst_local_shape)
+            for s in Tx.serial(0, local_total):
+                fused = Tx.meta_var(s)
+                src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
+                dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
+                dst_local[tuple(dst_indices)] = Tx.cast(src[tuple(src_indices)], dst.dtype)
+    # fmt: on
+
+    return impl
+
+
 def cast_local_view_impl(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
@@ -264,25 +350,49 @@ def cast_local_view_impl(
     if sctx.exec_scope.name not in ["warp", "warpgroup", "cta", "cluster"]:
         fail(f"unsupported exec_scope {sctx.exec_scope.name} for local-view cast")
 
-    local_case = _classify_cast_local_case(dst_buffer_region, src_buffer_region, sctx)
+    src_has_layout = _has_nontrivial_layout(src)
+    dst_has_layout = _has_nontrivial_layout(dst)
 
-    dst_st, dst_extent = get_st_extent(dst_buffer_region)
-    dst_local_info = get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
-    if not dst_local_info:
-        fail("dst layout is not supported for local-view cast")
+    if src_has_layout and dst_has_layout:
+        local_case = _classify_cast_local_case(dst_buffer_region, src_buffer_region, sctx)
 
-    if local_case == _LOCAL_CASE_VIEW_FULL:
-        return _emit_cast_local_view_full(dst_buffer_region, src_buffer_region, dst_local_info)
+        dst_st, dst_extent = get_st_extent(dst_buffer_region)
+        dst_local_info = get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
+        if not dst_local_info:
+            fail("dst layout is not supported for local-view cast")
 
-    # view_sliced
-    src_st, src_extent = get_st_extent(src_buffer_region)
-    src_local_info = get_local_region(src.layout, list(src.shape), src_st, src_extent)
-    if not src_local_info:
-        fail("src layout is not supported for local-view cast")
+        if local_case == _LOCAL_CASE_VIEW_FULL:
+            return _emit_cast_local_view_full(dst_buffer_region, src_buffer_region, dst_local_info)
 
-    return _emit_cast_local_view_sliced(
-        dst_buffer_region, src_buffer_region, dst_local_info, src_local_info
-    )
+        # view_sliced
+        src_st, src_extent = get_st_extent(src_buffer_region)
+        src_local_info = get_local_region(src.layout, list(src.shape), src_st, src_extent)
+        if not src_local_info:
+            fail("src layout is not supported for local-view cast")
+
+        return _emit_cast_local_view_sliced(
+            dst_buffer_region, src_buffer_region, dst_local_info, src_local_info
+        )
+
+    if src_has_layout:
+        src_st, src_extent = get_st_extent(src_buffer_region)
+        src_local_info = get_local_region(src.layout, list(src.shape), src_st, src_extent)
+        if not src_local_info:
+            fail("src layout is not supported for local-view cast")
+        return _emit_cast_local_view_src_layout_to_flat(
+            dst_buffer_region, src_buffer_region, src_local_info
+        )
+
+    if dst_has_layout:
+        dst_st, dst_extent = get_st_extent(dst_buffer_region)
+        dst_local_info = get_local_region(dst.layout, list(dst.shape), dst_st, dst_extent)
+        if not dst_local_info:
+            fail("dst layout is not supported for local-view cast")
+        return _emit_cast_local_view_flat_to_dst_layout(
+            dst_buffer_region, src_buffer_region, dst_local_info
+        )
+
+    fail("at least one local buffer must carry layout for local-view cast")
 
 
 # === Variant: cast/local_view (priority=15) ===

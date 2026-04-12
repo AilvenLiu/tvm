@@ -1,0 +1,21 @@
+content:
+  details: A benchmark summary was shared with only `tir` numbers, which hid baseline
+    context (`torch-cublas`, `deepgemm`, `flashinfer`). A noisy run then suggested
+    severe slowdown. Re-running per-config on an isolated GPU and exporting JSON `impls`
+    showed substantial run-to-run variance and restored expected performance ranges.
+    Next time, always publish all available baseline columns and rerun suspicious
+    configs before drawing conclusions.
+  summary: Publishing a TIR-only summary without baseline columns and rerun checks
+    made noisy measurements look like a real regression.
+created: '2026-04-11'
+id: M-20260411-224052-51a523
+scope:
+- repo
+tags:
+- benchmarking
+- communication
+- verification
+- gpu
+- performance
+title: Reporting single-column benchmark summaries caused avoidable regression alarms
+updated: '2026-04-11'

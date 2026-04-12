@@ -16,6 +16,7 @@
 # under the License.
 
 from .default import *
+from .local_view import *
 from .smem_tmem import *
 from .tmem_local import *
 from .utils import (

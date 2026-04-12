@@ -1,0 +1,25 @@
+content:
+  details: 'The adopted TMEM API still mirrors SMEMPool: `alloc(shape, dtype, layout=None,
+    cols=None)` returns a standard TMEM decl_buffer, `move_base_to(col)` handles non-sequential
+    physical placement, and `commit()`/`dealloc()` only manage tcgen05 hardware lifetime.
+    Fence/sync/zero-address assertions remain at kernel callsites. During rollout,
+    removing `PoolAllocator` outright caused compatibility failures in existing scripts
+    and tests, so a temporary alias (`PoolAllocator = SMEMPool`) is kept until all
+    external and in-tree callsites converge.'
+  summary: TMEMPool follows the SMEMPool mental model, while keeping a temporary PoolAllocator
+    compatibility alias to avoid parser and legacy kernel breakage during migration.
+created: '2026-04-11'
+id: ADR-20260411-224052-87dcb0
+scope:
+- repo
+tags:
+- tirx
+- tmem
+- allocator
+- api-design
+- parse-time
+- naming
+- compatibility
+- parser
+title: TMEMPool mirrors SMEMPool and keeps fence or sync logic at kernel callsites
+updated: '2026-04-11'

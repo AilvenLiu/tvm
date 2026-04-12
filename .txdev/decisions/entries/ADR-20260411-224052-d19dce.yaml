@@ -1,0 +1,22 @@
+content:
+  details: 'For this feature, the adopted boundary is: use wg-local distributed buffers
+    directly for element-wise register ops (e.g. `Tx.mul`, `Tx.cast`, `Tx.fma`, `Tx.add`),
+    and keep reduction ops (`Tx.max`, `Tx.sum`) on per-thread flat buffers with `with
+    Tx.thread()` when the destination is scalar-like (`Tx.f32[1]`). This preserves
+    softmax/correction semantics and avoids mixing wg-local sources with scalar reduction
+    destinations in dispatch.'
+  summary: Wg-local dispatch is the default for element-wise ops, but reduction ops
+    keep per-thread scalar destinations.
+created: '2026-04-11'
+id: ADR-20260411-224052-d19dce
+scope:
+- repo
+tags:
+- tirx
+- dispatch
+- reduction
+- softmax
+- wg-local
+- kernel-migration
+title: Limit wg-local dispatch scope to element-wise ops and keep reductions thread-local
+updated: '2026-04-11'

@@ -34,13 +34,15 @@ import functools
 import operator
 import re
 
+from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as Tx
 from tvm.tirx import BufferRegion, PrimExpr, PrimFunc, ScopeOpCall
 from tvm.tirx.expr import FloatImm
-from tvm.tirx.operator.scope_op_dispatch import DispatchContext
+from tvm.tirx.operator.scope_op_dispatch import DispatchContext, fail
 from tvm.tirx.operator.scope_op_dispatch.dispatcher import predicate
 
 from ..common import get_indices, get_st_extent
+from ..layout_utils import get_local_region
 
 
 def _validate_fma(
@@ -87,6 +89,54 @@ def _validate_fma_local(
     scope = sctx.exec_scope.name
     if scope not in ["cta", "warpgroup", "warp", "thread"]:
         return False, f"unsupported exec_scope {scope} for fma"
+    if scope == "thread":
+        return True, None
+
+    output, inp, scale, bias = op_call.args
+    if output.buffer.layout is None or inp.buffer.layout is None:
+        return False, "layouts are required for sub-CTA local fma"
+
+    out_st, out_extent = get_st_extent(output)
+    inp_st, inp_extent = get_st_extent(inp)
+    out_local_info = get_local_region(
+        output.buffer.layout, list(output.buffer.shape), out_st, out_extent
+    )
+    inp_local_info = get_local_region(inp.buffer.layout, list(inp.buffer.shape), inp_st, inp_extent)
+    if out_local_info is None or inp_local_info is None:
+        return False, "output/input layout is not supported for sub-CTA local fma"
+
+    analyzer = Analyzer()
+    out_total = functools.reduce(operator.mul, out_local_info[2], 1)
+    inp_total = functools.reduce(operator.mul, inp_local_info[2], 1)
+    if not analyzer.can_prove_equal(out_total, inp_total):
+        return False, "output/input local element count mismatch for sub-CTA local fma"
+
+    if isinstance(scale, BufferRegion):
+        if scale.buffer.layout is None:
+            return False, "buffer scale requires layout for sub-CTA local fma"
+        scale_st, scale_extent = get_st_extent(scale)
+        scale_info = get_local_region(
+            scale.buffer.layout, list(scale.buffer.shape), scale_st, scale_extent
+        )
+        if scale_info is None:
+            return False, "scale layout is not supported for sub-CTA local fma"
+        scale_total = functools.reduce(operator.mul, scale_info[2], 1)
+        if not analyzer.can_prove_equal(scale_total, out_total):
+            return False, "scale local element count mismatch for sub-CTA local fma"
+
+    if isinstance(bias, BufferRegion):
+        if bias.buffer.layout is None:
+            return False, "buffer bias requires layout for sub-CTA local fma"
+        bias_st, bias_extent = get_st_extent(bias)
+        bias_info = get_local_region(
+            bias.buffer.layout, list(bias.buffer.shape), bias_st, bias_extent
+        )
+        if bias_info is None:
+            return False, "bias layout is not supported for sub-CTA local fma"
+        bias_total = functools.reduce(operator.mul, bias_info[2], 1)
+        if not analyzer.can_prove_equal(bias_total, out_total):
+            return False, "bias local element count mismatch for sub-CTA local fma"
+
     return True, None
 
 
@@ -111,7 +161,7 @@ def _can_use_packed_f32x2(op_call, sctx):
     return True
 
 
-def _fma_local_impl(
+def _fma_local_thread_impl(
     op: ScopeOpCall,
     sctx: DispatchContext,
 ) -> PrimFunc:
@@ -299,6 +349,137 @@ def _fma_local_impl(
                     )
 
     return impl
+
+
+def _fma_local_view_impl(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
+    output_br, inp_br = op.args[0], op.args[1]
+    scale_arg, bias_arg = op.args[2], op.args[3]
+    output_buf = output_br.buffer
+    inp_buf = inp_br.buffer
+
+    out_st, out_extent = get_st_extent(output_br)
+    inp_st, inp_extent = get_st_extent(inp_br)
+    out_local_info = get_local_region(output_buf.layout, list(output_buf.shape), out_st, out_extent)
+    inp_local_info = get_local_region(inp_buf.layout, list(inp_buf.shape), inp_st, inp_extent)
+    if out_local_info is None or inp_local_info is None:
+        fail("output/input layout is not supported for sub-CTA local fma")
+
+    out_local_shape, out_local_st, out_local_ext = out_local_info
+    inp_local_shape, inp_local_st, inp_local_ext = inp_local_info
+    local_total = functools.reduce(operator.mul, out_local_ext, 1)
+    vec_len = op.config.get("vec_len", 1)
+
+    scale_is_buf = isinstance(scale_arg, BufferRegion)
+    bias_is_buf = isinstance(bias_arg, BufferRegion)
+
+    if scale_is_buf:
+        scale_buf = scale_arg.buffer
+        scale_st, scale_extent = get_st_extent(scale_arg)
+        scale_local_info = get_local_region(
+            scale_buf.layout, list(scale_buf.shape), scale_st, scale_extent
+        )
+        if scale_local_info is None:
+            fail("scale layout is not supported for sub-CTA local fma")
+        scale_local_shape, scale_local_st, scale_local_ext = scale_local_info
+
+    if bias_is_buf:
+        bias_buf = bias_arg.buffer
+        bias_st, bias_extent = get_st_extent(bias_arg)
+        bias_local_info = get_local_region(
+            bias_buf.layout, list(bias_buf.shape), bias_st, bias_extent
+        )
+        if bias_local_info is None:
+            fail("bias layout is not supported for sub-CTA local fma")
+        bias_local_shape, bias_local_st, bias_local_ext = bias_local_info
+
+    if not scale_is_buf and not bias_is_buf:
+
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                output_local = output_buf.local(*out_local_shape)
+                inp_local = inp_buf.local(*inp_local_shape)
+                for s in Tx.serial(0, Tx.ceildiv(local_total, vec_len)):
+                    for vec in Tx.vectorized(vec_len):
+                        fused = Tx.meta_var(s * vec_len + vec)
+                        if fused < local_total:
+                            out_idx = Tx.meta_var(get_indices(fused, out_local_st, out_local_ext))
+                            inp_idx = Tx.meta_var(get_indices(fused, inp_local_st, inp_local_ext))
+                            output_local[tuple(out_idx)] = (
+                                inp_local[tuple(inp_idx)] * scale_arg + bias_arg
+                            )
+
+    elif scale_is_buf and not bias_is_buf:
+
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                output_local = output_buf.local(*out_local_shape)
+                inp_local = inp_buf.local(*inp_local_shape)
+                scale_local = scale_buf.local(*scale_local_shape)
+                for s in Tx.serial(0, Tx.ceildiv(local_total, vec_len)):
+                    for vec in Tx.vectorized(vec_len):
+                        fused = Tx.meta_var(s * vec_len + vec)
+                        if fused < local_total:
+                            out_idx = Tx.meta_var(get_indices(fused, out_local_st, out_local_ext))
+                            inp_idx = Tx.meta_var(get_indices(fused, inp_local_st, inp_local_ext))
+                            sc_idx = Tx.meta_var(
+                                get_indices(fused, scale_local_st, scale_local_ext)
+                            )
+                            output_local[tuple(out_idx)] = (
+                                inp_local[tuple(inp_idx)] * scale_local[tuple(sc_idx)] + bias_arg
+                            )
+
+    elif not scale_is_buf and bias_is_buf:
+
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                output_local = output_buf.local(*out_local_shape)
+                inp_local = inp_buf.local(*inp_local_shape)
+                bias_local = bias_buf.local(*bias_local_shape)
+                for s in Tx.serial(0, Tx.ceildiv(local_total, vec_len)):
+                    for vec in Tx.vectorized(vec_len):
+                        fused = Tx.meta_var(s * vec_len + vec)
+                        if fused < local_total:
+                            out_idx = Tx.meta_var(get_indices(fused, out_local_st, out_local_ext))
+                            inp_idx = Tx.meta_var(get_indices(fused, inp_local_st, inp_local_ext))
+                            bi_idx = Tx.meta_var(get_indices(fused, bias_local_st, bias_local_ext))
+                            output_local[tuple(out_idx)] = (
+                                inp_local[tuple(inp_idx)] * scale_arg + bias_local[tuple(bi_idx)]
+                            )
+
+    else:
+
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                output_local = output_buf.local(*out_local_shape)
+                inp_local = inp_buf.local(*inp_local_shape)
+                scale_local = scale_buf.local(*scale_local_shape)
+                bias_local = bias_buf.local(*bias_local_shape)
+                for s in Tx.serial(0, Tx.ceildiv(local_total, vec_len)):
+                    for vec in Tx.vectorized(vec_len):
+                        fused = Tx.meta_var(s * vec_len + vec)
+                        if fused < local_total:
+                            out_idx = Tx.meta_var(get_indices(fused, out_local_st, out_local_ext))
+                            inp_idx = Tx.meta_var(get_indices(fused, inp_local_st, inp_local_ext))
+                            sc_idx = Tx.meta_var(
+                                get_indices(fused, scale_local_st, scale_local_ext)
+                            )
+                            bi_idx = Tx.meta_var(get_indices(fused, bias_local_st, bias_local_ext))
+                            output_local[tuple(out_idx)] = (
+                                inp_local[tuple(inp_idx)] * scale_local[tuple(sc_idx)]
+                                + bias_local[tuple(bi_idx)]
+                            )
+
+    return impl
+
+
+def _fma_local_impl(op: ScopeOpCall, sctx: DispatchContext) -> PrimFunc:
+    if sctx.exec_scope.name == "thread":
+        return _fma_local_thread_impl(op, sctx)
+    return _fma_local_view_impl(op, sctx)
 
 
 # ---------------------------------------------------------------------------

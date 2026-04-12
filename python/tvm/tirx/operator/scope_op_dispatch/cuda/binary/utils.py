@@ -510,7 +510,7 @@ def _classify_binary_local_case(
     """Classify local binary path by layout capability.
 
     For non-thread scopes (cta/warpgroup/warp): WGMMA/ROW_RED-view and
-    trivial-layout local-view are supported.
+    generic local-view (including thread-axis distributed layouts) are supported.
     For thread scope: trivial layout path is supported, with optional packed_f32x2 optimization.
     """
     scope = sctx.exec_scope.name
@@ -520,9 +520,6 @@ def _classify_binary_local_case(
     if scope in ["cta", "warpgroup", "warp"]:
         if _is_binary_local_wgmma_row_red_view_case(op_call, op_type, sctx):
             return _BINARY_LOCAL_CASE_SUBCTA, None
-        _, msg = _try_prepare_binary_map(op_call, op_type, require_trivial_layout=True)
-        if msg is not None:
-            return None, msg
         ok, msg = _validate_binary_local_view_case(op_call, sctx, op_type)
         if ok:
             return _BINARY_LOCAL_CASE_SUBCTA, None

@@ -1,0 +1,24 @@
+content:
+  details: For warpgroup-local register tiles, `wg_local_layout(cols, rows=128)` provides
+    a canonical mapping `(rows, cols) -> (1 @ tid_in_wg, 1)`. In lowering, `Tx.alloc_buffer(...,
+    layout=wg_local_layout(...), scope="local")` allocates only each thread's shard
+    (for `(128, N)`, each thread stores `N` elements). CUDA scope-op dispatch can
+    then run element-wise ops directly on the wg-local view without the old 3-step
+    pattern (`flat local buf -> view -> with Tx.thread()`). Mixed local-view and flat-local
+    cast/copy paths are useful for incremental kernel migration while preserving generated
+    IR behavior.
+  summary: A wg-local layout lets alloc_buffer compute per-thread local storage and
+    enables direct element-wise ops on distributed local views.
+created: '2026-04-11'
+id: KB-20260411-224052-b36a8a
+scope:
+- repo
+tags:
+- tirx
+- layout
+- lowering
+- dispatch
+- local-view
+- elementwise
+title: wg_local_layout-driven local buffer lowering and element-wise dispatch
+updated: '2026-04-11'

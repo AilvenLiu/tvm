@@ -21,7 +21,7 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tirx.function import PrimFunc
-from tvm.tirx.layout import laneid, tid_in_wg, warpid
+from tvm.tirx.layout import laneid, warpid, wg_local_layout
 from tvm.tirx.stmt import ExecScopeStmt
 from tvm.tirx.stmt_functor import post_order_visit
 from tvm.tirx.transform import LowerTIRx
@@ -948,7 +948,7 @@ def test_alloc_buffer_with_thread_axis_layout():
                 with Tx.thread():
                     # Single-step alloc with thread-axis layout
                     reg_wg = Tx.alloc_buffer((128, 4), "float32", scope="local",
-                                              layout=Tx.TileLayout(Tx.S[(128, 4) : (1 @ tid_in_wg, 1)]))  # noqa: E501
+                                              layout=wg_local_layout(4))
                     # Access via .local() to decompose thread and memory axes
                     reg = reg_wg.local(4)
                     for i in Tx.serial(4):

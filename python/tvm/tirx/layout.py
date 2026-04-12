@@ -485,6 +485,15 @@ __all__ += list(Axis.reg_dict)
 __all__ += ["R", "S"]
 
 
+def wg_local_layout(cols, rows=128):
+    """Return a warpgroup-local register layout.
+
+    The logical ``(rows, cols)`` tile is distributed on ``tid_in_wg`` along rows,
+    so each thread owns one row and contiguous ``cols`` local elements.
+    """
+    return TileLayout(S[(rows, cols) : (1 @ tid_in_wg, 1)])
+
+
 # ------------------------------------------------------------------
 # Helper types to support `PrimExpr @ Axis` and `sum` for offsets
 # ------------------------------------------------------------------

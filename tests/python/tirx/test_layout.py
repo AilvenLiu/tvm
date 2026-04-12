@@ -44,6 +44,7 @@ from tvm.tirx.layout import (
     tid_in_wg,
     tx,
     warpid,
+    wg_local_layout,
     wgid,
     wid_in_wg,
 )
@@ -135,6 +136,16 @@ def test_constructor():
         str(layout)
         == 'Tx.TileLayout.from_iters(shard=[T.Iter(8, 4, "laneid")], offset={"laneid": 1})'
     )
+
+
+def test_wg_local_layout_helper():
+    layout = wg_local_layout(16)
+    expected = TileLayout(S[(128, 16) : (1 @ tid_in_wg, 1)])
+    assert_structural_equal(layout.canonicalize(), expected.canonicalize())
+
+    layout_rows = wg_local_layout(8, rows=64)
+    expected_rows = TileLayout(S[(64, 8) : (1 @ tid_in_wg, 1)])
+    assert_structural_equal(layout_rows.canonicalize(), expected_rows.canonicalize())
 
 
 def test_spec_builder():

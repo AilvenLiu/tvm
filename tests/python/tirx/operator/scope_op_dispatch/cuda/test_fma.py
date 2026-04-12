@@ -25,7 +25,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm.tirx.layout import S, TileLayout, wg_local_layout
 
 
 def _get_sm_version():
@@ -281,6 +281,51 @@ def test_sub_buffer_buffer_rounding():
         mod(A_dev, B_dev)
         expected = A_np - B_np
         tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-6)
+
+
+def test_fma_warpgroup_wg_local_layout():
+    rows, cols = 128, 8
+    dtype = "float32"
+    scale_val = 1.5
+    bias_val = -0.25
+    dev = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+
+    @Tx.prim_func(tirx=True)
+    def test_func(A_ptr: Tx.handle, B_ptr: Tx.handle) -> None:
+        A = Tx.match_buffer(A_ptr, (rows, cols), dtype, layout=TileLayout(S[(rows, cols)]))
+        B = Tx.match_buffer(B_ptr, (rows, cols), dtype, layout=TileLayout(S[(rows, cols)]))
+        with Tx.kernel():
+            _bx = Tx.cta_id([1], parent="kernel")
+            Tx.warpgroup_id([1], parent="cta")
+            tid = Tx.thread_id([rows], parent="warpgroup")
+
+            reg = Tx.alloc_buffer((rows, cols), dtype, scope="local", layout=wg_local_layout(cols))
+
+            with Tx.thread():
+                reg_row = reg.local(cols)
+                for i in Tx.serial(cols):
+                    reg_row[i] = A[tid, i]
+
+            with Tx.warpgroup():
+                Tx.fma(reg, reg, Tx.float32(scale_val), Tx.float32(bias_val))
+
+            with Tx.thread():
+                reg_row = reg.local(cols)
+                for i in Tx.serial(cols):
+                    B[tid, i] = reg_row[i]
+
+    with target:
+        np.random.seed(0)
+        A_np = np.random.rand(rows, cols).astype(dtype)
+        B_np = np.zeros((rows, cols), dtype=dtype)
+        A_dev = tvm.runtime.tensor(A_np, dev)
+        B_dev = tvm.runtime.tensor(B_np, dev)
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod(A_dev, B_dev)
+        expected = A_np * scale_val + bias_val
+        tvm.testing.assert_allclose(expected, B_dev.numpy(), atol=1e-5)
 
 
 if __name__ == "__main__":

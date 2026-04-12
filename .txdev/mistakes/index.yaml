@@ -573,6 +573,32 @@ entries:
   - simplification
   title: Do not invent a second buffer abstraction when the allocator can return decl_buffer
   updated: '2026-04-11'
+- created: '2026-04-11'
+  id: M-20260411-224052-4d6171
+  path: entries/M-20260411-224052-4d6171.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - dispatch
+  - reduction
+  - scope-control
+  - review
+  title: Extending wg dispatch to reduction before locking op boundaries
+  updated: '2026-04-11'
+- created: '2026-04-11'
+  id: M-20260411-224052-51a523
+  path: entries/M-20260411-224052-51a523.yaml
+  scope:
+  - repo
+  tags:
+  - benchmarking
+  - communication
+  - verification
+  - gpu
+  - performance
+  title: Reporting single-column benchmark summaries caused avoidable regression alarms
+  updated: '2026-04-11'
 tags:
   L2-eviction:
   - M-20260323-185836-4c16ff
@@ -601,6 +627,7 @@ tags:
   - M-20260319-174407-01b7d3
   - M-20260319-174407-26e7d3
   - M-20260323-185836-374105
+  - M-20260411-224052-51a523
   buffer:
   - M-20260322-182024-631109
   caching:
@@ -618,6 +645,8 @@ tags:
   - M-20260410-182244-61efe4
   commit-sync:
   - M-20260410-182244-030f70
+  communication:
+  - M-20260411-224052-51a523
   correctness:
   - M-20260301-0001
   - M-20260307-231252-423c4d
@@ -649,6 +678,8 @@ tags:
   - M-20260325-174353-4a9cda
   design:
   - M-20260319-022448-dbe043
+  dispatch:
+  - M-20260411-224052-4d6171
   duplication:
   - M-20260301-0003
   editable-install:
@@ -677,6 +708,7 @@ tags:
   - M-20260307-231252-423c4d
   - M-20260319-022448-b1a13a
   - M-20260319-174407-26e7d3
+  - M-20260411-224052-51a523
   import:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
@@ -708,6 +740,8 @@ tags:
   - M-20260320-002326-7c92c5
   parallelism:
   - M-20260319-022448-dbe043
+  performance:
+  - M-20260411-224052-51a523
   pip:
   - M-20260320-002326-7c92c5
   - M-20260322-182024-19635e
@@ -754,6 +788,8 @@ tags:
   - M-20260327-142529-6d1726
   - M-20260327-142529-bcec6f
   - M-20260327-170120-886c27
+  reduction:
+  - M-20260411-224052-4d6171
   refactor:
   - M-20260302-015214-5390a0
   - M-20260308-232603-cf510d
@@ -766,6 +802,8 @@ tags:
   - M-20260227-0001
   resolved:
   - M-20260327-170120-886c27
+  review:
+  - M-20260411-224052-4d6171
   ruff:
   - M-20260328-001753-acf9c3
   - M-20260328-202457-411293
@@ -779,6 +817,7 @@ tags:
   - M-20260306-195314-50a55c
   - M-20260308-232603-9a9463
   - M-20260317-211411-dfb881
+  - M-20260411-224052-4d6171
   sed:
   - M-20260327-142529-6d1726
   shared-memory:
@@ -832,6 +871,7 @@ tags:
   - M-20260327-170120-886c27
   - M-20260410-182244-61efe4
   - M-20260411-190132-4dc261
+  - M-20260411-224052-4d6171
   tirx-kernels:
   - M-20260326-004750-646f60
   - M-20260327-142529-6d1726
@@ -857,6 +897,7 @@ tags:
   - M-20260325-174353-4a9cda
   - M-20260327-142529-e741bb
   - M-20260328-005952-98bd91
+  - M-20260411-224052-51a523
   warnings:
   - M-20260306-195314-50a55c
   warp:
