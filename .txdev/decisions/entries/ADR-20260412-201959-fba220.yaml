@@ -1,0 +1,35 @@
+content:
+  details: 'Three options were considered for handling the producer/consumer phase
+    asymmetry on empty barriers:
+
+    (a) Always set phase_offset=1 on empty barriers inside Pipe — breaks SSM/attention
+    tmem_pipes that have mixed/dynamic XOR patterns.
+
+    (b) No default offset; add empty_phase_offset parameter — chosen. Cursor-using
+    kernels rely on PipelineState asymmetry (producer phase=1, consumer phase=0).
+    Non-cursor kernels pass empty_phase_offset=1 at Pipe construction to centralize
+    the XOR. SSM/attention tmem_pipes with mixed patterns (some callsites use phase,
+    others use phase^1, others use phase^(chunk_i%2)) keep manual XOR.
+
+    (c) Always require callers to XOR manually — status quo, rejected because it scatters
+    ~30 XOR sites across 15 files.
+
+
+    Option (b) gives the best trade-off: centralizes the common case while preserving
+    flexibility for non-uniform patterns.
+
+    '
+  summary: Pipe does not set phase_offset=1 on empty barriers by default; callers
+    opt in via empty_phase_offset=1 to centralize the phase XOR.
+created: '2026-04-12'
+id: ADR-20260412-201959-fba220
+scope:
+- repo
+tags:
+- pipeline
+- mbarrier
+- phase
+- api-design
+- tirx
+title: Pipe empty_phase_offset as opt-in parameter, not default
+updated: '2026-04-12'

@@ -1,0 +1,35 @@
+content:
+  details: 'In based.py for example, the same tmem_pipe has:
+
+    - Line 350: tmem_pipe.empty.wait(0, phase_c2m)        — no XOR
+
+    - Line 368: tmem_pipe.empty.wait(0, phase_c2m ^ 1)    — XOR with 1
+
+    - Line 424: tmem_pipe.empty.wait(0, phase_c2m ^ (chunk_i % 2))  — dynamic XOR
+
+
+    These tmem_pipes are 1-stage barriers where the phase XOR encodes iteration-dependent
+    synchronization logic, not a fixed producer/consumer offset. Setting empty_phase_offset=1
+    would fix some callsites but break others.
+
+
+    This pattern is present in all 5 SSM/attention kernels'' tmem_pipe. Their smem_pipe,
+    by contrast, has uniform XOR and was successfully migrated to empty_phase_offset=1.
+
+    '
+  summary: SSM/attention kernels (based, mamba2, hedgehog, linear_attention, fftconv)
+    use tmem_pipe with non-uniform phase XOR — some callsites use phase, others phase^1,
+    others phase^(chunk_i%2) — so empty_phase_offset cannot replace the manual XOR.
+created: '2026-04-12'
+id: KB-20260412-201959-570c6a
+scope:
+- repo
+tags:
+- pipeline
+- mbarrier
+- phase
+- ssm
+- attention
+- tirx
+title: SSM/attention tmem_pipe has mixed XOR patterns that cannot be centralized
+updated: '2026-04-12'

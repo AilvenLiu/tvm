@@ -140,3 +140,156 @@ class TCGen05Bar(MBarrier):
             Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]))
         else:
             Tx.ptx.tcgen05.commit(self.buf.ptr_to([stage]), cta_group=cta_group, cta_mask=cta_mask)
+
+
+@Tx.meta_class
+class Pipe:
+    """Full+empty barrier pair for a software-pipelined data flow.
+
+    Wraps a full barrier (signaled when data is ready) and an optional
+    empty barrier (signaled when a slot is consumed) into a single object.
+    Provides factory methods for common barrier type combinations.
+
+    Parameters
+    ----------
+    pool : SMEMPool
+        Shared memory pool allocator.
+    stages : int
+        Number of pipeline stages (barrier slots).
+    full_type : type
+        Barrier class for the full signal (TMABar, TCGen05Bar, or MBarrier).
+    empty_type : type or None
+        Barrier class for the empty signal, or None for one-way pipes.
+    init_full : int
+        Expected arrival count for the full barrier.
+    init_empty : int or None
+        Expected arrival count for the empty barrier.
+    name : str
+        Descriptive name prefix for generated barriers.
+    """
+
+    def __init__(
+        self,
+        pool,
+        stages,
+        *,
+        full_type=MBarrier,
+        empty_type=None,
+        init_full=1,
+        init_empty=1,
+        empty_phase_offset=0,
+        name="pipe",
+    ):
+        self.full = full_type(pool, stages, name=f"{name}_full")
+        if empty_type is not None:
+            self.empty = empty_type(
+                pool, stages, name=f"{name}_empty", phase_offset=empty_phase_offset
+            )
+        else:
+            self.empty = None
+        self.stages = stages
+        self.name = name
+        self.full.init(init_full)
+        if self.empty is not None:
+            self.empty.init(init_empty)
+
+    @classmethod
+    def tma(cls, pool, stages, *, empty_count=1, empty_phase_offset=0, name="pipe"):
+        """TMA -> consumer: full=TMABar, empty=TCGen05Bar."""
+        return cls(
+            pool,
+            stages,
+            full_type=TMABar,
+            empty_type=TCGen05Bar,
+            init_full=1,
+            init_empty=empty_count,
+            empty_phase_offset=empty_phase_offset,
+            name=name,
+        )
+
+    @classmethod
+    def tcgen05(cls, pool, stages, *, empty_count=None, empty_phase_offset=0, name="pipe"):
+        """TCGen05 -> consumer: full=TCGen05Bar, empty=MBarrier (if empty_count given)."""
+        return cls(
+            pool,
+            stages,
+            full_type=TCGen05Bar,
+            empty_type=MBarrier if empty_count is not None else None,
+            init_full=1,
+            init_empty=empty_count,
+            empty_phase_offset=empty_phase_offset,
+            name=name,
+        )
+
+    @classmethod
+    def mbar(cls, pool, stages, *, full_count, empty_count=None, empty_phase_offset=0, name="pipe"):
+        """Thread -> thread: full=MBarrier, empty=MBarrier (if empty_count given)."""
+        return cls(
+            pool,
+            stages,
+            full_type=MBarrier,
+            empty_type=MBarrier if empty_count is not None else None,
+            init_full=full_count,
+            init_empty=empty_count,
+            empty_phase_offset=empty_phase_offset,
+            name=name,
+        )
+
+    def cursor(self, role="consumer"):
+        """Create a PipeCursor for this pipe."""
+        return PipeCursor(self, role)
+
+
+@Tx.meta_class
+class PipeCursor:
+    """Automatic phase/stage tracking for a Pipe.
+
+    Wraps a Pipe and a PipelineState to provide wait/signal/advance
+    operations that automatically manage stage and phase progression.
+
+    Parameters
+    ----------
+    pipe : Pipe
+        The pipe to track.
+    role : str
+        Either ``"producer"`` or ``"consumer"``.
+    """
+
+    def __init__(self, pipe, role):
+        self.pipe = pipe
+        self.role = role
+        self._state = PipelineState(f"{pipe.name}_{role}", pipe.stages)
+        self._state.init(is_producer=(role == "producer"))
+
+    @property
+    def stage(self):
+        return self._state.stage
+
+    @property
+    def phase(self):
+        return self._state.phase
+
+    @Tx.inline
+    def wait(self):
+        """Producer: wait for empty slot. Consumer: wait for full data."""
+        if self.role == "producer":
+            self.pipe.empty.wait(self.stage, self.phase)
+        else:
+            self.pipe.full.wait(self.stage, self.phase)
+
+    @Tx.inline
+    def signal(self, **kwargs):
+        """Producer: signal full. Consumer: signal empty."""
+        if self.role == "producer":
+            self.pipe.full.arrive(self.stage, **kwargs)
+        else:
+            self.pipe.empty.arrive(self.stage, **kwargs)
+
+    @Tx.inline
+    def advance(self):
+        """Move to the next pipeline stage."""
+        self._state.move_to_next_stage()
+
+    def snapshot(self):
+        """Freeze current (stage, phase) for deferred use."""
+        return (self.stage, self.phase)

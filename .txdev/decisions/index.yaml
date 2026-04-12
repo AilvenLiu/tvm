@@ -619,6 +619,30 @@ entries:
   - correctness
   title: Vec2 in non-full local_view cast paths uses contiguity + alignment guards
     with scalar fallback
+  id: ADR-20260412-201959-ed1100
+  path: entries/ADR-20260412-201959-ed1100.yaml
+  scope:
+  - repo
+  tags:
+  - pipeline
+  - cursor
+  - api-design
+  - tirx
+  title: PipeCursor covers sequential-pipeline subset only; escape hatch via direct
+    barrier access
+  updated: '2026-04-12'
+- created: '2026-04-12'
+  id: ADR-20260412-201959-fba220
+  path: entries/ADR-20260412-201959-fba220.yaml
+  scope:
+  - repo
+  tags:
+  - pipeline
+  - mbarrier
+  - phase
+  - api-design
+  - tirx
+  title: Pipe empty_phase_offset as opt-in parameter, not default
   updated: '2026-04-12'
 tags:
   API:
@@ -643,6 +667,8 @@ tags:
   - ADR-20260411-190132-ca1334
   - ADR-20260411-224052-87dcb0
   - ADR-20260412-200658-304173
+  - ADR-20260412-201959-ed1100
+  - ADR-20260412-201959-fba220
   api-evolution:
   - ADR-20260228-0002
   - ADR-20260327-142529-3943af
@@ -731,6 +757,8 @@ tags:
   cuda:
   - ADR-20260326-030916-5826a7
   - ADR-20260326-030916-ac4a46
+  cursor:
+  - ADR-20260412-201959-ed1100
   decision:
   - ADR-20260328-005952-4cf57e
   dedup:
@@ -784,6 +812,7 @@ tags:
   - ADR-20260228-0003
   mbarrier:
   - ADR-20260317-211411-5664ea
+  - ADR-20260412-201959-fba220
   meta-var:
   - ADR-20260326-004750-3e9972
   migration:
@@ -818,9 +847,13 @@ tags:
   - ADR-20260326-004750-3e9972
   - ADR-20260326-004750-de4733
   - ADR-20260411-224052-87dcb0
+  phase:
+  - ADR-20260412-201959-fba220
   pipeline:
   - ADR-20260317-211411-5664ea
   - ADR-20260325-174353-f8ad92
+  - ADR-20260412-201959-ed1100
+  - ADR-20260412-201959-fba220
   policy:
   - ADR-20260306-195314-450625
   - ADR-20260326-203453-b77baa
@@ -918,6 +951,8 @@ tags:
   - ADR-20260411-224052-87dcb0
   - ADR-20260411-224052-d19dce
   - ADR-20260412-200658-304173
+  - ADR-20260412-201959-ed1100
+  - ADR-20260412-201959-fba220
   tirx-kernels:
   - ADR-20260320-002326-d2fa6d
   - ADR-20260328-005952-4cf57e

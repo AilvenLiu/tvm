@@ -833,6 +833,18 @@ entries:
   - local-view
   - performance
   title: cast/local_view.py vec2 vectorization requirements for non-full paths
+  id: KB-20260412-201959-570c6a
+  path: entries/KB-20260412-201959-570c6a.yaml
+  scope:
+  - repo
+  tags:
+  - pipeline
+  - mbarrier
+  - phase
+  - ssm
+  - attention
+  - tirx
+  title: SSM/attention tmem_pipe has mixed XOR patterns that cannot be centralized
   updated: '2026-04-12'
 tags:
   API:
@@ -859,6 +871,8 @@ tags:
   - KB-20260326-203453-d526a0
   assert_structural_equal:
   - KB-20260227-0001
+  attention:
+  - KB-20260412-201959-570c6a
   barrier:
   - KB-20260317-211410-3d3076
   baseline:
@@ -1040,6 +1054,7 @@ tags:
   - KB-20260325-174353-cf8a51
   mbarrier:
   - KB-20260317-211410-c51a41
+  - KB-20260412-201959-570c6a
   measurement-gap:
   - KB-20260323-185836-570267
   megakernel:
@@ -1082,11 +1097,14 @@ tags:
   - KB-20260328-001753-e74f4d
   performance:
   - KB-20260412-200658-dc85b6
+  phase:
+  - KB-20260412-201959-570c6a
   pip:
   - KB-20260320-002326-24c511
   pipeline:
   - KB-20260317-211410-3d3076
   - KB-20260317-211410-c51a41
+  - KB-20260412-201959-570c6a
   pitfall:
   - KB-20260317-211410-e366ed
   pool-allocator:
@@ -1181,6 +1199,8 @@ tags:
   - KB-20260325-174353-b5e171
   - KB-20260326-030915-12829a
   - KB-20260410-182244-318c05
+  ssm:
+  - KB-20260412-201959-570c6a
   stmt-functor:
   - KB-20260327-170120-40cb7e
   - KB-20260327-170120-a4aad4
@@ -1229,6 +1249,7 @@ tags:
   - KB-20260411-224052-b36a8a
   - KB-20260412-200658-c526b0
   - KB-20260412-200658-dc85b6
+  - KB-20260412-201959-570c6a
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511

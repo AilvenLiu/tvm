@@ -1,0 +1,37 @@
+content:
+  details: 'Cursor was designed for the common case: a single role iterating stages
+    0,1,...,N-1 in order with automatic phase flip. Three escape hatch patterns were
+    identified during kernel migration:
+
+
+    1. Non-sequential stage indexing — fp16_bf16_gemm tmem_pipe uses warp_id and wg_id
+    as stage indices (not sequential). hedgehog/based/mamba2 tmem_pipes use constant
+    stage=0 with manually tracked phase.
+
+    2. TMA signal via remote_view — nvfp4/fp16_bf16 signal the full barrier from CTA-0''s
+    perspective using smem_pipe.full.remote_view(pair_leader_rank). Cursor.signal()
+    cannot express this.
+
+    3. External phase management — hgemm_1consumer/hgemm_splitk use partitioned_loop
+    to manage phase externally; cursor''s internal PipelineState would conflict.
+
+
+    In these cases, Pipe still provides value (declaration+init consolidation) even
+    without cursor.
+
+    '
+  summary: PipeCursor's wait/signal/advance pattern applies only to sequential stage
+    progression; non-sequential indexing (warp_id, wg_id), TMA remote_view, and cross-pipe
+    roles use pipe.full/pipe.empty directly.
+created: '2026-04-12'
+id: ADR-20260412-201959-ed1100
+scope:
+- repo
+tags:
+- pipeline
+- cursor
+- api-design
+- tirx
+title: PipeCursor covers sequential-pipeline subset only; escape hatch via direct
+  barrier access
+updated: '2026-04-12'

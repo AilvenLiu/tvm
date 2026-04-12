@@ -1,0 +1,38 @@
+content:
+  details: 'During the initial Pipe migration, PipeCursor objects (tma_cur, mma_smem,
+    mma_tmem, epi_cur) were created in nvfp4_gemm, but the inline functions that actually
+    call wait/arrive were not refactored — they continued to take (stage, phase) parameters
+    and call pipe.full.wait(stage, phase) directly. The cursor existed but was dead
+    code.
+
+
+    Root cause: the migration focused on replacing barrier declarations with Pipe
+    constructions (the "declaration+init" layer) but skipped the second layer — refactoring
+    inline function signatures to use cursor methods. The two layers are independent;
+    completing one does not imply the other.
+
+
+    Fix: After user review flagged "0% cursor usage", refactored 3 kernels (nvfp4_gemm,
+    fp16_bf16_gemm, fp8_blockwise_gemm) to remove stage/phase parameters from inline
+    functions and use cursor.wait()/cursor.signal()/cursor.advance() directly.
+
+
+    Lesson: When introducing a new abstraction layer (cursor) on top of an existing
+    one (pipe), verify that the new layer is actually exercised by the migrated code
+    — not just instantiated.
+
+    '
+  summary: PipeCursor was implemented and cursor objects were created in kernels,
+    but inline functions still used direct pipe.full.wait()/pipe.empty.wait() instead
+    of cursor.wait()/cursor.signal() — the cursor had zero effective usage.
+created: '2026-04-12'
+id: M-20260412-201959-0da7f0
+scope:
+- repo
+tags:
+- pipeline
+- cursor
+- migration
+- tirx
+title: Implemented cursor class but did not actually use it in kernel migrations
+updated: '2026-04-12'

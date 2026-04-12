@@ -1,0 +1,38 @@
+content:
+  details: 'The original plan (option b) correctly identified that Pipe should not
+    default to phase_offset=1 on empty barriers. However, the implementation stopped
+    there — it did not add an empty_phase_offset parameter to Pipe, leaving every
+    kernel to manually XOR the phase at each callsite.
+
+
+    User review pointed out this was a silent deadlock risk: a single missed or extra
+    `^ 1` in any of 30+ sites would cause a barrier phase mismatch, leading to a hang
+    with no error message.
+
+
+    Fix: Added empty_phase_offset parameter to Pipe.__init__() and all factory methods
+    (tma, tcgen05, mbar). Kernels that previously used phase_offset=1 on raw barriers
+    (or equivalently, XORed at every callsite) now pass empty_phase_offset=1 at construction.
+    The ~30 scattered `^ 1` operations were removed.
+
+
+    Lesson: When migrating a scattered pattern (manual XOR) into a centralized abstraction
+    (Pipe), complete the centralization in the same PR — don''t leave the scattered
+    pattern in place alongside the new abstraction.
+
+    '
+  summary: Initial implementation left ~30 manual `^ 1` XOR operations at empty.wait()
+    callsites across 15 kernel files instead of centralizing the offset in the Pipe
+    constructor.
+created: '2026-04-12'
+id: M-20260412-201959-ddb020
+scope:
+- repo
+tags:
+- pipeline
+- phase
+- mbarrier
+- tirx
+- correctness
+title: Scattered manual phase XOR instead of centralizing in Pipe constructor
+updated: '2026-04-12'
