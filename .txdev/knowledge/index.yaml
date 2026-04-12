@@ -806,6 +806,34 @@ entries:
   - elementwise
   title: wg_local_layout-driven local buffer lowering and element-wise dispatch
   updated: '2026-04-11'
+- created: '2026-04-12'
+  id: KB-20260412-200658-c526b0
+  path: entries/KB-20260412-200658-c526b0.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - layout
+  - lowering
+  - dispatch
+  - local-view
+  - elementwise
+  title: wg_local_layout-driven local buffer lowering and element-wise dispatch
+  updated: '2026-04-12'
+- created: '2026-04-12'
+  id: KB-20260412-200658-dc85b6
+  path: entries/KB-20260412-200658-dc85b6.yaml
+  scope:
+  - repo
+  tags:
+  - tirx
+  - dispatch
+  - cast
+  - vec2
+  - local-view
+  - performance
+  title: cast/local_view.py vec2 vectorization requirements for non-full paths
+  updated: '2026-04-12'
 tags:
   API:
   - KB-20260323-185836-62116f
@@ -859,6 +887,8 @@ tags:
   - KB-20260326-030915-12829a
   caching:
   - KB-20260325-174353-b5e171
+  cast:
+  - KB-20260412-200658-dc85b6
   claude:
   - KB-20260326-203453-d526a0
   code-cleanup:
@@ -917,12 +947,15 @@ tags:
   - KB-20260328-202457-a633e5
   - KB-20260328-202457-cc51d2
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
+  - KB-20260412-200658-dc85b6
   dsl:
   - KB-20260301-0004
   - KB-20260317-211410-6e13ad
   - KB-20260322-182024-e7c4c2
   elementwise:
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
   evaluator:
   - KB-20260326-004750-e4d4b4
   ffi:
@@ -982,6 +1015,7 @@ tags:
   - KB-20260410-182244-13b829
   - KB-20260410-182244-318c05
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
   lint:
   - KB-20260228-0001
   - KB-20260301-0003
@@ -995,10 +1029,13 @@ tags:
   - KB-20260322-182024-e7c4c2
   local-view:
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
+  - KB-20260412-200658-dc85b6
   logging:
   - KB-20260228-0004
   lowering:
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
   map:
   - KB-20260325-174353-cf8a51
   mbarrier:
@@ -1043,6 +1080,8 @@ tags:
   - KB-20260326-004750-e4d4b4
   pattern:
   - KB-20260328-001753-e74f4d
+  performance:
+  - KB-20260412-200658-dc85b6
   pip:
   - KB-20260320-002326-24c511
   pipeline:
@@ -1188,6 +1227,8 @@ tags:
   - KB-20260410-182244-318c05
   - KB-20260411-190132-58c10f
   - KB-20260411-224052-b36a8a
+  - KB-20260412-200658-c526b0
+  - KB-20260412-200658-dc85b6
   tirx-kernels:
   - KB-20260319-174406-349680
   - KB-20260320-002326-24c511
@@ -1224,6 +1265,8 @@ tags:
   - KB-20260326-203453-d526a0
   validation:
   - KB-20260228-0004
+  vec2:
+  - KB-20260412-200658-dc85b6
   vector-annotation:
   - KB-20260322-182024-e7c4c2
   warnings:

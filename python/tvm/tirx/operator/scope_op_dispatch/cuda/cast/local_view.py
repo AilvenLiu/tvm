@@ -47,6 +47,44 @@ _LOCAL_CASE_VIEW_SLICED = "view_sliced"
 _LOCAL_CASE_THREAD_WISE = "thread_wise"
 
 
+def _is_contiguous_region(analyzer, st, ext, shape):
+    """Check if region [st:st+ext] maps to a contiguous block in row-major layout.
+
+    Scans from innermost to outermost dimension. Inner dimensions must be fully
+    covered (st=0, ext=shape) up to one "break" dimension (any st/ext). All
+    dimensions outside the break must have unit extent.
+    """
+    found_break = False
+    for i in reversed(range(len(st))):
+        is_full = analyzer.can_prove_equal(st[i], 0) and analyzer.can_prove_equal(ext[i], shape[i])
+        if found_break:
+            if not analyzer.can_prove_equal(ext[i], 1):
+                return False
+        else:
+            if not is_full:
+                found_break = True
+    return True
+
+
+def _linear_offset(st, shape):
+    """Compute row-major linear offset of position st in buffer of given shape."""
+    offset = 0
+    stride = 1
+    for i in reversed(range(len(st))):
+        offset = offset + st[i] * stride
+        stride = stride * shape[i]
+    return offset
+
+
+def _is_offset_aligned_for_vec2(analyzer, offset):
+    """Check if offset is provably even (required for vec2 alignment)."""
+    if isinstance(offset, int):
+        return offset % 2 == 0
+    if isinstance(offset, IntImm):
+        return int(offset.value) % 2 == 0
+    return analyzer.can_prove_equal(offset % 2, 0)
+
+
 def _has_nontrivial_layout(buf: Buffer) -> bool:
     layout = buf.layout
     return layout is not None and not layout.is_trivial()
@@ -269,18 +307,79 @@ def _emit_cast_local_view_sliced(
     src_local_shape, src_local_st, src_local_ext = src_local_info
     local_total = functools.reduce(operator.mul, dst_local_ext, 1)
 
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def impl():
-        with Tx.thread():
-            src_local = src.local(*src_local_shape)
-            dst_local = dst.local(*dst_local_shape)
-            for s in Tx.serial(0, local_total):
-                fused = Tx.meta_var(s)
-                dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
-                src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
-                dst_local[tuple(dst_indices)] = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
-    # fmt: on
+    # Decide vec2 availability
+    use_vec2 = (src.dtype, dst.dtype) in vec2_cast_cuda_intrinsic_dict
+    local_total_imm = int(local_total.value) if isinstance(local_total, IntImm) else None
+
+    if use_vec2 and local_total_imm is not None:
+        analyzer = Analyzer()
+        src_cont = _is_contiguous_region(analyzer, src_local_st, src_local_ext, src_local_shape)
+        dst_cont = _is_contiguous_region(analyzer, dst_local_st, dst_local_ext, dst_local_shape)
+        if src_cont and dst_cont:
+            src_off = _linear_offset(src_local_st, src_local_shape)
+            dst_off = _linear_offset(dst_local_st, dst_local_shape)
+            if not (
+                _is_offset_aligned_for_vec2(analyzer, src_off)
+                and _is_offset_aligned_for_vec2(analyzer, dst_off)
+            ):
+                use_vec2 = False
+        else:
+            use_vec2 = False
+    else:
+        use_vec2 = False
+
+    if use_vec2:
+        intrinsic_name = vec2_cast_cuda_intrinsic_dict[(src.dtype, dst.dtype)]
+        src_dtypex2 = dtypex2_dict[src.dtype]
+        dst_dtypex2 = dtypex2_dict[dst.dtype]
+        func_name = f"tvm_builtin_cast_{src.dtype}x2_{dst.dtype}x2"
+        source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* src) {{
+    (({dst_dtypex2}*)dst)[0] = {intrinsic_name}((({src_dtypex2}*)src)[0]);
+}}
+"""
+        src_full_size = functools.reduce(operator.mul, src_local_shape, 1)
+        dst_full_size = functools.reduce(operator.mul, dst_local_shape, 1)
+
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                base_src = Tx.decl_buffer((src_full_size,), src.dtype, src.data, scope=src.scope())
+                base_dst = Tx.decl_buffer((dst_full_size,), dst.dtype, dst.data, scope=dst.scope())
+
+                n2 = Tx.meta_var(local_total_imm // 2)
+                tail = Tx.meta_var(local_total_imm % 2)
+
+                for s in Tx.serial(0, n2):
+                    src_idx = Tx.meta_var(src_off + s * 2)
+                    dst_idx = Tx.meta_var(dst_off + s * 2)
+                    Tx.cuda.func_call(
+                        func_name,
+                        Tx.address_of(base_dst[dst_idx]),
+                        Tx.address_of(base_src[src_idx]),
+                        source_code=source_code,
+                    )
+
+                if tail == 1:
+                    src_idx = Tx.meta_var(src_off + n2 * 2)
+                    dst_idx = Tx.meta_var(dst_off + n2 * 2)
+                    base_dst[dst_idx] = Tx.cast(base_src[src_idx], dst.dtype)
+        # fmt: on
+    else:
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                src_local = src.local(*src_local_shape)
+                dst_local = dst.local(*dst_local_shape)
+                for s in Tx.serial(0, local_total):
+                    fused = Tx.meta_var(s)
+                    dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
+                    src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
+                    casted = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
+                    dst_local[tuple(dst_indices)] = casted
+        # fmt: on
 
     return impl
 
@@ -297,17 +396,77 @@ def _emit_cast_local_view_src_layout_to_flat(
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
     local_total = functools.reduce(operator.mul, src_local_ext, 1)
 
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def impl():
-        with Tx.thread():
-            src_local = src.local(*src_local_shape)
-            for s in Tx.serial(0, local_total):
-                fused = Tx.meta_var(s)
-                src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
-                dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
-                dst[tuple(dst_indices)] = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
-    # fmt: on
+    # Decide vec2 availability
+    use_vec2 = (src.dtype, dst.dtype) in vec2_cast_cuda_intrinsic_dict
+    local_total_imm = int(local_total.value) if isinstance(local_total, IntImm) else None
+
+    if use_vec2 and local_total_imm is not None:
+        analyzer = Analyzer()
+        src_cont = _is_contiguous_region(analyzer, src_local_st, src_local_ext, src_local_shape)
+        dst_cont = _is_contiguous_region(analyzer, dst_st, dst_extent, list(dst.shape))
+        if src_cont and dst_cont:
+            src_off = _linear_offset(src_local_st, src_local_shape)
+            dst_off = _linear_offset(dst_st, list(dst.shape))
+            if not (
+                _is_offset_aligned_for_vec2(analyzer, src_off)
+                and _is_offset_aligned_for_vec2(analyzer, dst_off)
+            ):
+                use_vec2 = False
+        else:
+            use_vec2 = False
+    else:
+        use_vec2 = False
+
+    if use_vec2:
+        intrinsic_name = vec2_cast_cuda_intrinsic_dict[(src.dtype, dst.dtype)]
+        src_dtypex2 = dtypex2_dict[src.dtype]
+        dst_dtypex2 = dtypex2_dict[dst.dtype]
+        func_name = f"tvm_builtin_cast_{src.dtype}x2_{dst.dtype}x2"
+        source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* src) {{
+    (({dst_dtypex2}*)dst)[0] = {intrinsic_name}((({src_dtypex2}*)src)[0]);
+}}
+"""
+        src_full_size = functools.reduce(operator.mul, src_local_shape, 1)
+        dst_full_size = functools.reduce(operator.mul, list(dst.shape), 1)
+
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                base_src = Tx.decl_buffer((src_full_size,), src.dtype, src.data, scope=src.scope())
+                base_dst = Tx.decl_buffer((dst_full_size,), dst.dtype, dst.data, scope=dst.scope())
+
+                n2 = Tx.meta_var(local_total_imm // 2)
+                tail = Tx.meta_var(local_total_imm % 2)
+
+                for s in Tx.serial(0, n2):
+                    src_idx = Tx.meta_var(src_off + s * 2)
+                    dst_idx = Tx.meta_var(dst_off + s * 2)
+                    Tx.cuda.func_call(
+                        func_name,
+                        Tx.address_of(base_dst[dst_idx]),
+                        Tx.address_of(base_src[src_idx]),
+                        source_code=source_code,
+                    )
+
+                if tail == 1:
+                    src_idx = Tx.meta_var(src_off + n2 * 2)
+                    dst_idx = Tx.meta_var(dst_off + n2 * 2)
+                    base_dst[dst_idx] = Tx.cast(base_src[src_idx], dst.dtype)
+        # fmt: on
+    else:
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                src_local = src.local(*src_local_shape)
+                for s in Tx.serial(0, local_total):
+                    fused = Tx.meta_var(s)
+                    src_indices = Tx.meta_var(get_indices(fused, src_local_st, src_local_ext))
+                    dst_indices = Tx.meta_var(get_indices(fused, dst_st, dst_extent))
+                    dst[tuple(dst_indices)] = Tx.cast(src_local[tuple(src_indices)], dst.dtype)
+        # fmt: on
 
     return impl
 
@@ -324,17 +483,77 @@ def _emit_cast_local_view_flat_to_dst_layout(
     src_st, src_extent = get_st_extent(src_buffer_region)
     local_total = functools.reduce(operator.mul, dst_local_ext, 1)
 
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def impl():
-        with Tx.thread():
-            dst_local = dst.local(*dst_local_shape)
-            for s in Tx.serial(0, local_total):
-                fused = Tx.meta_var(s)
-                src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
-                dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
-                dst_local[tuple(dst_indices)] = Tx.cast(src[tuple(src_indices)], dst.dtype)
-    # fmt: on
+    # Decide vec2 availability
+    use_vec2 = (src.dtype, dst.dtype) in vec2_cast_cuda_intrinsic_dict
+    local_total_imm = int(local_total.value) if isinstance(local_total, IntImm) else None
+
+    if use_vec2 and local_total_imm is not None:
+        analyzer = Analyzer()
+        src_cont = _is_contiguous_region(analyzer, src_st, src_extent, list(src.shape))
+        dst_cont = _is_contiguous_region(analyzer, dst_local_st, dst_local_ext, dst_local_shape)
+        if src_cont and dst_cont:
+            src_off = _linear_offset(src_st, list(src.shape))
+            dst_off = _linear_offset(dst_local_st, dst_local_shape)
+            if not (
+                _is_offset_aligned_for_vec2(analyzer, src_off)
+                and _is_offset_aligned_for_vec2(analyzer, dst_off)
+            ):
+                use_vec2 = False
+        else:
+            use_vec2 = False
+    else:
+        use_vec2 = False
+
+    if use_vec2:
+        intrinsic_name = vec2_cast_cuda_intrinsic_dict[(src.dtype, dst.dtype)]
+        src_dtypex2 = dtypex2_dict[src.dtype]
+        dst_dtypex2 = dtypex2_dict[dst.dtype]
+        func_name = f"tvm_builtin_cast_{src.dtype}x2_{dst.dtype}x2"
+        source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* src) {{
+    (({dst_dtypex2}*)dst)[0] = {intrinsic_name}((({src_dtypex2}*)src)[0]);
+}}
+"""
+        src_full_size = functools.reduce(operator.mul, list(src.shape), 1)
+        dst_full_size = functools.reduce(operator.mul, dst_local_shape, 1)
+
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                base_src = Tx.decl_buffer((src_full_size,), src.dtype, src.data, scope=src.scope())
+                base_dst = Tx.decl_buffer((dst_full_size,), dst.dtype, dst.data, scope=dst.scope())
+
+                n2 = Tx.meta_var(local_total_imm // 2)
+                tail = Tx.meta_var(local_total_imm % 2)
+
+                for s in Tx.serial(0, n2):
+                    src_idx = Tx.meta_var(src_off + s * 2)
+                    dst_idx = Tx.meta_var(dst_off + s * 2)
+                    Tx.cuda.func_call(
+                        func_name,
+                        Tx.address_of(base_dst[dst_idx]),
+                        Tx.address_of(base_src[src_idx]),
+                        source_code=source_code,
+                    )
+
+                if tail == 1:
+                    src_idx = Tx.meta_var(src_off + n2 * 2)
+                    dst_idx = Tx.meta_var(dst_off + n2 * 2)
+                    base_dst[dst_idx] = Tx.cast(base_src[src_idx], dst.dtype)
+        # fmt: on
+    else:
+        # fmt: off
+        @Tx.prim_func(tirx=True, check_well_formed=False)
+        def impl():
+            with Tx.thread():
+                dst_local = dst.local(*dst_local_shape)
+                for s in Tx.serial(0, local_total):
+                    fused = Tx.meta_var(s)
+                    src_indices = Tx.meta_var(get_indices(fused, src_st, src_extent))
+                    dst_indices = Tx.meta_var(get_indices(fused, dst_local_st, dst_local_ext))
+                    dst_local[tuple(dst_indices)] = Tx.cast(src[tuple(src_indices)], dst.dtype)
+        # fmt: on
 
     return impl
 

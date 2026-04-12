@@ -1,0 +1,47 @@
+content:
+  details: 'Context: _emit_cast_local_view_full always operates on full regions (st=0),
+    so vec2 alignment is trivially satisfied. The three non-full paths (_sliced, _src_layout_to_flat,
+    _flat_to_dst_layout) may have arbitrary start offsets (e.g. `Dreg_16b[no*N:no*N+N]`),
+    so vec2 requires additional guards.
+
+
+    Decision: Add three helper functions (_is_contiguous_region, _linear_offset, _is_offset_aligned_for_vec2)
+    and gate vec2 on all checks passing. If any check fails, the unchanged scalar
+    element-wise path runs.
+
+
+    Alternatives considered:
+
+    1. Always use vec2 without checking alignment - rejected because misaligned half2*/float2*
+    pointer casts cause undefined behavior on GPU
+
+    2. Dynamic alignment check at runtime - rejected because it adds branches in hot
+    path and complicates the generated TIR
+
+    3. Only fix _src_layout_to_flat (the GEMM path) - rejected because the same pattern
+    applies to the other two paths and consistency reduces future bugs
+
+
+    The contiguity check scans dimensions from innermost outward: inner dims must
+    be fully covered (st=0, ext=shape), one "break" dim can have any st/ext, outer
+    dims must have unit extent (ext=1). This correctly handles both full regions and
+    1D slices of flat buffers.
+
+    '
+  summary: Non-full cast/local_view paths enable vec2 only when region contiguity
+    and offset alignment are provable at schedule time, falling back to scalar otherwise.
+created: '2026-04-12'
+id: ADR-20260412-200658-304173
+scope:
+- repo
+tags:
+- tirx
+- dispatch
+- cast
+- vec2
+- local-view
+- api-design
+- correctness
+title: Vec2 in non-full local_view cast paths uses contiguity + alignment guards with
+  scalar fallback
+updated: '2026-04-12'

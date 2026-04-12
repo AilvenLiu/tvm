@@ -1,0 +1,52 @@
+content:
+  details: 'cast/local_view.py dispatches Tx.cast into 4 emit paths based on whether
+    src/dst have layouts and whether regions are full or sliced:
+
+    1. _emit_cast_local_view_full (both have layout, full region) - had vec2 from
+    the start
+
+    2. _emit_cast_local_view_sliced (both have layout, partial region) - added vec2
+
+    3. _emit_cast_local_view_src_layout_to_flat (src has layout, dst flat) - added
+    vec2 (GEMM epilogue path)
+
+    4. _emit_cast_local_view_flat_to_dst_layout (dst has layout, src flat) - added
+    vec2
+
+
+    Vec2 activation conditions for non-full paths:
+
+    - dtype pair in vec2_cast_cuda_intrinsic_dict (float32<->float16, float32<->bfloat16)
+
+    - local_total is a compile-time IntImm (needed for static loop bound)
+
+    - Both src and dst regions are contiguous in row-major layout (_is_contiguous_region
+    check)
+
+    - Both linear offsets are provably even (_is_offset_aligned_for_vec2 uses Analyzer.can_prove_equal(offset
+    % 2, 0))
+
+
+    The GEMM epilogue cast `Tx.cast(Dreg_16b[no*N:no*N+N], Dreg)` hits _src_layout_to_flat
+    because Dreg has wg_local_layout but Dreg_16b is flat. The dst offset is `no *
+    TMEM_LD_N` which is symbolic but provably even (TMEM_LD_N is always even), so
+    vec2 activates. Without vec2, the compiler emits scalar cvt.rn.f16.f32 instructions,
+    causing measurable GEMM performance regression.
+
+    '
+  summary: All four cast/local_view emit paths (_full, _sliced, _src_layout_to_flat,
+    _flat_to_dst_layout) now support vec2 vectorized casts, with contiguity and alignment
+    guards.
+created: '2026-04-12'
+id: KB-20260412-200658-dc85b6
+scope:
+- repo
+tags:
+- tirx
+- dispatch
+- cast
+- vec2
+- local-view
+- performance
+title: cast/local_view.py vec2 vectorization requirements for non-full paths
+updated: '2026-04-12'
