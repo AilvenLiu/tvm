@@ -20,15 +20,14 @@ import functools
 from collections.abc import Callable
 
 import tvm.tirx.operator as tirx_op
-from tvm import DataType
 from tvm.ir import Op
 from tvm.tirx import Buffer, BufferRegion, PrimExpr
 from tvm.tirx.expr import FloatImm
+from tvm.tirx.lang.alloc_pool import PoolAllocator, SMEMPool, TMEMPool
 from tvm.tirx.predicate import Predicate
 
 from . import _ffi_api, frame
-from .ir import alloc_buffer, attr, decl_buffer, meta_class
-from .tmem_pool import TMEMPool
+from .ir import decl_buffer, meta_class
 
 
 def _to_region(buffer: BufferRegion | Buffer):
@@ -1284,138 +1283,6 @@ def select(
     if not isinstance(pred, Predicate):
         pred = Predicate(pred)
     return f_insert(tirx_op.Select(dst, true_value, false_value, pred))
-
-
-_POOL_UNSET = object()
-
-
-def _auto_swizzle_mode(dtype):
-    """Select the default MMA swizzle mode for a shared-memory allocation."""
-    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode
-
-    del dtype
-    return SwizzleMode.SWIZZLE_128B_ATOM
-
-
-@meta_class
-class SMEMPool:
-    """Bump allocator over a contiguous shared memory region.
-
-    Parameters
-    ----------
-    ptr : Var or None, optional
-        If omitted, an ``alloc_buffer([0], "uint8", scope="shared.dyn")`` is
-        created automatically and ``commit()`` must be called after all
-        allocations to emit the size annotation.
-        If a ``Var`` (or ``None`` for megakernel fusion mode) is provided,
-        the caller manages the backing buffer and ``commit()`` is a no-op.
-    """
-
-    def __init__(self, ptr=_POOL_UNSET):
-        if ptr is _POOL_UNSET:
-            buf = alloc_buffer([0], "uint8", scope="shared.dyn")
-            self.ptr = buf.data
-            self._owns_buffer = True
-        else:
-            self.ptr = ptr
-            self._owns_buffer = False
-        self.offset = 0
-        self.max_offset = 0
-
-    def alloc(
-        self,
-        shape,
-        dtype="float32",
-        strides=None,
-        scope="global",
-        align=0,
-        buffer_type="",
-        axis_separators=None,
-        layout="default",
-        name=None,
-    ) -> Buffer:
-        if align > 0:
-            self.offset = (self.offset + align - 1) // align * align
-        res = decl_buffer(
-            shape,
-            dtype,
-            self.ptr,
-            strides,
-            None,
-            self.offset,
-            scope,
-            align,
-            0,
-            buffer_type,
-            axis_separators,
-            layout,
-            name,
-        )
-        self.offset += functools.reduce(lambda x, y: x * y, shape) * (DataType(dtype).bits // 8)
-        if self._owns_buffer:
-            self.max_offset = self.offset if self.offset > self.max_offset else self.max_offset
-        return res
-
-    def alloc_mma(
-        self,
-        shape,
-        dtype="float16",
-        swizzle_mode="auto",
-        align=1024,
-        name=None,
-    ) -> Buffer:
-        """Allocate MMA-compatible shared memory with an inferred swizzle layout."""
-        from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
-            SwizzleMode,
-            mma_shared_layout,
-        )
-
-        if isinstance(swizzle_mode, str):
-            if swizzle_mode == "auto":
-                swizzle_mode = _auto_swizzle_mode(dtype)
-            elif swizzle_mode == "none":
-                swizzle_mode = SwizzleMode.SWIZZLE_NONE
-            else:
-                raise ValueError(
-                    f"Unsupported swizzle_mode={swizzle_mode!r}; expected 'auto', 'none', "
-                    "or SwizzleMode"
-                )
-        layout = mma_shared_layout(dtype, swizzle_mode, shape)
-        return self.alloc(shape, dtype, align=align, layout=layout, name=name)
-
-    def move_base_to(self, offset):
-        self.offset = offset
-        if self._owns_buffer:
-            self.max_offset = self.offset if self.offset > self.max_offset else self.max_offset
-
-    def commit(self, size=None):
-        """Emit pool size annotation into the IR.
-
-        Must be called after all ``alloc()`` / ``move_base_to()`` calls.
-
-        Parameters
-        ----------
-        size : int, optional
-            Explicit shared memory size in bytes.  When *None* (the default),
-            the high-water mark ``max_offset`` tracked by the allocator is used.
-        """
-        if not self._owns_buffer:
-            return
-        resolved = size if size is not None else self.max_offset
-        assert resolved >= self.max_offset, (
-            f"Specified smem size ({resolved}) is smaller than "
-            f"the pool high-water mark ({self.max_offset})"
-        )
-        attr_frame = attr(self.ptr, "tirx.pool_max_bytes", resolved)
-        if isinstance(attr_frame, frame.AttrFrame):
-            from functools import partial
-
-            attr_frame.add_callback(partial(attr_frame.__exit__, None, None, None))
-            attr_frame.__enter__()
-
-
-# Backward-compatible alias used by existing kernels.
-PoolAllocator = SMEMPool
 
 
 def reshape(buffer: Buffer, shape: list[PrimExpr]):
