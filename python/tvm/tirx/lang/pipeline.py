@@ -70,11 +70,12 @@ class MBarrier:
     depth : int
         Number of barrier slots (one per pipeline stage).
     name : str
-        Descriptive name (unused at runtime, for readability).
+        Descriptive name. Propagated to the underlying buffer so that
+        debug tools (e.g. synccheck) can surface it in reports.
     """
 
     def __init__(self, pool, depth, name="mbar", phase_offset=0):
-        self.buf = pool.alloc((depth,), "uint64", align=8)
+        self.buf = pool.alloc((depth,), "uint64", align=8, name=name)
         self.depth = depth
         self.phase_offset = phase_offset
 
