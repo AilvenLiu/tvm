@@ -82,7 +82,7 @@ def test_fp8_gemm_hopper_no_ws():
             col_noswizzle = Tx.meta_var(st_tile * 2 + lane_id // 16)
             col = Tx.meta_var((lane_id % 8) ^ col_noswizzle)
             row = Tx.meta_var(warp_id * 16 + lane_id % 16)
-            Tx.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))  # noqa: E501
+            Tx.ptx.stmatrix(C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]), num=4)  # noqa: E501
 
     @Tx.inline
     def s2G(warp_id, lane_id, C_smem: tvm.tirx.Buffer, C_map, m_idx, n_idx, n_tile):

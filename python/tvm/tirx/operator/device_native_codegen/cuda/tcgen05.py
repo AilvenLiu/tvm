@@ -1143,75 +1143,43 @@ __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
 
 @register_codegen("ptx_tcgen05_cp")
 def codegen_ptx_tcgen05_cp(
-    dst_addr,
-    row_offset,
-    col_offset,
+    taddr,
     src_desc,
     shape,
-    dst_dtype,
-    src_dtype,
-    cta_group=1,
-    multicast="",
+    cta_group,
+    multicast,
+    decompress,
+    row,
+    col,
 ):
     shape = parse_str(shape)
-    dst_dtype = parse_str(dst_dtype)
-    src_dtype = parse_str(src_dtype)
-    cta_group = validate_cta_group(cta_group)
     multicast = parse_str(multicast)
-
-    valid_shapes = {"128x256b", "4x256b", "128x128b", "64x128b", "32x128b"}
-    if shape not in valid_shapes:
-        raise ValueError(f"Invalid shape for tcgen05 copy, check failed for shape: {shape}")
-
-    err_msg = f"Invalid multicast for tcgen05 copy, check failed for shape: {shape}, multicast: {multicast}"  # noqa: E501
-    if shape == "64x128b":
-        if multicast not in {"warpx2::02_13", "warpx2::01_23"}:
-            raise ValueError(err_msg)
-    elif shape == "32x128b":
-        if multicast != "warpx4":
-            raise ValueError(err_msg)
-    else:
-        if multicast != "":
-            raise ValueError(err_msg)
-
-    # 2. Decompression Format Logic
-    # ===============================
-    dst_src_fmt = ""
-    dtype_enum = PTXDataType.from_string(dst_dtype)
-    stype_enum = PTXDataType.from_string(src_dtype)
-
-    fp8_types = {
-        PTXDataType.FLOAT8_E4M3FN,
-        PTXDataType.FLOAT8_E4M3FNUZ,
-        PTXDataType.FLOAT8_E5M2,
-        PTXDataType.FLOAT8_E8M0FNU,
-    }
-    fp6_types = {PTXDataType.FLOAT6_E2M3FN, PTXDataType.FLOAT6_E3M2FN}
-
-    if dtype_enum in fp8_types:
-        if stype_enum == PTXDataType.FLOAT4_E2M1FN:
-            dst_src_fmt = ".b8x16.b4x16_p64"
-        elif stype_enum in fp6_types:
-            dst_src_fmt = ".b8x16.b6x16_p32"
+    decompress = parse_str(decompress)
+    cta_group = validate_cta_group(cta_group)
 
     multicast_str = f".{multicast}" if multicast else ""
+    decompress_str = f".{decompress}" if decompress else ""
 
     multicast_safe = multicast.replace("::", "_")
-    func_name = f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}_multicast_{multicast_safe}"
+    decompress_safe = decompress.replace(".", "_")
+    func_name = (
+        f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}"
+        f"_multicast_{multicast_safe}_decompress_{decompress_safe}"
+    )
     source_code = f"""
-__forceinline__ __device__ void {func_name}(uint32_t dst_addr, int row_offset, int col_offset, uint64_t src_desc) {{
+__forceinline__ __device__ void {func_name}(uint32_t taddr, int row_offset, int col_offset, uint64_t src_desc) {{
     asm volatile(
-        "tcgen05.cp.cta_group::{cta_group}.{shape}{multicast_str}{dst_src_fmt} [%0], %1;"
+        "tcgen05.cp.cta_group::{cta_group}.{shape}{multicast_str}{decompress_str} [%0], %1;"
         :
-        : "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), "l"(src_desc)
+        : "r"(get_tmem_addr(taddr, row_offset, col_offset)), "l"(src_desc)
     );
 }}
 """  # noqa: E501
     return cuda_func_call(
         func_name,
-        dst_addr,
-        row_offset,
-        col_offset,
+        taddr,
+        row,
+        col,
         src_desc,
         source_code=source_code,
     ), ["get_tmem_addr"]

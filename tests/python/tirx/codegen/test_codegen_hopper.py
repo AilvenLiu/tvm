@@ -70,7 +70,7 @@ def test_stmatrix_sync_aligned(trans):
                     reg = Tx.alloc_buffer((8,), "float16", scope="local")
                     for i in range(8):
                         reg[i] = tx * 8 + i
-                    Tx.ptx.stmatrix(4, trans, A_smem.ptr_to([tx % 16, tx // 16 * 8]), reg.ptr_to([0]))  # noqa: E501
+                    Tx.ptx.stmatrix(A_smem.ptr_to([tx % 16, tx // 16 * 8]), reg.ptr_to([0]), num=4, trans=trans)  # noqa: E501
                     if tx == 0:
                         for i, j in Tx.grid(16, 16):
                             A[i, j] = A_smem[i, j]
@@ -132,7 +132,7 @@ def test_ptx_stmatrix(trans, num):
                 A_local = Tx.alloc_local([8], "float16")
                 for i in range(8):
                     A_local[i] = (i // 2) * 64 + tx * 2 + i % 2
-                Tx.ptx.stmatrix(num, trans, A_shared.ptr_to([tx % 16, tx // 16 * 8]), A_local.ptr_to([0]))  # noqa: E501
+                Tx.ptx.stmatrix(A_shared.ptr_to([tx % 16, tx // 16 * 8]), A_local.ptr_to([0]), num=num, trans=trans)  # noqa: E501
             Tx.cuda.cta_sync()
             with Tx.thread()[tx == 0]:
                 for i, j in Tx.grid(16, 16):

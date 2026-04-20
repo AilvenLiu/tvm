@@ -59,7 +59,7 @@ def test_printer_ptx_more():
         'r = Tx.handle()\ns = Tx.handle()\nTx.ptx.ldmatrix("void", Tx.bool(True), 1, ".b16", r, s)',
     )
     _assert_print(
-        tir.op.ptx_stmatrix(1, False, s, r),
+        tir.op.ptx_stmatrix(s, r, num=1, trans=False),
         "s = Tx.handle()\nr = Tx.handle()\nTx.ptx.stmatrix(1, Tx.bool(False), s, r)",
     )
     _assert_print(tir.op.ptx_setmaxnreg(True, 64), "Tx.ptx.setmaxnreg(Tx.bool(True), 64)")
@@ -103,33 +103,62 @@ def test_printer_ptx_more():
     )
     _assert_print(
         tir.op.ptx_tcgen05_encode_instr_descriptor(
-            d, "f16", "f16", "f16", 16, 16, 16, True, False, 1, False, False, False, False
+            d,
+            d_dtype="f16",
+            a_dtype="f16",
+            b_dtype="f16",
+            M=16,
+            N=16,
+            K=16,
+            trans_a=True,
+            trans_b=False,
+            n_cta_groups=1,
+            neg_a=False,
+            neg_b=False,
+            sat_d=False,
+            is_sparse=False,
         ),
         'd = Tx.handle()\nTx.ptx.tcgen05.encode_instr_descriptor(d, "f16", "f16", "f16", 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_tcgen05_encode_instr_descriptor_block_scaled(
-            d, "f16", "f16", "f16", "f16", a, b, 16, 16, 16, True, False, 1, False, False, False
+            d,
+            d_dtype="f16",
+            a_dtype="f16",
+            b_dtype="f16",
+            sfa_dtype="f16",
+            sfb_dtype="f16",
+            sfa_tmem_addr=a,
+            sfb_tmem_addr=b,
+            M=16,
+            N=16,
+            K=16,
+            trans_a=True,
+            trans_b=False,
+            is_sparse=True,
+            n_cta_groups=1,
+            neg_a=False,
+            neg_b=False,
         ),
         "d = Tx.handle()\n"
         "a = Tx.handle()\n"
         "b = Tx.handle()\n"
-        'Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(d, "f16", "f16", "f16", "f16", a, b, 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))',  # noqa: E501
+        'Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(d, "f16", "f16", "f16", "f16", "f16", a, b, 16, 16, 16, Tx.bool(True), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(True))',  # noqa: E501
     )
     _assert_print(
-        tir.op.ptx_tcgen05_cp(a, 0, 0, d, "64x128b", "f16", "f16", 1, ""),
+        tir.op.ptx_tcgen05_cp(a, d, shape="64x128b", cta_group=1, multicast="warpx2::02_13"),
         "a = Tx.handle()\n"
         "d = Tx.handle()\n"
-        'Tx.ptx.tcgen05.cp(a, 0, 0, d, "64x128b", "f16", "f16", 1, "")',
+        'Tx.ptx.tcgen05.cp(a, d, "64x128b", 1, "warpx2::02_13", "", 0, 0)',
     )
     _assert_print(tir.op.ptx_tcgen05_shift(a, 1), "a = Tx.handle()\nTx.ptx.tcgen05.shift(a, 1)")
     _assert_print(
-        tir.op.ptx_tcgen05_ld(a, 0, 0, "64x128b", 1, False, 0),
-        'a = Tx.handle()\nTx.ptx.tcgen05.ld(a, 0, 0, "64x128b", 1, Tx.bool(False), 0)',
+        tir.op.ptx_tcgen05_ld(a, 0, shape="16x64b", num=1, row=0, col=0, pack=False),
+        'a = Tx.handle()\nTx.ptx.tcgen05.ld(a, 0, 0, "16x64b", 1, Tx.bool(False), 0)',
     )
     _assert_print(
-        tir.op.ptx_tcgen05_st(a, 0, 0, "64x128b", 1, False, 0),
-        'a = Tx.handle()\nTx.ptx.tcgen05.st(a, 0, 0, "64x128b", 1, Tx.bool(False), 0)',
+        tir.op.ptx_tcgen05_st(a, 0, shape="16x64b", num=1, row=0, col=0, unpack=False),
+        'a = Tx.handle()\nTx.ptx.tcgen05.st(a, 0, 0, "16x64b", 1, Tx.bool(False), 0)',
     )
     _assert_print(tir.op.ptx_tcgen05_wait_ld(), "Tx.ptx.tcgen05.wait.ld()")
     _assert_print(tir.op.ptx_tcgen05_wait_st(), "Tx.ptx.tcgen05.wait.st()")
@@ -353,28 +382,28 @@ def test_printer_ptx_mma_and_wgmma():
 def test_printer_ptx_cp_async_tensor():
     tmap = tir.Var("tm", "handle")
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster(2, tmap, 0, tmap, 0, 0, 0, 0, 1, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 0, 0, 0, 1, "")',
+        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster(2, tmap, 0, tmap, 0, 1, "", 0, 1, ""),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c(2, tm, 0, tm, 0, 1, "", 0, 1, "")',
     )
     _assert_print(
         tir.op.ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
-            2, tmap, 0, tmap, 0, 0, 0, 0, 1, ""
+            2, tmap, 0, tmap, 0, 1, "", 0, 1, ""
         ),
         "tm = Tx.handle()\n"
         "Tx.ptx.cp_async.bulk.tensor.g2c_tile_gather4"
-        '(2, tm, 0, tm, 0, 0, 0, 0, 1, "")',
+        '(2, tm, 0, tm, 0, 1, "", 0, 1, "")',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, 0, 0, 0, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, tm, 0, 0, 0, "")',
+        tir.op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(2, tmap, "", 0, 0, ""),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.g2c_prefetch(2, tm, "", 0, 0, "")',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_shared_to_global(2, 0, tmap, 0, 0, 0, ""),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g(2, 0, tm, 0, 0, 0, "")',
+        tir.op.ptx_cp_async_bulk_tensor_shared_to_global(2, 0, tmap, "", 0, 0, ""),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g(2, 0, tm, "", 0, 0, "")',
     )
     _assert_print(
-        tir.op.ptx_cp_async_bulk_tensor_shared_to_global_reduce(2, 0, tmap, 0, 0, 0, "", "add"),
-        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, 0, 0, 0, "", "add")',
+        tir.op.ptx_cp_async_bulk_tensor_shared_to_global_reduce(2, 0, tmap, "", "add", 0, 0, ""),
+        'tm = Tx.handle()\nTx.ptx.cp_async.bulk.tensor.s2g_reduce(2, 0, tm, "", "add", 0, 0, "")',
     )
 
 
@@ -382,6 +411,8 @@ def test_printer_ptx_cp_async_call():
     sh = tir.Var("sh", "handle")
     gl = tir.Var("gl", "handle")
     _assert_print(
-        tir.op.ptx_cp_async(sh, gl, 16, "", -1, -1, ""),
+        tir.op.ptx_cp_async(
+            sh, gl, 16, cache_hint="", prefetch_size=-1, predicate=-1, fill_mode=""
+        ),
         'sh = Tx.handle()\ngl = Tx.handle()\nTx.ptx.cp_async("void", sh, gl, 16, "", -1, -1, "")',
     )

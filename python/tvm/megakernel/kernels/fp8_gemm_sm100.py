@@ -436,19 +436,19 @@ class FP8GemmTile(GemmTile):
                         tmem_phase = T.local_scalar("int32", "tmem_phase")
                         T.ptx.tcgen05.encode_instr_descriptor_block_scaled(
                             T.address_of(descI),
-                            "float32",
-                            self.a_type,
-                            self.b_type,
-                            self.sfa_type,
-                            self.sfb_type,
-                            0,
-                            0,
-                            self.MMA_M,
-                            self.MMA_N,
-                            self.MMA_K,
-                            False,
-                            False,
-                            self.CTA_GROUP,
+                            d_dtype="float32",
+                            a_dtype=self.a_type,
+                            b_dtype=self.b_type,
+                            sfa_dtype=self.sfa_type,
+                            sfb_dtype=self.sfb_type,
+                            sfa_tmem_addr=0,
+                            sfb_tmem_addr=0,
+                            M=self.MMA_M,
+                            N=self.MMA_N,
+                            K=self.MMA_K,
+                            trans_a=False,
+                            trans_b=False,
+                            n_cta_groups=self.CTA_GROUP,
                         )
                         self.phase[0] = 0
                         while tile_scheduler.valid():
@@ -479,17 +479,13 @@ class FP8GemmTile(GemmTile):
                                                 swizzle=0,
                                             )
                                             T.ptx.tcgen05.cp(
-                                                0,
-                                                0,
                                                 self.SFA_TMEM_START_COL
                                                 + tmem_idx * self.BLK_SFA // 32
                                                 + ki * 4,
                                                 descSFA,
-                                                "32x128b",
-                                                "uint32",
-                                                "uint32",
-                                                self.CTA_GROUP,
-                                                "warpx4",
+                                                shape="32x128b",
+                                                cta_group=self.CTA_GROUP,
+                                                multicast="warpx4",
                                             )
                                         for ki in T.unroll(0, self.BLK_SFB // 128):
                                             T.ptx.tcgen05.encode_matrix_descriptor(
@@ -500,17 +496,13 @@ class FP8GemmTile(GemmTile):
                                                 swizzle=0,
                                             )
                                             T.ptx.tcgen05.cp(
-                                                0,
-                                                0,
                                                 self.SFB_TMEM_START_COL
                                                 + tmem_idx * self.BLK_SFB // 32
                                                 + ki * 4,
                                                 descSFB,
-                                                "32x128b",
-                                                "uint32",
-                                                "uint32",
-                                                self.CTA_GROUP,
-                                                "warpx4",
+                                                shape="32x128b",
+                                                cta_group=self.CTA_GROUP,
+                                                multicast="warpx4",
                                             )
 
                                     # issue mma

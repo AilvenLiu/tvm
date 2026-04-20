@@ -712,16 +712,16 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
-            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), C_type, A_type, B_type, SFA_type, SFB_type,  # noqa: E501, F821
-                                                               SFA_init_addr, SFB_init_addr,
-                                                               M_mma * cta_group, N_mma, MMA_K, a_mn_major, b_mn_major, cta_group)  # noqa: E501
+            Tx.ptx.tcgen05.encode_instr_descriptor_block_scaled(Tx.address_of(descI_local), d_dtype=C_type, a_dtype=A_type, b_dtype=B_type, sfa_dtype=SFA_type, sfb_dtype=SFB_type,  # noqa: E501, F821
+                                                               sfa_tmem_addr=SFA_init_addr, sfb_tmem_addr=SFB_init_addr,  # noqa: E501
+                                                               M=M_mma * cta_group, N=N_mma, K=MMA_K, trans_a=a_mn_major, trans_b=b_mn_major, n_cta_groups=cta_group)  # noqa: E501
             main_impl(descA_val, descB_buf[0], descI_local)  # noqa: F821
     else:
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             descI_local: Tx.uint32
-            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), C_type, A_type, B_type,  # noqa: E501, F821
-                                                  M_mma * cta_group, N_mma, MMA_K, a_mn_major, b_mn_major, cta_group)  # noqa: E501
+            Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local), d_dtype=C_type, a_dtype=A_type, b_dtype=B_type,  # noqa: E501, F821
+                                                  M=M_mma * cta_group, N=N_mma, K=MMA_K, trans_a=a_mn_major, trans_b=b_mn_major, n_cta_groups=cta_group)  # noqa: E501
             main_impl(descA_val, descB_buf[0], descI_local)  # noqa: F821
     # fmt: on
 

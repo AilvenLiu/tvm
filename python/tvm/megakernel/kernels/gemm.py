@@ -620,15 +620,15 @@ class GemmTile(Tile):
                         descI: Tx.uint32
                         Tx.ptx.tcgen05.encode_instr_descriptor(
                             Tx.address_of(descI),  # noqa: F821
-                            "float32",
-                            self.a_type,
-                            self.b_type,
-                            self.MMA_N,
-                            self.MMA_M,
-                            self.MMA_K,
-                            False,
-                            False,
-                            KernelConfig.CTA_GROUP,
+                            d_dtype="float32",
+                            a_dtype=self.a_type,
+                            b_dtype=self.b_type,
+                            M=self.MMA_N,
+                            N=self.MMA_M,
+                            K=self.MMA_K,
+                            trans_a=False,
+                            trans_b=False,
+                            n_cta_groups=KernelConfig.CTA_GROUP,
                         )
 
                         @Tx.inline

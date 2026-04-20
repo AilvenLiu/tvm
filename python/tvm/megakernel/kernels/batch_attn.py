@@ -1252,12 +1252,11 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                         ),
                                     )
                                     Tx.ptx.stmatrix(
-                                        4,
-                                        False,
                                         o_smem.ptr_to(
                                             [o_smem_offset_w[0] * upcast_size("float16")]
                                         ),
                                         o_frag_f16.ptr_to([0]),
+                                        num=4,
                                     )
 
                     @Tx.inline

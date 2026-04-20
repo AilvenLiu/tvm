@@ -416,7 +416,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                                 Tx.cast(s_frag_f16[:], s_frag[mma_m, mma_n, :])
                                 c_smem_offset_w = int_cell(get_permuted_offset(UPCAST_STRIDE_N, warp_id_m * NUM_MMA_M * 16 + mma_m * 16 + lane_id % 16, warp_id_n * NUM_MMA_N * 2 + mma_n * 2 + lane_id // 16))  # noqa: E501
                                 c_smem_offset_w += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
-                                Tx.ptx.stmatrix(4, False, C_smem.ptr_to([c_smem_offset_w * VEC_LEN]), s_frag_f16.ptr_to([0]))  # noqa: E501
+                                Tx.ptx.stmatrix(C_smem.ptr_to([c_smem_offset_w * VEC_LEN]), s_frag_f16.ptr_to([0]), num=4)  # noqa: E501
 
                     @Tx.inline
                     def write_C_to_gmem():

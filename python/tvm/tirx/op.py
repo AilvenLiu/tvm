@@ -3772,6 +3772,8 @@ def ptx_fence(sem: str, scope: str):
     call : PrimExpr
         The call expression.
     """
+    _choice("sem", sem, _FENCE_SEM)
+    _choice("scope", scope, _FENCE_SCOPE)
     return call_intrin("", "tirx.ptx_fence", sem, scope)
 
 
@@ -3791,6 +3793,7 @@ def ptx_fence_proxy_async(space: str = ""):
     call : PrimExpr
         The call expression.
     """
+    _choice("space", space, _FENCE_PROXY_ASYNC_SPACE)
     return call_intrin("", "tirx.ptx_fence_proxy_async", space)
 
 
@@ -3933,6 +3936,7 @@ def ptx_cp_async(
     dst_ptr,
     src_ptr,
     cp_size,
+    *,
     cache_hint="",
     prefetch_size=-1,
     predicate=-1,
@@ -3955,7 +3959,7 @@ def ptx_cp_async(
     cache_hint : str["evict_last", "evict_first", "evict_normal", ""]
         The cache hint.
 
-    prefetch_size : int[-1, 64, 127, 256]
+    prefetch_size : int[-1, 64, 128, 256]
         The prefetch size.
 
     predicate : PrimExpr
@@ -3969,6 +3973,9 @@ def ptx_cp_async(
     call : PrimExpr
         The call expression.
     """
+    _choice("cache_hint", cache_hint, _CP_ASYNC_CACHE_HINT)
+    _choice("prefetch_size", prefetch_size, _CP_ASYNC_PREFETCH_SIZE)
+    _choice("fill_mode", fill_mode, _CP_ASYNC_FILL_MODE)
     return call_intrin(
         "",
         "tirx.ptx_cp_async",
@@ -4050,6 +4057,8 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
     call : PrimExpr
         The call expression.
     """  # noqa: E501
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
+    _choice("cache_hint", cache_hint, _CP_ASYNC_BULK_CACHE_HINT)
     return call_intrin(
         "",
         "tirx.ptx_cp_async_bulk_tensor_global_to_cluster",
@@ -4062,6 +4071,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
         cache_hint,
         *coords,
     )
+
 
 def ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
     dim, dst_ptr, bar, tensormap, cta_mask, cta_group, cache_hint, *coords
@@ -4099,7 +4109,9 @@ def ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster(
     -------
     call : PrimExpr
         The call expression.
-    """  # noqa: E501
+    """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
+    _choice("cache_hint", cache_hint, _CP_ASYNC_BULK_CACHE_HINT)
     return call_intrin(
         "",
         "tirx.ptx_cp_async_bulk_tensor_tile_gather4_global_to_cluster",
@@ -4139,6 +4151,7 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, cache_hin
     call : PrimExpr
         The call expression.
     """
+    _choice("cache_hint", cache_hint, _CP_ASYNC_BULK_CACHE_HINT)
     return call_intrin(
         "",
         "tirx.ptx_cp_async_bulk_tensor_shared_to_global",
@@ -4172,6 +4185,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, cache_hi
     call : PrimExpr
         The call expression.
     """
+    _choice("cache_hint", cache_hint, _CP_ASYNC_BULK_CACHE_HINT)
     return call_intrin(
         "",
         "tirx.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
@@ -4212,6 +4226,8 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
     call : PrimExpr
         The call expression.
     """
+    _choice("cache_hint", cache_hint, _CP_ASYNC_BULK_CACHE_HINT)
+    _choice("red_op", red_op, _CP_ASYNC_BULK_RED_OP)
     return call_intrin(
         "",
         "tirx.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
@@ -4265,6 +4281,7 @@ def ptx_barrier_cluster_arrive(sem="", aligned=True):
     aligned : bool
         Whether all threads in the warp must execute the same instruction.
     """
+    _choice("sem", sem, _CLUSTER_BARRIER_SEM)
     return call_intrin("", "tirx.ptx_barrier_cluster_arrive", sem, aligned)
 
 
@@ -4430,7 +4447,7 @@ def ptx_ldmatrix(trans, num, dtype, local_ptr, smem_ptr):
         The matrix is loaded in column-major format.
 
     num : IntImm
-        The number of matrices.
+        The number of matrices. One of 1, 2, 4.
 
     dtype : Literal[".b16", ".b8"]
         The data type of the matrices.
@@ -4446,6 +4463,8 @@ def ptx_ldmatrix(trans, num, dtype, local_ptr, smem_ptr):
     call : PrimExpr
         The call expression.
     """
+    _choice("num", num, _LDMATRIX_NUM)
+    _choice("dtype", dtype, _LDMATRIX_DTYPE)
     return call_intrin(
         "",
         "tirx.ptx_ldmatrix",
@@ -4457,24 +4476,28 @@ def ptx_ldmatrix(trans, num, dtype, local_ptr, smem_ptr):
     )
 
 
-def ptx_stmatrix(num, trans, smem_ptr, local_ptr):
-    """TVM intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r
+def ptx_stmatrix(smem_ptr, local_ptr, *, num, trans=False):
+    """TVM intrinsic for ``stmatrix.sync.aligned.m8n8.x{num}[.trans].shared.b16``.
+
+    Stores 1/2/4 8x8 matrices from registers into shared memory.
+
     https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-stmatrix
 
     Parameters
     ----------
-    num : int
-        The number of 8x8 matrices to store.
-
-    trans: bool
-        True indicates the matrix is stored in column-major format.
-
     smem_ptr : PrimExpr
-        The shared memory pointer.
+        Destination pointer in shared memory.
 
     local_ptr : PrimExpr
-        The pointer to the local memory (register)
+        Source pointer in register memory.
+
+    num : int
+        Number of 8x8 matrices. One of 1, 2, 4.
+
+    trans : bool
+        Store in column-major (transposed) form.
     """
+    _choice("num", num, _LDMATRIX_NUM)
     return call_intrin("", "tirx.ptx_stmatrix", num, trans, smem_ptr, local_ptr)
 
 
@@ -4715,6 +4738,7 @@ def ptx_tcgen05_alloc(dst_ptr, n_cols, cta_group=1):
         If cta_group=1, one warp from CTA performs the allocation. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the allocation.
     """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin("", "tirx.ptx_tcgen05_alloc", dst_ptr, n_cols, cta_group)
 
 
@@ -4736,6 +4760,7 @@ def ptx_tcgen05_dealloc(taddr, n_cols, cta_group=1):
         If cta_group=1, one warp from CTA performs the deallocation. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the deallocation.
     """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin("", "tirx.ptx_tcgen05_dealloc", taddr, n_cols, cta_group)
 
 
@@ -4751,6 +4776,7 @@ def ptx_tcgen05_relinquish_alloc_permit(cta_group=1):
         If cta_group=1, one warp from CTA performs the relinquishing. Else, if cta_group=2,
         one warp from each of the peer CTAs perform the relinquishing.
     """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin("", "tirx.ptx_tcgen05_relinquish_alloc_permit", cta_group)
 
 
@@ -4781,6 +4807,7 @@ def ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
 
 def ptx_tcgen05_encode_instr_descriptor(
     desc,
+    *,
     d_dtype,
     a_dtype,
     b_dtype,
@@ -4843,6 +4870,7 @@ def ptx_tcgen05_encode_instr_descriptor(
     is_sparse : bool
         Whether the MMA operation is sparse.
     """
+    _choice("n_cta_groups", n_cta_groups, _TCGEN05_CTA_GROUP)
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_encode_instr_descriptor",
@@ -4865,6 +4893,7 @@ def ptx_tcgen05_encode_instr_descriptor(
 
 def ptx_tcgen05_encode_instr_descriptor_block_scaled(
     desc,
+    *,
     d_dtype,
     a_dtype,
     b_dtype,
@@ -4939,6 +4968,7 @@ def ptx_tcgen05_encode_instr_descriptor_block_scaled(
     is_sparse : bool
         Whether the MMA operation is sparse.
     """
+    _choice("n_cta_groups", n_cta_groups, _TCGEN05_CTA_GROUP)
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_encode_instr_descriptor_block_scaled",
@@ -5330,66 +5360,109 @@ def ptx_tcgen05_fence_after_thread_sync():
     return call_intrin("", "tirx.ptx_tcgen05_fence_after_thread_sync")
 
 
+def _choice(name: str, value, options):
+    """Validate `value` is one of `options`. Raise a clear ValueError otherwise."""
+    if value not in options:
+        raise ValueError(f"invalid {name}={value!r}; expected one of {tuple(options)}")
+
+
+_FENCE_SEM = ("sc", "acq_rel")
+_FENCE_SCOPE = ("cta", "cluster", "gpu", "sys")
+_FENCE_PROXY_ASYNC_SPACE = ("", "global", "shared::cta", "shared::cluster")
+_CLUSTER_BARRIER_SEM = ("", "release", "relaxed")
+_TCGEN05_CTA_GROUP = (1, 2)
+_NVSHMEM_CMP = ("eq", "ne", "gt", "ge", "lt", "le")
+_NVSHMEM_SIG_OP = ("set", "add")
+_F32X2_ROUND = ("rz", "rn", "rm", "rp")
+
+_CP_ASYNC_CACHE_HINT = ("", "evict_last", "evict_first", "evict_normal")
+_CP_ASYNC_PREFETCH_SIZE = (-1, 64, 128, 256)
+_CP_ASYNC_FILL_MODE = ("", "zero")
+_CP_ASYNC_BULK_CACHE_HINT = ("", "evict_last", "evict_first", "evict_normal", "evict_last_use")
+_CP_ASYNC_BULK_RED_OP = ("add", "min", "max", "inc", "dec", "and", "or", "xor")
+_LDMATRIX_DTYPE = (".b16", ".b8")
+_LDMATRIX_NUM = (1, 2, 4)
+
+_TCGEN05_CP_SHAPES = ("32x128b", "4x256b", "128x128b", "128x256b", "64x128b")
+_TCGEN05_CP_MULTICAST = ("", "warpx4", "warpx2::02_13", "warpx2::01_23")
+_TCGEN05_CP_DECOMPRESS = ("", "b8x16.b4x16_p64", "b8x16.b6x16_p32")
+_TCGEN05_LDST_SHAPES = ("16x32bx2", "16x64b", "16x128b", "16x256b", "32x32b")
+# Note: keep in sync with codegen_ptx_tcgen05_ld/_st in device_native_codegen/cuda/tcgen05.py.
+
+
 def ptx_tcgen05_cp(
-    dst_addr,
-    row_offset,
-    col_offset,
+    taddr,
     src_desc,
+    *,
     shape,
-    dst_dtype,
-    src_dtype,
     cta_group=1,
     multicast="",
+    decompress="",
+    row=0,
+    col=0,
 ):
-    """TVM intrinsic to call tcgen05.cp.cta_group
-        Asynchronous copy from shared memory to tensor memory.
+    """TVM intrinsic for the Blackwell `tcgen05.cp` PTX instruction.
+
+    The emitted PTX is::
+
+        tcgen05.cp.cta_group::{cta_group}.{shape}[.{multicast}][.{decompress}] [taddr], src_desc;
+
+    Each keyword argument maps 1:1 to a PTX token: read the call and you
+    know what instruction is emitted.
 
     Parameters
     ----------
-    dst_addr : PrimExpr
-        The address of the destination in tensor memory, should be uint32_t.
-
-    row_offset : PrimExpr
-        The row offset of the source matrix in tensor memory.
-        Should be a multiple of 32.
-
-    col_offset : PrimExpr
-        The column offset of the source matrix in tensor memory.
+    taddr : PrimExpr
+        Destination tensor-memory address (uint32). Callers typically pass
+        ``tmem_base + column_offset_in_uint32s`` directly. Use the optional
+        ``row`` / ``col`` keyword arguments only when the address needs
+        runtime row/col composition via ``get_tmem_addr`` (high 16 bits row,
+        low 16 bits col).
 
     src_desc : PrimExpr
-        The matrix descriptor of the source in shared memory.
+        The 64-bit shared-memory matrix descriptor.
 
     shape : str
-        The data movement shape, should be lane x size, where lanes indicates the
-        number of rows in Tensor Memory, and size indicates the amount of data in
-        bits across the columns in Tensor Memory.
-
-    dst_dtype : str
-        The datatype of the destination.
-
-    src_dtype : str
-        The datatype of the source.
+        One of ``"32x128b"``, ``"4x256b"``, ``"128x128b"``, ``"128x256b"``,
+        ``"64x128b"``.
 
     cta_group : int
-        The number of CTA groups involved in the copy operation.
+        1 or 2.
 
     multicast : str
-        Required by some shapes (64x128b, 32x128b).
-        Specify how to multicast the data being copied across warps.
+        One of ``""``, ``"warpx4"``, ``"warpx2::02_13"``, ``"warpx2::01_23"``.
+        ``"32x128b"`` requires ``"warpx4"``; ``"64x128b"`` requires one of the
+        ``warpx2::*`` values; other shapes require ``""``.
+
+    decompress : str
+        Trailing PTX suffix for fp4/fp6 → fp8 on-the-fly decompression.
+        One of ``""``, ``"b8x16.b4x16_p64"``, ``"b8x16.b6x16_p32"``.
+
+    row, col : PrimExpr
+        Optional row/col offsets added to ``taddr`` at runtime. Default 0.
     """
+    _choice("shape", shape, _TCGEN05_CP_SHAPES)
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
+    _choice("multicast", multicast, _TCGEN05_CP_MULTICAST)
+    _choice("decompress", decompress, _TCGEN05_CP_DECOMPRESS)
+    if shape == "32x128b" and multicast != "warpx4":
+        raise ValueError(f"shape=32x128b requires multicast='warpx4', got {multicast!r}")
+    if shape == "64x128b" and multicast not in ("warpx2::02_13", "warpx2::01_23"):
+        raise ValueError(f"shape=64x128b requires multicast in warpx2::*, got {multicast!r}")
+    if shape in ("128x128b", "128x256b", "4x256b") and multicast != "":
+        raise ValueError(f"shape={shape} requires multicast='', got {multicast!r}")
 
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_cp",
-        dst_addr,
-        row_offset,
-        col_offset,
+        taddr,
         src_desc,
         shape,
-        dst_dtype,
-        src_dtype,
         cta_group,
         multicast,
+        decompress,
+        row,
+        col,
     )
 
 
@@ -5408,77 +5481,68 @@ def ptx_tcgen05_shift(taddr, cta_group=1):
         Else, shift operation is performed in the Tensor Memory of both the current CTA and
         the peer CTA.
     """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin("", "tirx.ptx_tcgen05_shift", taddr, cta_group)
 
 
-def ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack=False, *regs):
-    """TVM intrinsic to call tcgen05.ld.sync.aligned
-        Asynchronous collective load from tensor memory into registers.
+def ptx_tcgen05_ld(src_addr, *regs, shape, num, row=0, col=0, pack=False):
+    """TVM intrinsic for tcgen05.ld.sync.aligned — async collective load from TMEM.
+
+    Emits ``tcgen05.ld.sync.aligned.{shape}.x{num}[.pack::16b].b32 {regs}, [addr];``
 
     Parameters
     ----------
     src_addr : PrimExpr
-        The address of the source matrix in tensor memory, should be uint32_t.
+        Tensor-memory source address (uint32).
 
-    row_offset : PrimExpr
-        The row offset of the source matrix in tensor memory.
-        Should be a multiple of 32.
-
-    col_offset : PrimExpr
-        The column offset of the source matrix in tensor memory.
+    regs : list[PrimExpr]
+        Destination registers. Count depends on shape x num.
 
     shape : str
-        The data movement shape, should be lane x size, where lanes indicates the
-        number of rows in Tensor Memory, and size indicates the amount of data in
-        bits across the columns in Tensor Memory.
+        One of ``"16x32bx2"``, ``"16x64b"``, ``"16x128b"``, ``"16x256b"``, ``"32x32b"``.
 
     num : int
-        The repeat factor along the columns of tensor memory.
+        Repeat factor along the columns. Power-of-two in [1, 128].
+
+    row, col : PrimExpr
+        Optional TMEM row/col offsets added to ``src_addr`` at runtime (row must be
+        a multiple of 32). Default 0.
 
     pack : bool
-        Whether to pack two 16-bit chunks into a single 32-bit chunk in the register.
-
-    regs : list
-        The destination registers to copy into.
+        Pack two 16-bit chunks into a single 32-bit register.
     """
-    return call_intrin(
-        "", "tirx.ptx_tcgen05_ld", src_addr, row_offset, col_offset, shape, num, pack, *regs
-    )
+    _choice("shape", shape, _TCGEN05_LDST_SHAPES)
+    return call_intrin("", "tirx.ptx_tcgen05_ld", src_addr, row, col, shape, num, pack, *regs)
 
 
-def ptx_tcgen05_st(dst_addr, row_offset, col_offset, shape, num, unpack=False, *regs):
-    """TVM intrinsic to call tcgen05.st.sync.aligned
-        Asynchronous collective store to tensor memory from registers.
+def ptx_tcgen05_st(dst_addr, *regs, shape, num, row=0, col=0, unpack=False):
+    """TVM intrinsic for tcgen05.st.sync.aligned — async collective store to TMEM.
+
+    Emits ``tcgen05.st.sync.aligned.{shape}.x{num}[.unpack::16b].b32 [addr], {regs};``
 
     Parameters
     ----------
     dst_addr : PrimExpr
-        The address of the destination matrix in tensor memory, should be uint32_t.
+        Tensor-memory destination address (uint32).
 
-    row_offset : PrimExpr
-        The row offset of the destination matrix in tensor memory.
-        Should be a multiple of 32.
-
-    col_offset : PrimExpr
-        The column offset of the destination matrix in tensor memory.
+    regs : list[PrimExpr]
+        Source registers. Count depends on shape x num.
 
     shape : str
-        The data movement shape, should be lane x size, where lanes indicates the
-        number of rows in Tensor Memory, and size indicates the amount of data in
-        bits across the columns in Tensor Memory.
+        One of ``"16x32bx2"``, ``"16x64b"``, ``"16x128b"``, ``"16x256b"``, ``"32x32b"``.
 
     num : int
-        The repeat factor along the columns of tensor memory.
+        Repeat factor along the columns. Power-of-two in [1, 128].
+
+    row, col : PrimExpr
+        Optional TMEM row/col offsets added to ``dst_addr`` at runtime (row must be
+        a multiple of 32). Default 0.
 
     unpack : bool
-        Whether to unpack a single 32-bit chunk into two 16-bit chunks in the register.
-
-    regs : list
-        The source registers to copy from.
+        Unpack a 32-bit register into two 16-bit chunks.
     """
-    return call_intrin(
-        "", "tirx.ptx_tcgen05_st", dst_addr, row_offset, col_offset, shape, num, unpack, *regs
-    )
+    _choice("shape", shape, _TCGEN05_LDST_SHAPES)
+    return call_intrin("", "tirx.ptx_tcgen05_st", dst_addr, row, col, shape, num, unpack, *regs)
 
 
 def ptx_tcgen05_wait_ld():
@@ -5514,6 +5578,7 @@ def ptx_tcgen05_commit(bar, cta_group=1, cta_mask=0):
     call : PrimExpr
         The call expression.
     """
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_commit",
@@ -5998,6 +6063,7 @@ def ptx_add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
+    _choice("rounding_mode", rounding_mode, _F32X2_ROUND)
     return call_intrin("", "tirx.ptx_add_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
@@ -6024,6 +6090,7 @@ def ptx_sub_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
+    _choice("rounding_mode", rounding_mode, _F32X2_ROUND)
     return call_intrin("", "tirx.ptx_sub_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
@@ -6050,6 +6117,7 @@ def ptx_mul_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
+    _choice("rounding_mode", rounding_mode, _F32X2_ROUND)
     return call_intrin("", "tirx.ptx_mul_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
 
 
@@ -6078,6 +6146,7 @@ def ptx_fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr, rounding_mode="rz"):
     call : PrimExpr
         The call expression.
     """
+    _choice("rounding_mode", rounding_mode, _F32X2_ROUND)
     return call_intrin(
         "", "tirx.ptx_fma_packed_f32x2", a1, a2, b1, b2, c1, c2, d_addr, rounding_mode
     )
@@ -6398,6 +6467,7 @@ def nvshmem_signal_op(sig_addr, signal, sig_op, pe):
         The call expression.
     """
 
+    _choice("sig_op", sig_op, _NVSHMEM_SIG_OP)
     return call_intrin("", "tirx.nvshmem_signal_op", sig_addr, signal, sig_op, pe)
 
 
@@ -6424,6 +6494,7 @@ def nvshmem_wait_until(ivar, cmp, cmp_value, type="uint64_t"):
         The call expression.
     """
 
+    _choice("cmp", cmp, _NVSHMEM_CMP)
     return call_intrin("", "tirx.nvshmem_wait_until", ivar, cmp, cmp_value, type)
 
 

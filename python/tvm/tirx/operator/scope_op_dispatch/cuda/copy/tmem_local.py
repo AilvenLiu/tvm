@@ -122,7 +122,7 @@ def copy_tmem_local_impl(
         with Tx.warp():
             local_storage = local_buf.view(local_buf.shape[1] * elem_per_32b, layout=TileLayout(S[num * elem_per_32b]))  # noqa: E501
             local_32b = local_storage.view("uint32")
-            op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[local_st[1] // elem_per_32b+i] for i in range(num)])  # noqa: E501
+            op(tmem_buf.allocated_addr[0], *[local_32b[local_st[1] // elem_per_32b+i] for i in range(num)], shape="32x32b", num=num, row=0, col=offset_32b)  # noqa: E501
             if not async_op:
                 wait_op()
     # fmt: on

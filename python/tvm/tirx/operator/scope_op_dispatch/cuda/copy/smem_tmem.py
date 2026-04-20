@@ -198,14 +198,11 @@ def copy_smem_tmem_impl(
             desc_val = smem_desc_add_16B_offset(cp_desc[0], offset_16B)
             Tx.ptx.tcgen05.cp(
                 tmem_addr[0],
-                0,
-                tmem_col,
                 desc_val,
-                copy_shape,
-                smem_buf.dtype,
-                tmem_buf.dtype,
-                cta_group,
-                multicast
+                shape=copy_shape,
+                cta_group=cta_group,
+                multicast=multicast,
+                col=tmem_col,
             )
         if cta_mask is not None:
             Tx.ptx.tcgen05.commit(mbar, cta_group=cta_group, cta_mask=cta_mask)
@@ -225,7 +222,7 @@ def copy_smem_tmem_impl(
 #     Tx.copy(acc_tmem[0:16, 0:128], A_smem[0:16, 0:128])
 #
 # After (tcgen05.cp with descriptor encoding):
-#     Tx.ptx.tcgen05.cp(num_regs, tmem_addr, smem_desc, ...)
+#     Tx.ptx.tcgen05.cp(tmem_addr, smem_desc, shape=..., cta_group=..., multicast=...)
 @register_dispatch(
     "copy",
     "cuda",

@@ -122,7 +122,7 @@ def test_tcgen05_ld_st_roundtrip():
                         reg[i] = A[tx, i]
                     # RF -> TMEM
                     for i in range(WIDTH):
-                        Tx.ptx.tcgen05.st(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])  # noqa: E501
+                        Tx.ptx.tcgen05.st(tmem_addr, reg[i], shape="32x32b", num=REPEAT_NUM, row=warp_id * 32, col=i)  # noqa: E501
                     Tx.ptx.tcgen05.wait.st()
                     Tx.cuda.cta_sync()
                     # reset RF
@@ -132,7 +132,7 @@ def test_tcgen05_ld_st_roundtrip():
                     # TMEM -> RF
                     Tx.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
-                        Tx.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])  # noqa: E501
+                        Tx.ptx.tcgen05.ld(tmem_addr, reg[i], shape="32x32b", num=REPEAT_NUM, row=warp_id * 32, col=i)  # noqa: E501
                     Tx.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(WIDTH):
@@ -210,7 +210,7 @@ def test_tcgen05_cp_ld_roundtrip():
                         Tx.ptx.mbarrier.init(bar.data, 1)
                         for k in range(dtype_bits * WIDTH // 256):
                             Tx.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.elem_offset_of([0, k * 8])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501
-                            Tx.ptx.tcgen05.cp(tmem_addr, 0, k * 256 // 32, descA[0], "128x256b", dtype, dtype, cta_group=cta_group)  # noqa: E501
+                            Tx.ptx.tcgen05.cp(tmem_addr, descA[0], shape="128x256b", cta_group=cta_group, col=k * 256 // 32)  # noqa: E501
                         Tx.ptx.tcgen05.commit(bar.data, cta_group)
                     Tx.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1
@@ -218,7 +218,7 @@ def test_tcgen05_cp_ld_roundtrip():
                     # TMEM -> RF (ld)
                     Tx.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
-                        Tx.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])  # noqa: E501
+                        Tx.ptx.tcgen05.ld(tmem_addr, reg[i], shape="32x32b", num=REPEAT_NUM, row=warp_id * 32, col=i)  # noqa: E501
                     Tx.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(WIDTH):
@@ -339,7 +339,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                     phase[0] = 0
                     if tx == 0:
                         Tx.ptx.mbarrier.init(bar.data, 1)
-                        Tx.ptx.tcgen05.encode_instr_descriptor(descI.data, d_type, a_type, b_type, M, N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)  # noqa: E501
+                        Tx.ptx.tcgen05.encode_instr_descriptor(descI.data, d_dtype=d_type, a_dtype=a_type, b_dtype=b_type, M=M, N=N, K=MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)  # noqa: E501
                         for k in range(K // MMA_K):
                             Tx.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501
                             Tx.ptx.tcgen05.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501
@@ -355,7 +355,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                     # TMEM -> RF
                     Tx.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(N):
-                        Tx.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])  # noqa: E501
+                        Tx.ptx.tcgen05.ld(tmem_addr, reg[i], shape="32x32b", num=REPEAT_NUM, row=warp_id * 32, col=i)  # noqa: E501
                     Tx.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(N):

@@ -1242,7 +1242,7 @@ def test_lower_tirx_dedup_smem_descriptor():
             tmem = Tx.decl_buffer((16384,), scope="tmem", layout=None, allocated_addr=tmem_addr_1[0])  # noqa: E501, F841
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 descI_local = Tx.alloc_local((1,), "uint32", layout=None)
-                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), "float32", "float16", "float16", 128, 128, 16, Tx.bool(False), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))  # noqa: E501
+                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), d_dtype="float32", a_dtype="float16", b_dtype="float16", M=128, N=128, K=16, trans_a=Tx.bool(False), trans_b=Tx.bool(False), n_cta_groups=1, neg_a=Tx.bool(False), neg_b=Tx.bool(False), sat_d=Tx.bool(False), is_sparse=Tx.bool(False))  # noqa: E501
                 for mi in Tx.unroll(1):
                     for ni in Tx.unroll(1):
                         for ki in Tx.unroll(4):
@@ -1257,7 +1257,7 @@ def test_lower_tirx_dedup_smem_descriptor():
                             Tx.ptx.tcgen05.mma("float32", "float16", "float16", Tx.cuda.get_tmem_addr(tmem_addr[0], mi * 128, tmem_col[0]), a_val[0], descB_val[0], descI_local[0], Tx.bool(False), 1, Tx.Cast("bool", should_accum[0]), 0, 0, 0, 0, 0)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
                 descI_local = Tx.alloc_local((1,), "uint32", layout=None)
-                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), "float32", "float16", "float16", 128, 128, 16, Tx.bool(False), Tx.bool(False), 1, Tx.bool(False), Tx.bool(False), Tx.bool(False), Tx.bool(False))  # noqa: E501
+                Tx.ptx.tcgen05.encode_instr_descriptor(Tx.address_of(descI_local[0]), d_dtype="float32", a_dtype="float16", b_dtype="float16", M=128, N=128, K=16, trans_a=Tx.bool(False), trans_b=Tx.bool(False), n_cta_groups=1, neg_a=Tx.bool(False), neg_b=Tx.bool(False), sat_d=Tx.bool(False), is_sparse=Tx.bool(False))  # noqa: E501
                 for mi in Tx.unroll(1):
                     for ni in Tx.unroll(1):
                         for ki in Tx.unroll(4):
