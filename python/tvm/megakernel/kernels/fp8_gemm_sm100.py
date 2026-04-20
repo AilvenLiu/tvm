@@ -525,11 +525,6 @@ class FP8GemmTile(GemmTile):
 
                                         if self.stage == 0 and ki == 0:
                                             T.ptx.tcgen05.mma.block_scale(
-                                                "float32",
-                                                self.a_type,
-                                                self.b_type,
-                                                self.sfa_type,
-                                                self.sfb_type,
                                                 tmem_idx * self.MMA_N,
                                                 descA,
                                                 descB,
@@ -538,17 +533,17 @@ class FP8GemmTile(GemmTile):
                                                 self.SFB_TMEM_START_COL
                                                 + tmem_idx * self.BLK_SFB // 32,
                                                 descI,
-                                                False,
-                                                self.CTA_GROUP,
-                                                False,
+                                                d_dtype="float32",
+                                                a_dtype=self.a_type,
+                                                b_dtype=self.b_type,
+                                                sfa_dtype=self.sfa_type,
+                                                sfb_dtype=self.sfb_type,
+                                                use_a_tmem=False,
+                                                cta_group=self.CTA_GROUP,
+                                                enable_input_d=False,
                                             )
                                         else:
                                             T.ptx.tcgen05.mma.block_scale(
-                                                "float32",
-                                                self.a_type,
-                                                self.b_type,
-                                                self.sfa_type,
-                                                self.sfb_type,
                                                 tmem_idx * self.MMA_N,
                                                 descA,
                                                 descB,
@@ -557,9 +552,14 @@ class FP8GemmTile(GemmTile):
                                                 self.SFB_TMEM_START_COL
                                                 + tmem_idx * self.BLK_SFB // 32,
                                                 descI,
-                                                False,
-                                                self.CTA_GROUP,
-                                                True,
+                                                d_dtype="float32",
+                                                a_dtype=self.a_type,
+                                                b_dtype=self.b_type,
+                                                sfa_dtype=self.sfa_type,
+                                                sfb_dtype=self.sfb_type,
+                                                use_a_tmem=False,
+                                                cta_group=self.CTA_GROUP,
+                                                enable_input_d=True,
                                             )
                                     self.mma2tma_bar.arrive(ks)
 

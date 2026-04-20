@@ -761,8 +761,8 @@ def test_wgmma_ss_nt():
                     Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descA), A_smem.data, *A_encode_args)  # noqa: E501, F821
                     Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descB), B_smem.data, *B_encode_args)  # noqa: E501, F821
                     Tx.ptx.wgmma.fence()
-                    Tx.ptx.wgmma.mma_async.ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False,  # noqa: E501
-                                             descA, descB, *get_accum_list(C_local, C_elems))  # noqa: F821
+                    Tx.ptx.wgmma.mma_async.ss(descA, descB, *get_accum_list(C_local, C_elems),  # noqa: F821
+                                             M=M, N=N, K=K, in_dtype=in_dtype, out_dtype=out_dtype, transA=transA, transB=transB, scaleA=1.0, scaleB=1.0, scaleD=False)  # noqa: E501
                     Tx.ptx.wgmma.commit_group()
                     Tx.ptx.wgmma.wait_group(0)
 
@@ -927,8 +927,8 @@ def test_wgmma_rs_nt():
                     # do wgmma
                     Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descB), B_smem.data, *B_encode_args)  # noqa: E501, F821
                     Tx.ptx.wgmma.fence()
-                    Tx.ptx.wgmma.mma_async.rs(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False,  # noqa: E501
-                                             descB, *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)))  # noqa: E501, F821
+                    Tx.ptx.wgmma.mma_async.rs(descB, *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)),  # noqa: E501, F821
+                                             M=M, N=N, K=K, in_dtype=in_dtype, out_dtype=out_dtype, transA=transA, transB=transB, scaleA=1.0, scaleB=1.0, scaleD=False)  # noqa: E501
                     Tx.ptx.wgmma.commit_group()
                     Tx.ptx.wgmma.wait_group(0)
 

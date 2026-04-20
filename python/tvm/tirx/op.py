@@ -4541,7 +4541,19 @@ def ptx_wgmma_noop_barrier(reg):
 
 
 def ptx_wgmma_mma_async_ss(
-    M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB, scaleD, descA, descB, *accums
+    descA,
+    descB,
+    *accums,
+    M,
+    N,
+    K,
+    in_dtype,
+    out_dtype,
+    transA,
+    transB,
+    scaleA,
+    scaleB,
+    scaleD,
 ):
     """TVM intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype over 2 smem operators
 
@@ -4606,7 +4618,18 @@ def ptx_wgmma_mma_async_ss(
 
 
 def ptx_wgmma_mma_async_rs(
-    M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB, scaleD, descB, *reg_list
+    descB,
+    *reg_list,
+    M,
+    N,
+    K,
+    in_dtype,
+    out_dtype,
+    transA,
+    transB,
+    scaleA,
+    scaleB,
+    scaleD,
 ):
     """TVM intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
         When A is in register and B is in shared memory
@@ -4993,18 +5016,18 @@ def ptx_tcgen05_encode_instr_descriptor_block_scaled(
 
 
 def ptx_tcgen05_mma(
-    d_dtype,
-    a_dtype,
-    b_dtype,
     d_tmem_addr,
     a_operand,
     b_desc,
     i_desc,
+    *disable_output_lane,
+    d_dtype,
+    a_dtype,
+    b_dtype,
     use_a_tmem,
     cta_group,
     enable_input_d=True,
     scale_input_d=0,
-    *disable_output_lane,
 ):
     """TVM intrinsic to call tcgen05.mma.cta_group.kind without block scaling.
 
@@ -5050,14 +5073,11 @@ def ptx_tcgen05_mma(
         The lanes that should not be updated in the resultant matrix D.
     """
 
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
+
     # default value for disable_output_lane
     if len(disable_output_lane) == 0:
-        if cta_group == 1:
-            disable_output_lane = [0, 0, 0, 0]
-        elif cta_group == 2:
-            disable_output_lane = [0, 0, 0, 0, 0, 0, 0, 0]
-        else:
-            raise ValueError("Number of CTA groups in ptx_tcgen05_mma is invalid, must be 1 or 2.")
+        disable_output_lane = [0] * (4 if cta_group == 1 else 8)
 
     return call_intrin(
         "",
@@ -5078,17 +5098,18 @@ def ptx_tcgen05_mma(
 
 
 def ptx_tcgen05_mma_block_scale(
-    d_dtype,
-    a_dtype,
-    b_dtype,
-    sfa_dtype,
-    sfb_dtype,
     d_tmem_addr,
     a_operand,
     b_desc,
     sfa_tmem_addr,
     sfb_tmem_addr,
     i_desc,
+    *,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
     use_a_tmem,
     cta_group,
     enable_input_d=True,
@@ -5143,6 +5164,7 @@ def ptx_tcgen05_mma_block_scale(
         Whether to accum results into the resultant matrix D or not.
     """
 
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_mma_block_scale",
@@ -5164,19 +5186,19 @@ def ptx_tcgen05_mma_block_scale(
 
 
 def ptx_tcgen05_mma_sp(
-    d_dtype,
-    a_dtype,
-    b_dtype,
     d_tmem_addr,
     a_operand,
     b_desc,
     sp_tmem_addr,
     i_desc,
+    *disable_output_lane,
+    d_dtype,
+    a_dtype,
+    b_dtype,
     use_a_tmem,
     cta_group,
     enable_input_d=True,
     scale_input_d=0,
-    *disable_output_lane,
 ):
     """TVM intrinsic to call tcgen05.mma.sp.cta_group.kind without block scaling.
 
@@ -5225,16 +5247,11 @@ def ptx_tcgen05_mma_sp(
         The lanes that should not be updated in the resultant matrix D.
     """
 
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
+
     # default value for disable_output_lane
     if len(disable_output_lane) == 0:
-        if cta_group == 1:
-            disable_output_lane = [0, 0, 0, 0]
-        elif cta_group == 2:
-            disable_output_lane = [0, 0, 0, 0, 0, 0, 0, 0]
-        else:
-            raise ValueError(
-                "Number of CTA groups in ptx_tcgen05_mma_sp is invalid, must be 1 or 2."
-            )
+        disable_output_lane = [0] * (4 if cta_group == 1 else 8)
 
     return call_intrin(
         "",
@@ -5256,11 +5273,6 @@ def ptx_tcgen05_mma_sp(
 
 
 def ptx_tcgen05_mma_sp_block_scale(
-    d_dtype,
-    a_dtype,
-    b_dtype,
-    sfa_dtype,
-    sfb_dtype,
     d_tmem_addr,
     a_operand,
     b_desc,
@@ -5268,6 +5280,12 @@ def ptx_tcgen05_mma_sp_block_scale(
     sfb_tmem_addr,
     sp_tmem_addr,
     i_desc,
+    *,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
     use_a_tmem,
     cta_group,
     enable_input_d=True,
@@ -5324,7 +5342,7 @@ def ptx_tcgen05_mma_sp_block_scale(
     enable_input_d : bool
         Whether to accum results into the resultant matrix D or not.
     """
-
+    _choice("cta_group", cta_group, _TCGEN05_CTA_GROUP)
     return call_intrin(
         "",
         "tirx.ptx_tcgen05_mma_sp_block_scale",

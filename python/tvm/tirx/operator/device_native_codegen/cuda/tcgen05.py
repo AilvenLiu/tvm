@@ -318,98 +318,151 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
     ]
 
 
+# Dtype sets used to classify tcgen05 MMA variants.
+_FP8_FAMILY = frozenset(
+    {
+        PTXDataType.FLOAT8_E4M3FN,
+        PTXDataType.FLOAT8_E4M3FNUZ,
+        PTXDataType.FLOAT8_E5M2,
+        PTXDataType.FLOAT6_E2M3FN,
+        PTXDataType.FLOAT6_E3M2FN,
+        PTXDataType.FLOAT4_E2M1FN,
+    }
+)
+_E8M0 = frozenset({PTXDataType.FLOAT8_E8M0FNU})
+_E4M3 = frozenset({PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ})
+
+
+# Rules for classifying (d_dtype, a_dtype, b_dtype [, sfa_dtype, sfb_dtype]) into
+# one of tcgen05.mma's kind tags. First matching rule wins; rules are disjoint.
+# sf_required=True means a non-empty sfa_dtype AND sfb_dtype must be provided.
+_TCGEN05_MMA_RULES: tuple[tuple, ...] = (
+    # (kind, d_in, a_in, b_in, sf_required, sfa_in, sfb_in)
+    (
+        "f16",
+        frozenset({PTXDataType.FLOAT16}),
+        frozenset({PTXDataType.FLOAT16}),
+        frozenset({PTXDataType.FLOAT16}),
+        False,
+        None,
+        None,
+    ),
+    (
+        "f16",
+        frozenset({PTXDataType.FLOAT32}),
+        frozenset({PTXDataType.FLOAT16, PTXDataType.BFLOAT16}),
+        frozenset({PTXDataType.FLOAT16, PTXDataType.BFLOAT16}),
+        False,
+        None,
+        None,
+    ),
+    (
+        "tf32",
+        frozenset({PTXDataType.FLOAT32}),
+        frozenset({PTXDataType.TENSOR_FLOAT32}),
+        frozenset({PTXDataType.TENSOR_FLOAT32}),
+        False,
+        None,
+        None,
+    ),
+    (
+        "i8",
+        frozenset({PTXDataType.INT32}),
+        frozenset({PTXDataType.INT8, PTXDataType.UINT8}),
+        frozenset({PTXDataType.INT8, PTXDataType.UINT8}),
+        False,
+        None,
+        None,
+    ),
+    (
+        "f8f6f4",
+        frozenset({PTXDataType.FLOAT32, PTXDataType.FLOAT16}),
+        _FP8_FAMILY,
+        _FP8_FAMILY,
+        False,
+        None,
+        None,
+    ),
+    (
+        "mxf4",
+        frozenset({PTXDataType.FLOAT32}),
+        frozenset({PTXDataType.FLOAT4_E2M1FN}),
+        frozenset({PTXDataType.FLOAT4_E2M1FN}),
+        True,
+        _E8M0,
+        _E8M0,
+    ),
+    (
+        "mxf4nvf4",
+        frozenset({PTXDataType.FLOAT32}),
+        frozenset({PTXDataType.FLOAT4_E2M1FN}),
+        frozenset({PTXDataType.FLOAT4_E2M1FN}),
+        True,
+        _E4M3,
+        _E4M3,
+    ),
+    ("mxf8f6f4", frozenset({PTXDataType.FLOAT32}), _FP8_FAMILY, _FP8_FAMILY, True, _E8M0, _E8M0),
+)
+
+
 def _get_tcgen05_mma_kind(
     d_dtype: str, a_dtype: str, b_dtype: str, sfa_dtype: str = "", sfb_dtype: str = ""
 ) -> str:
-    kind = ""
+    """Classify an MMA dtype tuple into one of tcgen05.mma's kind tags.
 
-    dtype = PTXDataType.from_string(d_dtype)
-    atype = PTXDataType.from_string(a_dtype)
-    btype = PTXDataType.from_string(b_dtype)
-    kind = ""
+    Reads from ``_TCGEN05_MMA_RULES``; first match wins. Raises ``ValueError`` if
+    no rule matches.
+    """
+    d = PTXDataType.from_string(d_dtype)
+    a = PTXDataType.from_string(a_dtype)
+    b = PTXDataType.from_string(b_dtype)
+    has_sf = bool(sfa_dtype) and bool(sfb_dtype)
+    sfa = PTXDataType.from_string(sfa_dtype) if sfa_dtype else None
+    sfb = PTXDataType.from_string(sfb_dtype) if sfb_dtype else None
 
-    if (
-        atype == PTXDataType.FLOAT16
-        and btype == PTXDataType.FLOAT16
-        and dtype == PTXDataType.FLOAT16
-    ):
-        kind = "f16"
-    elif (
-        (atype in {PTXDataType.BFLOAT16, PTXDataType.FLOAT16})
-        and (btype in {PTXDataType.BFLOAT16, PTXDataType.FLOAT16})
-        and dtype == PTXDataType.FLOAT32
-    ):
-        kind = "f16"
-    elif (
-        atype == PTXDataType.TENSOR_FLOAT32
-        and btype == PTXDataType.TENSOR_FLOAT32
-        and dtype == PTXDataType.FLOAT32
-    ):
-        kind = "tf32"
-    elif (
-        atype == PTXDataType.FLOAT4_E2M1FN
-        and btype == PTXDataType.FLOAT4_E2M1FN
-        and sfa_dtype
-        and sfb_dtype
-        and dtype == PTXDataType.FLOAT32
-    ):
-        sfa_dtype_enum = PTXDataType.from_string(sfa_dtype)
-        sfb_dtype_enum = PTXDataType.from_string(sfb_dtype)
-        if (
-            sfa_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
-            and sfb_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
-        ):
-            kind = "mxf4"
-        elif (sfa_dtype_enum in {PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ}) and (
-            sfb_dtype_enum in {PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ}
-        ):
-            kind = "mxf4nvf4"
-    elif (
-        atype
-        in {
-            PTXDataType.FLOAT8_E4M3FN,
-            PTXDataType.FLOAT8_E4M3FNUZ,
-            PTXDataType.FLOAT8_E5M2,
-            PTXDataType.FLOAT6_E2M3FN,
-            PTXDataType.FLOAT6_E3M2FN,
-            PTXDataType.FLOAT4_E2M1FN,
-        }
-    ) and (
-        btype
-        in {
-            PTXDataType.FLOAT8_E4M3FN,
-            PTXDataType.FLOAT8_E4M3FNUZ,
-            PTXDataType.FLOAT8_E5M2,
-            PTXDataType.FLOAT6_E2M3FN,
-            PTXDataType.FLOAT6_E3M2FN,
-            PTXDataType.FLOAT4_E2M1FN,
-        }
-    ):
-        if not sfa_dtype and not sfb_dtype:
-            if dtype in {PTXDataType.FLOAT32, PTXDataType.FLOAT16}:
-                kind = "f8f6f4"
-        elif sfa_dtype and sfb_dtype:
-            sfa_dtype_enum = PTXDataType.from_string(sfa_dtype)
-            sfb_dtype_enum = PTXDataType.from_string(sfb_dtype)
-            if (
-                sfa_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
-                and sfb_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
-                and dtype == PTXDataType.FLOAT32
-            ):
-                kind = "mxf8f6f4"
-    elif (
-        (atype in {PTXDataType.INT8, PTXDataType.UINT8})
-        and (btype in {PTXDataType.INT8, PTXDataType.UINT8})
-        and dtype == PTXDataType.INT32
-    ):
-        kind = "i8"
+    # mxf4/mxf4nvf4 take precedence over mxf8f6f4 for fp4xfp4; rule order handles that.
+    for kind, d_in, a_in, b_in, sf_required, sfa_in, sfb_in in _TCGEN05_MMA_RULES:
+        if d not in d_in or a not in a_in or b not in b_in:
+            continue
+        if sf_required != has_sf:
+            continue
+        if sf_required and (sfa not in sfa_in or sfb not in sfb_in):
+            continue
+        return kind
 
-    if not kind:
-        raise ValueError(
-            f"Invalid multiplicand data types for Tcgen05 MMA, check failed for d: {d_dtype}, "
-            f"a: {a_dtype}, b: {b_dtype}, scale_a: {sfa_dtype}, scale_b: {sfb_dtype}"
-        )
-    return kind
+    raise ValueError(
+        f"Invalid multiplicand data types for Tcgen05 MMA, check failed for d: {d_dtype}, "
+        f"a: {a_dtype}, b: {b_dtype}, scale_a: {sfa_dtype}, scale_b: {sfb_dtype}"
+    )
+
+
+# Shape constraints for tcgen05 MMA.
+# Each entry: (kinds, cta_group, m_to_n_step, extra_ms_for_n, k_dense, k_sparse).
+#   - kinds: which MMA kinds this entry applies to
+#   - cta_group: 1 or 2
+#   - m_to_n_step: {valid_m: n_step} - N must be in range(n_step, 257, n_step)
+#   - extra_ns_for_any_m: extra N values allowed (e.g. {8, 24} for i8 cta_group=1)
+#   - k_dense / k_sparse: required K value
+_TCGEN05_MMA_SHAPE_RULES: tuple[tuple, ...] = (
+    # (kinds_set, cta_group, m_to_n_step, extra_ns, k_dense, k_sparse)
+    (frozenset({"f16", "tf32", "f8f6f4"}), 1, {64: 8, 128: 16}, frozenset(), None, None),
+    (frozenset({"f16", "tf32", "f8f6f4"}), 2, {128: 32, 256: 32}, frozenset(), None, None),
+    (frozenset({"i8"}), 1, {64: 16, 128: 16}, frozenset({8, 24}), 32, 64),
+    (frozenset({"i8"}), 2, {128: 32, 256: 32}, frozenset(), 32, 64),
+    (frozenset({"mxf8f6f4", "mxf4", "mxf4nvf4"}), 1, {128: 8}, frozenset(), None, None),
+    (frozenset({"mxf8f6f4", "mxf4", "mxf4nvf4"}), 2, {128: 16, 256: 16}, frozenset(), None, None),
+)
+
+# K values are kind-dependent (dense/sparse pair).
+_TCGEN05_MMA_K: dict[str, tuple[int, int]] = {
+    "f16": (16, 32),
+    "tf32": (8, 16),
+    "f8f6f4": (32, 64),
+    "i8": (32, 64),
+    "mxf8f6f4": (32, 64),
+    "mxf4": (64, 128),
+    "mxf4nvf4": (64, 128),
+}
 
 
 def _check_tcgen05_mma_matrix_shape(
@@ -420,64 +473,29 @@ def _check_tcgen05_mma_matrix_shape(
         f"is_sparse: {is_sparse}, cta_group: {cta_group}, M: {m}, N: {n}, K: {k}"
     )
 
-    if kind in ["f16", "tf32", "f8f6f4"]:
-        if cta_group == 1:
-            if m == 64:
-                if not (8 <= n <= 256 and n % 8 == 0):
-                    raise ValueError(err)
-            elif m == 128:
-                if not (16 <= n <= 256 and n % 16 == 0):
-                    raise ValueError(err)
-            else:
-                raise ValueError(err)
-        elif cta_group == 2:
-            if m not in [128, 256]:
-                raise ValueError(err)
-            if not (32 <= n <= 256 and n % 32 == 0):
-                raise ValueError(err)
-    elif kind == "i8":
-        if cta_group == 1:
-            if m not in [64, 128]:
-                raise ValueError(err)
-            is_n_valid = (n == 8) or (n == 24) or (16 <= n <= 256 and n % 16 == 0)
-            if not is_n_valid:
-                raise ValueError(err)
-        elif cta_group == 2:
-            if m not in [128, 256]:
-                raise ValueError(err)
-            if not (32 <= n <= 256 and n % 32 == 0):
-                raise ValueError(err)
-    elif kind in ["mxf8f6f4", "mxf4", "mxf4nvf4"]:
-        if cta_group == 1:
-            if not (m == 128):
-                raise ValueError(err)
-            if not (8 <= n <= 256 and n % 8 == 0):
-                raise ValueError(err)
-        elif cta_group == 2:
-            if is_sparse:
-                if not (m == 256):
-                    raise ValueError(err)
-            else:  # dense
-                if m not in [128, 256]:
-                    raise ValueError(err)
-            if not (16 <= n <= 256 and n % 16 == 0):
-                raise ValueError(err)
+    # Find the matching shape rule.
+    for kinds, cg, m_to_n_step, extra_ns, _, _ in _TCGEN05_MMA_SHAPE_RULES:
+        if kind not in kinds or cg != cta_group:
+            continue
+        # Extra constraint: mxf* with cta_group=2 and is_sparse requires m=256.
+        if kind in {"mxf8f6f4", "mxf4", "mxf4nvf4"} and cta_group == 2 and is_sparse and m != 256:
+            raise ValueError(err)
+        if m not in m_to_n_step:
+            raise ValueError(err)
+        n_step = m_to_n_step[m]
+        if n not in extra_ns and not (n_step <= n <= 256 and n % n_step == 0):
+            raise ValueError(err)
+        break
     else:
         raise ValueError(err)
 
-    if kind == "f16":
-        if not (k == (32 if is_sparse else 16)):
-            raise ValueError(err)
-    elif kind == "tf32":
-        if not (k == (16 if is_sparse else 8)):
-            raise ValueError(err)
-    elif kind in ["f8f6f4", "i8", "mxf8f6f4"]:
-        if not (k == (64 if is_sparse else 32)):
-            raise ValueError(err)
-    elif kind in ["mxf4", "mxf4nvf4"]:
-        if not (k == (128 if is_sparse else 64)):
-            raise ValueError(err)
-    else:
+    # K must match the kind-specific (dense, sparse) pair.
+    k_pair = _TCGEN05_MMA_K.get(kind)
+    if k_pair is None:
+        raise ValueError(err)
+    k_dense, k_sparse = k_pair
+    expected_k = k_sparse if is_sparse else k_dense
+    if k != expected_k:
         raise ValueError(err)
 
     return True

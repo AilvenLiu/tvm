@@ -367,13 +367,38 @@ def test_printer_ptx_mma_and_wgmma():
     _assert_print(tir.op.ptx_wgmma_noop_barrier(0), "Tx.ptx.wgmma.noop_barrier(0)")
     _assert_print(
         tir.op.ptx_wgmma_mma_async_ss(
-            16, 16, 16, "f16", "f16", True, False, 1.0, 1.0, True, d, d, 0, 0
+            d,
+            d,
+            0,
+            0,
+            M=16,
+            N=16,
+            K=16,
+            in_dtype="f16",
+            out_dtype="f16",
+            transA=True,
+            transB=False,
+            scaleA=1.0,
+            scaleB=1.0,
+            scaleD=True,
         ),
         'd = Tx.handle()\nTx.ptx.wgmma.mma_async.ss(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, d, 0, 0)',  # noqa: E501
     )
     _assert_print(
         tir.op.ptx_wgmma_mma_async_rs(
-            16, 16, 16, "f16", "f16", True, False, 1.0, 1.0, True, d, 0, 0
+            d,
+            0,
+            0,
+            M=16,
+            N=16,
+            K=16,
+            in_dtype="f16",
+            out_dtype="f16",
+            transA=True,
+            transB=False,
+            scaleA=1.0,
+            scaleB=1.0,
+            scaleD=True,
         ),
         'd = Tx.handle()\nTx.ptx.wgmma.mma_async.rs(16, 16, 16, "f16", "f16", Tx.bool(True), Tx.bool(False), Tx.float32(1.0), Tx.float32(1.0), Tx.bool(True), d, 0, 0)',  # noqa: E501
     )

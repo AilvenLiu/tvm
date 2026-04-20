@@ -70,7 +70,7 @@ def test_fp8_gemm_hopper_no_ws():
             B_offset = Tx.meta_var(inner_k * WGMMA_K)
             Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descA), A_smem.ptr_to([stage, A_offset]), 1, 64, swizzle=3)  # noqa: E501
             Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(descB), B_smem.ptr_to([stage, B_offset]), 1, 64, swizzle=3)  # noqa: E501
-            Tx.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True, descA, descB, *get_accum_list(accum, 128))  # noqa: E501
+            Tx.ptx.wgmma.mma_async.ss(descA, descB, *get_accum_list(accum, 128), M=WGMMA_M, N=WGMMA_N, K=WGMMA_K, in_dtype="float8_e4m3fn", out_dtype="float32", transA=False, transB=False, scaleA=1.0, scaleB=1.0, scaleD=True)  # noqa: E501
         Tx.ptx.wgmma.commit_group()
 
     @Tx.inline

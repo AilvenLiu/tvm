@@ -344,9 +344,9 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                             Tx.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501
                             Tx.ptx.tcgen05.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)  # noqa: E501
                             if k == 0:
-                                Tx.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr, descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=False)  # noqa: E501
+                                Tx.ptx.tcgen05.mma(tmem_addr, descA[0], descB[0], descI[0], d_dtype=d_type, a_dtype=a_type, b_dtype=b_type, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)  # noqa: E501
                             else:
-                                Tx.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr, descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=True)  # noqa: E501
+                                Tx.ptx.tcgen05.mma(tmem_addr, descA[0], descB[0], descI[0], d_dtype=d_type, a_dtype=a_type, b_dtype=b_type, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)  # noqa: E501
                         Tx.ptx.tcgen05.commit(bar.data, cta_group)
                     Tx.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1

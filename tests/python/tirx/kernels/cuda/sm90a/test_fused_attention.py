@@ -340,8 +340,11 @@ def test_fp16_fused_attn():
             for tma_tile in Tx.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in Tx.serial(TMA_TILE // WGMMA_QK_K):
                     Tx.ptx.wgmma.mma_async.ss(
-                        WGMMA_QK_M, WGMMA_QK_N, WGMMA_QK_K, "float16", "float32", False, False,
-                        1.0, 1.0, scaleD, desc_Q, desc_K, *[S_reg[i] for i in range(S_REG_COUNT)]
+                        desc_Q, desc_K, *[S_reg[i] for i in range(S_REG_COUNT)],
+                        M=WGMMA_QK_M, N=WGMMA_QK_N, K=WGMMA_QK_K,
+                        in_dtype="float16", out_dtype="float32",
+                        transA=False, transB=False,
+                        scaleA=1.0, scaleB=1.0, scaleD=scaleD,
                     )
                     scaleD = 1
                     desc_Q = desc_Q + (2 * (WGMMA_QK_K) >> 4)
@@ -363,8 +366,9 @@ def test_fp16_fused_attn():
         for wgmma_tile in Tx.serial(BLK_KV // WGMMA_PV_K):
             P_offset = Tx.meta_var(wgmma_tile * WGMMA_PV_K // 4)
             Tx.ptx.wgmma.mma_async.rs(
-                WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
-                1.0, 1.0, True, desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)])  # noqa: E501
+                desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)]),  # noqa: E501
+                M=WGMMA_PV_M, N=WGMMA_PV_N, K=WGMMA_PV_K, in_dtype="float16", out_dtype="float32",
+                transA=False, transB=True, scaleA=1.0, scaleB=1.0, scaleD=True,
             )
             desc_V = desc_V + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 

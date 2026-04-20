@@ -679,11 +679,14 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
                     tmem_col = tmem_offset_32b + ni * (N_mma_phys_cols // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma.block_scale(
-                            C_type, A_type, B_type, SFA_type, SFB_type,
                             Tx.cuda.get_tmem_addr(tmem_addr, mi * M_mma, tmem_col),
                             a_val, descB_val,
                             sfa_addr, sfb_addr,
-                            descI_in, a_is_tmem, cta_group, should_accum,
+                            descI_in,
+                            d_dtype=C_type, a_dtype=A_type, b_dtype=B_type,
+                            sfa_dtype=SFA_type, sfb_dtype=SFB_type,
+                            use_a_tmem=a_is_tmem, cta_group=cta_group,
+                            enable_input_d=should_accum,
                         )
     else:
         @Tx.inline
@@ -697,9 +700,11 @@ def gemm_async_tcgen05_impl(op_call: ScopeOpCall, sctx: DispatchContext) -> Prim
                     tmem_col = tmem_offset_32b + ni * (N_mma_phys_cols // C_elem_per_32b)
                     if elect_pred:
                         Tx.ptx.tcgen05.mma(
-                            "float32", A_type, B_type,
                             Tx.cuda.get_tmem_addr(tmem_addr, mi * M_mma, tmem_col),
-                            a_val, descB_val, descI_in, a_is_tmem, cta_group, should_accum,
+                            a_val, descB_val, descI_in,
+                            d_dtype="float32", a_dtype=A_type, b_dtype=B_type,
+                            use_a_tmem=a_is_tmem, cta_group=cta_group,
+                            enable_input_d=should_accum,
                         )
 
     descA_val = None if a_is_tmem else descA_buf[0]
