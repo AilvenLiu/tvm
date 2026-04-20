@@ -29,18 +29,18 @@ from tvm.tirx import IntImm, StringImm, Var
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.layout import S, TCol, TileLayout, TLane, tid_in_wg
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.operator.scope_op import CopyAsync
-from tvm.tirx.operator.scope_op_dispatch.cuda.common import next_power_of_2
-from tvm.tirx.operator.scope_op_dispatch.cuda.copy_async.dsmem import copy_dsmem_impl
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+from tvm.tirx.operator.tile_primitive import CopyAsync
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.common import next_power_of_2
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.copy_async.dsmem import copy_dsmem_impl
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import (
     SwizzleMode,
     mma_atom_layout,
     mma_atom_shape,
     mma_shared_layout,
 )
-from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
-from tvm.tirx.operator.scope_op_dispatch.dispatcher import DispatchFail
-from tvm.tirx.stmt import DeclBuffer, ScopeOpCall
+from tvm.tirx.operator.tile_primitive_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import DispatchFail
+from tvm.tirx.stmt import DeclBuffer, TilePrimitiveCall
 from tvm.tirx.stmt_functor import StmtExprVisitor
 
 # ===========================================================================
@@ -90,7 +90,7 @@ def _make_tma_call(
     dtype="float16",
     direction="g2s",
 ):
-    """Construct ScopeOpCall + DispatchContext and call copy_tma_impl.
+    """Construct TilePrimitiveCall + DispatchContext and call copy_tma_impl.
 
     Returns (impl, host_init_stmts) on success, raises DispatchFail on failure.
     impl is the device-side PrimFunc, host_init_stmts is a list of Stmt
@@ -99,9 +99,9 @@ def _make_tma_call(
     from tvm.ir import Range
     from tvm.tirx import Var
     from tvm.tirx.exec_scope import ExecScope
-    from tvm.tirx.operator.scope_op import CopyAsync
-    from tvm.tirx.operator.scope_op_dispatch.cuda.copy_async.utils import copy_tma_impl
-    from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
+    from tvm.tirx.operator.tile_primitive import CopyAsync
+    from tvm.tirx.operator.tile_primitive_dispatch.cuda.copy_async.utils import copy_tma_impl
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatch_context import DispatchContext
     from tvm.tirx.stmt import BufferRegion
 
     g_buf = tvm.tirx.decl_buffer(g_shape, dtype, "A", layout=gmem_layout)
@@ -165,7 +165,7 @@ def _build_expected_host_init(dtype, encode_args):
         + [IntImm("int32", v) for v in encode_args[1:]]
     )
     encode_call = tvm.tirx.Call("int32", tvm.ir.Op.get("tirx.tvm_call_packed"), call_args)
-    replace_point = ScopeOpCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
+    replace_point = TilePrimitiveCall(op=tvm.ir.Op.get("tirx.tvm_kernel_replace_point"))
     return tvm.tirx.SeqStmt(
         [tvm.tirx.Bind(A_tensormap, stack_alloca), tvm.tirx.Evaluate(encode_call), replace_point]
     )
@@ -1007,7 +1007,7 @@ TMA_S2G_CASES = [
 )
 def test_copy_tma_codegen_fail(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout):
     """Verify that copy_tma_impl raises DispatchFail for unsupported layouts."""
-    from tvm.tirx.operator.scope_op_dispatch.dispatcher import DispatchFail
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import DispatchFail
 
     with pytest.raises(DispatchFail, match="stride.*1"):
         _make_tma_call(g_shape, g_region, s_shape, s_region, gmem_layout, smem_layout)
@@ -1810,7 +1810,7 @@ def test_copy_tma_dynamic_cta_mask(dtype):
     Verifies that a TIR expression (depending on Tx.cta_id) used as cta_mask in
     copy_async compiles through the full TIRX pipeline without crashing.
     Previously, lower_tirx_scope_ids replaced scope-ID vars via Substitute,
-    but Substitute didn't visit ScopeOpCall.config values, leaving stale var
+    but Substitute didn't visit TilePrimitiveCall.config values, leaving stale var
     references that caused MakePackedAPI to fail with:
         "variables [...] are used, but are not passed in as API arguments"
     """

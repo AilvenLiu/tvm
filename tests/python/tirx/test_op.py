@@ -21,11 +21,11 @@ from tvm.ir import Op
 from tvm.script import tirx as T
 from tvm.script import tirx as Tx
 from tvm.tirx.buffer import decl_buffer
-from tvm.tirx.stmt import ScopeOpCall
+from tvm.tirx.stmt import TilePrimitiveCall
 
 
 def _test(op: str, *args):
-    return ScopeOpCall(*args, op=Op.get("tirx." + op), workspace={}, config={})
+    return TilePrimitiveCall(*args, op=Op.get("tirx." + op), workspace={}, config={})
 
 
 def test_copy():
@@ -67,7 +67,7 @@ def test_gemm():
 
 def test_generic_op_creates_op():
     """GenericOp auto-registers unknown ops."""
-    from tvm.tirx.operator.scope_op import GenericOp
+    from tvm.tirx.operator.tile_primitive import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -79,7 +79,7 @@ def test_generic_op_creates_op():
 
 def test_generic_op_reuses_registered_op():
     """GenericOp reuses already-registered ops without error."""
-    from tvm.tirx.operator.scope_op import GenericOp
+    from tvm.tirx.operator.tile_primitive import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -92,7 +92,7 @@ def test_generic_op_reuses_registered_op():
 
 def test_generic_op_with_existing_tirx_op():
     """GenericOp works with already-registered tirx ops (e.g., tirx.copy)."""
-    from tvm.tirx.operator.scope_op import GenericOp
+    from tvm.tirx.operator.tile_primitive import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
@@ -118,19 +118,19 @@ def test_tx_dynamic_op_in_prim_func():
         with T.kernel():
             Tx.copy_and_cast(B, A)
 
-    # Walk IR to find ScopeOpCall with op="tirx.copy_and_cast"
+    # Walk IR to find TilePrimitiveCall with op="tirx.copy_and_cast"
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.copy_and_cast"):
+        if isinstance(stmt, TilePrimitiveCall) and stmt.op == Op.get("tirx.copy_and_cast"):
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected ScopeOpCall with tirx.copy_and_cast not found"
+    assert found[0], "Expected TilePrimitiveCall with tirx.copy_and_cast not found"
 
 
 def test_tx_dynamic_op_with_workspace():
-    """Tx.some_op(..., workspace={...}) passes workspace to ScopeOpCall."""
+    """Tx.some_op(..., workspace={...}) passes workspace to TilePrimitiveCall."""
 
     @T.prim_func(tirx=True)
     def func(A_ptr: T.handle, B_ptr: T.handle, W_ptr: T.handle):
@@ -143,12 +143,12 @@ def test_tx_dynamic_op_with_workspace():
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.custom_with_ws"):
+        if isinstance(stmt, TilePrimitiveCall) and stmt.op == Op.get("tirx.custom_with_ws"):
             assert "tmp" in stmt.workspace
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected ScopeOpCall with workspace not found"
+    assert found[0], "Expected TilePrimitiveCall with workspace not found"
 
 
 def test_tx_existing_op_not_overridden():
@@ -164,23 +164,23 @@ def test_tx_existing_op_not_overridden():
     found = [False]
 
     def visit(stmt):
-        if isinstance(stmt, ScopeOpCall) and stmt.op == Op.get("tirx.copy"):
+        if isinstance(stmt, TilePrimitiveCall) and stmt.op == Op.get("tirx.copy"):
             found[0] = True
 
     tvm.tirx.stmt_functor.post_order_visit(func.body, visit)
-    assert found[0], "Expected ScopeOpCall with tirx.copy not found"
+    assert found[0], "Expected TilePrimitiveCall with tirx.copy not found"
 
 
 def test_opcall_downcast_tolerant():
-    """ScopeOpCall.downcast returns instance as-is for unknown ops."""
-    from tvm.tirx.operator.scope_op import GenericOp
+    """TilePrimitiveCall.downcast returns instance as-is for unknown ops."""
+    from tvm.tirx.operator.tile_primitive import GenericOp
 
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="global")
 
     op_call = GenericOp(B[0:64], A[0:64], op_name="totally_unknown_op")
     # downcast should not raise
-    result = ScopeOpCall.downcast(op_call)
+    result = TilePrimitiveCall.downcast(op_call)
     assert result is not None
 
 
@@ -199,7 +199,7 @@ def test_buffer_replacer_no_shared_default():
 
 def test_permute_dims_buffer_property():
     """Regression test for F2: PermuteDims.buffer should return args[0], not recurse."""
-    from tvm.tirx.operator.scope_op import PermuteDims
+    from tvm.tirx.operator.tile_primitive import PermuteDims
 
     A = decl_buffer((64, 64), "float32", scope="global")
     pd = PermuteDims(A[0:64, 0:64], [1, 0])

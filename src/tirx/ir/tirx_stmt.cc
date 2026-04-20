@@ -29,18 +29,19 @@
 namespace tvm {
 namespace tirx {
 
-TVM_FFI_STATIC_INIT_BLOCK() { ScopeOpCallNode::RegisterReflection(); }
+TVM_FFI_STATIC_INIT_BLOCK() { TilePrimitiveCallNode::RegisterReflection(); }
 
-// ScopeOpCall
-ScopeOpCall::ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
-                         ffi::Map<ffi::String, Buffer> workspace,
-                         ffi::Map<ffi::String, ffi::Any> config,
-                         ffi::Optional<ffi::String> dispatch) {
+// TilePrimitiveCall
+TilePrimitiveCall::TilePrimitiveCall(tvm::Op op, ffi::Array<ffi::Any> args,
+                                     ffi::Map<ffi::String, Buffer> workspace,
+                                     ffi::Map<ffi::String, ffi::Any> config,
+                                     ffi::Optional<ffi::String> dispatch) {
   // Check if the op is a TIRX op.
   static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
-  TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 1) << "Only TIRX ops can be used in tirx::ScopeOpCall";
-  // Construct the ScopeOpCall.
-  ObjectPtr<ScopeOpCallNode> n = ffi::make_object<ScopeOpCallNode>();
+  TVM_FFI_ICHECK_EQ(tirx_op_map.count(op), 1)
+      << "Only TIRX ops can be used in tirx::TilePrimitiveCall";
+  // Construct the TilePrimitiveCall.
+  ObjectPtr<TilePrimitiveCallNode> n = ffi::make_object<TilePrimitiveCallNode>();
   n->op = std::move(op);
   n->args = std::move(args);
   n->workspace = std::move(workspace);
@@ -52,17 +53,17 @@ ScopeOpCall::ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
-      "tirx.ScopeOpCall",
+      "tirx.TilePrimitiveCall",
       [](tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
          ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
-        return ScopeOpCall(op, args, workspace, config, dispatch);
+        return TilePrimitiveCall(op, args, workspace, config, dispatch);
       });
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ScopeOpCallCopyHandle",
-                        [](const ScopeOpCall& op) { return ScopeOpCall(op); });
+  refl::GlobalDef().def("tirx.TilePrimitiveCallCopyHandle",
+                        [](const TilePrimitiveCall& op) { return TilePrimitiveCall(op); });
 }
 
 }  // namespace tirx

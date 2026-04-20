@@ -30,9 +30,9 @@ namespace tvm {
 namespace tirx {
 
 /*!
- * \brief TIRX ScopeOpCall stmt.
+ * \brief TIRX TilePrimitiveCall stmt.
  */
-class ScopeOpCallNode : public StmtNode {
+class TilePrimitiveCallNode : public StmtNode {
  public:
   // tvm::Op which corresponds to the TIRX operator.
   tvm::Op op;
@@ -51,32 +51,32 @@ class ScopeOpCallNode : public StmtNode {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ScopeOpCallNode>()
-        .def_ro("op", &ScopeOpCallNode::op)
-        .def_ro("args", &ScopeOpCallNode::args)
-        .def_ro("workspace", &ScopeOpCallNode::workspace)
-        .def_ro("config", &ScopeOpCallNode::config)
-        .def_ro("dispatch", &ScopeOpCallNode::dispatch);
+    refl::ObjectDef<TilePrimitiveCallNode>()
+        .def_ro("op", &TilePrimitiveCallNode::op)
+        .def_ro("args", &TilePrimitiveCallNode::args)
+        .def_ro("workspace", &TilePrimitiveCallNode::workspace)
+        .def_ro("config", &TilePrimitiveCallNode::config)
+        .def_ro("dispatch", &TilePrimitiveCallNode::dispatch);
   }
 
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScopeOpCall", ScopeOpCallNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.TilePrimitiveCall", TilePrimitiveCallNode, StmtNode);
 };
 
 /*!
- * \brief Managed reference to ScopeOpCallNode
- * \sa ScopeOpCallNode
+ * \brief Managed reference to TilePrimitiveCallNode
+ * \sa TilePrimitiveCallNode
  */
-class ScopeOpCall : public Stmt {
+class TilePrimitiveCall : public Stmt {
  public:
-  TVM_DLL ScopeOpCall(tvm::Op op, ffi::Array<ffi::Any> args,
-                      ffi::Map<ffi::String, Buffer> workspace = {},
-                      ffi::Map<ffi::String, ffi::Any> config = {},
-                      ffi::Optional<ffi::String> dispatch = std::nullopt);
+  TVM_DLL TilePrimitiveCall(tvm::Op op, ffi::Array<ffi::Any> args,
+                            ffi::Map<ffi::String, Buffer> workspace = {},
+                            ffi::Map<ffi::String, ffi::Any> config = {},
+                            ffi::Optional<ffi::String> dispatch = std::nullopt);
 
   static bool IsValidOpCallArgType(const ffi::Any& arg);
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScopeOpCall, Stmt, ScopeOpCallNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeOpCallNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TilePrimitiveCall, Stmt, TilePrimitiveCallNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(TilePrimitiveCallNode);
 };
 
 }  // namespace tirx

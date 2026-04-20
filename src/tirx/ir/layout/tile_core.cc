@@ -222,13 +222,13 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
   auto check_axis = [&](const Axis& axis) {
     if (!axis->IsThreadAxis()) return;
 
-    auto subscope_opt = axis->GetSubscope();
-    auto scope_opt = axis->GetScope();
-    TVM_FFI_ICHECK(subscope_opt.defined() && scope_opt.defined())
+    auto subtile_primitivet = axis->GetSubscope();
+    auto tile_primitivet = axis->GetScope();
+    TVM_FFI_ICHECK(subtile_primitivet.defined() && tile_primitivet.defined())
         << "Thread axis " << axis->name << " has no subscope or scope";
 
-    ffi::String subscope = subscope_opt.value()->name;
-    ffi::String scope = scope_opt.value()->name;
+    ffi::String subscope = subtile_primitivet.value()->name;
+    ffi::String scope = tile_primitivet.value()->name;
 
     if (!inner_most.has_value() ||
         ExecScope::Create(inner_most.value())->Higher(ExecScope::Create(subscope)))

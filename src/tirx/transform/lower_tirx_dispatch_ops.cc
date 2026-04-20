@@ -19,7 +19,7 @@
 
 /*!
  * \file lower_tirx_dispatch_ops.cc
- * \brief Lower TIRx ScopeOpCall nodes via registered dispatchers.
+ * \brief Lower TIRx TilePrimitiveCall nodes via registered dispatchers.
  */
 
 #include <tvm/runtime/logging.h>
@@ -49,8 +49,8 @@ class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const tirx::ScopeOpCallNode* obj, ffi::reflection::AccessPath path) final {
-    Verify(false) << "TIRxError: ScopeOpCall at " << path
+  void VisitStmt_(const tirx::TilePrimitiveCallNode* obj, ffi::reflection::AccessPath path) final {
+    Verify(false) << "TIRxError: TilePrimitiveCall at " << path
                   << " is not allowed in TIRx before lowering";
   }
 };
@@ -104,7 +104,7 @@ class TIRxOpDispatcher : public StmtExprMutator {
     }
 
    private:
-    Stmt VisitStmt_(const tirx::ScopeOpCallNode* op) final {
+    Stmt VisitStmt_(const tirx::TilePrimitiveCallNode* op) final {
       if (op->op == tirx::tvm_kernel_replace_point()) {
         return body_;
       }
@@ -235,14 +235,14 @@ class TIRxOpDispatcher : public StmtExprMutator {
     return SeqStmt::Flatten(seq);
   }
 
-  Stmt VisitStmt_(const tirx::ScopeOpCallNode* op) final {
+  Stmt VisitStmt_(const tirx::TilePrimitiveCallNode* op) final {
     tirx::DispatchContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_,
                                /*alloc_only=*/false, /*callbacks=*/{}, shared_state_);
     static auto f_op_dispatcher_ = ffi::Function::GetGlobal("tirx.f_op_dispatcher");
     TVM_FFI_ICHECK(f_op_dispatcher_.has_value())
         << "Internal Error: tirx.f_op_dispatcher is not registered";
     PrimFunc res =
-        f_op_dispatcher_.value()(ffi::GetRef<tirx::ScopeOpCall>(op), sctx).cast<PrimFunc>();
+        f_op_dispatcher_.value()(ffi::GetRef<tirx::TilePrimitiveCall>(op), sctx).cast<PrimFunc>();
     TVM_FFI_ICHECK(res.defined()) << "TIRx dispatcher did not return a PrimFunc";
     // Implementation found, handle callbacks
     if (auto bufs = sctx->callbacks.Get(tirx::callback::kPrivateAlloc)) {

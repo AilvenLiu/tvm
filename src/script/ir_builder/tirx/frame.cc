@@ -256,13 +256,13 @@ void ComposeOpFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   ffi::Array<ObjectRef> ops;
   for (const auto& stmt : stmts) {
-    auto op_call = stmt.as<tvm::tirx::ScopeOpCallNode>();
+    auto op_call = stmt.as<tvm::tirx::TilePrimitiveCallNode>();
     TVM_FFI_ICHECK(op_call) << "ValueError: Only TIRx op calls allowed in ComposeOp. Violated by "
                             << stmt;
-    ops.push_back(ffi::GetRef<tvm::tirx::ScopeOpCall>(op_call));
+    ops.push_back(ffi::GetRef<tvm::tirx::TilePrimitiveCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirx.compose_op");
-  AddToParent(tvm::tirx::ScopeOpCall(compose_op_op, ops, workspace, config, dispatch));
+  AddToParent(tvm::tirx::TilePrimitiveCall(compose_op_op, ops, workspace, config, dispatch));
 }
 
 void AllocBufferFrameNode::ExitWithScope() {

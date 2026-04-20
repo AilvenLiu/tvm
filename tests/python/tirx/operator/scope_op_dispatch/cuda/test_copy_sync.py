@@ -23,8 +23,8 @@ import tvm
 import tvm.testing
 from tvm.script import tirx as Tx
 from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TCol, TileLayout, TLane, tid_in_wg
-from tvm.tirx.operator.scope_op_dispatch.cuda.common import next_power_of_2
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.common import next_power_of_2
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import (
     SwizzleMode,
     mma_atom_shape,
     mma_shared_layout,

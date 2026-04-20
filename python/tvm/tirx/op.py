@@ -5405,7 +5405,7 @@ _TCGEN05_CP_SHAPES = ("32x128b", "4x256b", "128x128b", "128x256b", "64x128b")
 _TCGEN05_CP_MULTICAST = ("", "warpx4", "warpx2::02_13", "warpx2::01_23")
 _TCGEN05_CP_DECOMPRESS = ("", "b8x16.b4x16_p64", "b8x16.b6x16_p32")
 _TCGEN05_LDST_SHAPES = ("16x32bx2", "16x64b", "16x128b", "16x256b", "32x32b")
-# Note: keep in sync with codegen_ptx_tcgen05_ld/_st in device_native_codegen/cuda/tcgen05.py.
+# Note: keep in sync with codegen_ptx_tcgen05_ld/_st in intrinsics/cuda/tcgen05.py.
 
 
 def ptx_tcgen05_cp(

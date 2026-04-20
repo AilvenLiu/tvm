@@ -30,9 +30,9 @@ The codebase is an Apache TVM fork. Custom additions are concentrated in these a
 - **Device op codegen** — `python/tvm/tir/device_op_codegen/cuda/` — PTX/CUDA code generation for barriers, MMA, wgmma, TMA, nvshmem
 
 ### TIRX DSL & Compiler (`python/tvm/tirx/`)
-- **Operator framework** — `operator/scope_op.py` — Base operator classes (Unary, Binary, Reduction, etc.)
-- **Scope op dispatch** — `operator/scope_op_dispatch/cuda/`, `operator/scope_op_dispatch/trn/` — Target-specific kernel scheduling (GEMM, copy_async, reduction, etc.)
-- **Device native codegen** — `operator/device_native_codegen/cuda/` — PTX/CUDA code generation for barriers, MMA, wgmma, TMA, nvshmem
+- **Operator framework** — `operator/tile_primitive.py` — Base operator classes (Unary, Binary, Reduction, etc.)
+- **Scope op dispatch** — `operator/tile_primitive_dispatch/cuda/`, `operator/tile_primitive_dispatch/trn/` — Target-specific kernel scheduling (GEMM, copy_async, reduction, etc.)
+- **Device native codegen** — `operator/intrinsics/cuda/` — PTX/CUDA code generation for barriers, MMA, wgmma, TMA, nvshmem
 - **Transforms** — `transform/` — Buffer allocation, event tensor legalization
 - **Lang** — `lang/pipeline.py`, `lang/tile_scheduler.py`, `lang/warp_role.py` — Async pipeline management, tile scheduling, warp role dispatch
 - **Bench** — `bench.py` — Benchmarking utilities (profiling, CUDA timing, Proton integration)
@@ -124,7 +124,7 @@ Branch naming: `<type>/<kebab-case-description>`, e.g. `feat/direct-sum`, `fix/s
 
 - **C++ ↔ Python sync**: Changing IR nodes (layout, stmt, op) requires updating both the C++ side (`include/` + `src/`) and Python bindings (`python/tvm/tir/`). Don't forget FFI registration.
 - **Printer ↔ Parser sync**: Modifications to IR printing (`src/script/printer/tir/`) must have corresponding parser changes (`python/tvm/script/parser/tir/`) and vice versa. Run `test_parser_printer.py` to verify round-trip.
-- **New op checklist**: Adding a TIRX operator requires registration in `operator/scope_op.py`, a schedule in `operator/scope_op_dispatch/cuda/` (and/or `trn/`), a DSL entry in `ir_builder/tir/tirx.py`, and tests.
+- **New op checklist**: Adding a TIRX operator requires registration in `operator/tile_primitive.py`, a schedule in `operator/tile_primitive_dispatch/cuda/` (and/or `trn/`), a DSL entry in `ir_builder/tir/tirx.py`, and tests.
 - Keep documentation in sync with code changes: when modifying code that is referenced in this document or in `.claude/skills/`, update the corresponding documentation immediately.
 - **`Tx.meta_var` is not an accumulator**: `Tx.meta_var` creates a TIR expression, not a mutable variable. Writing `acc = Tx.meta_var(0); for i: acc = acc + x` does NOT accumulate — each reassignment creates a new expression and the compiler may optimize the loop away. For accumulation, write directly into a buffer: `buf[d] = buf[d] + x` (using `Tx.alloc_buffer` or SMEM buffers). Read-only scalars (`val = Tx.meta_var(expr)`) are fine.
 - **Flaky tests**: If tests fail intermittently, first check `nvidia-smi` to see if the GPU is occupied by other workloads. Switch to an idle GPU before re-running.

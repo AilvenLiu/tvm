@@ -77,7 +77,7 @@ if not _RUNTIME_ONLY:
 
 # tvm.tirx / tvm.megakernel
 from . import megakernel
-from .tirx.operator import scope_op_dispatch
+from .tirx.operator import tile_primitive_dispatch
 
 
 def _should_print_backtrace():

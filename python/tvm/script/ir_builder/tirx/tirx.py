@@ -43,7 +43,7 @@ def _wrap_elem_in_tuple(e):
     return (e,)
 
 
-f_insert = _ffi_api.ScopeOpCall  # pylint: disable=no-member
+f_insert = _ffi_api.TilePrimitiveCall  # pylint: disable=no-member
 
 
 def zero(

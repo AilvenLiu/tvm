@@ -20,7 +20,7 @@ import pytest
 
 def _import_and_register():
     # Ensure all schedule registrations (legacy + dispatcher variants) are loaded
-    import tvm.tirx.operator.scope_op_dispatch as _  # noqa: F401
+    import tvm.tirx.operator.tile_primitive_dispatch as _  # noqa: F401
 
 
 class _DummyKind:
@@ -51,7 +51,7 @@ def test_dispatch_prints_predicate_reasons():
     """Validate TRACE mode prints per-variant predicate failure reasons."""
     _import_and_register()
     from tvm.ir import Op
-    from tvm.tirx.operator.scope_op_dispatch.dispatcher import run_dispatch
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import run_dispatch
 
     class _OpCall:
         def __init__(self, op):
@@ -79,7 +79,7 @@ def test_dispatch_prints_predicate_reasons():
 def test_dispatch_forced_variant_missing_table_and_message():
     _import_and_register()
     from tvm.ir import Op
-    from tvm.tirx.operator.scope_op_dispatch.dispatcher import run_dispatch
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import run_dispatch
 
     class _OpCall:
         def __init__(self, op):
@@ -103,7 +103,7 @@ def test_dispatch_raises_with_aggregated_reasons():
     """Validate STRICT mode raises aggregated error message with reasons."""
     _import_and_register()
     from tvm.ir import Op
-    from tvm.tirx.operator.scope_op_dispatch.dispatcher import run_dispatch
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import run_dispatch
 
     class _OpCall:
         def __init__(self, op):
@@ -128,17 +128,19 @@ def test_dispatch_raises_with_aggregated_reasons():
 
 
 def test_dispatch_prints_real_opcall_ir():
-    """Create a real ScopeOpCall via BufferRegions and ensure its IR is in the table."""
+    """Create a real TilePrimitiveCall via BufferRegions and ensure its IR is in the table."""
     _import_and_register()
     from tvm.ir import Op
     from tvm.tirx.buffer import decl_buffer
-    from tvm.tirx.operator.scope_op_dispatch.dispatcher import run_dispatch
-    from tvm.tirx.stmt import ScopeOpCall
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import run_dispatch
+    from tvm.tirx.stmt import TilePrimitiveCall
 
-    # Build a real TIRx ScopeOpCall: tirx.copy(A[0:64], B[0:64])
+    # Build a real TIRx TilePrimitiveCall: tirx.copy(A[0:64], B[0:64])
     A = decl_buffer((64,), "float32", scope="global")
     B = decl_buffer((64,), "float32", scope="shared")
-    real_opcall = ScopeOpCall(A[0:64], B[0:64], op=Op.get("tirx.copy"), workspace={}, config={})
+    real_opcall = TilePrimitiveCall(
+        A[0:64], B[0:64], op=Op.get("tirx.copy"), workspace={}, config={}
+    )
 
     # Force predicate rejection to trigger formatted error with opcall IR
     sctx = _DummySctx(target_kind="trn", exec_scope="warp")

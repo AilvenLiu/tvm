@@ -48,7 +48,7 @@ from tvm.tirx.layout import (
     wgid,
     wid_in_wg,
 )
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import (
     SwizzleMode,
     mma_shared_layout,
     tma_shared_layout,

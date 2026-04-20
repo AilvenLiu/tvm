@@ -59,10 +59,11 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
                   << ". Use ExecScopeStmt with T.attr() instead.";
   }
 
-  void VisitStmt_(const tirx::ScopeOpCallNode* op, ffi::reflection::AccessPath path) override {
+  void VisitStmt_(const tirx::TilePrimitiveCallNode* op,
+                  ffi::reflection::AccessPath path) override {
     static const tvm::OpAttrMap<Bool>& tirx_op_map_ = Op::GetAttrMap<Bool>("TIsTIRxOp");
     Verify(tirx_op_map_.count(op->op))
-        << "TIRxError: ScopeOpCall at " << path << " has unknown TIRX op " << op->op;
+        << "TIRxError: TilePrimitiveCall at " << path << " has unknown TIRX op " << op->op;
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {

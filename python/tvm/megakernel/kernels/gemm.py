@@ -25,7 +25,7 @@ from tvm.script import tirx as Tx
 from tvm.tirx.bench import CudaProfiler
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
-from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode, mma_shared_layout
+from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import SwizzleMode, mma_shared_layout
 
 
 class BarTMA2MMA(Barriers):

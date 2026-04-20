@@ -19,8 +19,16 @@
 from tvm.ir import Range
 from tvm.target import Target
 from tvm.tirx.buffer import Buffer
-from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
-from tvm.tirx.stmt import AllocBuffer, AttrStmt, ExecScopeStmt, For, ScopeOpCall, SeqStmt, Stmt
+from tvm.tirx.operator.tile_primitive_dispatch.dispatch_context import DispatchContext
+from tvm.tirx.stmt import (
+    AllocBuffer,
+    AttrStmt,
+    ExecScopeStmt,
+    For,
+    SeqStmt,
+    Stmt,
+    TilePrimitiveCall,
+)
 from tvm.tirx.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tirx.transform.common import seek_kernel_replace_point
 from tvm.tirx.transform.function_pass import prim_func_pass
@@ -50,7 +58,7 @@ class PrivateAllocCollector(StmtVisitor):
         self.var_range_map[op.loop_var] = Range.from_min_extent(op.min, op.extent)
         super().visit_for_(op)
 
-    def visit_op_call_(self, op: ScopeOpCall):
+    def visit_op_call_(self, op: TilePrimitiveCall):
         sctx = DispatchContext(
             target=self.target,
             exec_scope=self.exec_scope_stack_[-1],
@@ -58,7 +66,7 @@ class PrivateAllocCollector(StmtVisitor):
             var_range_map=self.var_range_map,
             alloc_only=True,
         )
-        op = ScopeOpCall.downcast(op)
+        op = TilePrimitiveCall.downcast(op)
         private_buf_refs = op.get_private_buffers(self.buffer_dict, sctx)
         self.private_buf_refs[op] = private_buf_refs
 
@@ -68,7 +76,7 @@ class PrivateAllocMutator(StmtMutator):
         self,
         alloc_buffers: list[Buffer],
         init_stmts: list[Stmt],
-        added_workspace: dict[ScopeOpCall, dict[str, Buffer]],
+        added_workspace: dict[TilePrimitiveCall, dict[str, Buffer]],
     ):
         super().__init__()
         self.alloc_buffers = alloc_buffers
@@ -94,7 +102,7 @@ class PrivateAllocMutator(StmtMutator):
             return op
         new_workspace = dict(op.workspace)
         new_workspace.update(self.added_workspace[op])
-        op = ScopeOpCall(
+        op = TilePrimitiveCall(
             *op.args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch
         )
         return op
@@ -120,7 +128,7 @@ def private_alloc(stmt: Stmt, target: Target) -> Stmt:
 
 @prim_func_pass(opt_level=0, name="PrivateBufferAlloc")
 class PrivateBufferAlloc:
-    """Generate private buffer allocations for each ScopeOpCall"""
+    """Generate private buffer allocations for each TilePrimitiveCall"""
 
     def transform_function(self, func, mod, ctx):
         target = func.attrs.get("target", None)

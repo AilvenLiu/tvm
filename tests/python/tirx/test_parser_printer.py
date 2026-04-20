@@ -957,7 +957,7 @@ def test_workspace_default_none():
     C = BufferRegion(C_buf, [tvm.ir.Range(0, 128)])
 
     # These should not crash when workspace is not provided (defaults to None)
-    from tvm.tirx.operator import scope_op as tirx_op
+    from tvm.tirx.operator import tile_primitive as tirx_op
 
     op_br = tirx_op.BinaryReduce(
         B, C, A, B, tirx_op.get_tirx_op("add"), tirx_op.get_tirx_op("max"), (-1,)

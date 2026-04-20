@@ -44,7 +44,7 @@ from .stmt import (
 from .stmt import SeqStmt
 from .stmt import IfThenElse, Evaluate, stmt_seq, stmt_list
 from .stmt import BufferRegion, MatchBufferRegion, SBlock, SBlockRealize
-from .stmt import ScopeOpCall, ExecScopeStmt
+from .stmt import TilePrimitiveCall, ExecScopeStmt
 
 from .function import PrimFunc, TensorIntrin, IndexMap
 
@@ -122,9 +122,15 @@ from . import transform
 from . import analysis
 from . import backend
 from . import stmt_functor
-from .operator.device_native_codegen import (
-    cuda as _device_native_codegen_cuda,
-)  # register codegen FFI
+
+# Import CUDA codegen package. Each family module registers codegen via
+# @register_codegen (hand-written ops) and ptx_intrinsic/cuda_helper_intrinsic
+# (schema-declared ops); the schema declarations also inject Python wrappers
+# into `tvm.tirx.op`. Must come before anything downstream that looks up
+# wrappers or the codegen registry.
+from .operator.intrinsics import (
+    cuda as _intrinsics_cuda,
+)
 from .build import build
 from .compilation_pipeline import get_tir_pipeline, get_default_tir_pipeline
 from .functor import PyStmtExprVisitor, PyStmtExprMutator

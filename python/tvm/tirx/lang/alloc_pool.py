@@ -68,7 +68,7 @@ def _shape_product(shape):
 
 def _auto_swizzle_mode(dtype):
     """Select the default MMA swizzle mode for a shared-memory allocation."""
-    from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import SwizzleMode
+    from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import SwizzleMode
 
     del dtype
     return SwizzleMode.SWIZZLE_128B_ATOM
@@ -364,7 +364,7 @@ class SMEMPool:
         name=None,
     ):
         """Allocate MMA-compatible shared memory with an inferred swizzle layout."""
-        from tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils import (
+        from tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils import (
             SwizzleMode,
             mma_shared_layout,
         )

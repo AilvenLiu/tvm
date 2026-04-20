@@ -23,14 +23,14 @@ from tvm.tirx import (
     BufferStore,
     DeclBuffer,
     PrimExpr,
-    ScopeOpCall,
     Stmt,
+    TilePrimitiveCall,
     Var,
     decl_buffer,
 )
 from tvm.tirx.buffer import Buffer
 from tvm.tirx.layout import Iter, TileLayout
-from tvm.tirx.operator.scope_op import KernelReplacePoint
+from tvm.tirx.operator.tile_primitive import KernelReplacePoint
 from tvm.tirx.stmt_functor import StmtExprMutator, StmtMutator
 
 
@@ -160,7 +160,7 @@ class BufferReplacer(StmtExprMutator):
         args = list()
         for arg in op.args:
             args.append(arg)
-        return ScopeOpCall(
+        return TilePrimitiveCall(
             *args, op=op.op, workspace=new_workspace, config=new_config, dispatch=op.dispatch
         )
 
@@ -170,8 +170,8 @@ class KernelReplacePointSearcher(StmtMutator):
         super().__init__()
         self.body = body
 
-    def visit_op_call_(self, op: ScopeOpCall):
-        op = ScopeOpCall.downcast(op)
+    def visit_op_call_(self, op: TilePrimitiveCall):
+        op = TilePrimitiveCall.downcast(op)
         if isinstance(op, KernelReplacePoint):
             return self.body
         return super().visit_op_call_(op)

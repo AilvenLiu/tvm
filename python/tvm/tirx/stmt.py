@@ -43,7 +43,7 @@ from .exec_scope import ExecScope
 from .expr import IterVar, StringImm, Var
 
 if TYPE_CHECKING:
-    from tvm.tirx.operator.scope_op_dispatch.dispatch_context import DispatchContext
+    from tvm.tirx.operator.tile_primitive_dispatch.dispatch_context import DispatchContext
 
 
 @tvm_ffi.register_object("tirx.Stmt")
@@ -975,9 +975,9 @@ def normalize_const_arg(arg) -> PrimExpr:
     return arg
 
 
-@tvm_ffi.register_object("tirx.ScopeOpCall")
-class ScopeOpCall(Stmt):
-    """ScopeOpCall node.
+@tvm_ffi.register_object("tirx.TilePrimitiveCall")
+class TilePrimitiveCall(Stmt):
+    """TilePrimitiveCall node.
 
     Parameters
     ----------
@@ -1001,7 +1001,7 @@ class ScopeOpCall(Stmt):
     workspace: dict[str, Buffer]
     config: dict[str, Any]
     dispatch: str | None
-    _registry: ClassVar[dict[Op, type["ScopeOpCall"]]] = {}
+    _registry: ClassVar[dict[Op, type["TilePrimitiveCall"]]] = {}
 
     def __init__(
         self,
@@ -1016,20 +1016,20 @@ class ScopeOpCall(Stmt):
         if config is None:
             config = {}
         if op is None:
-            assert self.__class__ != ScopeOpCall, (
-                "Directly instantiating ScopeOpCall needs to specify the op"
+            assert self.__class__ != TilePrimitiveCall, (
+                "Directly instantiating TilePrimitiveCall needs to specify the op"
             )
             op = self.__class__.op
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
-            _ffi_api.ScopeOpCall,
+            _ffi_api.TilePrimitiveCall,
             op,
             args,
             workspace,
             config,
             dispatch,  # pylint: disable=no-member
         )
-        casted_op = ScopeOpCall.downcast(self)
+        casted_op = TilePrimitiveCall.downcast(self)
         casted_op.validate()
 
     def __init_subclass__(cls, **kwargs):
@@ -1038,13 +1038,13 @@ class ScopeOpCall(Stmt):
             cls._registry[cls.op] = cls
 
     @classmethod
-    def downcast(cls, instance: "ScopeOpCall") -> "ScopeOpCall":
+    def downcast(cls, instance: "TilePrimitiveCall") -> "TilePrimitiveCall":
         subclass = cls._registry.get(instance.op)
         if subclass is None:
             return instance  # Unknown op: return as-is
         new_instance = subclass.__new__(subclass)
         new_instance.__init_handle_by_constructor__(
-            _ffi_api.ScopeOpCallCopyHandle,
+            _ffi_api.TilePrimitiveCallCopyHandle,
             instance,  # pylint: disable=no-member
         )
         return new_instance

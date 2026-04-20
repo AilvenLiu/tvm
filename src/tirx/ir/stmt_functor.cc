@@ -170,7 +170,7 @@ void StmtVisitor::VisitStmt_(const ExecScopeStmtNode* op) {
   this->VisitStmt(op->body);
 }
 
-void StmtVisitor::VisitStmt_(const tirx::ScopeOpCallNode* op) {
+void StmtVisitor::VisitStmt_(const tirx::TilePrimitiveCallNode* op) {
   auto fvisit = [this](const ffi::Any& e) {
     if (e == nullptr) return;
     if (auto buffer_region = e.as<BufferRegion>()) {
@@ -694,7 +694,7 @@ Stmt StmtMutator::VisitStmt_(const ExecScopeStmtNode* op) {
   }
 }
 
-Stmt StmtMutator::VisitStmt_(const tirx::ScopeOpCallNode* op) {
+Stmt StmtMutator::VisitStmt_(const tirx::TilePrimitiveCallNode* op) {
   auto fmutate = [&](const ffi::Any& e) -> ffi::Any {
     if (e == nullptr) return e;
     if (auto buffer_region = e.as<BufferRegion>()) {

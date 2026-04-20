@@ -80,8 +80,8 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::ScopeOpCall>(
-        "", [](tirx::ScopeOpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::TilePrimitiveCall>(
+        "", [](tirx::TilePrimitiveCall op_call, AccessPath p, IRDocsifier d) -> Doc {
           static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
               Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
           auto op = op_call->op;
@@ -94,7 +94,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
           TVM_FFI_ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
-              << "Only TIRX ops can be used in tirx::ScopeOpCall";
+              << "Only TIRX ops can be used in tirx::TilePrimitiveCall";
           ffi::String name = op_names.get(op, op->name);
           if (bool(dispatch_op_map.get(op, tvm::Bool(false))) ||
               bool(async_op_map.get(op, tvm::Bool(false)))) {
@@ -169,7 +169,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(TIRx(d, name), args, {}, {}, std::nullopt);
           }
         });
-TVM_SCRIPT_REPR(tirx::ScopeOpCallNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::TilePrimitiveCallNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {
