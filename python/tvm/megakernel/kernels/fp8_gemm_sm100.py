@@ -224,6 +224,24 @@ class FP8GemmTile(GemmTile):
             align=1,
         )
 
+    @Tx.inline
+    def _copy_async_B_from_gmem(self, ks, B, n_start, k_start, tma_copy, m_idx):
+        """Default dense GEMM: B is (N, K). m_idx is unused."""
+        Tx.copy_async(
+            self.B_smem[ks, :, :],
+            B[n_start : n_start + self.BLK_N, k_start : k_start + self.BLK_K],
+            **tma_copy,
+        )
+
+    @Tx.inline
+    def _copy_async_SFB_from_gmem(self, ks, SFB, n_start_sf, tma_copy, m_idx):
+        """Default dense GEMM: SFB is (sfa_rows, N). m_idx is unused."""
+        Tx.copy_async(
+            self.SFB_smem_2d[ks, 0 : self.BLK_N * self.CTA_GROUP],
+            SFB[self.stage // 4, n_start_sf : n_start_sf + self.BLK_N * self.CTA_GROUP],
+            **tma_copy,
+        )
+
     def _alloc_local(self, m_idx):
         self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         self.reg_fp16 = T.alloc_buffer(
@@ -346,13 +364,8 @@ class FP8GemmTile(GemmTile):
                                     ],
                                     **tma_copy,
                                 )
-                                Tx.copy_async(
-                                    self.B_smem[ks, :, :],
-                                    B[
-                                        n_start : n_start + self.BLK_N,
-                                        k_start : k_start + self.BLK_K,
-                                    ],
-                                    **tma_copy,
+                                self._copy_async_B_from_gmem(
+                                    ks, B, n_start, k_start, tma_copy, m_idx
                                 )
                                 if self.stage % 4 == 0:
                                     Tx.copy_async(
@@ -360,13 +373,8 @@ class FP8GemmTile(GemmTile):
                                         SFA[self.stage // 4, m_start : m_start + self.BLK_M],
                                         **tma_copy,
                                     )
-                                    Tx.copy_async(
-                                        self.SFB_smem_2d[ks, 0 : self.BLK_N * self.CTA_GROUP],
-                                        SFB[
-                                            self.stage // 4,
-                                            n_start_sf : n_start_sf + self.BLK_N * self.CTA_GROUP,
-                                        ],
-                                        **tma_copy,
+                                    self._copy_async_SFB_from_gmem(
+                                        ks, SFB, n_start_sf, tma_copy, m_idx
                                     )
                                 AB_bytes = T.meta_var(
                                     self.BLK_M * self.BLK_K * F8_BYTES
@@ -659,3 +667,45 @@ class FP8GemmTile(GemmTile):
         self._alloc_local(m_idx)
         self._run(m_idx, n_idx, k_idx, cbx, A, B, output, tile_scheduler, SFA, SFB, profiler)
         self.smem_manager.advance()
+
+
+class FP8GroupGemmTile(FP8GemmTile):
+
+    def set_moe_info(self, expert_ids):
+        self.expert_ids = expert_ids
+
+    @Tx.inline
+    def _copy_async_B_from_gmem(self, ks, B, n_start, k_start, tma_copy, m_idx):
+        eid = self.expert_ids[m_idx]
+        Tx.copy_async(
+            self.B_smem[ks, :, :],
+            B[eid, n_start : n_start + self.BLK_N, k_start : k_start + self.BLK_K],
+            **tma_copy,
+        )
+
+    @Tx.inline
+    def _copy_async_SFB_from_gmem(self, ks, SFB, n_start_sf, tma_copy, m_idx):
+        eid = self.expert_ids[m_idx]
+        Tx.copy_async(
+            self.SFB_smem_2d[ks, 0 : self.BLK_N * self.CTA_GROUP],
+            SFB[eid, self.stage // 4, n_start_sf : n_start_sf + self.BLK_N * self.CTA_GROUP],
+            **tma_copy,
+        )
+
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        cbx,
+        A,
+        B,
+        output,
+        tile_scheduler,
+        SFA,
+        SFB,
+        expert_ids,
+        profiler=None,
+    ):
+        self.set_moe_info(expert_ids)
+        super().run(m_idx, n_idx, k_idx, cbx, A, B, output, tile_scheduler, SFA, SFB, profiler)
