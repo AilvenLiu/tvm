@@ -33,6 +33,7 @@ from tvm.tirx.layout import (
     Axis,
     ComposeLayout,
     F,
+    Iter,
     P,
     R,
     S,
@@ -101,41 +102,59 @@ def test_axis():
 
 
 def test_constructor():
+    def assert_tile_layout(layout, shard, replica=None, offset=None):
+        expected = TileLayout.from_iters(shard, replica or [], offset or {})
+        assert_structural_equal(layout, expected)
+
     layout = TileLayout(S[2, 3, 4])
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(2, 12, "m"), T.Iter(3, 4, "m"), T.Iter(4, 1, "m")])'  # noqa: E501
+    assert_tile_layout(
+        layout,
+        [
+            Iter(2, 12, "m"),
+            Iter(3, 4, "m"),
+            Iter(4, 1, "m"),
+        ],
     )
 
     layout = TileLayout(S[(2, 3, 4) : (12, 4, 1)])
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(2, 12, "m"), T.Iter(3, 4, "m"), T.Iter(4, 1, "m")])'  # noqa: E501
+    assert_tile_layout(
+        layout,
+        [
+            Iter(2, 12, "m"),
+            Iter(3, 4, "m"),
+            Iter(4, 1, "m"),
+        ],
     )
 
     layout = TileLayout(S[(2, 3, 4) : (12 @ m, 4 @ m, 1 @ m)])
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(2, 12, "m"), T.Iter(3, 4, "m"), T.Iter(4, 1, "m")])'  # noqa: E501
+    assert_tile_layout(
+        layout,
+        [
+            Iter(2, 12, "m"),
+            Iter(3, 4, "m"),
+            Iter(4, 1, "m"),
+        ],
     )
 
     layout = TileLayout(S[(8, 4, 2) : (4 @ laneid, 1 @ laneid, 1)])
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(8, 4, "laneid"), T.Iter(4, 1, "laneid"), T.Iter(2, 1, "m")])'  # noqa: E501
+    assert_tile_layout(
+        layout,
+        [
+            Iter(8, 4, "laneid"),
+            Iter(4, 1, "laneid"),
+            Iter(2, 1, "m"),
+        ],
     )
 
     layout = TileLayout(S[8 : 4 @ laneid] + R[4 : 1 @ laneid])
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(8, 4, "laneid")], replica=[T.Iter(4, 1, "laneid")])'  # noqa: E501
+    assert_tile_layout(
+        layout,
+        [Iter(8, 4, "laneid")],
+        replica=[Iter(4, 1, "laneid")],
     )
 
     layout = TileLayout(S[8 : 4 @ laneid] + 1 @ laneid)
-    assert (
-        str(layout)
-        == 'Tx.TileLayout.from_iters(shard=[T.Iter(8, 4, "laneid")], offset={"laneid": 1})'
-    )
+    assert_tile_layout(layout, [Iter(8, 4, "laneid")], offset={laneid: 1})
 
 
 def test_wg_local_layout_helper():

@@ -1073,8 +1073,8 @@ StructInfo InferStructInfoConv3dTranspose(const Call& call, const BlockBuilder& 
                                                          /*tgt_layout=*/"IODHW",           //
                                                          /*tensor_name=*/"kernel");
   auto [out_layout, out2NCDHW] = CheckTensorLayout(call, ctx, attrs->out_layout,  //
-                                                  /*tgt_layout=*/"NCDHW",        //
-                                                  /*tensor_name=*/"output");
+                                                   /*tgt_layout=*/"NCDHW",        //
+                                                   /*tensor_name=*/"output");
 
   ffi::Optional<ShapeExpr> data_shape =
       CheckNdimPerLayoutAndGetShape(call, ctx, data_sinfo, data_layout);
@@ -1168,13 +1168,13 @@ InferLayoutOutput InferLayoutConv3dTranspose(
 
   auto it = desired_layouts.find("relax.nn.conv3d_transpose");
   if (it != desired_layouts.end()) {
-    Layout desired_data_layout = (*it).second[0];
-    Layout desired_weight_layout = (*it).second[1];
-    Layout desired_output_layout = (*it).second.size() == 3 ? (*it).second[2] : (*it).second[0];
+    SLayout desired_data_layout = (*it).second[0];
+    SLayout desired_weight_layout = (*it).second[1];
+    SLayout desired_output_layout = (*it).second.size() == 3 ? (*it).second[2] : (*it).second[0];
 
-    Layout input_layout = Layout(attrs->data_layout);
-    Layout kernel_layout = Layout(attrs->kernel_layout);
-    Layout out_layout = Layout(attrs->out_layout);
+    SLayout input_layout = SLayout(attrs->data_layout);
+    SLayout kernel_layout = SLayout(attrs->kernel_layout);
+    SLayout out_layout = SLayout(attrs->out_layout);
 
     if (desired_data_layout.ndim_primal() == input_layout.ndim() &&
         desired_weight_layout.ndim_primal() == kernel_layout.ndim() &&
@@ -1199,7 +1199,7 @@ InferLayoutOutput InferLayoutConv3dTranspose(
       bool can_data_proved =
           CanProveLayoutTransform(input_layout, desired_data_layout, data_shape.value()->values);
       bool can_kernel_proved = CanProveLayoutTransform(kernel_layout, desired_weight_layout,
-                                                     kernel_shape.value()->values);
+                                                       kernel_shape.value()->values);
 
       if (can_data_proved && can_kernel_proved) {
         data_layout = TransposeSubLayoutLike(InitialLayout(5), input_layout, desired_data_layout);

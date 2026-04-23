@@ -24,6 +24,11 @@ from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
     try_get_optimal_moe_config,
 )
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
+from sglang.srt.server_args import (
+    ServerArgs,
+    get_global_server_args,
+    set_global_server_args_for_scheduler,
+)
 from torch.nn import functional as F
 from triton import language as tl
 
@@ -44,6 +49,15 @@ test_configs = [
 
 DEBUG = False
 AUOTUNE = False
+
+
+def _ensure_sglang_server_args():
+    """Newer sglang builds require scheduler args before querying MoE configs."""
+
+    try:
+        get_global_server_args()
+    except ValueError:
+        set_global_server_args_for_scheduler(ServerArgs(model_path="dummy"))
 
 
 def compute_routing(router_logits: torch.Tensor, top_k: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -634,6 +648,8 @@ def test_group_gemm(task):
         return out1_tvm.numpy(), out2_tvm.numpy().reshape(batch_size, top_k, hidden_size)
 
     def sglang():
+        _ensure_sglang_server_args()
+
         def get_config(batch_size):
             get_config_func = functools.partial(
                 try_get_optimal_moe_config,

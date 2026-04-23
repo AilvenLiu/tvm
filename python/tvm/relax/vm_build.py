@@ -246,6 +246,8 @@ def build(
     if not params:
         params = {}
 
+    has_tirx_primfunc = any(isinstance(func, PrimFunc) for func in mod.functions.values())
+
     if relax_pipeline is not None:
         if isinstance(relax_pipeline, str):
             # For GPU targets, prefer the target-specific pipeline which
@@ -254,9 +256,11 @@ def build(
             # VerifyMemory. CPU targets continue to use the generic pipeline
             # since the CPU-specific pipeline applies fusion passes that can
             # incorrectly remove call_pure_packed calls whose results are
-            # unused but whose side effects are relied upon.
+            # unused but whose side effects are relied upon. TIRx PrimFuncs
+            # should continue to use the generic pipeline because the GPU
+            # pipeline's DLight stage is only valid for s-TIR PrimFuncs.
             _is_gpu = target is not None and "gpu" in target.keys
-            if relax_pipeline == "default" and _is_gpu:
+            if relax_pipeline == "default" and _is_gpu and not has_tirx_primfunc:
                 try:
                     relax_pipeline = relax.get_default_pipeline(target)
                 except (ValueError, AttributeError):

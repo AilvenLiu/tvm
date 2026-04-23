@@ -94,6 +94,13 @@ class DispatchCase:
 _DISPATCH_TABLE: dict[tuple[Op, str], list[DispatchCase]] = {}
 
 
+def _target_kind_name(sctx: DispatchContext) -> str:
+    """Normalize target kind to a stable dispatch key."""
+
+    kind = getattr(getattr(sctx, "target", None), "kind", None)
+    return getattr(kind, "name", str(kind))
+
+
 def register_dispatch(
     op_name: str,
     target_kind: str,
@@ -241,10 +248,11 @@ def run_dispatch(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc 
     an aggregated reason report.
     """
 
-    key = (op_call.op, str(sctx.target.kind))
+    target_kind = _target_kind_name(sctx)
+    key = (op_call.op, target_kind)
     cases = _DISPATCH_TABLE.get(key)
     if not cases:
-        header = f"TIRx schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
+        header = f"TIRx schedule dispatch failed: op={op_call.op.name} target={target_kind}"
         report = _format_failure_table(header, [])
         # Append a simple reason when there are no variants at all
         report = "\n".join([report, "no registered variants for this op/target"])
@@ -260,9 +268,7 @@ def run_dispatch(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc 
     if forced_variant is not None:
         cases = [c for c in cases if c.variant == forced_variant]
         if not cases:
-            msg_header = (
-                f"TIRx schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
-            )
+            msg_header = f"TIRx schedule dispatch failed: op={op_call.op.name} target={target_kind}"
             table = _format_failure_table(msg_header, [])
             msg = "\n".join([table, f"no variant named '{forced_variant}' is registered"])
             raise RuntimeError(msg)
@@ -319,7 +325,7 @@ def run_dispatch(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc 
             last_exception = e
 
     # no success
-    header = f"TIRx schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
+    header = f"TIRx schedule dispatch failed: op={op_call.op.name} target={target_kind}"
     report = _format_failure_table(header, failure_rows)
     if last_exception is not None:
         raise RuntimeError(report) from last_exception
