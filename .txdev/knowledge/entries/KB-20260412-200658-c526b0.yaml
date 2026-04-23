@@ -2,7 +2,7 @@ content:
   details: 'For warpgroup-local register tiles, `wg_local_layout(cols, rows=128)`
     provides a canonical mapping `(rows, cols) -> (1 @ tid_in_wg, 1)`. In lowering,
     `Tx.alloc_buffer(..., layout=wg_local_layout(...), scope="local")` allocates only
-    each thread''s shard (for `(128, N)`, each thread stores `N` elements). CUDA scope-op
+    each thread''s shard (for `(128, N)`, each thread stores `N` elements). CUDA tile-primitive
     dispatch can then run element-wise ops directly on the wg-local view without the
     old 3-step pattern (`flat local buf -> view -> with Tx.thread()`).
 

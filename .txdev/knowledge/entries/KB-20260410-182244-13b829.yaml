@@ -1,6 +1,6 @@
 content:
   details: 'This feature renamed the public CUDA shared-memory layout helpers from
-    TMA-centric names to MMA-centric names in the current `tvm.tirx.operator.scope_op_dispatch.cuda.tma_utils`
+    TMA-centric names to MMA-centric names in the current `tvm.tirx.operator.tile_primitive_dispatch.cuda.tma_utils`
     module: `mma_shared_layout`, `mma_atom_layout`, and `mma_atom_shape`. The old
     `tma_shared_layout`, `tma_atom_layout`, and `tma_atom_shape` names are retained
     as compatibility aliases. The helper still computes the swizzle parameters from

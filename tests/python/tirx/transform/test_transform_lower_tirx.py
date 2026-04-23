@@ -1110,11 +1110,11 @@ def test_lower_tirx_dedup_tensormap():
             A_smem2 = Tx.decl_buffer((2048,), "float16", data=dyn.data, elem_offset=2048, scope="shared.dyn", layout=None)  # noqa: E501
             mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
-                for loop_vars in range(1):
+                for loop_vars in Tx.unroll(1):
                     s_buf_w_offset = A_smem2.partition[-2048:0]
                     Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
-                for loop_vars in range(1):
+                for loop_vars in Tx.unroll(1):
                     s_buf_w_offset = Tx.decl_buffer((2048,), "float16", data=dyn.data, elem_offset=2048, scope="shared.dyn", layout=None)  # noqa: E501
                     Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
     # fmt: on
@@ -1167,11 +1167,11 @@ def test_lower_tirx_keep_different_tensormaps():
             A_smem2 = Tx.decl_buffer((1024,), "float16", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
             mbarrier = Tx.decl_buffer((1,), "uint64", data=dyn.data, elem_offset=512, scope="shared.dyn", layout=None)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
-                for loop_vars in range(1):
+                for loop_vars in Tx.unroll(1):
                     s_buf_w_offset = A_smem2.partition[-1024:-512]
                     Tx.ptx.cp_async.bulk.tensor.g2c(2, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap_1, 0, 1, "", 0, 0)  # noqa: E501
             if threadIdx_x >= 0 and threadIdx_x < 1:
-                for loop_vars in range(1):
+                for loop_vars in Tx.unroll(1):
                     s_buf_w_offset = Tx.decl_buffer((1024,), "float16", data=dyn.data, elem_offset=1024, scope="shared.dyn", layout=None)  # noqa: E501
                     Tx.ptx.cp_async.bulk.tensor.g2c(3, Tx.address_of(s_buf_w_offset[0]), Tx.address_of(mbarrier[0]), A_ptr_tensormap, 0, 1, "", 0, 0, 0)  # noqa: E501
     # fmt: on

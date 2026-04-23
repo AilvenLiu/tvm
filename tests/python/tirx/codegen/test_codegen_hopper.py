@@ -34,6 +34,29 @@ def _get_source(func: tvm.tirx.PrimFunc) -> tuple[str, tvm.IRModule]:
     return src, mod
 
 
+def _run_tensormap_encode(shape, dtype, encode_args):
+    # fmt: off
+    @Tx.prim_func(tirx=True)
+    def main(A_ptr: Tx.handle):
+        A = Tx.match_buffer(A_ptr, shape, dtype=dtype, align=32)
+
+        A_map: Tx.let[Tx.handle("tensormap")] = Tx.tvm_stack_alloca("tensormap", 1)
+        Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, dtype, len(shape), A.data, *encode_args)  # noqa: E501
+
+        with Tx.kernel():
+            for blockIdx in Tx.thread_binding(1, thread="blockIdx.x"):
+                for threadIdx in Tx.thread_binding(1, thread="threadIdx.x"):
+                    with Tx.thread():
+                        Tx.evaluate(blockIdx + threadIdx)
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": main})
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+    A = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), device=tvm.cuda(0))
+    mod(A)
+
+
 @pytest.mark.parametrize("inc", [False, True])
 @tvm.testing.requires_cuda_compute_version(9)
 def test_ptx_setmaxnreg(inc):
@@ -358,6 +381,80 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     B = tvm.runtime.tensor(B_np, device=DEV)
     mod(A, B)
     assert np.allclose(A.numpy().astype("float32"), B.numpy().astype("float32"))
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize(
+    ("shape", "dtype", "encode_args", "error_msg"),
+    [
+        (
+            (16, 16),
+            "float16",
+            [0, 16, 32, 16, 16, 1, 1, 0, 0, 0, 0],
+            r"globalDim\[0\] must be non-zero",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [(1 << 32) + 1, 16, 32, 16, 16, 1, 1, 0, 0, 0, 0],
+            r"globalDim\[0\] must be less than or equal to 2\^32",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 1 << 40, 16, 16, 1, 1, 0, 0, 0, 0],
+            r"globalStrides\[0\] must be less than 2\^40",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 32, 0, 16, 1, 1, 0, 0, 0, 0],
+            r"boxDim\[0\] must be non-zero",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 32, 7, 16, 1, 1, 0, 0, 0, 0],
+            r"boxDim\[0\] \* elementSizeInBytes\(tensorDataType\) must be a multiple of 16 bytes",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 32, 16, 16, 0, 1, 0, 0, 0, 0],
+            r"elementStrides\[0\] must be non-zero",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 32, 16, 16, 9, 1, 0, 0, 0, 0],
+            r"elementStrides\[0\] must be less than or equal to 8",
+        ),
+        (
+            (16, 16),
+            "float16",
+            [16, 16, 32, 16, 16, 1, 1, 2, 0, 0, 0],
+            r"tensorRank must be greater than or equal to 3 when interleave is not NONE",
+        ),
+        (
+            (8, 8, 8),
+            "float16",
+            [8, 8, 8, 16, 128, 8, 8, 8, 1, 1, 1, 2, 0, 0, 0],
+            r"globalStrides\[0\] must be a multiple of 32",
+        ),
+        (
+            (16, 16),
+            "int32",
+            [16, 16, 64, 4, 16, 1, 1, 0, 0, 0, 1],
+            (
+                r"CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA requires a "
+                r"floating-point tensorDataType"
+            ),
+        ),
+    ],
+)
+def test_tensormap_encode_tiled_runtime_validation(shape, dtype, encode_args, error_msg):
+    with pytest.raises(tvm.error.InternalError, match=error_msg):
+        _run_tensormap_encode(shape, dtype, encode_args)
 
 
 @pytest.mark.parametrize("swizzle", [1, 2, 3])

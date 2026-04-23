@@ -36,6 +36,36 @@ from . import _ffi_api
 from .exec_scope import ExecScope
 
 
+def _flatten_coord(coord: list[PrimExpr], shape: list[PrimExpr]) -> PrimExpr:
+    """Python mirror of ``src/tirx/ir/layout/utils.cc::FlattenCoord``."""
+
+    flat: PrimExpr = 0
+    for c, s in zip(coord, shape, strict=False):
+        flat = flat * s + c
+    return flat
+
+
+def _split_coord(coord: PrimExpr, extents: list[PrimExpr]) -> list[PrimExpr]:
+    """Python mirror of ``src/tirx/ir/layout/utils.cc::SplitCoord``.
+
+    Walks ``extents`` from the innermost (last index, ``%``-ed first) toward
+    the outermost (index 0, gets the final remaining ``//``).
+    """
+
+    n = len(extents)
+    if n == 0:
+        return []
+    result: list = [None] * n
+    remaining = coord
+    for i in range(n - 1, -1, -1):
+        if i == 0:
+            result[0] = remaining
+        else:
+            result[i] = tvm.tirx.floormod(remaining, extents[i])
+            remaining = tvm.tirx.floordiv(remaining, extents[i])
+    return result
+
+
 @tvm_ffi.register_object("tirx.Layout")
 class Layout(Object):
     def __init__(self):
@@ -95,6 +125,39 @@ class Layout(Object):
         if shape is None:
             return _ffi_api.LayoutApply(self, coord)  # pylint: disable=no-member
         return _ffi_api.LayoutApplyWithShape(self, coord, shape)  # pylint: disable=no-member
+
+    def apply_to_shape(self, coord: list[PrimExpr], input_shape: list[PrimExpr]) -> list[PrimExpr]:
+        """Compute the per-shard value that each shard would take if ``coord``
+        were interpreted against ``input_shape``.
+
+        Tries ``self.group(input_shape)`` first. On success, each group owns
+        exactly one ``input_shape`` entry, so ``coord[d]`` can be split
+        *within* that group's shard extents (bounds stay local to one input
+        dim — simpler analyzer simplification, no cross-dim complications).
+
+        Falls back to ``FlattenCoord(coord, input_shape)`` + ``SplitCoord``
+        on ``self``'s raw shard shape when the group call fails (e.g. when
+        ``input_shape`` does not align with the layout's factor boundaries).
+
+        Returns a list of length ``len(self.shard)``; each entry is the value
+        that shard would iterate.
+        """
+
+        try:
+            grouped, seps = self.group(list(input_shape))
+        except Exception:
+            flat = _flatten_coord(coord, input_shape)
+            return _split_coord(flat, [sh.extent for sh in self.shard])
+
+        results: list = [None] * len(grouped.shard)
+        for d in range(len(input_shape)):
+            start = seps[d]
+            end = seps[d + 1]
+            extents = [grouped.shard[i].extent for i in range(start, end)]
+            part = _split_coord(coord[d], extents)
+            for i, c in zip(range(start, end), part, strict=False):
+                results[i] = c
+        return results
 
     def canonicalize(self) -> "Layout":
         """Canonicalize the layout by simplifying and fusing iterators where possible.

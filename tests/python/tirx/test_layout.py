@@ -1627,5 +1627,28 @@ def test_slice():
     case_compose_slice_2d()
 
 
+def test_apply_to_shape():
+    """``apply_to_shape`` should give per-shard coord, preferring per-dim
+    split when the input shape aligns with the layout's grouping."""
+
+    from tvm.tirx.layout import Iter, TileLayout
+
+    # 1 shard per dim — coord[d] passes through unchanged.
+    lay = TileLayout(S[16, 16])
+    assert [int(x) for x in lay.apply_to_shape([5, 7], [16, 16])] == [5, 7]
+
+    # Dim 1 split into (4, 4) factors — per-dim mixed-radix within dim 1,
+    # no cross-dim flatten needed.
+    lay2 = TileLayout.from_iters([Iter(16, 16, "m"), Iter(4, 4, "m"), Iter(4, 1, "m")])
+    assert [int(x) for x in lay2.apply_to_shape([5, 7], [16, 16])] == [5, 7 // 4, 7 % 4]
+
+    # Both dims split — verifies split stays local to each dim.
+    lay3 = TileLayout.from_iters(
+        [Iter(4, 64, "m"), Iter(4, 16, "m"), Iter(4, 4, "m"), Iter(4, 1, "m")]
+    )
+    r = lay3.apply_to_shape([13, 9], [16, 16])
+    assert [int(x) for x in r] == [13 // 4, 13 % 4, 9 // 4, 9 % 4]
+
+
 if __name__ == "__main__":
     tvm.testing.main()

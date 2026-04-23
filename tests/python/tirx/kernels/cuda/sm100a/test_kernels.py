@@ -43,3 +43,24 @@ for name, mod in sorted(_registry.items()):
 @pytest.mark.parametrize("kernel_name,config", _test_cases, ids=_test_ids)
 def test_kernel(kernel_name, config):
     run_kernel_test(kernel_name, config, registry=_registry)
+
+
+@tvm.testing.requires_cuda_compute_version(10, exact=True)
+def test_based_compile_uses_tma_tirx_plan(monkeypatch):
+    from tirx_kernels.runner import compile_kernel
+    from tirx_kernels.ssm.based import get_based_kernel
+
+    from tvm.tirx.operator.tile_primitive_dispatch.cuda.copy_async import tma as tma_mod
+
+    called = {"plan": 0}
+    orig = tma_mod._build_plan_with_shrink
+
+    def wrapped(*args, **kwargs):
+        called["plan"] += 1
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(tma_mod, "_build_plan_with_shrink", wrapped)
+
+    compile_kernel(get_based_kernel())
+
+    assert called["plan"] > 0, "expected based kernel lowering to build a unified TMA plan"
