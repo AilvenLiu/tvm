@@ -75,7 +75,7 @@ def codegen_ptx_wgmma_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
     func_name = "ptx_wgmma_encode_matrix_descriptor"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo, int sdo, int swizzle) {{
-  GmmaDescriptor _desc;
+  GmmaDescriptor _desc{{}};  // value-init: reading uncovered pad bits is UB
 
   switch (swizzle) {{
     case 0: _desc.bitfield.layout_type_ = uint8_t(0); break; // No swizzle

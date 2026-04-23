@@ -292,7 +292,7 @@ def codegen_ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
     func_name = "tvm_builtin_ptx_tcgen05_encode_matrix_descriptor"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo, int sdo, int swizzle) {{
-  SmemDescriptor _desc;
+  SmemDescriptor _desc{{}};  // value-init: reading uncovered pad bits is UB
 
   _desc.version_ = 1;
   _desc.lbo_mode_ = 0;
@@ -592,7 +592,7 @@ def codegen_ptx_tcgen05_encode_instr_descriptor(
 __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int d_format,
                                             int a_format, int b_format, bool trans_a, bool trans_b,
                                             bool neg_a, bool neg_b, bool sat_d, bool is_sparse) {{
-  InstrDescriptor _desc;
+  InstrDescriptor _desc{{}};  // value-init: reading uncovered pad bits is UB
 
   _desc.a_format_ = uint8_t(a_format);
   _desc.b_format_ = uint8_t(b_format);
@@ -723,7 +723,7 @@ def codegen_ptx_tcgen05_encode_instr_descriptor_block_scaled(
 __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_format,
                                             int b_format, int s_format, bool trans_a, bool trans_b,
                                             bool neg_a, bool neg_b, bool is_sparse) {{
-  InstrDescriptorBlockScaled _desc;
+  InstrDescriptorBlockScaled _desc{{}};  // value-init: reading uncovered pad bits is UB
 
   _desc.a_format_ = uint8_t(a_format);
   _desc.b_format_ = uint8_t(b_format);
