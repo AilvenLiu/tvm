@@ -670,7 +670,6 @@ class FP8GemmTile(GemmTile):
 
 
 class FP8GroupGemmTile(FP8GemmTile):
-
     def set_moe_info(self, expert_ids):
         self.expert_ids = expert_ids
 

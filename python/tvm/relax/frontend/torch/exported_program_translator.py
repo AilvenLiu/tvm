@@ -1140,9 +1140,7 @@ class ExportedProgramImporter(BaseFXGraphImporter):
         target_w = size[3]
 
         # Relax affine_grid outputs [N, 2, H, W]
-        grid = self.block_builder.emit(
-            relax.op.image.affine_grid(theta, (target_h, target_w))
-        )
+        grid = self.block_builder.emit(relax.op.image.affine_grid(theta, (target_h, target_w)))
         # Permute to PyTorch convention [N, H, W, 2]
         return self.block_builder.emit(relax.op.permute_dims(grid, axes=[0, 2, 3, 1]))
 

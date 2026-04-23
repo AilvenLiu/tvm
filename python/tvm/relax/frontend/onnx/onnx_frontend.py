@@ -311,6 +311,7 @@ class OnnxOpConverter:
             return getattr(cls, f"_impl_v{version}")
         raise NotImplementedError(f"opset version {version} of {cls.__name__} not implemented")
 
+
 class QuantizeLinear(OnnxOpConverter):
     @classmethod
     def _impl_v10(cls, bb, inputs, attr, params):
@@ -378,6 +379,7 @@ class DynamicQuantizeLinear(OnnxOpConverter):
 
         y = relax.op.quantize(x, y_scale, y_zero_point, axis=0, out_dtype="uint8")
         return relax.Tuple([y, y_scale, y_zero_point])
+
 
 class MatMul(OnnxOpConverter):
     """Converts an onnx MatMul node into an equivalent Relax expression."""
@@ -4390,8 +4392,6 @@ class SplitToSequence(OnnxOpConverter):
 
         input_tensor = inputs[0]
         input_shape = input_tensor.struct_info.shape
-        split_is_scalar = False
-
         if len(inputs) == 1:
             split = _np.array(1)
         else:
@@ -4407,7 +4407,7 @@ class SplitToSequence(OnnxOpConverter):
             chunk_size = int(split)
             dim_size = input_shape[axis]
 
-            if isinstance(dim_size, (int, tirx.IntImm)):
+            if isinstance(dim_size, int | tirx.IntImm):
                 dim_size_int = int(dim_size)
                 split = math.ceil(dim_size_int / chunk_size)
             else:

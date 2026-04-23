@@ -16,13 +16,13 @@
 # under the License.
 # ruff: noqa: E712, F841
 
+import gc
 import multiprocessing
 import os
 import stat
 import sys
 import tempfile
 import time
-import gc
 
 import numpy as np
 import pytest

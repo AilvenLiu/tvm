@@ -33,7 +33,7 @@ restricted to the valid prefix, so the kernel is only compared on the
 unpadded positions (padded positions are intentionally free to contain
 arbitrary garbage).
 """
-# ruff: noqa: E501
+
 import math
 
 import numpy as np

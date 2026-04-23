@@ -350,7 +350,8 @@ def test_range_dynamic_scalar_inputs_not_supported():
 
     with pytest.raises(tvm.error.OpNotImplemented, match="dynamic scalar inputs"):
         verify(RangeDynamic)
-        
+
+
 def test_tile_ir():
     """TILE conversion with explicit Relax IR structural check."""
 
@@ -1010,6 +1011,7 @@ def test_reverse_v2():
             return gv
 
     verify(ReverseV2, Expected)
+
 
 def _make_conv2d_module(data_shape, kernel_shape, data_format, strides, padding):
     class Conv2DModule(tf.Module):
@@ -2292,7 +2294,7 @@ def test_relu_n1_to_1():
         pytest.param(None, id="elementwise_no_shared_axes"),
     ],
 )
-def test_prelu(shared_axes):
+def test_prelu_shared_axes(shared_axes):
     inputs = tf.keras.Input(shape=(4, 4, 3), batch_size=1, dtype=tf.float32)
     prelu_kwargs = {
         "alpha_initializer": tf.initializers.constant(0.25),

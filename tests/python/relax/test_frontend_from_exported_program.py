@@ -9098,9 +9098,7 @@ def test_cond_nested():
 def test_affine_grid():
     class AffineGrid(Module):
         def forward(self, theta):
-            return torch.nn.functional.affine_grid(
-                theta, [1, 3, 16, 16], align_corners=True
-            )
+            return torch.nn.functional.affine_grid(theta, [1, 3, 16, 16], align_corners=True)
 
     @tvm.script.ir_module
     class expected:
@@ -9129,9 +9127,7 @@ def test_affine_grid_numerically():
 
     class AffineGrid(Module):
         def forward(self, theta):
-            return torch.nn.functional.affine_grid(
-                theta, [2, 3, 8, 12], align_corners=True
-            )
+            return torch.nn.functional.affine_grid(theta, [2, 3, 8, 12], align_corners=True)
 
     model = AffineGrid()
     example_args = (torch.randn(2, 2, 3, dtype=torch.float32),)

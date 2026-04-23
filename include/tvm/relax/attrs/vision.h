@@ -111,8 +111,7 @@ struct GetValidCountsAttrs : public AttrsNodeReflAdapter<GetValidCountsAttrs> {
 };  // struct GetValidCountsAttrs
 
 /*! \brief Attributes used in NonMaximumSuppression operator */
-struct NonMaximumSuppressionAttrs
-    : public AttrsNodeReflAdapter<NonMaximumSuppressionAttrs> {
+struct NonMaximumSuppressionAttrs : public AttrsNodeReflAdapter<NonMaximumSuppressionAttrs> {
   int max_output_size;
   double iou_threshold;
   bool force_suppress;

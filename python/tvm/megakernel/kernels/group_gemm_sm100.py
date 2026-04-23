@@ -189,7 +189,9 @@ class GroupGEMMTile(GemmTile):
             idx = i * 32 + lane_id
             row_global = Tx.min(m_idx * self.M_pad_size + idx, self.sorted_token_ids.shape[0] - 1)
             token_linear = self.sorted_token_ids[row_global]
-            self.smem_sorted_token_ids_gather4[idx] = Tx.min(Tx.max(token_linear, 0), self.numel - 1)
+            self.smem_sorted_token_ids_gather4[idx] = Tx.min(
+                Tx.max(token_linear, 0), self.numel - 1
+            )
         Tx.cuda.warp_sync()
 
     @Tx.inline
@@ -206,7 +208,9 @@ class GroupGEMMTile(GemmTile):
                 for r in Tx.vectorized(4):
                     row_idx[r] = self.smem_sorted_token_ids_gather4[row_group + r] // self.top_k
                 for r in Tx.vectorized(4):
-                    row_idx[r + 4] = self.smem_sorted_token_ids_gather4[row_group + r + 4] // self.top_k
+                    row_idx[r + 4] = (
+                        self.smem_sorted_token_ids_gather4[row_group + r + 4] // self.top_k
+                    )
 
             Tx.ptx.cp_async.bulk.tensor.g2c_tile_gather4(
                 2,
@@ -224,7 +228,7 @@ class GroupGEMMTile(GemmTile):
             )
             Tx.ptx.cp_async.bulk.tensor.g2c_tile_gather4(
                 2,
-                self.A_smem.ptr_to([ks, row_group + 4, 4 * (2 ** self.SWIZZLE)]),
+                self.A_smem.ptr_to([ks, row_group + 4, 4 * (2**self.SWIZZLE)]),
                 tma_config["mbar"],
                 tma_config["tensormap"],
                 0,

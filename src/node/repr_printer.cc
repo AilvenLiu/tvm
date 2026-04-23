@@ -193,13 +193,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // Register __ffi_repr__ for AccessPath/AccessStep so that ffi.ReprPrint
   // uses the concise "<root>.field[idx]" format instead of the dataclass repr.
   refl::TypeAttrDef<ffi::reflection::AccessPathObj>().def(
-      refl::type_attr::kRepr,
-      [](ffi::reflection::AccessPath path, ffi::Function) -> ffi::String {
+      refl::type_attr::kRepr, [](ffi::reflection::AccessPath path, ffi::Function) -> ffi::String {
         return FormatAccessPath(path);
       });
   refl::TypeAttrDef<ffi::reflection::AccessStepObj>().def(
-      refl::type_attr::kRepr,
-      [](ffi::reflection::AccessStep step, ffi::Function) -> ffi::String {
+      refl::type_attr::kRepr, [](ffi::reflection::AccessStep step, ffi::Function) -> ffi::String {
         std::ostringstream os;
         FormatAccessStep(os, step);
         return os.str();

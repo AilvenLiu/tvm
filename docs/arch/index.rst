@@ -434,4 +434,3 @@ and then integrate it into the IRModule.
 
 While possible to construct operators directly via TensorIR or tensor expressions (TE) for each use case, it is tedious to do so.
 `topi` (Tensor operator inventory) provides a set of pre-defined operators defined by numpy and found in common deep learning workloads.
-

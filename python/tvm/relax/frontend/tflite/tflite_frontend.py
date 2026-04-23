@@ -864,7 +864,9 @@ class OperatorConverter:
         )
         pooled = self.bb.normalize(_op.reshape(pooled, data_shape))
         denom = relax.op.power(
-            relax.op.add(relax.const(bias, in_type), relax.op.multiply(relax.const(alpha, in_type), pooled)),
+            relax.op.add(
+                relax.const(bias, in_type), relax.op.multiply(relax.const(alpha, in_type), pooled)
+            ),
             relax.const(beta, in_type),
         )
         out = relax.op.divide(in_expr, denom)
@@ -957,7 +959,8 @@ class OperatorConverter:
                     # relax.op.arange currently expects scalar-like values here.
                     # Keep dynamic scalar RANGE explicit until frontend support is added.
                     raise tvm.error.OpNotImplemented(
-                        "TFLite RANGE with dynamic scalar inputs is not supported in Relax frontend yet."
+                        "TFLite RANGE with dynamic scalar inputs is not "
+                        "supported in Relax frontend yet."
                     )
             else:
                 value = self.get_tensor_value(tensor)
@@ -969,7 +972,7 @@ class OperatorConverter:
         start_value = get_scalar_value(start)
         limit_value = get_scalar_value(limit)
         delta_value = get_scalar_value(delta)
- 
+
         # out type inference
         if delta.tensor.Type() == TensorType.FLOAT32:
             out_type = self.get_tensor_type_str(delta.tensor.Type())
@@ -3745,11 +3748,20 @@ class OperatorConverter:
         output_shape = to_int_list(self.get_tensor_shape(output_tensor))
         output_dtype = self.get_tensor_type_str(output_tensor.tensor.Type())
 
-        # topi.matrix_set_diag(input, diagonal, k1, k2, super_diag_right_align, sub_diag_right_align)
+        # topi.matrix_set_diag(
+        #     input, diagonal, k1, k2, super_diag_right_align, sub_diag_right_align
+        # )
         # TFLite MATRIX_SET_DIAG only sets the main diagonal, so k1=0, k2=0
         out = relax.op.call_dps_packed(
             "topi.matrix_set_diag",
-            (input_expr, diagonal_expr, relax.const(0), relax.const(0), relax.const(False), relax.const(False)),
+            (
+                input_expr,
+                diagonal_expr,
+                relax.const(0),
+                relax.const(0),
+                relax.const(False),
+                relax.const(False),
+            ),
             out_sinfo=relax.TensorStructInfo(output_shape, output_dtype),
         )
         return out
@@ -3777,11 +3789,20 @@ class OperatorConverter:
         diagonal_expr = self.get_tensor_expr(diagonal)
         zeros_expr = relax.op.zeros(output_shape, output_dtype)
 
-        # topi.matrix_set_diag(input, diagonal, k1, k2, super_diag_right_align, sub_diag_right_align)
+        # topi.matrix_set_diag(
+        #     input, diagonal, k1, k2, super_diag_right_align, sub_diag_right_align
+        # )
         # TFLite MATRIX_DIAG only sets the main diagonal, so k1=0, k2=0
         out = relax.op.call_dps_packed(
             "topi.matrix_set_diag",
-            (zeros_expr, diagonal_expr, relax.const(0), relax.const(0), relax.const(False), relax.const(False)),
+            (
+                zeros_expr,
+                diagonal_expr,
+                relax.const(0),
+                relax.const(0),
+                relax.const(False),
+                relax.const(False),
+            ),
             out_sinfo=relax.TensorStructInfo(output_shape, output_dtype),
         )
         return out

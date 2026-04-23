@@ -253,7 +253,6 @@ class CountAndSortExpertTokens(Tile):
 
 
 class MOETokenDispatchTile(Tile):
-
     def __init__(self, num_experts, numel, block_size, pad_sorted_token_ids=True):
         super().__init__()
         self.num_experts = num_experts
@@ -279,7 +278,7 @@ class MOETokenDispatchTile(Tile):
 
     @Tx.inline
     def warp_exclusive_scan(self, v, output, mask=0xFFFFFFFF):
-        output[0] = T.cuda.func_call(
+        output[0] = Tx.cuda.func_call(
             "warp_exclusive_scan",
             v,
             mask,

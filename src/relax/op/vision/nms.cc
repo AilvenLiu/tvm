@@ -153,10 +153,9 @@ StructInfo InferStructInfoGetValidCounts(const Call& call, const BlockBuilder& c
   auto vdev = data_sinfo->vdevice;
   const auto* data_shape = data_sinfo->shape.as<ShapeExprNode>();
   if (data_shape == nullptr) {
-    tvm::ffi::Array<StructInfo> fields = {
-        TensorStructInfo(DataType::Int(32), /*ndim=*/1, vdev),
-        TensorStructInfo(data_sinfo->dtype, /*ndim=*/3, vdev),
-        TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev)};
+    tvm::ffi::Array<StructInfo> fields = {TensorStructInfo(DataType::Int(32), /*ndim=*/1, vdev),
+                                          TensorStructInfo(data_sinfo->dtype, /*ndim=*/3, vdev),
+                                          TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev)};
     return TupleStructInfo(fields);
   }
 
@@ -321,9 +320,8 @@ StructInfo InferStructInfoNMS(const Call& call, const BlockBuilder& ctx) {
   if (attrs->return_indices) {
     // Returns (box_indices[batch, num_anchors], valid_box_count[batch, 1])
     if (data_shape == nullptr) {
-      tvm::ffi::Array<StructInfo> fields = {
-          TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev),
-          TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev)};
+      tvm::ffi::Array<StructInfo> fields = {TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev),
+                                            TensorStructInfo(DataType::Int(32), /*ndim=*/2, vdev)};
       return TupleStructInfo(fields);
     }
     auto batch = data_shape->values[0];

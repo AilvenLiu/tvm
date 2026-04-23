@@ -5599,6 +5599,7 @@ def test_split_to_sequence_uneven_last_chunk(axis: int):
     model = helper.make_model(graph, producer_name="test_split_to_sequence_uneven")
     check_correctness(model)
 
+
 def test_quantizelinear_singleton_qparams_opset10():
     """QuantizeLinear must treat shape-[1] scale/zp as scalar in opset10."""
     node = helper.make_node("QuantizeLinear", ["x", "scale", "zero_point"], ["y"])
@@ -5671,6 +5672,7 @@ def test_dynamicquantizelinear_opset11():
     x = rg.standard_normal((2, 3, 4)).astype("float32")
     check_correctness(model, inputs={"x": x}, opset=11, atol=1e-5, rtol=1e-5, check_dtypes=True)
 
+
 def test_quantizelinear_default_axis_opset10():
     """opset10 QuantizeLinear should honor default axis=1 (not hardcode axis=0)."""
     node = helper.make_node("QuantizeLinear", ["x", "scale", "zero_point"], ["y"])
@@ -5707,6 +5709,7 @@ def test_dequantizelinear_default_axis_opset10():
 
     x = rg.integers(low=0, high=255, size=(2, 3, 4), dtype=np.uint8)
     check_correctness(model, inputs={"x": x}, opset=10, check_dtypes=True)
+
 
 if __name__ == "__main__":
     tvm.testing.main()
