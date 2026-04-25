@@ -183,7 +183,7 @@ def gemm_async_tcgen05_impl(op_call: TilePrimitiveCall, sctx: DispatchContext) -
             B must be shared).
         AssertionError: If shape/layout constraints are not satisfied.
     """
-    warp_scope = sctx.exec_scope.name == "warp"
+    warp_scope = sctx.is_warp
     op_call = TilePrimitiveCall.downcast(op_call)
     is_block_scaled = op_call.is_block_scaled
 
@@ -770,7 +770,7 @@ def gemm_async_tcgen05_impl(op_call: TilePrimitiveCall, sctx: DispatchContext) -
         predicate(
             "single_thread_or_warp",
             lambda op, sctx: (
-                single_thread(op, sctx) or sctx.exec_scope.name == "warp",
+                single_thread(op, sctx) or sctx.is_warp,
                 f"unsupported exec_scope {sctx.exec_scope}, expected single thread or warp scope",
             ),
         ),

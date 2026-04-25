@@ -74,8 +74,8 @@ def _emit_binary_local_trivial_layout(
     sctx: DispatchContext,
 ) -> PrimFunc | None:
     """Emit local trivial-layout binary map."""
-    if sctx.exec_scope.name != "thread":
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for local thread-trivial binary op")
+    if not sctx.is_thread:
+        fail(f"unsupported exec_scope {sctx.scope_kind} for local thread-trivial binary op")
 
     info, msg = _try_prepare_binary_map(
         op, binary_op, require_trivial_layout=True, allow_no_layout=True

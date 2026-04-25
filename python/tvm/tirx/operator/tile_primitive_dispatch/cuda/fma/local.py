@@ -56,9 +56,9 @@ def _validate_fma(
         return False, "fma output must be BufferRegion"
     if not isinstance(inp, BufferRegion):
         return False, "fma input must be BufferRegion"
-    if not isinstance(scale, (BufferRegion, FloatImm, PrimExpr)):  # noqa: UP038
+    if not isinstance(scale, BufferRegion | FloatImm | PrimExpr):
         return False, f"fma scale must be BufferRegion or PrimExpr, got {type(scale)}"
-    if not isinstance(bias, (BufferRegion, FloatImm, PrimExpr)):  # noqa: UP038
+    if not isinstance(bias, BufferRegion | FloatImm | PrimExpr):
         return False, f"fma bias must be BufferRegion or PrimExpr, got {type(bias)}"
     return True, None
 
@@ -86,7 +86,7 @@ def _validate_fma_local(
     op_call: TilePrimitiveCall,
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
-    scope = sctx.exec_scope.name
+    scope = sctx.scope_kind
     if scope not in ["cta", "warpgroup", "warp", "thread"]:
         return False, f"unsupported exec_scope {scope} for fma"
     if scope == "thread":
@@ -477,7 +477,7 @@ def _fma_local_view_impl(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
 
 
 def _fma_local_impl(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
-    if sctx.exec_scope.name == "thread":
+    if sctx.is_thread:
         return _fma_local_thread_impl(op, sctx)
     return _fma_local_view_impl(op, sctx)
 

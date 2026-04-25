@@ -261,56 +261,48 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             }
             ffi::Array<ExprDoc> call_args = {d->AsDoc<ExprDoc>(
                 scope_id_def->extents, scope_p->Attr("scope_id_def")->Attr("extents"))};
-            ffi::Array<ffi::String> kwarg_keys = {"parent"};
-            ffi::Array<ExprDoc> kwarg_vals = {LiteralDoc::Str(
-                scope_id_def->scope->parent, scope_p->Attr("scope_id_def")->Attr("parent"))};
+            ffi::Array<ffi::String> kwarg_keys;
+            ffi::Array<ExprDoc> kwarg_vals;
             if (scope_id_def->preferred_extents.defined()) {
               kwarg_keys.push_back("preferred");
               kwarg_vals.push_back(
                   d->AsDoc<ExprDoc>(scope_id_def->preferred_extents.value(),
                                     scope_p->Attr("scope_id_def")->Attr("preferred_extents")));
             }
-            ExprDoc rhs =
-                TIR(d, scope_id_def->scope->cur + "_id")->Call(call_args, kwarg_keys, kwarg_vals);
+            // Map (parent, cur) to new API name (Phase 2 ScopeIdDef API collapse).
+            auto [parent, cur] = tirx::ScopeBindingToStringPair(scope_id_def->scope);
+            std::string api_name;
+            if (parent == "kernel" && cur == "cluster") {
+              api_name = "cluster_id";
+            } else if (parent == "kernel" && cur == "cta") {
+              api_name = "cta_id";
+            } else if (parent == "cluster" && cur == "cta") {
+              api_name = "cta_id_in_cluster";
+            } else if (parent == "cta" && cur == "warpgroup") {
+              api_name = "warpgroup_id";
+            } else if (parent == "cta" && cur == "warp") {
+              api_name = "warp_id";
+            } else if (parent == "warpgroup" && cur == "warp") {
+              api_name = "warp_id_in_wg";
+            } else if (parent == "warp" && cur == "thread") {
+              api_name = "lane_id";
+            } else if (parent == "cta" && cur == "thread") {
+              api_name = "thread_id";
+            } else if (parent == "warpgroup" && cur == "thread") {
+              api_name = "thread_id_in_wg";
+            } else {
+              LOG(FATAL) << "Unknown scope id binding: parent=" << parent << " cur=" << cur;
+            }
+            ExprDoc rhs = TIR(d, api_name)->Call(call_args, kwarg_keys, kwarg_vals);
             (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
           }
 
           // Print body
           AsDocBody(stmt->body, p->Attr("body"), frame->get(), d);
 
-          // Generate the with statement
-          if (auto scope_slice_opt = exec_scope.as<tvm::tirx::ExecScopeSlice>()) {
-            auto scope_slice = scope_slice_opt.value();
-            ExprDoc extents_doc = d->AsDoc<ExprDoc>(scope_slice->extents, scope_p->Attr("extents"));
-            ExprDoc parent_doc = LiteralDoc::Str(scope_slice->parent, scope_p->Attr("parent"));
-            ExprDoc call = TIR(d, exec_scope->name)->Call({extents_doc, parent_doc});
-            if (auto slices_opt = scope_slice->slices.as<ffi::Array<Range>>()) {
-              auto slices = slices_opt.value();
-              ffi::Array<Doc> slices_doc;
-              for (size_t i = 0; i < slices.size(); ++i) {
-                auto path = scope_p->Attr("slices")->ArrayItem(i);
-                auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));
-                auto stop =
-                    d->AsDoc<ExprDoc>(slices[i]->min + slices[i]->extent, path->Attr("extent"));
-                slices_doc.push_back(SliceDoc(start, stop, std::nullopt));
-              }
-              return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
-            } else {
-              auto cond = scope_slice->slices.as<PrimExpr>().value();
-              // Detect thread()[ptx.elect_sync()] and print as elected()
-              if (exec_scope->name == "thread") {
-                if (auto call_node = cond.as<tirx::CallNode>()) {
-                  if (call_node->op.same_as(tirx::builtin::ptx_elect_sync())) {
-                    return ScopeDoc(std::nullopt, TIR(d, "elected")->Call({}), (*frame)->stmts);
-                  }
-                }
-              }
-              auto cond_doc = d->AsDoc<ExprDoc>(cond, scope_p->Attr("select_cond"));
-              return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
-            }
-          } else {
-            return ScopeDoc(std::nullopt, TIR(d, exec_scope->name)->Call({}), (*frame)->stmts);
-          }
+          // Generate the with statement (plain scope only — slices are now
+          // expressed as IfThenElse(tirx.filter) around the ExecScopeStmt).
+          return ScopeDoc(std::nullopt, TIR(d, exec_scope->name())->Call({}), (*frame)->stmts);
         });
 
 TVM_SCRIPT_REPR(tirx::ExecScopeStmtNode, ReprPrintTIR);
@@ -318,7 +310,8 @@ TVM_SCRIPT_REPR(tirx::ExecScopeStmtNode, ReprPrintTIR);
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::ExecScope>(
         "", [](tirx::ExecScope exec_scope, AccessPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "ExecScope")->Call({LiteralDoc::Str(exec_scope->name, p->Attr("name"))});
+          Doc doc =
+              TIR(d, "ExecScope")->Call({LiteralDoc::Str(exec_scope->name(), p->Attr("name"))});
           return doc;
         });
 TVM_SCRIPT_REPR(tirx::ExecScopeNode, ReprPrintTIR);
@@ -326,24 +319,15 @@ TVM_SCRIPT_REPR(tirx::ExecScopeNode, ReprPrintTIR);
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::ScopeIdDef>(
         "", [](tirx::ScopeIdDef def, AccessPath p, IRDocsifier d) -> Doc {
+          auto [parent, cur] = tirx::ScopeBindingToStringPair(def->scope);
           Doc doc = TIR(d, "ScopeIdDef")
                         ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
                                 d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
-                                LiteralDoc::Str(def->scope->parent, p->Attr("parent")),
-                                LiteralDoc::Str(def->scope->cur, p->Attr("cur"))});
+                                LiteralDoc::Str(parent, p->Attr("parent")),
+                                LiteralDoc::Str(cur, p->Attr("cur"))});
           return doc;
         });
 TVM_SCRIPT_REPR(tirx::ScopeIdDefNode, ReprPrintTIR);
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::ScopePair>(
-        "", [](tirx::ScopePair pair, AccessPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "ScopePair")
-                        ->Call({d->AsDoc<ExprDoc>(pair->parent, p->Attr("parent")),
-                                d->AsDoc<ExprDoc>(pair->cur, p->Attr("cur"))});
-          return doc;
-        });
-TVM_SCRIPT_REPR(tirx::ScopePairNode, ReprPrintTIR);
 
 }  // namespace printer
 }  // namespace script

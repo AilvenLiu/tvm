@@ -76,8 +76,8 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(res: Tx.Buffer((2,), "int32")):
                 with Tx.kernel():
-                    Tx.cta_id([1], parent="kernel")
-                    Tx.thread_id([1], parent="cta")
+                    cta_id = Tx.cta_id([1])
+                    tid = Tx.thread_id([nwarps * 32])
                     with Tx.thread():
                         res[0] = Tx.nvshmem.my_pe()
                         res[1] = Tx.nvshmem.n_pes()
@@ -97,10 +97,10 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(A: Tx.Buffer(shape, dtype), B: Tx.Buffer(shape, dtype)):
                 with Tx.kernel():
-                    Tx.cta_id([1], parent="kernel")
-                    warp_id = Tx.warp_id([nwarps], parent="cta")
-                    Tx.thread_id([32], parent="warp")
-                    tid = Tx.thread_id([nwarps * 32], parent="cta")
+                    cta_id = Tx.cta_id([1])
+                    warp_id = Tx.warp_id([nwarps])
+                    lane_id = Tx.lane_id([32])
+                    tid = Tx.thread_id([nwarps * 32])
 
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()
@@ -137,8 +137,8 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(res: Tx.Buffer((1,), "uint64")):
                 with Tx.kernel():
-                    Tx.cta_id([1], parent="kernel")
-                    Tx.thread_id([1], parent="cta")
+                    cta_id = Tx.cta_id([1])
+                    tid = Tx.thread_id([nwarps * 32])
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()
                         n_pes = Tx.nvshmem.n_pes()
@@ -175,10 +175,10 @@ def test_codegen_nvshmem():
                 signal_array: Tx.Buffer((1,), "uint64"),
             ):
                 with Tx.kernel():
-                    Tx.cta_id([1], parent="kernel")
-                    warp_id = Tx.warp_id([nwarps], parent="cta")
-                    Tx.thread_id([32], parent="warp")
-                    tid = Tx.thread_id([nwarps * 32], parent="cta")
+                    cta_id = Tx.cta_id([1])
+                    warp_id = Tx.warp_id([nwarps])
+                    lane_id = Tx.lane_id([32])
+                    tid = Tx.thread_id([nwarps * 32])
 
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()
@@ -229,10 +229,10 @@ def test_codegen_nvshmem():
             @Tx.prim_func(tirx=True)
             def main(A: Tx.Buffer(shape, dtype), B: Tx.Buffer(shape, dtype), res: Tx.Buffer((1,), "uint64")):  # noqa: E501
                 with Tx.kernel():
-                    Tx.cta_id([1], parent="kernel")
-                    Tx.warp_id([2], parent="cta")
-                    Tx.thread_id([32], parent="warp")
-                    tid = Tx.thread_id([2 * 32], parent="cta")
+                    cta_id = Tx.cta_id([1])
+                    warp_id = Tx.warp_id([nwarps])
+                    lane_id = Tx.lane_id([32])
+                    tid = Tx.thread_id([2 * 32])
 
                     with Tx.thread():
                         my_pe = Tx.nvshmem.my_pe()

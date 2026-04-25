@@ -48,7 +48,7 @@ class SplitKReduceTile(Tile):
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             self._alloc_local()
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             self.idx = tid * self.VEC_SIZE
             while (
                 self.idx < self.M_TILE * self.N_TILE
@@ -78,7 +78,7 @@ class MOETopKReduceTile(SplitKReduceTile):
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
             self._alloc_local()
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             self.idx = tid * self.VEC_SIZE
             while (
                 self.idx < self.M_TILE * self.N_TILE

@@ -132,8 +132,8 @@ class TopkSoftmaxTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, gating_output, topk_weights, topk_indices, renormalize=False):  # noqa: E501
         with Tx.cta():
-            warp_id_in_cta = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")  # noqa: E501
-            lane_id = Tx.thread_id([self.bdx], parent="warp")
+            warp_id_in_cta = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([self.bdx])
 
             with Tx.thread():
                 self.token_idx[0] = m_idx * self.ROWS_PER_CTA

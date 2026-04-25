@@ -174,6 +174,6 @@ class GroupGEMMTile(Tile):
         num_tokens_post_pad,
     ):
         with Tx.cta():
-            Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-            Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id_in_wg = Tx.warp_id_in_wg([4])
+            lane_id = Tx.lane_id([32])

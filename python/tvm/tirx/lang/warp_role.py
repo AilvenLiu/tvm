@@ -99,9 +99,10 @@ class WarpgroupRole:
 
     Generates (range of wg_ids, e.g. ``wg_id_val=(0, 2)``)::
 
-        with Tx.warpgroup()[0:2]:
-            Tx.ptx.setmaxnreg(<increase>, <regs>)
-            <user code>
+        if Tx.filter(<wg_id_var>, 0, 2):
+            with Tx.warpgroup():
+                Tx.ptx.setmaxnreg(<increase>, <regs>)
+                <user code>
 
     Parameters
     ----------
@@ -109,7 +110,7 @@ class WarpgroupRole:
         The warpgroup_id variable (from ``Tx.warpgroup_id(...)``).
     wg_id_val : int or tuple[int, int]
         Which warpgroup index (int) or range ``(start, stop)`` this role
-        corresponds to.  A tuple generates ``Tx.warpgroup()[start:stop]``.
+        corresponds to.
     regs : int, optional
         Register budget.
     increase : bool
@@ -125,15 +126,13 @@ class WarpgroupRole:
     def __enter__(self):
         if isinstance(self.wg_id_val, tuple):
             start, stop = self.wg_id_val
-            self._if_frame = None
-            self._then_frame = None
-            self._wg_frame = Tx.warpgroup()[start:stop]
+            self._if_frame = Tx.If(Tx.filter(self.wg_id_var, start, stop))
         else:
             self._if_frame = Tx.If(self.wg_id_var == self.wg_id_val)
-            self._if_frame.__enter__()
-            self._then_frame = Tx.Then()
-            self._then_frame.__enter__()
-            self._wg_frame = Tx.warpgroup()
+        self._if_frame.__enter__()
+        self._then_frame = Tx.Then()
+        self._then_frame.__enter__()
+        self._wg_frame = Tx.warpgroup()
         self._wg_frame.__enter__()
         if self.regs is not None:
             Tx.evaluate(Tx.ptx.setmaxnreg(self.increase, self.regs))
@@ -141,8 +140,6 @@ class WarpgroupRole:
 
     def __exit__(self, *exc):
         self._wg_frame.__exit__(*exc)
-        if self._then_frame is not None:
-            self._then_frame.__exit__(*exc)
-        if self._if_frame is not None:
-            self._if_frame.__exit__(*exc)
+        self._then_frame.__exit__(*exc)
+        self._if_frame.__exit__(*exc)
         return False

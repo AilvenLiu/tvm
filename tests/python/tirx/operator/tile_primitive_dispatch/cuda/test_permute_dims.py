@@ -68,8 +68,8 @@ def test_vectorized_permute_dims_2d(task, dtype):
         A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.cta():
                 with Tx.warp():
                     Tx.permute_dims(A, [1, 0])
@@ -130,8 +130,8 @@ def test_vectorized_permute_dims_nd(task, dtype):
         A = Tx.match_buffer(A_ptr, a_shape, dtype, layout=layoutA)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.cta():
                 with Tx.warp():
                     Tx.permute_dims(A[tuple(region)], order)

@@ -45,8 +45,8 @@ def reduce_negate_trn(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc 
         predicate(
             "exec_scope",
             lambda op, sctx: (
-                sctx.exec_scope.name == "kernel",
-                f"unsupported exec_scope {sctx.exec_scope.name}",
+                sctx.scope_kind == "kernel",
+                f"unsupported exec_scope {sctx.scope_kind}",
             ),
         )
     ],

@@ -55,7 +55,7 @@ class RopeTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, qkv, cos_sin_cache, rope_pos):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var(tid // self.bdx)
             half_dim = self.head_dim // 2

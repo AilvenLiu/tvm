@@ -159,7 +159,7 @@ def generate_unary_func(
     src = _src.buffer if isinstance(_src, BufferRegion) else None
 
     # Handle bias tensor
-    if isinstance(bias, (FloatImm, float)):  # noqa: UP038
+    if isinstance(bias, FloatImm | float):
         bias_buffer = get_const_bias_tensor(
             bias, (p_size, inst_repr.size), dst.dtype, workspace, sctx
         )

@@ -57,7 +57,7 @@ class RMSnormTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, qkv, q_weight, k_weight):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var(tid // self.bdx)
             self._alloc_local()

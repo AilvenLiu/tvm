@@ -52,7 +52,7 @@ class AllreduceTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             rank: Tx.let = Tx.nvshmem.my_pe()
             # restrict tile size so that this will not be iterated over
             if (

@@ -136,12 +136,12 @@ inline AxisRegEntry& AxisRegEntry::set_attr(const ffi::String& key, const ValueT
 }
 
 AxisRegEntry& AxisRegEntry::set_scope(const ffi::String& scope_name, int plevel) {
-  set_attr<ffi::Optional<ExecScope>>("scope", ExecScope::Create(scope_name), plevel);
+  set_attr<ffi::Optional<ExecScope>>("scope", ExecScope(scope_name), plevel);
   return *this;
 }
 
 AxisRegEntry& AxisRegEntry::set_subscope(const ffi::String& subscope_name, int plevel) {
-  set_attr<ffi::Optional<ExecScope>>("subscope", ExecScope::Create(subscope_name), plevel);
+  set_attr<ffi::Optional<ExecScope>>("subscope", ExecScope(subscope_name), plevel);
   return *this;
 }
 

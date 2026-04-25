@@ -449,9 +449,7 @@ def match_buffer(
 def sblock(
     name: str = "",
     no_realize: bool = False,
-    exec_scope="",
-    scope_slice_extents=None,
-    scope_slice_parent="",
+    exec_scope: str = "",
 ) -> frame.SBlockFrame:
     """The sblock declaration statement.
 
@@ -466,9 +464,6 @@ def sblock(
     exec_scope : str
         The execution scope of the block.
 
-    scope_slice_parent : str
-        The parent of the execution scope slice.
-
     Returns
     -------
     res : frame.SBlockFrame
@@ -480,123 +475,52 @@ def sblock(
     block_suffix = _get_sblock_name_suffix()
     if block_suffix and name:
         name = name + block_suffix
-    return _ffi_api.Block(name, no_realize, exec_scope, scope_slice_extents, scope_slice_parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Block(name, no_realize, exec_scope)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def world() -> frame.ExecScopeFrame:
-    """The execution scope declaration for world scope.
+def kernel() -> frame.ExecScopeFrame:
+    """Open a ``kernel``-level execution scope."""
+    return _ffi_api.Kernel()  # type: ignore[attr-defined] # pylint: disable=no-member
 
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
+
+def cluster() -> frame.ExecScopeFrame:
+    """Open a ``cluster``-level execution scope."""
+    return _ffi_api.Cluster()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def cta() -> frame.ExecScopeFrame:
+    """Open a ``cta``-level execution scope."""
+    return _ffi_api.CTA()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def warpgroup() -> frame.ExecScopeFrame:
+    """Open a ``warpgroup``-level execution scope."""
+    return _ffi_api.WarpGroup()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def warp() -> frame.ExecScopeFrame:
+    """Open a ``warp``-level execution scope."""
+    return _ffi_api.Warp()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def thread() -> frame.ExecScopeFrame:
+    """Open a ``thread``-level execution scope."""
+    return _ffi_api.Thread()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def elected():
+    """Stub that rejects the removed ``Tx.elected()`` sugar.
+
+    Write the explicit form instead::
+
+        if Tx.ptx.elect_sync():
+            with Tx.thread():
+                ...
     """
-    return _ffi_api.World()  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def kernel(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "world",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for kernel scope.
-
-    Parameters
-    ----------
-    extents : Optional[List[PrimExpr]]
-        The extents of the execution scope slice.
-
-    parent : Optional[str]
-        The parent of the execution scope slice.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.Kernel(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def cluster(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "world",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for cluster scope.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.Cluster(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def cta(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "kernel",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for CTA scope.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.CTA(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def warpgroup(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "cta",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for warpgroup scope.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.WarpGroup(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def warp(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "cta",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for warp scope.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.Warp(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def thread(
-    extents: list[PrimExpr] | None = None,
-    parent: str = "cta",
-) -> frame.ExecScopeFrame:
-    """The execution scope declaration for thread scope.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame.
-    """
-    return _ffi_api.Thread(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def elected() -> frame.ExecScopeFrame:
-    """Shorthand for ``thread()[ptx.elect_sync()]``.
-
-    Selects a single elected thread within the current warp.
-
-    Returns
-    -------
-    res : frame.ExecScopeFrame
-        The ExecScopeFrame with elect_sync predicate.
-    """
-    return thread()[ptx.elect_sync()]
+    raise RuntimeError(
+        "Tx.elected() is no longer available. Write explicitly: "
+        "`if Tx.ptx.elect_sync(): with Tx.thread():`"
+    )
 
 
 def scope_id(
@@ -610,43 +534,64 @@ def scope_id(
     return ret
 
 
-def kernel_id(extents: list[PrimExpr | int], parent: str = "world") -> list[Var]:
-    ret = _ffi_api.KernelId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def cluster_id(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.ClusterId(extents, "kernel")  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cluster_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
-    ret = _ffi_api.ClusterId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def cta_id(extents: list[PrimExpr | int], preferred=None) -> list[Var]:
+    ret = _ffi_api.CtaId(extents, "kernel", preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cta_id(extents: list[PrimExpr | int], parent: str, preferred=None) -> list[Var]:
-    ret = _ffi_api.CtaId(extents, parent, preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
+def cta_id_in_cluster(extents: list[PrimExpr | int], preferred=None) -> list[Var]:
+    ret = _ffi_api.CtaId(extents, "cluster", preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warpgroup_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
-    ret = _ffi_api.WarpgroupId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def warpgroup_id(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.WarpgroupId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warp_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
-    ret = _ffi_api.WarpId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def warp_id(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.WarpId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def thread_id(extents: list[PrimExpr | int], parent: str) -> list[Var]:
-    ret = _ffi_api.ThreadId(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+def warp_id_in_wg(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.WarpId(extents, "warpgroup")  # type: ignore[attr-defined] # pylint: disable=no-member
+    if len(ret) == 1:
+        return ret[0]
+    return ret
+
+
+def lane_id(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.ThreadId(extents, "warp")  # type: ignore[attr-defined] # pylint: disable=no-member
+    if len(ret) == 1:
+        return ret[0]
+    return ret
+
+
+def thread_id(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.ThreadId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
+    if len(ret) == 1:
+        return ret[0]
+    return ret
+
+
+def thread_id_in_wg(extents: list[PrimExpr | int]) -> list[Var]:
+    ret = _ffi_api.ThreadId(extents, "warpgroup")  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
@@ -2798,6 +2743,7 @@ class CUDANamespace:
         self.cta_sync = _op_wrapper(_tir_op.cuda_cta_sync)
         self.grid_sync = _op_wrapper(_tir_op.cuda_grid_sync)
         self.cluster_sync = _op_wrapper(_tir_op.cuda_cluster_sync)
+        self.thread_rank = _op_wrapper(_tir_op.cuda_thread_rank)
         self.trap_when_assert_failed = _op_wrapper(_tir_op.cuda_trap_when_assert_failed)
         self.runtime_instr_desc = _op_wrapper(_tir_op.cuda_runtime_instr_desc)
         self.half2float = _op_wrapper(_tir_op.cuda_half2float)
@@ -2967,6 +2913,7 @@ erf = _op_wrapper(_tir_op.erf)
 exp = _op_wrapper(_tir_op.exp)
 exp2 = _op_wrapper(_tir_op.exp2)
 exp10 = _op_wrapper(_tir_op.exp10)
+filter = _op_wrapper(_tir_op.filter)  # pylint: disable=redefined-builtin
 floor = _op_wrapper(_tir_op.floor)
 ceildiv = _op_wrapper(_tir_op.ceildiv)
 floordiv = _op_wrapper(_tir_op.floordiv)
@@ -3286,6 +3233,7 @@ __all__ = [
     "floordiv",
     "floormod",
     "fmod",
+    "filter",
     "hypot",
     "if_then_else",
     "infinity",
@@ -3462,10 +3410,11 @@ __all__ += [
     "cluster_id",
     "cta",
     "cta_id",
+    "cta_id_in_cluster",
     "cuda",
     "decl_scalar",
     "kernel",
-    "kernel_id",
+    "lane_id",
     "local_scalar",
     "nki",
     "nvshmem",
@@ -3477,12 +3426,13 @@ __all__ += [
     "static_assert",
     "thread",
     "thread_id",
+    "thread_id_in_wg",
     "tmem",
     "warp",
     "warp_id",
+    "warp_id_in_wg",
     "warpgroup",
     "warpgroup_id",
-    "world",
 ]
 
 # Shorthand dtype aliases

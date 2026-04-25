@@ -65,11 +65,10 @@ def test_layernorm(dtype):
         norm_bias = Tx.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=Tx.TileLayout(Tx.S[ATTN_D])) # beta  # noqa: E501
 
         with Tx.kernel():
-            bx, by = Tx.cta_id([Tx.ceildiv(ATTN_N, N_PER_TILE), ATTN_B], parent="kernel")
-            Tx.thread_id([NUM_WORKERS * 32], parent="cta")
-            Tx.warp_id([NUM_WORKERS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-
+            bx, by = Tx.cta_id([Tx.ceildiv(ATTN_N, N_PER_TILE), ATTN_B])
+            tid = Tx.thread_id([NUM_WORKERS * 32])
+            warp_id = Tx.warp_id([NUM_WORKERS])
+            lane_id = Tx.lane_id([32])
             with Tx.cta():
                 x_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))  # noqa: E501
                 resid_smem = Tx.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=Tx.TileLayout(Tx.S[NUM_WORKERS, PIPELINE_DEPTH, ATTN_D]))  # noqa: E501

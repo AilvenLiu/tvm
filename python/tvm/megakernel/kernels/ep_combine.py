@@ -81,11 +81,10 @@ class EPCombineSendTile(Tile):
         rank,
     ):
         with Tx.cta():
-            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-
+            cta_id = Tx.cta_id([KernelConfig.SM_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32])
             # each CTA is responsible for one expert and one source GPU
             dst_expert = Tx.meta_var(Tx.int32(self.local_num_experts * rank + local_expert_idx))
             num_recv = Tx.meta_var(num_recv_tokens[local_expert_idx, src_rank_idx])
@@ -167,10 +166,10 @@ class EPCombineRecvTile(Tile):
         rank,
     ):
         with Tx.cta():
-            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
+            cta_id = Tx.cta_id([KernelConfig.SM_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32])
 
             # each CTA is responsible for one token
             if token_idx < self.num_tokens:

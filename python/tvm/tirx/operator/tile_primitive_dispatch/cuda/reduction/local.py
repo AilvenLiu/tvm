@@ -168,10 +168,10 @@ def validate_reduction_local(
     if src.dtype != dst.dtype:
         return False, f"dtype mismatch: src={src.dtype} dst={dst.dtype}"
 
-    if sctx.exec_scope.name == "thread":
+    if sctx.is_thread:
         return True, None  # thread-wise reduction
-    elif sctx.exec_scope.name in ["warp", "warpgroup"]:
-        if sctx.exec_scope.name != "warp" and op.config.get("thread_reduce", False):
+    elif sctx.scope_kind in ["warp", "warpgroup"]:
+        if not sctx.is_warp and op.config.get("thread_reduce", False):
             return (
                 False,
                 "thread_reduce=True is only supported in warp scope; "
@@ -191,7 +191,7 @@ def validate_reduction_local(
         src_st, src_extent = get_st_extent(src_br)
         dst_st, dst_extent = get_st_extent(dst_br)
 
-        if sctx.exec_scope.name == "warp":
+        if sctx.is_warp:
             # Check for laneid shard->replica shuffle reduce pattern first.
             # This pattern has laneid in dst replica (broadcast), which the
             # general validation below would reject.
@@ -227,7 +227,7 @@ def validate_reduction_local(
         )
         return ok, msg
     else:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for local reduction"
+        return False, f"unsupported exec_scope {sctx.scope_kind} for local reduction"
 
 
 def _emit_reduction_local_thread_wise(
@@ -414,15 +414,15 @@ def reduction_local_impl(
     src_ndim = len(src_br.region)
     reduce_dims, spatial_dims = _analyze_axes(src_ndim, reduce_axes)
 
-    if sctx.exec_scope.name == "thread":
+    if sctx.is_thread:
         return _emit_reduction_local_thread_wise(
             dst_br, src_br, accum, op_type, reduce_dims, spatial_dims
         )
-    elif sctx.exec_scope.name in ["warp", "warpgroup"]:
+    elif sctx.scope_kind in ["warp", "warpgroup"]:
         src = src_br.buffer
         dst = dst_br.buffer
 
-        if sctx.exec_scope.name == "warp":
+        if sctx.is_warp:
             # --- Try laneid shard->replica shuffle reduce ---
             shuffle_info = _analyze_shuffle_reduce(src.layout, dst.layout)
             if shuffle_info is not None:
@@ -468,7 +468,7 @@ def reduction_local_impl(
             shuffle_masks,
         )
     else:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for reduction_local_impl")
+        fail(f"unsupported exec_scope {sctx.scope_kind} for reduction_local_impl")
 
 
 # ---------------------------------------------------------------------------

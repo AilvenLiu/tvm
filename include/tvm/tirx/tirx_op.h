@@ -148,6 +148,20 @@ class DispatchContextNode : public Object {
   ffi::Map<ffi::String, ObjectRef> callbacks;
   /*! \brief Shared state that persists across dispatch calls within a single lowering pass. */
   ffi::Map<ffi::String, ObjectRef> shared_state;
+  /*!
+   * \brief ExecContext inter-team view at this op site.
+   *
+   * Maps axis name ("laneid"/"warpid"/"cta_id"/"wid_in_wg"/"wgid") to a
+   * 2-element [extent, offset] IntImm array. Empty map = no ExecContext
+   * tracking available (fallback for unresolved filters, pre-Phase-4 call
+   * sites, etc.); dispatchers should fall back to exec_scope.name in that
+   * case.
+   */
+  ffi::Map<ffi::String, ffi::Array<IntImm>> inter;
+  /*! \brief ExecContext intra-team view. Same encoding as ``inter``. */
+  ffi::Map<ffi::String, ffi::Array<IntImm>> intra;
+  /*! \brief Scope kind string ("kernel"/"cta"/"warpgroup"/"warp"/"thread"/"cluster"). */
+  ffi::String scope_kind;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -158,7 +172,10 @@ class DispatchContextNode : public Object {
         .def_ro("var_range_map", &DispatchContextNode::var_range_map)
         .def_ro("alloc_only", &DispatchContextNode::alloc_only)
         .def_ro("callbacks", &DispatchContextNode::callbacks)
-        .def_ro("shared_state", &DispatchContextNode::shared_state);
+        .def_ro("shared_state", &DispatchContextNode::shared_state)
+        .def_ro("inter", &DispatchContextNode::inter)
+        .def_ro("intra", &DispatchContextNode::intra)
+        .def_ro("scope_kind", &DispatchContextNode::scope_kind);
   }
 
   /*! \brief Add a buffer to be allocated in the kernel. */
@@ -188,7 +205,10 @@ class DispatchContext : public ObjectRef {
                           ffi::Map<ffi::String, IterVar> launch_params = {},
                           ffi::Map<Var, Range> var_range_map = {}, bool alloc_only = false,
                           ffi::Map<ffi::String, ObjectRef> callbacks = {},
-                          ffi::Map<ffi::String, ObjectRef> shared_state = {});
+                          ffi::Map<ffi::String, ObjectRef> shared_state = {},
+                          ffi::Map<ffi::String, ffi::Array<IntImm>> inter = {},
+                          ffi::Map<ffi::String, ffi::Array<IntImm>> intra = {},
+                          ffi::String scope_kind = "");
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(DispatchContext, ObjectRef, DispatchContextNode);
 };

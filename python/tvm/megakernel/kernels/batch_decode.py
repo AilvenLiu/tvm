@@ -190,9 +190,9 @@ class DecodeTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, split_kv):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var((tid // self.bdx) % self.bdy)
             tz = Tx.meta_var(tid // (self.bdx * self.bdy))

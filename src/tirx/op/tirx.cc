@@ -141,11 +141,11 @@ ffi::Optional<ObjectRef> DispatchContextNode::SharedStateGet(ffi::String key) {
   return ffi::Optional<ObjectRef>();
 }
 
-DispatchContext::DispatchContext(Target target, ExecScope exec_scope,
-                                 ffi::Map<ffi::String, IterVar> launch_params,
-                                 ffi::Map<Var, Range> var_range_map, bool alloc_only,
-                                 ffi::Map<ffi::String, ObjectRef> callbacks,
-                                 ffi::Map<ffi::String, ObjectRef> shared_state) {
+DispatchContext::DispatchContext(
+    Target target, ExecScope exec_scope, ffi::Map<ffi::String, IterVar> launch_params,
+    ffi::Map<Var, Range> var_range_map, bool alloc_only, ffi::Map<ffi::String, ObjectRef> callbacks,
+    ffi::Map<ffi::String, ObjectRef> shared_state, ffi::Map<ffi::String, ffi::Array<IntImm>> inter,
+    ffi::Map<ffi::String, ffi::Array<IntImm>> intra, ffi::String scope_kind) {
   auto n = ffi::make_object<DispatchContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
@@ -154,6 +154,9 @@ DispatchContext::DispatchContext(Target target, ExecScope exec_scope,
   n->alloc_only = alloc_only;
   n->callbacks = std::move(callbacks);
   n->shared_state = std::move(shared_state);
+  n->inter = std::move(inter);
+  n->intra = std::move(intra);
+  n->scope_kind = std::move(scope_kind);
   data_ = std::move(n);
 }
 
@@ -164,9 +167,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](Target target, ExecScope exec_scope, ffi::Map<ffi::String, IterVar> launch_params,
               ffi::Map<Var, Range> var_range_map, bool alloc_only,
               ffi::Map<ffi::String, ObjectRef> callbacks,
-              ffi::Map<ffi::String, ObjectRef> shared_state) {
+              ffi::Map<ffi::String, ObjectRef> shared_state,
+              ffi::Map<ffi::String, ffi::Array<IntImm>> inter,
+              ffi::Map<ffi::String, ffi::Array<IntImm>> intra, ffi::String scope_kind) {
              return DispatchContext(target, exec_scope, launch_params, var_range_map, alloc_only,
-                                    callbacks, shared_state);
+                                    callbacks, shared_state, inter, intra, scope_kind);
            })
       .def_method("tirx.DispatchContextAddAllocBuffer", &DispatchContextNode::AddAllocBuffer)
       .def_method("tirx.DispatchContextAddInitStmt", &DispatchContextNode::AddInitStmt)

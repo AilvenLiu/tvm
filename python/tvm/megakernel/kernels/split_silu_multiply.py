@@ -55,9 +55,9 @@ class SiluMultiplyTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output, tile_scheduler):
         with Tx.cta():
-            Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            lane_id = Tx.lane_id([32])
             self._alloc_local()
             with Tx.thread():
                 self.idx = tid * self.VEC_SIZE
@@ -116,9 +116,9 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, output, sorted_token_ids):
         with Tx.cta():
-            Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            lane_id = Tx.lane_id([32])
             self._alloc_local()
             with Tx.thread():
                 self.idx = tid * self.VEC_SIZE

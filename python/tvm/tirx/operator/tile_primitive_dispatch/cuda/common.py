@@ -175,13 +175,13 @@ def copy_vec_load_impl(
         fail(f"unsupported memory scopes src={src.scope()} dst={dst.scope()}")
 
     # Thread and vectorization setup
-    if sctx.exec_scope.name == "cta":
+    if sctx.is_cta:
         tx = sctx.launch_params["threadIdx.x"].dom.extent
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
-    elif sctx.exec_scope.name == "thread":
+    elif sctx.is_thread:
         tx = 1
     else:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
+        fail(f"unsupported exec_scope {sctx.scope_kind}")
 
     elem_size = DataType(src.dtype).bits  # in bits
     vec_len = op_call.config.get("vec_len", None)
@@ -205,7 +205,7 @@ def copy_vec_load_impl(
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
     n_elements = functools.reduce(operator.mul, src_extent, 1)
 
-    if sctx.exec_scope.name == "cta":
+    if sctx.is_cta:
         # fmt: off
         @Tx.prim_func(tirx=True)
         def impl():
@@ -226,7 +226,7 @@ def copy_vec_load_impl(
             if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
                 Tx.tvm_storage_sync("shared")
         # fmt: on
-    elif sctx.exec_scope.name == "thread":
+    elif sctx.is_thread:
         # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
@@ -244,7 +244,7 @@ def copy_vec_load_impl(
                     Tx.evaluate(Tx.ptx.cp_async(dst.ptr_to(dst_indices), src.ptr_to(src_indices), cp_size))  # noqa: E501
         # fmt: on
     else:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
+        fail(f"unsupported exec_scope {sctx.scope_kind}")
     return impl
 
 
@@ -262,7 +262,7 @@ def match_scope(scope: str | None, pattern: str) -> bool:
 
 def get_thread_cnt(sctx: DispatchContext) -> int | None:
     """Get thread count for the current execution scope."""
-    scope_name = sctx.exec_scope.name
+    scope_name = sctx.scope_kind
     if scope_name == "cta":
         return sctx.launch_params["threadIdx.x"].dom.extent
     if scope_name == "warpgroup":

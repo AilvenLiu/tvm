@@ -26,6 +26,7 @@
 #include <tvm/ir/transform.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirx_op.h>
 #include <tvm/tirx/transform.h>
 
 namespace tvm {
@@ -61,11 +62,10 @@ Pass LowerTIRxStripExecScope() {
 }  // namespace
 
 Pass LowerTIRx() {
-  std::vector<tvm::transform::Pass> passes = {LowerTIRxResolveScopeIds(), LowerTIRxDispatchOps()};
+  std::vector<tvm::transform::Pass> passes = {TilePrimitiveDispatch()};
   if (std::getenv("TVM_PRINT_AFTER_TIRX_DISPATCH_OPS")) {
     passes.push_back(tvm::transform::PrintIR());
   }
-  passes.push_back(LowerTIRxResolveScopeSlices());
   passes.push_back(LowerTIRxCleanup());
   passes.push_back(LowerTIRxStripExecScope());
   return tvm::transform::Sequential(passes, "tirx.LowerTIRx");
@@ -74,9 +74,7 @@ Pass LowerTIRx() {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("tirx.transform.LowerTIRxResolveScopeIds", LowerTIRxResolveScopeIds)
-      .def("tirx.transform.LowerTIRxDispatchOps", LowerTIRxDispatchOps)
-      .def("tirx.transform.LowerTIRxResolveScopeSlices", LowerTIRxResolveScopeSlices)
+      .def("tirx.transform.TilePrimitiveDispatch", TilePrimitiveDispatch)
       .def("tirx.transform.LowerTIRxCleanup", LowerTIRxCleanup)
       .def("tirx.transform.LowerTIRx", LowerTIRx);
 }

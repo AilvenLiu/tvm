@@ -175,9 +175,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
-                  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                  ffi::String scope_slice_parent) {
+SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   ObjectPtr<SBlockFrameNode> n = ffi::make_object<SBlockFrameNode>();
   n->name = name;
   n->iter_vars.clear();
@@ -195,68 +193,19 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
 
 void TilePrimitiveCall(tvm::tirx::TilePrimitiveCall op_call) { AddToParent(op_call); }
 
-ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name,
-                              ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                              ffi::String scope_slice_parent) {
+ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name) {
   ObjectPtr<ExecScopeFrameNode> n = ffi::make_object<ExecScopeFrameNode>();
   TVM_FFI_ICHECK(!exec_scope_name.empty()) << "InternalError: exec_scope_name must not be empty";
-  n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope_name);
-  n->scope_slice_parent = scope_slice_parent;
-  n->scope_slice_extents = scope_slice_extents;
+  n->exec_scope = tvm::tirx::ExecScope(exec_scope_name);
   return ExecScopeFrame(n);
 }
 
-ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
-                                   ffi::Variant<ffi::Array<Range>, PrimExpr> slice) {
-  TVM_FFI_ICHECK(frame->exec_scope.defined())
-      << "InternalError: ExecScope frame must have an execution scope";
-  TVM_FFI_ICHECK(!frame->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
-      << "InternalError: ExecScope frame already has an execution scope slice";
-  auto scope_name = frame->exec_scope.value()->name;
-  if (scope_name == "warp" || scope_name == "warpgroup") {
-    if (auto ranges = slice.as<ffi::Array<Range>>()) {
-      TVM_FFI_ICHECK_EQ(ranges.value().size(), 1)
-          << "ValueError: " << scope_name << " scope only supports 1D slices, got "
-          << ranges.value().size() << "D";
-    }
-  }
-  frame->exec_scope =
-      tvm::tirx::ExecScopeSlice(slice, frame->scope_slice_extents, frame->scope_slice_parent,
-                                frame->exec_scope.value()->name);
-  return frame;
-}
-
-ExecScopeFrame World() { return ExecScopeBlock("world", std::nullopt, ""); }
-
-ExecScopeFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                      ffi::String scope_slice_parent) {
-  return ExecScopeBlock("kernel", scope_slice_extents, scope_slice_parent);
-}
-
-ExecScopeFrame Cluster(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                       ffi::String scope_slice_parent) {
-  return ExecScopeBlock("cluster", scope_slice_extents, scope_slice_parent);
-}
-
-ExecScopeFrame WarpGroup(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                         ffi::String scope_slice_parent) {
-  return ExecScopeBlock("warpgroup", scope_slice_extents, scope_slice_parent);
-}
-
-ExecScopeFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                   ffi::String scope_slice_parent) {
-  return ExecScopeBlock("cta", scope_slice_extents, scope_slice_parent);
-}
-
-ExecScopeFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                    ffi::String scope_slice_parent) {
-  return ExecScopeBlock("warp", scope_slice_extents, scope_slice_parent);
-}
-
-ExecScopeFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                      ffi::String scope_slice_parent) {
-  return ExecScopeBlock("thread", scope_slice_extents, scope_slice_parent);
-}
+ExecScopeFrame Kernel() { return ExecScopeBlock("kernel"); }
+ExecScopeFrame Cluster() { return ExecScopeBlock("cluster"); }
+ExecScopeFrame WarpGroup() { return ExecScopeBlock("warpgroup"); }
+ExecScopeFrame CTA() { return ExecScopeBlock("cta"); }
+ExecScopeFrame Warp() { return ExecScopeBlock("warp"); }
+ExecScopeFrame Thread() { return ExecScopeBlock("thread"); }
 
 ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
                                    ffi::String name, ffi::String cur) {
@@ -276,14 +225,9 @@ ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String par
     scope_ids.push_back(tvm::tirx::Var(""));
   }
   const_cast<tvm::tirx::ExecScopeNode*>(exec_scope.value().as<tvm::tirx::ExecScopeNode>())
-      ->scope_id_def.push_back(
-          tvm::tirx::ScopeIdDef(scope_ids, extents, tvm::tirx::ScopePair(parent, cur)));
+      ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(
+          scope_ids, extents, tvm::tirx::StringPairToScopeBinding(parent, cur)));
   return scope_ids;
-}
-
-ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  TVM_FFI_ICHECK(parent == "world") << "ValueError: KernelId only supports parent=world";
-  return ScopeId(extents, "world", "T.kernel_id", "kernel");
 }
 
 ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String parent) {
@@ -308,7 +252,7 @@ ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String paren
     }
     const_cast<tvm::tirx::ExecScopeNode*>(exec_scope.value().as<tvm::tirx::ExecScopeNode>())
         ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(
-            scope_ids, extents, tvm::tirx::ScopePair(parent, "cta"), preferred));
+            scope_ids, extents, tvm::tirx::StringPairToScopeBinding(parent, "cta"), preferred));
     return scope_ids;
   }
   return ScopeId(extents, parent, "T.cta_id", "cta");
@@ -981,18 +925,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.FuncAttrs", FuncAttrs)
       .def("script.ir_builder.tirx.FuncRet", FuncRet)
       .def("script.ir_builder.tirx.MatchBuffer", MatchBuffer)
-      .def("script.ir_builder.tirx.ExecScopeFrameSlice", ExecScopeFrameSlice)
       .def("script.ir_builder.tirx.Block", Block)
       .def("script.ir_builder.tirx.ExecScopeBlock", ExecScopeBlock)
       .def("script.ir_builder.tirx.TilePrimitiveCall", TilePrimitiveCall)
-      .def("script.ir_builder.tirx.World", World)
       .def("script.ir_builder.tirx.Kernel", Kernel)
       .def("script.ir_builder.tirx.Cluster", Cluster)
       .def("script.ir_builder.tirx.CTA", CTA)
       .def("script.ir_builder.tirx.WarpGroup", WarpGroup)
       .def("script.ir_builder.tirx.Warp", Warp)
       .def("script.ir_builder.tirx.Thread", Thread)
-      .def("script.ir_builder.tirx.KernelId", KernelId)
       .def("script.ir_builder.tirx.ClusterId", ClusterId)
       .def("script.ir_builder.tirx.CtaId",
            [](ffi::Array<PrimExpr> extents, ffi::String parent,

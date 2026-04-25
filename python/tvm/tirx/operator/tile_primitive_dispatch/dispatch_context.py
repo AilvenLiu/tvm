@@ -57,6 +57,9 @@ class DispatchContext(Object, Scriptable):
     alloc_only: bool
     callbacks: dict[str, Object]
     shared_state: dict[str, Object]
+    inter: dict[str, list]
+    intra: dict[str, list]
+    scope_kind: str
 
     kPrivateAlloc = "private_alloc"
     kDeviceInitStmt = "device_init_stmt"
@@ -72,6 +75,9 @@ class DispatchContext(Object, Scriptable):
         alloc_only: bool = False,
         callbacks: dict[str, Object] = {},
         shared_state: dict[str, Object] = {},
+        inter: dict[str, list] | None = None,
+        intra: dict[str, list] | None = None,
+        scope_kind: str = "",
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.DispatchContext,  # pylint: disable=no-member
@@ -82,6 +88,9 @@ class DispatchContext(Object, Scriptable):
             alloc_only,
             callbacks,
             shared_state,
+            inter or {},
+            intra or {},
+            scope_kind,
         )
 
     def add_alloc_buffer(self, buffer: Buffer) -> None:
@@ -159,3 +168,38 @@ class DispatchContext(Object, Scriptable):
     def is_trn(self) -> bool:
         """Check if the target is Trainium."""
         return self.target.kind.name == "trn"
+
+    # -- scope predicates ----------------------------------------------------
+    #
+    # Each ``is_<scope>`` returns True iff the op site is at that scope kind.
+    # Backed by ``self.scope_kind``, which 1-1 maps to a canonical intra
+    # TileLayout shape:
+    #   thread     -> {}
+    #   warp       -> {laneid}
+    #   warpgroup  -> {laneid, wid_in_wg}
+    #   cta        -> {laneid, warpid}
+    #   cluster    -> {laneid, warpid, cta_id}
+    #
+    # Prefer these predicates over raw ``self.scope_kind == "..."`` comparisons
+    # so dispatchers that later need stricter intra/inter shape checks can
+    # tighten the predicate body without touching every call site.
+
+    @property
+    def is_thread(self) -> bool:
+        return self.scope_kind == "thread"
+
+    @property
+    def is_warp(self) -> bool:
+        return self.scope_kind == "warp"
+
+    @property
+    def is_warpgroup(self) -> bool:
+        return self.scope_kind == "warpgroup"
+
+    @property
+    def is_cta(self) -> bool:
+        return self.scope_kind == "cta"
+
+    @property
+    def is_cluster(self) -> bool:
+        return self.scope_kind == "cluster"

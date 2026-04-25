@@ -243,8 +243,8 @@ def test_hgemm_ampere():
         C = Tx.match_buffer(C_ptr, (M, N), "float32", scope="global")
 
         with Tx.kernel():
-            bx, by = Tx.cta_id([M // MI, N // NI], parent="kernel")
-            tx, ty, tz = Tx.thread_id([32, 2, 2], parent="cta")
+            bx, by = Tx.cta_id([M // MI, N // NI])
+            tx, ty, tz = Tx.thread_id([32, 2, 2])
 
             with Tx.cta():
                 # 4-pipeline + ld_matrix + ptx_mma

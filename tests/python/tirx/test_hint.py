@@ -35,9 +35,9 @@ def test_hint_statement():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -65,9 +65,9 @@ def test_hint_context_manager():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -93,9 +93,9 @@ def test_hint_with_attrs():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -123,9 +123,9 @@ def test_hint_printer_roundtrip_statement():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -145,9 +145,9 @@ def test_hint_printer_roundtrip_context_manager():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -167,9 +167,9 @@ def test_hint_printer_roundtrip_with_attrs():
     def func(A_ptr: T.handle) -> None:
         _A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -227,9 +227,9 @@ def test_hint_no_message():
     def func(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (128,), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([1, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():
@@ -260,9 +260,9 @@ def test_hint_access_buffer_region():
     def func(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (128, 64), "float32", scope="global")
         with T.kernel():
-            bx, by, bz = T.cta_id([2, 1, 1], parent="kernel")
-            T.warp_id([1], parent="cta")
-            T.thread_id([32], parent="warp")
+            bx, by, bz = T.cta_id([2, 1, 1])
+            warp_id = T.warp_id([1])
+            lane_id = T.lane_id([32])
             with T.cta():
                 with T.warp():
                     with T.thread():

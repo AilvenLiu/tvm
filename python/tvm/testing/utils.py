@@ -2020,7 +2020,7 @@ class CompareBeforeAfter:
 
     @classmethod
     def _normalize_ir_module(cls, func):
-        if isinstance(func, (tvm.tirx.PrimFunc, tvm.IRModule)):  # noqa: UP038
+        if isinstance(func, tvm.tirx.PrimFunc | tvm.IRModule):
 
             def inner(self):
                 # pylint: disable=unused-argument
@@ -2148,7 +2148,7 @@ class CompareBeforeAfter:
                     )
                 )
 
-        elif isinstance(expected, (tvm.tirx.PrimFunc, tvm.ir.IRModule)):  # noqa: UP038
+        elif isinstance(expected, tvm.tirx.PrimFunc | tvm.ir.IRModule):
             after = transform(before)
 
             try:

@@ -89,7 +89,7 @@ def validate_unary_local(
     _dst, _src, _bias, _scale = _unary_args(op)
     local_case = _classify_unary_local_case(_dst, _src, _bias, sctx)
     if local_case is None:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for local unary op"
+        return False, f"unsupported exec_scope {sctx.scope_kind} for local unary op"
 
     # For thread-wise path, allow layout=None (flat local buffers).
     # Only require scope="local" and basic dtype checks.
@@ -478,7 +478,7 @@ def unary_local_impl(
     _dst, _src, _bias, _scale = _unary_args(op)
     local_case = _classify_unary_local_case(_dst, _src, _bias, sctx)
     if local_case is None:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for unary map impl")
+        fail(f"unsupported exec_scope {sctx.scope_kind} for unary map impl")
 
     if local_case in (_LOCAL_CASE_VIEW_FULL, _LOCAL_CASE_VIEW_SLICED):
         dst_st, dst_extent = get_st_extent(_dst)

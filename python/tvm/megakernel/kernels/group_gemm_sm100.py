@@ -264,9 +264,9 @@ class GroupGEMMTile(GemmTile):
             GemmTile._consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler)
         else:
             with Tx.cta():
-                tid_in_wg = Tx.thread_id([128], parent="warpgroup")
-                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-                lane_id = Tx.thread_id([32], parent="warp")
+                tid_in_wg = Tx.thread_id_in_wg([128])
+                warp_id = Tx.warp_id_in_wg([KernelConfig.WARP_NUMBER])
+                lane_id = Tx.lane_id([32])
                 Tx.cuda.trap_when_assert_failed(self.tmem_addr[0] == 0)
                 if tid_in_wg < self.M_pad_size:
                     idx = self.sorted_token_ids[m_idx * self.M_pad_size + tid_in_wg]
@@ -404,7 +404,7 @@ class GroupGEMMTile(GemmTile):
             else self.M_pad_size
         )
         with Tx.cta():
-            Tx.thread_id([256], parent="cta")
+            tid = Tx.thread_id([256])
             if num_tokens_in_block <= 32:
                 self.set_BLK_M(32)
                 GemmTile._run(

@@ -89,8 +89,8 @@ def _emit_binary_shared(
     assert vec_len is not None and vec_len >= 1
     thread_cnt = get_thread_cnt(sctx)
     if thread_cnt is None:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for shared binary map impl")
-    exec_scope_name = sctx.exec_scope.name
+        fail(f"unsupported exec_scope {sctx.scope_kind} for shared binary map impl")
+    exec_scope_name = sctx.scope_kind
 
     op_func = binary_op_table.get(binary_op)
     assert op_func is not None

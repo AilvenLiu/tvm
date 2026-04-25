@@ -27,118 +27,98 @@
 namespace tvm {
 namespace tirx {
 
-namespace {
-/*! \brief ExecScope order from highest to lowest */
-const std::unordered_map<ffi::String, int> ScopeOrder = {
-    {"world", 0},     {"kernel", 1}, {"cluster", 2}, {"cta", 3},
-    {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
-}  // namespace
+std::string ScopeKindToString(ScopeKind kind) {
+  switch (kind) {
+    case ScopeKind::kWorld:
+      return "world";
+    case ScopeKind::kKernel:
+      return "kernel";
+    case ScopeKind::kCluster:
+      return "cluster";
+    case ScopeKind::kCta:
+      return "cta";
+    case ScopeKind::kWarpgroup:
+      return "warpgroup";
+    case ScopeKind::kWarp:
+      return "warp";
+    case ScopeKind::kThread:
+      return "thread";
+  }
+  LOG(FATAL) << "Internal Error: unknown ScopeKind " << static_cast<int>(kind);
+}
+
+ScopeKind StringToScopeKind(const ffi::String& name) {
+  if (name == "world") return ScopeKind::kWorld;
+  if (name == "kernel") return ScopeKind::kKernel;
+  if (name == "cluster") return ScopeKind::kCluster;
+  if (name == "cta") return ScopeKind::kCta;
+  if (name == "warpgroup") return ScopeKind::kWarpgroup;
+  if (name == "warp") return ScopeKind::kWarp;
+  if (name == "thread") return ScopeKind::kThread;
+  LOG(FATAL) << "Unknown scope kind name: " << name;
+}
+
+std::pair<ffi::String, ffi::String> ScopeBindingToStringPair(ScopeBinding binding) {
+  switch (binding) {
+    case ScopeBinding::kKernelCluster:
+      return {"kernel", "cluster"};
+    case ScopeBinding::kKernelCta:
+      return {"kernel", "cta"};
+    case ScopeBinding::kClusterCta:
+      return {"cluster", "cta"};
+    case ScopeBinding::kCtaWarpgroup:
+      return {"cta", "warpgroup"};
+    case ScopeBinding::kCtaWarp:
+      return {"cta", "warp"};
+    case ScopeBinding::kWarpgroupWarp:
+      return {"warpgroup", "warp"};
+    case ScopeBinding::kWarpThread:
+      return {"warp", "thread"};
+    case ScopeBinding::kCtaThread:
+      return {"cta", "thread"};
+    case ScopeBinding::kWarpgroupThread:
+      return {"warpgroup", "thread"};
+  }
+  LOG(FATAL) << "Internal Error: unknown ScopeBinding " << static_cast<int>(binding);
+}
+
+ScopeBinding StringPairToScopeBinding(const ffi::String& parent, const ffi::String& cur) {
+  if (parent == "kernel" && cur == "cluster") return ScopeBinding::kKernelCluster;
+  if (parent == "kernel" && cur == "cta") return ScopeBinding::kKernelCta;
+  if (parent == "cluster" && cur == "cta") return ScopeBinding::kClusterCta;
+  if (parent == "cta" && cur == "warpgroup") return ScopeBinding::kCtaWarpgroup;
+  if (parent == "cta" && cur == "warp") return ScopeBinding::kCtaWarp;
+  if (parent == "warpgroup" && cur == "warp") return ScopeBinding::kWarpgroupWarp;
+  if (parent == "warp" && cur == "thread") return ScopeBinding::kWarpThread;
+  if (parent == "cta" && cur == "thread") return ScopeBinding::kCtaThread;
+  if (parent == "warpgroup" && cur == "thread") return ScopeBinding::kWarpgroupThread;
+  LOG(FATAL) << "Unknown scope binding: parent=" << parent << " cur=" << cur;
+}
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   ExecScopeNode::RegisterReflection();
-  ExecScopeSliceNode::RegisterReflection();
-  ScopePairNode::RegisterReflection();
   ScopeIdDefNode::RegisterReflection();
 }
 
 /******** Definition of Execution Scope ********/
-// ExecScope
-ExecScope::ExecScope(ffi::String name, ffi::Array<ScopeIdDef> scope_id_def) {
-  TVM_FFI_ICHECK(Valid(name)) << "ValueError: Unknown scope name: " << name;
+bool ScopeNameHigher(const ffi::String& a, const ffi::String& b) {
+  return ScopeKindHigher(StringToScopeKind(a), StringToScopeKind(b));
+}
+
+ExecScope::ExecScope(ScopeKind kind, ffi::Array<ScopeIdDef> scope_id_def) {
   auto n = ffi::make_object<ExecScopeNode>();
-  n->name = std::move(name);
+  n->kind = kind;
   n->scope_id_def = std::move(scope_id_def);
   data_ = std::move(n);
 }
-
-ExecScope ExecScope::Create(ffi::String name) { return ExecScope(name); }
-
-bool ExecScope::Valid(const ffi::String& name) { return ScopeOrder.find(name) != ScopeOrder.end(); }
-
-bool ExecScopeNode::Is(const ffi::String& name) const { return name == this->name; }
-
-bool ExecScopeNode::Is(const ExecScope& other) const {
-  // Both must be the same concrete type (both plain or both slice)
-  if (this->IsInstance<ExecScopeSliceNode>() != other->IsInstance<ExecScopeSliceNode>()) {
-    return false;
-  }
-  return Is(other->name);
-}
-
-bool ExecScopeNode::Higher(const ffi::String& other) const {
-  TVM_FFI_ICHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
-  TVM_FFI_ICHECK(ExecScope::Valid(other)) << "ValueError: Unknown scope name";
-  return ScopeOrder.at(this->name) < ScopeOrder.at(other);
-}
-
-bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->name); }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScope", [](ffi::String name) { return ExecScope(name); });
 }
 
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ExecScopeCreate",
-                        [](ffi::String name) { return ExecScope::Create(name); });
-}
-
-// ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
-                               ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
-                               ffi::String cur) {
-  auto n = ffi::make_object<ExecScopeSliceNode>();
-  n->name = cur;
-  n->parent = parent;
-  n->extents = std::move(extents);
-  if (extents.defined()) {
-    if (auto slices_ = slices.as<ffi::Array<Range>>()) {
-      TVM_FFI_ICHECK_EQ(slices_.value().size(), extents.value().size())
-          << "ValueError: Number of slices must match the number of extents";
-    } else if (auto cond = slices.as<PrimExpr>()) {
-      TVM_FFI_ICHECK_EQ(1, extents.value().size())
-          << "ValueError: Number of select_cond must match the number of extents";
-    }
-  }
-  n->slices = std::move(slices);
-  data_ = std::move(n);
-}
-
-bool ExecScopeSliceNode::Is(const ExecScope& other) const {
-  auto other_slice = other.as<ExecScopeSliceNode>();
-  if (!other_slice) {
-    return false;
-  }
-  return ExecScopeNode::Is(other) && ffi::StructuralEqual()(this->slices, other_slice->slices);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ExecScopeSlice", [](ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
-                                                  ffi::Optional<ffi::Array<PrimExpr>> extents,
-                                                  ffi::String parent, ffi::String cur) {
-    return ExecScopeSlice(slices, extents, parent, cur);
-  });
-}
-
-/******** Definition of Var ********/
-// ScopePair
-ScopePair::ScopePair(ffi::String parent, ffi::String cur) {
-  auto n = ffi::make_object<ScopePairNode>();
-  n->parent = parent;
-  n->cur = cur;
-  data_ = std::move(n);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ScopePair",
-                        [](ffi::String parent, ffi::String cur) { return ScopePair(parent, cur); });
-}
-
 // ScopeIdDef
-ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope,
+ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopeBinding scope,
                        ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
   auto n = ffi::make_object<ScopeIdDefNode>();
   TVM_FFI_ICHECK_EQ(ids.size(), extents.size())
@@ -146,7 +126,7 @@ ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopeP
       << extents.size();
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
-  n->scope = std::move(scope);
+  n->scope = scope;
   n->preferred_extents = std::move(preferred_extents);
   data_ = std::move(n);
 }
@@ -163,11 +143,17 @@ PrimExpr ScopeIdDef::fused_extent() const {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ScopeIdDef",
-                        [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope,
-                           ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
-                          return ScopeIdDef(vars, extents, scope, preferred_extents);
+                        [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ffi::String parent,
+                           ffi::String cur, ffi::Optional<ffi::Array<PrimExpr>> preferred_extents) {
+                          return ScopeIdDef(vars, extents, StringPairToScopeBinding(parent, cur),
+                                            preferred_extents);
                         });
 }
+
+// Forward declarations for the file-static Compose/Compliment helpers used
+// by ScopeIdDefVerifier::Verify below; defined further down in this file.
+static ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
+static ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 
 bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   id_set.clear();
@@ -178,7 +164,7 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
     auto [it, inserted] = id_set.try_emplace(id->scope, id);
     if (!inserted) {
       TVM_FFI_ICHECK(ana.CanProveEqual(it->second.fused_extent(), id.fused_extent()))
-          << "Inconsistent extents for scope " << id->scope;
+          << "Inconsistent extents for scope binding " << static_cast<int>(id->scope);
     } else {
       queue.push(id);
     }
@@ -186,9 +172,8 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
 
   for (const auto& def : defs) {
     if (def->preferred_extents.defined()) {
-      TVM_FFI_ICHECK(def->scope->parent == "cluster" && def->scope->cur == "cta")
-          << "ValueError: preferred_extents is only valid for cluster→cta scope, got "
-          << def->scope->parent << "→" << def->scope->cur;
+      TVM_FFI_ICHECK(def->scope == ScopeBinding::kClusterCta)
+          << "ValueError: preferred_extents is only valid for cluster→cta scope";
       TVM_FFI_ICHECK_EQ(def->preferred_extents.value().size(), def->extents.size())
           << "ValueError: preferred_extents must have the same size as extents, got "
           << def->preferred_extents.value().size() << " vs " << def->extents.size();
@@ -214,59 +199,69 @@ bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   return true;
 }
 
-ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
-  return (lhs->scope->cur == rhs->scope->parent)
-             ? ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()},
-                          ScopePair(lhs->scope->parent, rhs->scope->cur))
-             : ffi::Optional<ScopeIdDef>(std::nullopt);
+namespace {
+// The ScopeBinding enum is a closed set; these helpers project it back onto
+// the (parent, cur) scope-kind pair so Compose/Compliment can operate on the
+// hierarchy without reintroducing string plumbing.
+std::pair<ffi::String, ffi::String> BindingParts(ScopeBinding b) {
+  return ScopeBindingToStringPair(b);
 }
 
-ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+ffi::Optional<ScopeBinding> TryStringPairToBinding(const ffi::String& parent,
+                                                   const ffi::String& cur) {
+  if (parent == "kernel" && cur == "cluster") return ScopeBinding::kKernelCluster;
+  if (parent == "kernel" && cur == "cta") return ScopeBinding::kKernelCta;
+  if (parent == "cluster" && cur == "cta") return ScopeBinding::kClusterCta;
+  if (parent == "cta" && cur == "warpgroup") return ScopeBinding::kCtaWarpgroup;
+  if (parent == "cta" && cur == "warp") return ScopeBinding::kCtaWarp;
+  if (parent == "warpgroup" && cur == "warp") return ScopeBinding::kWarpgroupWarp;
+  if (parent == "warp" && cur == "thread") return ScopeBinding::kWarpThread;
+  if (parent == "cta" && cur == "thread") return ScopeBinding::kCtaThread;
+  if (parent == "warpgroup" && cur == "thread") return ScopeBinding::kWarpgroupThread;
+  return std::nullopt;
+}
+}  // namespace
+
+static ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+  auto [l_parent, l_cur] = BindingParts(lhs->scope);
+  auto [r_parent, r_cur] = BindingParts(rhs->scope);
+  if (l_cur != r_parent) return std::nullopt;
+  auto composed = TryStringPairToBinding(l_parent, r_cur);
+  if (!composed.has_value()) return std::nullopt;
+  return ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()}, composed.value());
+}
+
+static ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (is_zero(rhs.fused_extent())) return std::nullopt;
   arith::Analyzer ana;
   auto try_compliment = [&](PrimExpr lhs_ext, PrimExpr rhs_ext,
-                            ScopePair scope) -> ffi::Optional<ScopeIdDef> {
+                            ScopeBinding scope) -> ffi::Optional<ScopeIdDef> {
     if (ana.CanProve(floormod(lhs_ext, rhs_ext) == 0)) {
       return ScopeIdDef({Var("")}, {floordiv(lhs_ext, rhs_ext)}, scope);
     }
     TVM_FFI_ICHECK(!ana.CanProve(floormod(lhs_ext, rhs_ext) != 0))
-        << "ValueError: scope " << scope << " has non-divisible extents: " << lhs_ext
-        << " is not divisible by " << rhs_ext;
+        << "ValueError: scope binding " << static_cast<int>(scope)
+        << " has non-divisible extents: " << lhs_ext << " is not divisible by " << rhs_ext;
     return std::nullopt;
   };
-  if (lhs->scope->parent == rhs->scope->parent &&
-      ExecScope::Create(rhs->scope->cur)->Higher(lhs->scope->cur)) {
-    return try_compliment(lhs.fused_extent(), rhs.fused_extent(),
-                          ScopePair(rhs->scope->cur, lhs->scope->cur));
+  auto [l_parent, l_cur] = BindingParts(lhs->scope);
+  auto [r_parent, r_cur] = BindingParts(rhs->scope);
+  if (l_parent == r_parent && ScopeNameHigher(r_cur, l_cur)) {
+    if (auto b = TryStringPairToBinding(r_cur, l_cur)) {
+      return try_compliment(lhs.fused_extent(), rhs.fused_extent(), b.value());
+    }
   }
-  if (lhs->scope->cur == rhs->scope->cur &&
-      ExecScope::Create(lhs->scope->parent)->Higher(rhs->scope->parent)) {
-    return try_compliment(lhs.fused_extent(), rhs.fused_extent(),
-                          ScopePair(lhs->scope->parent, rhs->scope->parent));
+  if (l_cur == r_cur && ScopeNameHigher(l_parent, r_parent)) {
+    if (auto b = TryStringPairToBinding(l_parent, r_parent)) {
+      return try_compliment(lhs.fused_extent(), rhs.fused_extent(), b.value());
+    }
   }
   return std::nullopt;
 }
 
-/******** ScopeIdResolve related functions ********/
-ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(ffi::String parent, ffi::String cur,
-                                                             ffi::String target_kind) {
-  const auto& key = GetKey(ScopePair(parent, cur), target_kind);
-  auto* table = Global();
-  TVM_FFI_ICHECK(table->resolve_map_.count(key) == 0) << "Duplicate registration for " << key;
-  return table->resolve_map_[key];
-}
-
-ffi::Array<PrimExpr> ScopeIdResolveTable::Resolve(
-    const ScopePair& scope, const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
-    ffi::String target_kind, const LaunchParams& params) {
-  auto table = ScopeIdResolveTable::Global();
-  const auto& key = GetKey(scope, target_kind);
-  auto it = table->resolve_map_.find(key);
-  TVM_FFI_ICHECK(it != table->resolve_map_.end()) << "Cannot resolve scope id for " << key;
-  return it->second.func_(extents, out_dim, params);
-}
-
-using LaunchParams = ScopeIdResolveTable::LaunchParams;
+/******** ScopeIdResolve: closed-enum static dispatch ********/
+namespace {
+using LaunchParams = ScopeIdResolve::LaunchParams;
 
 std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchParams& params,
                                         bool allow_missing = false) {
@@ -278,8 +273,7 @@ std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchPara
   return {(*it).second->var, (*it).second->dom->extent};
 }
 
-// Helper function to handle common thread index calculations
-inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
+PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
   PrimExpr tx, ty, tz, ex, ey, ez;
   std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
   std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
@@ -287,96 +281,77 @@ inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
   return tx + ty * ex + tz * ex * ey;
 }
 
-PrimExpr ScopeIdResolveTable::ComputeWarpIdInCta(const LaunchParams& params) {
+ffi::Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const char* prefix, int out_dim) {
+  ffi::Array<PrimExpr> ret;
+  for (int i = 0; i < out_dim; ++i) {
+    ret.push_back(GetThread(std::string(prefix) + static_cast<char>('x' + i), params).first);
+  }
+  return ret;
+}
+
+ffi::Array<PrimExpr> ResolveCuda(ScopeBinding binding,
+                                 const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
+                                 const LaunchParams& params) {
+  arith::Analyzer ana;
+  switch (binding) {
+    case ScopeBinding::kKernelCta:
+      return Trivial3DResolve(params, "blockIdx.", out_dim);
+    case ScopeBinding::kClusterCta:
+      return Trivial3DResolve(params, "clusterCtaIdx.", out_dim);
+    case ScopeBinding::kCtaThread:
+      return Trivial3DResolve(params, "threadIdx.", out_dim);
+    case ScopeBinding::kKernelCluster: {
+      TVM_FFI_ICHECK_LE(out_dim, 3)
+          << "ValueError: kernel->cluster can only have 3 dimensions for now";
+      ffi::Array<PrimExpr> ret;
+      for (int i = 0; i < out_dim; ++i) {
+        ret.push_back(tirx::Call(
+            DataType::Int(32), builtin::ptx_fetch_register(),
+            {IntImm(DataType::Int(32), 32), StringImm("clusterid." + std::string(1, 'x' + i))}));
+      }
+      return ret;
+    }
+    case ScopeBinding::kCtaWarpgroup: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: cta->warpgroup must be 1D";
+      return {ana.Simplify(FloorDiv(GetThread("warp_id_in_cta", params).first, 4))};
+    }
+    case ScopeBinding::kCtaWarp: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: cta->warp must be 1D";
+      return {ana.Simplify(GetThread("warp_id_in_cta", params).first)};
+    }
+    case ScopeBinding::kWarpgroupWarp: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warpgroup->warp must be 1D";
+      return {ana.Simplify(FloorMod(GetThread("warp_id_in_cta", params).first, 4))};
+    }
+    case ScopeBinding::kWarpgroupThread: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warpgroup->thread must be 1D";
+      return {ana.Simplify(FloorMod(GetLinearThreadIndex(params), 128))};
+    }
+    case ScopeBinding::kWarpThread: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warp->thread must be 1D";
+      return {ana.Simplify(FloorMod(GetLinearThreadIndex(params), 32))};
+    }
+  }
+  LOG(FATAL) << "Internal Error: unknown ScopeBinding " << static_cast<int>(binding);
+}
+}  // namespace
+
+ffi::Array<PrimExpr> ScopeIdResolve::Resolve(ScopeBinding binding,
+                                             const ffi::Optional<ffi::Array<PrimExpr>>& extents,
+                                             int out_dim, const ffi::String& target_kind,
+                                             const LaunchParams& params) {
+  if (target_kind == "cuda") return ResolveCuda(binding, extents, out_dim, params);
+  LOG(FATAL) << "Cannot resolve ScopeIdDef for target=" << target_kind
+             << " binding=" << static_cast<int>(binding);
+}
+
+PrimExpr ScopeIdResolve::ComputeWarpIdInCta(const LaunchParams& params) {
   PrimExpr warp_id = FloorDiv(GetLinearThreadIndex(params), 32);
   PrimExpr mask = IntImm(DataType::UInt(32), 0xffffffff);
   return Call(warp_id.dtype(), builtin::tvm_warp_shuffle(),
               {mask, warp_id, IntImm(DataType::Int(32), 0), IntImm(DataType::Int(32), 32),
                IntImm(DataType::Int(32), 32)});
 }
-
-#define TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF \
-  static TVM_ATTRIBUTE_UNUSED ScopeIdResolveTable::Registry& res
-
-#define TVM_REGISTER_SCOPEID_RESOLVE(parent, cur, target_kind)        \
-  TVM_STR_CONCAT(TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF, __COUNTER__) = \
-      ::tvm::tirx::ScopeIdResolveTable::Global()->Register(parent, cur, target_kind)
-
-Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& prefix,
-                                 int out_dim) {
-  Array<PrimExpr> ret;
-  for (size_t i = 0; i < out_dim; i++) {
-    ret.push_back(GetThread(prefix + static_cast<char>('x' + i), params).first);
-  }
-  return std::move(ret);
-}
-
-TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
-    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(params, "blockIdx.", out_dim);
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
-    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      TVM_FFI_ICHECK_LE(out_dim, 3)
-          << "ValueError: kernel->cluster can only have 3 dimensions for now";
-      Array<PrimExpr> ret;
-      for (size_t i = 0; i < out_dim; i++) {
-        ret.push_back(tirx::Call(
-            DataType::Int(32), builtin::ptx_fetch_register(),
-            {IntImm(DataType::Int(32), 32), StringImm("clusterid." + std::string(1, 'x' + i))}));
-      }
-      return ret;
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
-    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(params, "clusterCtaIdx.", out_dim);
-    });
-
-// Macro to reduce boilerplate for single-dimension checks and thread calculations
-#define REGISTER_1D_THREAD_SCOPE(from, to, divisor, modifier)                             \
-  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                          \
-      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,            \
-              const LaunchParams& params) -> Array<PrimExpr> {                            \
-        TVM_FFI_ICHECK_EQ(out_dim, 1)                                                     \
-            << "ValueError: " from "->" to " can only have 1 dimension for now";          \
-        arith::Analyzer ana;                                                              \
-        return {ana.Simplify(modifier(FloorDiv(GetLinearThreadIndex(params), divisor)))}; \
-      })
-
-// Define common modifiers
-auto identity = [](PrimExpr x) { return x; };
-auto mod4 = [](PrimExpr x) { return FloorMod(x, 4); };
-auto div4 = [](PrimExpr x) { return FloorDiv(x, 4); };
-auto mod32 = [](PrimExpr x) { return FloorMod(x, 32); };
-auto mod128 = [](PrimExpr x) { return FloorMod(x, 128); };
-
-// Warp-related scopes: resolve from warp_id_in_cta in launch params
-#define REGISTER_1D_WARP_SCOPE(from, to, modifier)                                  \
-  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                    \
-      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,      \
-              const LaunchParams& params) -> Array<PrimExpr> {                      \
-        TVM_FFI_ICHECK_EQ(out_dim, 1)                                               \
-            << "ValueError: " from "->" to " can only have 1 dimension for now";    \
-        arith::Analyzer ana;                                                        \
-        return {ana.Simplify(modifier(GetThread("warp_id_in_cta", params).first))}; \
-      })
-
-REGISTER_1D_WARP_SCOPE("cta", "warpgroup", div4);
-REGISTER_1D_WARP_SCOPE("cta", "warp", identity);
-REGISTER_1D_WARP_SCOPE("warpgroup", "warp", mod4);
-REGISTER_1D_THREAD_SCOPE("warpgroup", "thread", 1, mod128);
-REGISTER_1D_THREAD_SCOPE("warp", "thread", 1, mod32);
-
-TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
-    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> ffi::Array<PrimExpr> {
-      return Trivial3DResolve(params, "threadIdx.", out_dim);
-    });
 
 }  // namespace tirx
 }  // namespace tvm

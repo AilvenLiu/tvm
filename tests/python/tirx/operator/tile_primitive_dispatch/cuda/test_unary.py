@@ -73,8 +73,8 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
             A = Tx.match_buffer(A_ptr, g_shape, src_dtype, layout=g_layout)
 
             with Tx.kernel():
-                _bx = Tx.cta_id([1], parent="kernel")
-                _tx = Tx.thread_id([thread_cnt], parent="cta")
+                _bx = Tx.cta_id([1])
+                _tx = Tx.thread_id([thread_cnt])
 
                 with Tx.cta():
                     A_smem = Tx.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
@@ -93,8 +93,8 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
             B = Tx.match_buffer(B_ptr, g_shape, dst_dtype, layout=g_layout)
 
             with Tx.kernel():
-                _bx = Tx.cta_id([1], parent="kernel")
-                _tx = Tx.thread_id([thread_cnt], parent="cta")
+                _bx = Tx.cta_id([1])
+                _tx = Tx.thread_id([thread_cnt])
 
                 with Tx.cta():
                     A_smem = Tx.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
@@ -155,19 +155,23 @@ def test_unary_op_shared_subcta_scope(exec_scope):
         A = Tx.match_buffer(A_ptr, g_shape, dtype, layout=TileLayout(S[g_shape]))
 
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tid = Tx.thread_id([256], parent="cta")
+            warp_id = Tx.warp_id([(256) // 32])
+            wg_id = Tx.warpgroup_id([(256) // 128])
+            _bx = Tx.cta_id([1])
+            _tid = Tx.thread_id([256])
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(
                     g_shape, dtype, scope="shared", layout=TileLayout(S[g_shape])
                 )
                 Tx.copy(A_smem, A)
                 if exec_scope == "warp":
-                    with Tx.warp()[5:6]:
-                        Tx.zero(A_smem, A_smem)
+                    if Tx.filter(warp_id, 5, 6):
+                        with Tx.warp():
+                            Tx.zero(A_smem, A_smem)
                 elif exec_scope == "warpgroup":
-                    with Tx.warpgroup()[1:2]:
-                        Tx.zero(A_smem, A_smem)
+                    if Tx.filter(wg_id, 1, 2):
+                        with Tx.warpgroup():
+                            Tx.zero(A_smem, A_smem)
                 Tx.cuda.cta_sync()
                 Tx.copy(A, A_smem)
 
@@ -240,8 +244,8 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             bias = Tx.match_buffer(bias_ptr, g_shape, src_dtype, layout=g_layout)
 
             with Tx.kernel():
-                _bx = Tx.cta_id([1], parent="kernel")
-                _tx = Tx.thread_id([thread_cnt], parent="cta")
+                _bx = Tx.cta_id([1])
+                _tx = Tx.thread_id([thread_cnt])
 
                 with Tx.cta():
                     A_smem = Tx.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
@@ -288,8 +292,8 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             bias = Tx.match_buffer(bias_ptr, g_shape, src_dtype, layout=g_layout)
 
             with Tx.kernel():
-                _bx = Tx.cta_id([1], parent="kernel")
-                _tx = Tx.thread_id([thread_cnt], parent="cta")
+                _bx = Tx.cta_id([1])
+                _tx = Tx.thread_id([thread_cnt])
 
                 with Tx.cta():
                     A_smem = Tx.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
@@ -451,10 +455,10 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
         B = Tx.match_buffer(B_ptr, g_shape_b, dst_dtype, layout=g_layout_b)
 
         with Tx.kernel():
-            bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            wg_id = Tx.warpgroup_id([N_GROUPS], parent="cta")
-            warp_id_in_wg = Tx.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
-            lane_id = Tx.thread_id([thread_cnt], parent="warp")
+            bx, by, bz = Tx.cta_id([1, 1, 1])
+            wg_id = Tx.warpgroup_id([N_GROUPS])
+            warp_id_in_wg = Tx.warp_id_in_wg([N_WARPS // N_GROUPS])
+            lane_id = Tx.lane_id([thread_cnt])
 
             with Tx.thread():
                 # acc layout
@@ -586,10 +590,10 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
         bias = Tx.match_buffer(bias_ptr, g_shape_bias, src_dtype, layout=g_layout_bias)
 
         with Tx.kernel():
-            bx, by, bz = Tx.cta_id([1, 1, 1], parent="kernel")
-            wg_id = Tx.warpgroup_id([N_GROUPS], parent="cta")
-            warp_id_in_wg = Tx.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
-            lane_id = Tx.thread_id([thread_cnt], parent="warp")
+            bx, by, bz = Tx.cta_id([1, 1, 1])
+            wg_id = Tx.warpgroup_id([N_GROUPS])
+            warp_id_in_wg = Tx.warp_id_in_wg([N_WARPS // N_GROUPS])
+            lane_id = Tx.lane_id([thread_cnt])
 
             with Tx.thread():
                 # acc layout
@@ -715,8 +719,8 @@ def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
     def test_unary_thread(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, shape, dtype, layout=TileLayout(S[shape]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([128], parent="cta")
+            _bx = Tx.cta_id([1])
+            tx = Tx.thread_id([128])
             with Tx.thread():
                 if storage_scope == "shared":
                     a_smem = Tx.alloc_buffer(
@@ -735,8 +739,8 @@ def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
     def test_unary_cta(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, shape, dtype, layout=TileLayout(S[shape]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tid = Tx.thread_id([128], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tid = Tx.thread_id([128])
             with Tx.cta():
                 if storage_scope == "shared":
                     a_smem = Tx.alloc_buffer(
@@ -769,8 +773,8 @@ def test_unary_op_local_thread_wise(op_type, dtype):
     def kernel(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, shape, dtype, layout=TileLayout(S[shape]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            tid = Tx.thread_id([64], parent="cta")
+            _bx = Tx.cta_id([1])
+            tid = Tx.thread_id([64])
             with Tx.thread():
                 a_local = Tx.alloc_buffer(
                     local_shape, dtype, scope="local", layout=TileLayout(S[local_shape])
@@ -831,9 +835,8 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, shape, B_dtype, layout=TileLayout(S[shape]))
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
-
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([256])
             with Tx.thread():
                 A_local = Tx.alloc_local(shape, dtype=A_dtype, layout=TileLayout(S[shape]))
                 B_local = Tx.alloc_local(shape, dtype=B_dtype, layout=TileLayout(S[shape]))
@@ -881,9 +884,9 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warpgroup_id([1], parent="cta")
-            tid_in_wg = Tx.thread_id([N_THREADS], parent="warpgroup")
+            cta_id = Tx.cta_id([1])
+            wg_id = Tx.warpgroup_id([1])
+            tid_in_wg = Tx.thread_id_in_wg([N_THREADS])
 
             with Tx.thread():
                 reg_src = Tx.alloc_buffer((LOCAL_LEN,), A_dtype, scope="local")
@@ -931,8 +934,8 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
         B = Tx.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx_var = Tx.thread_id([N_THREADS], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx_var = Tx.thread_id([N_THREADS])
 
             with Tx.thread():
                 reg_src = Tx.alloc_buffer((LOCAL_LEN,), A_dtype, scope="local")
@@ -980,8 +983,8 @@ def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
         A = Tx.match_buffer(A_ptr, g_shape, A_dtype, layout=g_layout)
         B = Tx.match_buffer(B_ptr, g_shape, B_dtype, layout=g_layout)
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([N_THREADS], parent="cta")
+            _bx = Tx.cta_id([1])
+            tx = Tx.thread_id([N_THREADS])
             with Tx.thread():
                 reg_src = Tx.alloc_buffer((LOCAL_LEN,), A_dtype, scope="local")
                 reg_dst = Tx.alloc_buffer((LOCAL_LEN,), B_dtype, scope="local")
@@ -1091,9 +1094,9 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
         A = Tx.match_buffer(A_ptr, full_shape, "float32", layout=g_layout)
         B = Tx.match_buffer(B_ptr, full_shape, "float16", layout=g_layout)
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([N_WARPS], parent="cta")
-            lane_id = Tx.thread_id([LANES], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([N_WARPS])
+            lane_id = Tx.lane_id([LANES])
             with Tx.thread():
                 reg_src = Tx.alloc_buffer((LOCAL_LEN,), "float32", scope="local")
                 reg_dst = Tx.alloc_buffer((LOCAL_LEN,), "float16", scope="local")
@@ -1169,9 +1172,9 @@ def test_cast_validate_extent_mismatch_rejected():
         A = Tx.match_buffer(A_ptr, view_shape, "float32", layout=g_layout)
         B = Tx.match_buffer(B_ptr, view_shape, "float16", layout=g_layout)
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([2], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([2])
+            lane_id = Tx.lane_id([32])
             with Tx.thread():
                 reg_src = Tx.alloc_buffer((8,), "float32", scope="local")
                 reg_dst = Tx.alloc_buffer((8,), "float16", scope="local")

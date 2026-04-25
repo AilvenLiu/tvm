@@ -434,7 +434,7 @@ class CudaProfiler:
         self.default_leader = default_leader
         # Accept either a Python bool or a PrimExpr; normalize simple bools to Tx.bool
         # so we can use it uniformly inside macros for conditional emission.
-        if isinstance(profiler_enabled, (bool, np.bool_)):  # noqa: UP038
+        if isinstance(profiler_enabled, bool | np.bool_):
             self.profiler_enabled = Tx.bool(bool(profiler_enabled))
         else:
             # Assume PrimExpr-like input; use as-is
@@ -449,7 +449,7 @@ class CudaProfiler:
 
     def _leader(self, leader: None | tvm.tirx.PrimExpr | bool):
         if leader is not None:
-            if isinstance(leader, (bool, np.bool_)):  # noqa: UP038
+            if isinstance(leader, bool | np.bool_):
                 return Tx.bool(bool(leader))
             return leader
         if self.default_leader is not None:

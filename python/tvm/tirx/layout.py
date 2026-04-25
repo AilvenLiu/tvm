@@ -339,10 +339,10 @@ class Layout(Object):
 
     @staticmethod
     def _get_default_strides(data: list[int | PrimExpr], stride: int = 1) -> tuple:
-        assert isinstance(data, (list, tuple)), "data must be a tuple"  # noqa: UP038
+        assert isinstance(data, list | tuple), "data must be a tuple"
         res = list()
         for t in reversed(data):
-            assert isinstance(t, (int, PrimExpr)), f"data must be int or PrimExpr, but got {t}"  # noqa: UP038
+            assert isinstance(t, int | PrimExpr), f"data must be int or PrimExpr, but got {t}"
             res.append(stride)
             stride *= t
         return list(reversed(res))
@@ -640,12 +640,12 @@ class _LayoutSpec:
                 replica=other.replica if other.replica else self.replica,
                 offset=self.offset or other.offset,
             )
-        if isinstance(other, (_OnAxis, _OffsetExpr, int)):  # noqa: UP038
+        if isinstance(other, _OnAxis | _OffsetExpr | int):
             return _LayoutSpec(shard=self.shard, replica=self.replica, offset=other)
         return NotImplemented
 
     def __radd__(self, other):
-        if isinstance(other, (_OnAxis, _OffsetExpr, int)):  # noqa: UP038
+        if isinstance(other, _OnAxis | _OffsetExpr | int):
             return _LayoutSpec(shard=self.shard, replica=self.replica, offset=other)
         return NotImplemented
 
@@ -674,7 +674,7 @@ class _SpecBuilder:
     def __getitem__(self, key):
         if isinstance(key, slice):
             pair = (self._to_tuple(key.start), self._to_tuple(key.stop))
-        elif isinstance(key, (tuple, list)):  # noqa: UP038
+        elif isinstance(key, tuple | list):
             pair = (tuple(key), None)  # extents only
         else:
             pair = ((key,), None)  # single extent

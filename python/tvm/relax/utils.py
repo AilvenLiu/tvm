@@ -444,14 +444,14 @@ def extract_extra_args(func: Callable) -> tuple[Callable, list[Expr | PrimExprLi
     cell_index_map = {}
     extra_args = []
     for i in range(len(code.co_freevars)):
-        if isinstance(func.__closure__[i].cell_contents, (Expr, PrimExprLike)):  # noqa: UP038
+        if isinstance(func.__closure__[i].cell_contents, Expr | PrimExprLike):
             new_arg_name = f"extra_arg_{cnt}"
             new_arg_names.append(new_arg_name)
             cell_index_map[new_arg_name] = ("closure", i)
             extra_args.append(func.__closure__[i].cell_contents)
             cnt += 1
     for name, value in func.__globals__.items():
-        if name in code.co_names and isinstance(value, (Expr, PrimExprLike)):  # noqa: UP038
+        if name in code.co_names and isinstance(value, Expr | PrimExprLike):
             new_arg_name = f"extra_arg_{cnt}"
             new_arg_names.append(new_arg_name)
             cell_index_map[new_arg_name] = ("global", name)
@@ -543,7 +543,7 @@ def trans_callable_to_primfunc(
     return gvar, [
         (
             var
-            if isinstance(var, (Expr, PrimExpr))  # noqa: UP038
+            if isinstance(var, Expr | PrimExpr)
             else {"int32": T.int32, "int64": T.int64}[dtype](var)
         )
         for var in extra_args

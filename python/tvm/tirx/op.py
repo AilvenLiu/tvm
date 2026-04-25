@@ -2053,6 +2053,24 @@ def likely(cond, span=None):
     return _ffi_api.likely(cond, span)  # type: ignore
 
 
+def filter(*args, span=None):  # pylint: disable=redefined-builtin
+    """Thread-set filter predicate (Phase 3 v3 exec-scope refactor).
+
+    Two call forms:
+      - Range: ``filter(var, lo, hi)`` — true iff ``var`` in ``[lo, hi)``.
+      - Predicate: ``filter(var, cond_expr)`` — true iff ``cond_expr`` holds
+        (typical use ``var == k``).
+
+    ``var`` must be a ``ScopeIdDef``-declared Var visible at the call site.
+    Returns a Bool PrimExpr, intended to be used as ``if T.filter(...):``.
+    """
+    if len(args) not in (2, 3):
+        raise ValueError(
+            f"Tx.filter expects (var, lo, hi) or (var, cond_expr); got {len(args)} args"
+        )
+    return call_intrin("bool", "tirx.filter", *args, span=span)
+
+
 def isnan(x, span=None):
     """Check if input value is Nan.
 
@@ -3119,6 +3137,24 @@ def cuda_cluster_sync():
         The call expression.
     """
     return call_intrin("", "tirx.cuda_cluster_sync")
+
+
+def cuda_thread_rank():
+    """TVM intrinsic that returns ``cooperative_groups::thread_rank()``
+    for the enclosing CTA -- the linear thread index within the block.
+
+    Useful for building "single thread of CTA" predicates without
+    referencing user-declared scope_id vars. For example, the idiomatic
+    mbarrier.init leader predicate is::
+
+        Tx.cuda.thread_rank() == 0
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression (``int32``).
+    """
+    return call_intrin("int32", "tirx.cuda_thread_rank")
 
 
 def cuda_half2float(src):

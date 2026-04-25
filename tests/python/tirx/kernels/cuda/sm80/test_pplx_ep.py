@@ -95,8 +95,9 @@ def test_dispatch_combine(world_size=8):
             def signal(self):
                 with Tx.thread():
                     Tx.cuda.cta_sync()
-                    with Tx.thread()[0:1]:
-                        Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
+                    if Tx.filter(tid, 0, 1):  # noqa: F821
+                        with Tx.thread():
+                            Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
                     Tx.cuda.thread_fence()
 
             @Tx.inline
@@ -437,10 +438,10 @@ def test_dispatch_combine(world_size=8):
                             sem_bar: Tx.Buffer((1,), "int32"), # semaphore for grid-level barrier
                             ):
             with Tx.kernel():
-                bx = Tx.cta_id([N_BLOCKS_DISPATCH], parent="kernel")
-                warp_id = Tx.warp_id([N_WARPS_DISPATCH], parent="cta")
-                lane_id = Tx.thread_id([32], parent="warp")
-                tid = Tx.thread_id([N_WARPS_DISPATCH * 32], parent="cta")
+                bx = Tx.cta_id([N_BLOCKS_DISPATCH])
+                warp_id = Tx.warp_id([N_WARPS_DISPATCH])
+                lane_id = Tx.lane_id([32])
+                tid = Tx.thread_id([N_WARPS_DISPATCH * 32])
                 rank = Tx.nvshmem.my_pe()
                 grid_bar = Tx.meta_var(GridBarrier(N_BLOCKS_DISPATCH, sem_bar))
                 group_rank = Tx.meta_var(Tx.int32(rank % GROUP_SIZE))
@@ -453,21 +454,23 @@ def test_dispatch_combine(world_size=8):
 
                     if DISPATCH_SEND:
                         zero_smem(tid, smem_buf)
-                        with Tx.warp()[N_WARPS_DISPATCH - 1:N_WARPS_DISPATCH]:
-                            for k in Tx.serial(Tx.ceildiv(N_EXPERTS, N_BLOCKS_DISPATCH * GROUP_SIZE)):  # noqa: E501
-                                dst_expert = Tx.meta_var(Tx.uint32(k * N_BLOCKS_DISPATCH * GROUP_SIZE + bx * GROUP_SIZE + group_rank))  # noqa: E501
-                                if dst_expert < N_EXPERTS:
-                                    count = int_var()
-                                    warp_count(lane_id, dst_expert, count, send_experts)
-                                    thread_signal(group_idx, lane_id, dst_expert, count, buf_target_wait)  # noqa: E501
-                        with Tx.warp()[0:N_WARPS_DISPATCH - 1]:
-                            for m in range(M):
-                                thread_accum(tid, m, send_experts, smem_buf)
-                                if m % (N_BLOCKS_DISPATCH * GROUP_SIZE) == Tx.int32(bx * GROUP_SIZE + group_rank):  # noqa: E501
-                                    n_threads = Tx.meta_var(Tx.int32(N_WARPS_DISPATCH - 1) * 32)
-                                    thread_prepare_buf(n_threads, tid, m, send_tokens, buf_send)
-                                    Tx.ptx.bar.sync(1, n_threads)
-                                    warp_dispatch_exp(group_idx, warp_id, m, smem_buf, send_experts, buf_send, buf_recv, buf_actual_wait)  # noqa: E501
+                        if Tx.filter(warp_id, N_WARPS_DISPATCH - 1, N_WARPS_DISPATCH):
+                            with Tx.warp():
+                                for k in Tx.serial(Tx.ceildiv(N_EXPERTS, N_BLOCKS_DISPATCH * GROUP_SIZE)):  # noqa: E501
+                                    dst_expert = Tx.meta_var(Tx.uint32(k * N_BLOCKS_DISPATCH * GROUP_SIZE + bx * GROUP_SIZE + group_rank))  # noqa: E501
+                                    if dst_expert < N_EXPERTS:
+                                        count = int_var()
+                                        warp_count(lane_id, dst_expert, count, send_experts)
+                                        thread_signal(group_idx, lane_id, dst_expert, count, buf_target_wait)  # noqa: E501
+                        elif Tx.filter(warp_id, 0, N_WARPS_DISPATCH - 1):
+                            with Tx.warp():
+                                for m in range(M):
+                                    thread_accum(tid, m, send_experts, smem_buf)
+                                    if m % (N_BLOCKS_DISPATCH * GROUP_SIZE) == Tx.int32(bx * GROUP_SIZE + group_rank):  # noqa: E501
+                                        n_threads = Tx.meta_var(Tx.int32(N_WARPS_DISPATCH - 1) * 32)
+                                        thread_prepare_buf(n_threads, tid, m, send_tokens, buf_send)
+                                        Tx.ptx.bar.sync(1, n_threads)
+                                        warp_dispatch_exp(group_idx, warp_id, m, smem_buf, send_experts, buf_send, buf_recv, buf_actual_wait)  # noqa: E501
                     if DISPATCH_RECV:
                         cta_wait(bx, tid, buf_target_wait, buf_actual_wait, recv_num_total, recv_num_per_expert, smem_expert_st, smem_token_st)  # noqa: E501
                         thread_compute_meta(bx, tid, buf_meta_index, buf_meta_expert, buf_meta_offset, buf_meta_group, buf_meta_token,  # noqa: E501
@@ -492,10 +495,10 @@ def test_dispatch_combine(world_size=8):
                         buf_meta_group: Tx.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
                         ):
             with Tx.kernel():
-                bx = Tx.cta_id([N_BLOCKS_COMBINE], parent="kernel")
-                warp_id = Tx.warp_id([N_WARPS_COMBINE], parent="cta")
-                Tx.thread_id([32], parent="warp")
-                tid = Tx.thread_id([N_WARPS_COMBINE * 32], parent="cta")
+                bx = Tx.cta_id([N_BLOCKS_COMBINE])
+                warp_id = Tx.warp_id([N_WARPS_COMBINE])
+                lane_id = Tx.lane_id([32])
+                tid = Tx.thread_id([N_WARPS_COMBINE * 32])
                 rank = Tx.nvshmem.my_pe()
                 n_threads = Tx.meta_var(N_WARPS_COMBINE * 32)
 

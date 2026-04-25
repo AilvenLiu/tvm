@@ -51,7 +51,7 @@ class MOEAlignTile(Tile):
         # offset = Tx.alloc_scalar("int32", name="offset")
         # original = Tx.alloc_scalar("int32", name="original")
         # with Tx.warp():
-        #     lane_id = Tx.thread_id(32, parent="warp")
+        #     lane_id = Tx.lane_id(32)
         #     offset = 1
         #     original = v
         #     while offset < 32:
@@ -96,9 +96,9 @@ class MOEAlignTile(Tile):
         pre = Tx.alloc_local([1], "int32", name="pre")
         sum_val = Tx.alloc_local([1], "int32", name="sum_val")
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            lane_id = Tx.lane_id([32])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
             self.smem_manager.wait_all("cta")
             if tid < self.num_experts:
                 self.shared_counts[tid] = 0
@@ -215,7 +215,7 @@ class CountAndSortExpertTokens(Tile):
         cnt = Tx.alloc_local([1], "int32", name="cnt")
         col_idx = Tx.alloc_local([1], "int32", name="col_idx")
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             process_token_idx: Tx.let = m_idx + tid * KernelConfig.SM_NUMBER
             self.smem_manager.wait_all("cta")
             if process_token_idx < self.numel:
@@ -313,9 +313,9 @@ class MOETokenDispatchTile(Tile):
         pre = Tx.alloc_local([1], "int32", name="pre")
         sum_val = Tx.alloc_local([1], "int32", name="sum_val")
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            lane_id = Tx.lane_id([32])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
             self.smem_manager.wait_all("cta")
             if tid < self.num_experts:
                 self.shared_counts[tid] = 0

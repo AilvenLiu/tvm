@@ -58,6 +58,13 @@ cuda_helper_intrinsic(
     op_name="cuda_cluster_sync",
     c_body='asm("barrier.cluster.arrive.aligned;");\n    asm("barrier.cluster.wait.aligned;");',
 )
+cuda_helper_intrinsic(
+    op_name="cuda_thread_rank",
+    c_body="namespace cg = cooperative_groups;\n    return cg::this_thread_block().thread_rank();",
+    return_type="int",
+    tvm_return_type="int32",
+    extra_deps=("cooperative_groups",),
+)
 
 # -----------------------------------------------------------------------------
 # Single-operand helpers.

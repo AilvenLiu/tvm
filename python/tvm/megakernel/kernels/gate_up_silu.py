@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 from tvm.megakernel.utils.base import SmemManager
 from tvm.megakernel.utils.config import KernelConfig, ProfileEventType
 from tvm.megakernel.utils.utils import silu
@@ -27,16 +26,10 @@ from .gemm import GemmTile
 
 
 class GateUpSiluTile(GemmTile):
-    # Notes: Fused Gate/Up Weight Matrix (B), shape: [intermediate_size * 2, hidden_size].
-    #        Gate, Up weights shape: [intermediate_size, hidden_size].
-    #        B is formed by row-wise interleaving of 16-row blocks from g and u.
-    #        B = [g[0:16, :]; u[0:16, :]; g[16:32, :]; u[16:32, :]; ...].
-
     need_init = False
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        # alloc shared memory
         self.A_smem = smem_manager.alloc(
             (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
             self.a_type,
@@ -74,7 +67,6 @@ class GateUpSiluTile(GemmTile):
         )
 
     def _alloc_local(self, m_idx):
-        # alloc local memory
         self.reg = Tx.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         self.reg_fp16 = Tx.alloc_buffer(
             (self.TMEM_LD_SIZE // 2,), "float16", scope="local", name="reg_fp16"
@@ -92,35 +84,28 @@ class GateUpSiluTile(GemmTile):
     @Tx.inline
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with Tx.thread():
-            tid_in_wg = Tx.thread_id([128], parent="warpgroup")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            tid_in_wg = Tx.thread_id_in_wg([128])
+            warp_id = Tx.warp_id_in_wg([KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
             Tx.cuda.trap_when_assert_failed(self.tmem_addr[0] == 0)
             if warp_id == 0:
                 self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
             Tx.ptx.bar.sync(10, 128)
             self.phase[0] = 0
             self.tmem_idx = self.tile_idx % self.TMEM_PIPE_DEPTH
-            self.tmem_phase = (self.tile_idx // self.TMEM_PIPE_DEPTH) & 1
-
-            # flush previous tma
-            # wait for the completion of all the mma of the same tile
+            self.tmem_phase = self.tile_idx // self.TMEM_PIPE_DEPTH & 1
             self.mma2ld_bar.wait(self.tmem_idx, self.tmem_phase)
             Tx.ptx.tcgen05.fence.after_thread_sync()
-
             SILU_HANDLE_UNIT = Tx.meta_var(self.TMEM_LD_SIZE // 2)
             self.off = Tx.if_then_else(lane_id < 16, SILU_HANDLE_UNIT, 0)
             for ko in Tx.unroll(self.MMA_M // self.EPI_TILE):
                 self.stage = (
                     self.tile_idx * self.MMA_M // self.EPI_TILE + ko
                 ) % self.TMEM_PIPE_DEPTH
-                # wait the smem to be free
                 if ko >= self.TMEM_PIPE_DEPTH:
-                    if lane_id == 0 and warp_id == 0:
+                    if (lane_id == 0) & (warp_id == 0):
                         Tx.ptx.cp_async.bulk.wait_group(self.TMEM_PIPE_DEPTH - 1)
                     Tx.cuda.warpgroup_sync(10)
-
-                # tmem -> rf (ld) -> smem
                 for ki in Tx.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                     with Tx.warpgroup():
                         reg_wg = self.reg.view(
@@ -138,15 +123,14 @@ class GateUpSiluTile(GemmTile):
                         Tx.copy(reg_wg[:, :], self.tmem[:, col_st : col_st + self.TMEM_LD_SIZE])
                     if self.profiler_on:
                         profiler.start(ProfileEventType.SILU_MUL, lane_id == 0)
-                    # for each warp, lane 0~15 holds the gate output, lane 16~31 holds the up output
                     for kv in Tx.unroll(SILU_HANDLE_UNIT):
                         self.reg[self.off + kv] = Tx.tvm_warp_shuffle_xor(
-                            0xFFFFFFFF, self.reg[self.off + kv], 16, 32, 32
+                            4294967295, self.reg[self.off + kv], 16, 32, 32
                         )
                     for kv in Tx.unroll(SILU_HANDLE_UNIT):
                         self.reg[kv] = silu(self.reg[kv]) * self.reg[SILU_HANDLE_UNIT + kv]
                     Tx.cast(self.reg_fp16[:], self.reg[0:SILU_HANDLE_UNIT], vec=SILU_HANDLE_UNIT)
-                    st = Tx.meta_var(ki * self.TMEM_LD_SIZE + (lane_id // 16) * SILU_HANDLE_UNIT)
+                    st = Tx.meta_var(ki * self.TMEM_LD_SIZE + lane_id // 16 * SILU_HANDLE_UNIT)
                     Tx.copy(
                         self.output_smem[
                             self.stage, st : st + SILU_HANDLE_UNIT, warp_id * 16 + lane_id % 16
@@ -156,27 +140,24 @@ class GateUpSiluTile(GemmTile):
                     )
                     if self.profiler_on:
                         profiler.end(ProfileEventType.SILU_MUL, lane_id == 0)
-
-                # the tmem can be overwritten
                 if ko == self.MMA_M // self.EPI_TILE - 1:
                     Tx.ptx.tcgen05.fence.before_thread_sync()
                     self.ld2mma_bar.arrive(self.tmem_idx)
-
                 Tx.ptx.fence.proxy_async("shared::cta")
                 Tx.cuda.warpgroup_sync(10)
-                # smem -> gmem
-                with Tx.thread(parent="warpgroup")[tid_in_wg == 0]:
-                    m_st = Tx.meta_var(m_idx * self.M_pad_size + ko * self.EPI_TILE)
-                    n_st = Tx.meta_var(n_idx * self.BLK_N // 2)
-                    tma_config = Tx.meta_var(
-                        {"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP}
-                    )
-                    Tx.copy_async(
-                        output[m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N // 2],
-                        self.output_smem[self.stage, :, :],
-                        **tma_config,
-                    )
-                    Tx.ptx.cp_async.bulk.commit_group()
+                if tid_in_wg == 0:
+                    with Tx.thread():
+                        m_st = Tx.meta_var(m_idx * self.M_pad_size + ko * self.EPI_TILE)
+                        n_st = Tx.meta_var(n_idx * self.BLK_N // 2)
+                        tma_config = Tx.meta_var(
+                            {"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP}
+                        )
+                        Tx.copy_async(
+                            output[m_st : m_st + self.EPI_TILE, n_st : n_st + self.BLK_N // 2],
+                            self.output_smem[self.stage, :, :],
+                            **tma_config,
+                        )
+                        Tx.ptx.cp_async.bulk.commit_group()
             if tid_in_wg == 0:
                 Tx.ptx.cp_async.bulk.wait_group(0)
             Tx.cuda.warpgroup_sync(10)

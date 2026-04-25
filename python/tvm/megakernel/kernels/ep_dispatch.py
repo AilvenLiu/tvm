@@ -79,10 +79,10 @@ class EPDispatchPrecomputeTile(Tile):
         rank,
     ):
         with Tx.cta():
-            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
+            cta_id = Tx.cta_id([KernelConfig.SM_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32])
 
             # TODO: tune number of CTAs for precompute based on profiling results
             # for now, each warp in a CTA is responsible for one expert; total CTA: 16
@@ -191,11 +191,10 @@ class EPDispatchSendTile(Tile):
         rank,
     ):
         with Tx.cta():
-            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
-
+            cta_id = Tx.cta_id([KernelConfig.SM_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32])
             # each warp sends to one dest expert
             if warp_id < self.topk:
                 dst_expert = route_experts[src_token_idx, warp_id]
@@ -278,10 +277,10 @@ class EPDispatchRecvTile(Tile):
         rank,
     ):
         with Tx.cta():
-            Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")  # noqa: E501
+            cta_id = Tx.cta_id([KernelConfig.SM_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32])
 
             # TODO: can adjust the granularity of tile when fusing with GEMM
             # for now, each CTA is responsible for one expert and one source GPU

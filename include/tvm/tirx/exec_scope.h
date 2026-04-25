@@ -27,56 +27,83 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ir/module.h>
 #include <tvm/tirx/var.h>
+
+#include <string>
+#include <utility>
+
 namespace tvm {
 namespace tirx {
 
+/*!
+ * \brief The target execution scope kind of an ExecScopeStmt.
+ *
+ * Replaces the string-keyed name of ExecScope. One value per user-facing
+ * `with T.<kind>():` construct, plus ``kWorld`` for the cross-kernel root
+ * scope used by axe-layout's ``pid`` axis. Ordered from coarsest to finest;
+ * smaller integer = wider scope, so ``ScopeKindHigher`` is a plain ``<``.
+ */
+enum class ScopeKind : int {
+  kWorld = 0,
+  kKernel = 1,
+  kCluster = 2,
+  kCta = 3,
+  kWarpgroup = 4,
+  kWarp = 5,
+  kThread = 6,
+};
+
+/*! \brief Convert a ScopeKind to its string name (e.g. kKernel -> "kernel"). */
+TVM_DLL std::string ScopeKindToString(ScopeKind kind);
+
+/*! \brief Parse a string name to a ScopeKind. FATAL if unknown. */
+TVM_DLL ScopeKind StringToScopeKind(const ffi::String& name);
+
+/*!
+ * \brief The binding between a parent scope and a child scope as used by a
+ * `ScopeIdDef`. The closed enum of valid (parent -> cur) pairs.
+ *
+ * Single-axis bindings (target one ActiveSet box axis -- ``laneid`` /
+ * ``warpid`` / ``cta_id``, possibly via a warpid factor lane):
+ *   kKernelCta, kClusterCta -> cta_id (flat)
+ *   kCtaWarp                -> warpid (flat)
+ *   kCtaWarpgroup           -> warpid (outer factor; warpgroup index)
+ *   kWarpgroupWarp          -> warpid (inner factor; warp-within-wg index)
+ *   kWarpThread             -> laneid (flat)
+ *   kKernelCluster          -> not a filter target (cluster_id by design)
+ *
+ * Multi-axis (flat-thread) bindings -- linearize across two ActiveSet
+ * axes; ``T.filter(var, lo, hi)`` cannot narrow them as a contiguous box
+ * range, so they fall back to plain predicate semantics:
+ *   kCtaThread       -> threadIdx.x within a CTA          (laneid * warpid)
+ *   kWarpgroupThread -> threadIdx.x within a warpgroup    (laneid * wid_in_wg)
+ */
+enum class ScopeBinding : int {
+  kKernelCluster = 0,
+  kKernelCta = 1,
+  kClusterCta = 2,
+  kCtaWarpgroup = 3,
+  kCtaWarp = 4,
+  kWarpgroupWarp = 5,
+  kWarpThread = 6,
+  kCtaThread = 7,
+  kWarpgroupThread = 8,
+};
+
+/*! \brief Convert a ScopeBinding to its (parent, cur) string pair. */
+TVM_DLL std::pair<ffi::String, ffi::String> ScopeBindingToStringPair(ScopeBinding binding);
+
+/*! \brief Parse a (parent, cur) string pair to a ScopeBinding. FATAL if unknown. */
+TVM_DLL ScopeBinding StringPairToScopeBinding(const ffi::String& parent, const ffi::String& cur);
+
 /******** Definition of ScopeId ********/
-class ScopePairNode : public Object {
- public:
-  /*! \brief The parent scope */
-  ffi::String parent;
-  /*! \brief The current scope */
-  ffi::String cur;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ScopePairNode>()
-        .def_ro("parent", &ScopePairNode::parent)
-        .def_ro("cur", &ScopePairNode::cur);
-  }
-
-  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScopePair", ScopePairNode, Object);
-};
-
-class ScopePair : public ObjectRef {
- public:
-  TVM_DLL explicit ScopePair(ffi::String parent, ffi::String cur);
-
-  struct ScopePairEqual {
-    bool operator()(const ScopePair& a, const ScopePair& b) const {
-      return a->parent == b->parent && a->cur == b->cur;
-    }
-  };
-
-  struct ScopePairHash {
-    size_t operator()(const ScopePair& a) const {
-      return std::hash<ffi::String>()(a->parent) ^ std::hash<ffi::String>()(a->cur);
-    }
-  };
-
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScopePair, ObjectRef, ScopePairNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopePairNode);
-};
-
 class ScopeIdDefNode : public Object {
  public:
   /*! \brief The ScopeId defined */
   ffi::Array<Var> def_ids;
   /*! \brief The extents of the ScopeId */
   ffi::Array<PrimExpr> extents;
-  /*! \brief The scope of the scope id */
-  ScopePair scope;
+  /*! \brief The (parent, cur) binding of this scope id as a closed enum. */
+  ScopeBinding scope;
   /*!
    * \brief Optional preferred extents (cluster→cta only).
    * Maps to cudaLaunchAttributePreferredClusterDimension (CUDA 12.8+).
@@ -99,7 +126,7 @@ class ScopeIdDefNode : public Object {
 class ScopeIdDef : public ObjectRef {
  public:
   TVM_DLL explicit ScopeIdDef(ffi::Array<Var> def_ids, ffi::Array<PrimExpr> extents,
-                              ScopePair scope,
+                              ScopeBinding scope,
                               ffi::Optional<ffi::Array<PrimExpr>> preferred_extents =
                                   ffi::Optional<ffi::Array<PrimExpr>>(std::nullopt));
 
@@ -109,16 +136,9 @@ class ScopeIdDef : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdDefNode);
 };
 
-/*! \brief Compose two scope id definitions */
-ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
-
-/*! \brief Compliment two scope id definitions */
-ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
-
 class ScopeIdDefVerifier {
  public:
-  using ScopeIdSet = std::unordered_map<ScopePair, ScopeIdDef, ScopePair::ScopePairHash,
-                                        ScopePair::ScopePairEqual>;
+  using ScopeIdSet = std::unordered_map<ScopeBinding, ScopeIdDef>;
 
   /*! \brief Verify the scope id definitions are well formed */
   bool Verify(const ffi::Array<ScopeIdDef>& defs);
@@ -127,83 +147,52 @@ class ScopeIdDefVerifier {
   ScopeIdSet id_set;
 };
 
-class ScopeIdResolveTable {
+/*!
+ * \brief Static resolver for ScopeIdDef values. Replaces the former
+ * ScopeIdResolveTable runtime registry with a closed-enum switch.
+ */
+class ScopeIdResolve {
  public:
-  using ScopeIdSet = ScopeIdDefVerifier::ScopeIdSet;
   using LaunchParams = std::unordered_map<ffi::String, IterVar>;
 
-  typedef ffi::Array<PrimExpr> (*ResolveFunc)(const ffi::Optional<ffi::Array<PrimExpr>>& extents,
-                                              int out_dim, const LaunchParams& params);
-
-  static ScopeIdResolveTable* Global() {
-    static ScopeIdResolveTable inst;
-    return &inst;
-  }
-
-  class Registry {
-   public:
-    Registry& set(ResolveFunc func) {
-      this->func_ = func;
-      return *this;
-    }
-
-   private:
-    friend class ScopeIdResolveTable;
-    ResolveFunc func_;
-  };
-
-  /*! \brief Register a ScopeIdDef resolve rule */
-  static Registry& Register(ffi::String parent, ffi::String cur, ffi::String target_kind);
-
-  /*! \brief Resolve a ScopeIdDef */
-  static ffi::Array<PrimExpr> Resolve(const ScopePair& scope,
-                                      const ffi::Optional<ffi::Array<PrimExpr>>& extents,
-                                      int out_dim, ffi::String target_kind,
-                                      const LaunchParams& params);
-
-  /*! \brief Check if a scope cur name needs warp_id_in_cta in launch params */
-  static bool NeedWarpIdInCta(const ffi::String& scope_cur) {
-    return scope_cur == "warp" || scope_cur == "warpgroup";
-  }
+  /*! \brief Resolve a ScopeIdDef for a given canonical binding + target. */
+  TVM_DLL static ffi::Array<PrimExpr> Resolve(ScopeBinding binding,
+                                              const ffi::Optional<ffi::Array<PrimExpr>>& extents,
+                                              int out_dim, const ffi::String& target_kind,
+                                              const LaunchParams& params);
 
   /*! \brief Compute the warp_id_in_cta shuffle expression from threadIdx in launch params */
-  static PrimExpr ComputeWarpIdInCta(const LaunchParams& params);
-
- private:
-  static std::string GetKey(const ScopePair& scope, const ffi::String& target_kind) {
-    return scope->parent.operator std::string() + "__##__" + scope->cur.operator std::string() +
-           "__##__" + target_kind.operator std::string();
-  }
-
-  /*! \brief The registered scope id definitions */
-  std::unordered_map<std::string, Registry> resolve_map_;
+  TVM_DLL static PrimExpr ComputeWarpIdInCta(const LaunchParams& params);
 };
 
+/*!
+ * \brief Strict-weak "a is wider than b" on scope kinds: ``world > kernel >
+ * cluster > cta > warpgroup > warp > thread``. Only used by axe-layout
+ * scope-chain validity (the rest of the codebase compares scope identities
+ * with ==).
+ */
+inline bool ScopeKindHigher(ScopeKind a, ScopeKind b) {
+  return static_cast<int>(a) < static_cast<int>(b);
+}
+
+/*! \brief String-keyed convenience over ScopeKindHigher. FATALs on bad name. */
+TVM_DLL bool ScopeNameHigher(const ffi::String& a, const ffi::String& b);
+
 /******** Definition of Execution Scope ********/
-class ExecScope;
 class ExecScopeNode : public Object {
  public:
   ffi::Array<ScopeIdDef> scope_id_def;
 
-  /*! \brief scope name, used when printing */
-  ffi::String name;
+  /*! \brief scope identity; one of the closed ScopeKind values. */
+  ScopeKind kind = ScopeKind::kKernel;
 
-  /*! \brief scope's are the same */
-  virtual bool Is(const ExecScope& other) const;
-
-  /*! \brief scope is identified by name */
-  bool Is(const ffi::String& name) const;
-
-  /*! \brief scope is higher than other sope */
-  bool Higher(const ExecScope& other) const;
-
-  /*! \brief scope is higher than other sope */
-  bool Higher(const ffi::String& other) const;
+  /*! \brief Human-readable name derived from ``kind`` (for printing / errors). */
+  ffi::String name() const { return ScopeKindToString(kind); }
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ExecScopeNode>()
-        .def_ro("name", &ExecScopeNode::name)
+        .def_ro("kind", &ExecScopeNode::kind)
         .def_ro("scope_id_def", &ExecScopeNode::scope_id_def);
   }
 
@@ -213,49 +202,13 @@ class ExecScopeNode : public Object {
 
 class ExecScope : public ObjectRef {
  public:
-  TVM_DLL explicit ExecScope(ffi::String name, ffi::Array<ScopeIdDef> scope_id_def = {});
-
-  /*! \brief create a exec scope from scope name */
-  static ExecScope Create(ffi::String name);
-
-  /*! \brief check if a scope name is valid */
-  static bool Valid(const ffi::String& name);
+  /*! \brief Construct from a ScopeKind (canonical). */
+  TVM_DLL explicit ExecScope(ScopeKind kind, ffi::Array<ScopeIdDef> scope_id_def = {});
+  /*! \brief Construct from a name string (FATALs on unknown name). */
+  TVM_DLL explicit ExecScope(const ffi::String& name, ffi::Array<ScopeIdDef> scope_id_def = {})
+      : ExecScope(StringToScopeKind(name), std::move(scope_id_def)) {}
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ExecScope, ObjectRef, ExecScopeNode);
-};
-
-class ExecScopeSliceNode : public ExecScopeNode {
- public:
-  /*! \brief slices or select condition of the execution scope */
-  ffi::Variant<ffi::Array<Range>, PrimExpr> slices = ffi::Array<Range>({});
-  /*! \brief extents of the execution scope */
-  ffi::Optional<ffi::Array<PrimExpr>> extents;
-  /*! \brief parent scope name */
-  ffi::String parent;
-
-  bool Is(const ExecScope& other) const final;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ExecScopeSliceNode>()
-        .def_ro("slices", &ExecScopeSliceNode::slices)
-        .def_ro("extents", &ExecScopeSliceNode::extents)
-        .def_ro("parent", &ExecScopeSliceNode::parent)
-        .def_ro("name", &ExecScopeSliceNode::name)
-        .def_ro("scope_id_def", &ExecScopeSliceNode::scope_id_def);
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ExecScopeSlice", ExecScopeSliceNode, ExecScopeNode);
-};
-
-class ExecScopeSlice : public ExecScope {
- public:
-  TVM_DLL explicit ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
-                                  ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
-                                  ffi::String cur);
-
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
 };
 
 }  // namespace tirx

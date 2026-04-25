@@ -85,17 +85,18 @@ def test_hgemm_hopper_ws_cooperative():
         # make sure smem write is visible to TMA
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.bar.sync(0, 256)
-        with Tx.thread()[tid == 128]:
-            # only 1 thread in 2 consumers write to TMA
-            Tx.ptx.cp_async.bulk.tensor.s2g(
-                2,
-                C_smem.ptr_to([n_tile % STAGES_EPI, 0]),
-                C_map,
-                n_glb_offset + n_tile * 32,
-                m_glb_offset,
-            )
-            Tx.ptx.cp_async.bulk.commit_group()
-            Tx.ptx.cp_async.bulk.wait_group(n=1, read=False)
+        if Tx.filter(tid, tid == 128):
+            with Tx.thread():
+                # only 1 thread in 2 consumers write to TMA
+                Tx.ptx.cp_async.bulk.tensor.s2g(
+                    2,
+                    C_smem.ptr_to([n_tile % STAGES_EPI, 0]),
+                    C_map,
+                    n_glb_offset + n_tile * 32,
+                    m_glb_offset,
+                )
+                Tx.ptx.cp_async.bulk.commit_group()
+                Tx.ptx.cp_async.bulk.wait_group(n=1, read=False)
 
     # fmt: off
     @Tx.prim_func(tirx=True)
@@ -114,13 +115,13 @@ def test_hgemm_hopper_ws_cooperative():
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float32", 2, C.data, N, M, f32_bytes * N, 32, BLK_M, 1, 1, 0, swizzleC, 0, 0)  # noqa: E501
 
         with Tx.kernel():
-            cbx, cby = Tx.cta_id([CLUSTER_M, CLUSTER_N], parent="cluster")
-            bx, by = Tx.cta_id([CLUSTER_M, SM_COUNT // CLUSTER_M], parent="kernel")
-            wg_id = Tx.warpgroup_id([3], parent="cta")
-            tid = Tx.thread_id([128 * 3], parent="cta")
-            warp_id_in_wg = Tx.warp_id([4], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
-            tid_in_wg = Tx.thread_id([128], parent="warpgroup")
+            cbx, cby = Tx.cta_id_in_cluster([CLUSTER_M, CLUSTER_N])
+            bx, by = Tx.cta_id([CLUSTER_M, SM_COUNT // CLUSTER_M])
+            wg_id = Tx.warpgroup_id([3])
+            tid = Tx.thread_id([128 * 3])
+            warp_id_in_wg = Tx.warp_id_in_wg([4])
+            lane_id = Tx.lane_id([32])
+            tid_in_wg = Tx.thread_id_in_wg([128])
 
             with Tx.cta():
                 # tensor stroage
@@ -184,110 +185,115 @@ def test_hgemm_hopper_ws_cooperative():
                     Tx.cuda.cluster_sync()
 
                     k_tile_count = Tx.meta_var((K + BLK_K - 1) // BLK_K)
-                    with Tx.warpgroup()[0:1]:
-                        ############################################################################## PRODUCER  # noqa: E501
-                        # producer WG
-                        with Tx.warp(parent="warpgroup")[0:1]:
-                            stage = Tx.meta_var(producer.index)
-                            cur_full = Tx.meta_var(full.ptr_to([stage]))
-                            cur_empty = Tx.meta_var(empty.ptr_to([stage]))
-                            # mainloop producer warp
+                    if Tx.filter(wg_id, 0, 1):
+                        with Tx.warpgroup():
+                            ############################################################################## PRODUCER  # noqa: E501
+                            # producer WG
+                            if Tx.filter(warp_id_in_wg, 0, 1):
+                                with Tx.warp():
+                                    stage = Tx.meta_var(producer.index)
+                                    cur_full = Tx.meta_var(full.ptr_to([stage]))
+                                    cur_empty = Tx.meta_var(empty.ptr_to([stage]))
+                                    # mainloop producer warp
+                                    while (tile_scheduler.valid()):
+                                        if Tx.filter(tid, Tx.ptx.elect_sync()):
+                                            with Tx.thread():
+                                                # only the leader thread does the TMA load
+                                                for i in range(k_tile_count):
+                                                    # producer acquire the slot
+                                                    Tx.ptx.mbarrier.try_wait(cur_empty, producer.phase)  # noqa: E501
+                                                    Tx.ptx.mbarrier.arrive.expect_tx(cur_full, TMA_BYTES)  # noqa: E501
+                                                    # issue TMA loads for A
+                                                    Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]),cur_full, A_map, i * BLK_K, tile_scheduler.m_idx * BLK_M)  # noqa: E501
+                                                    # issue TMA loads for B
+                                                    for n_tile in range(4):
+                                                        multicast_stride_b = Tx.meta_var(BLK_K // CLUSTER_M)  # noqa: E501
+                                                        Tx.ptx.cp_async.bulk.tensor.g2c(
+                                                            2, B_smem.ptr_to([stage, cbx * multicast_stride_b * 64 + n_tile * BLK_K * 64]),  # noqa: E501
+                                                            cur_full, B_map, tile_scheduler.n_idx * BLK_N + n_tile * 64, i * BLK_K + cbx * multicast_stride_b,  # noqa: E501
+                                                            cta_mask=0x3
+                                                        )
+                                                    # move to the next stage
+                                                    producer.advance()
+                                        # move to the next tile
+                                        tile_scheduler.next_tile()
+                                    # producer needs to wait for consumers to finish to prevent early exit  # noqa: E501
+                                    # early exit can cause conusmers signaling CTAs that are already finished  # noqa: E501
+                                    if Tx.filter(tid, Tx.ptx.elect_sync()):
+                                        with Tx.thread():
+                                            for _ in range(STAGES_MMA):
+                                                # producer acquire the slot
+                                                Tx.ptx.mbarrier.try_wait(cur_empty, producer.phase)
+                                                # move to the next stage
+                                                producer.advance()
+                    elif Tx.filter(wg_id, 1, 3):
+                        with Tx.warpgroup():
+                            ############################################################################## CONSUMER  # noqa: E501
+                            # consumer WG
                             while (tile_scheduler.valid()):
-                                with Tx.thread()[Tx.ptx.elect_sync()]:
-                                    # only the leader thread does the TMA load
-                                    for i in range(k_tile_count):
-                                        # producer acquire the slot
-                                        Tx.ptx.mbarrier.try_wait(cur_empty, producer.phase)
-                                        Tx.ptx.mbarrier.arrive.expect_tx(cur_full, TMA_BYTES)
-                                        # issue TMA loads for A
-                                        Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]),cur_full, A_map, i * BLK_K, tile_scheduler.m_idx * BLK_M)  # noqa: E501
-                                        # issue TMA loads for B
-                                        for n_tile in range(4):
-                                            multicast_stride_b = Tx.meta_var(BLK_K // CLUSTER_M)
-                                            Tx.ptx.cp_async.bulk.tensor.g2c(
-                                                2, B_smem.ptr_to([stage, cbx * multicast_stride_b * 64 + n_tile * BLK_K * 64]),  # noqa: E501
-                                                cur_full, B_map, tile_scheduler.n_idx * BLK_N + n_tile * 64, i * BLK_K + cbx * multicast_stride_b,  # noqa: E501
-                                                cta_mask=0x3
-                                            )
-                                        # move to the next stage
-                                        producer.advance()
+                                ####################################### WGMMA
+                                # initialize the accumulators
+                                for i in range(128):
+                                    accum[i] = 0
+                                    Tx.ptx.wgmma.noop_barrier(accum[i])
+                                read_stage = Tx.meta_var(consumer_read.index)
+                                release_stage = Tx.meta_var(consumer_release.index)
+                                full_read = Tx.meta_var(full.ptr_to([read_stage]))
+                                empty_release = Tx.meta_var(empty.ptr_to([release_stage]))
+                                for k_iter in range(k_tile_count):
+                                    # consumer acquire the slot
+                                    Tx.ptx.mbarrier.try_wait(full_read, consumer_read.phase)
+                                    # issue WGMMA for the current stage
+                                    ptx_wgmma_noop_barrier(accum)
+                                    Tx.ptx.wgmma.fence()
+                                    for inner_k in range(BLK_K // WGMMA_K):
+                                        A_offset = Tx.meta_var((wg_id - 1) * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)  # noqa: E501
+                                        B_offset = Tx.meta_var(inner_k * WGMMA_K * 64)
+                                        Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_A), A_smem.ptr_to([read_stage, A_offset]), 1, 64, swizzle=3)  # noqa: E501, F821
+                                        Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_B), B_smem.ptr_to([read_stage, B_offset]), 512, 64, swizzle=3)  # noqa: E501, F821
+                                        Tx.ptx.wgmma.mma_async.ss(desc_A, desc_B, *[accum[i] for i in range(128)],  # noqa: E501, F821
+                                                                 M=WGMMA_M, N=WGMMA_N, K=WGMMA_K, in_dtype="float16", out_dtype="float32", transA=False, transB=True, scaleA=1.0, scaleB=1.0, scaleD=True)  # noqa: E501
+                                    Tx.ptx.wgmma.commit_group()
+                                    if k_iter > 0:
+                                        # wait for the previous stage to finish
+                                        Tx.ptx.wgmma.wait_group(n = 1)
+                                        ptx_wgmma_noop_barrier(accum)
+                                        # release the previous stage, send the signal to the producer  # noqa: E501
+                                        Tx.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)  # noqa: E501
+                                    # move to the next stage
+                                    consumer_release.copy(consumer_read)
+                                    consumer_read.advance()
+                                ptx_wgmma_noop_barrier(accum)
+                                # wait for the last stage to finish
+                                Tx.ptx.wgmma.wait_group(0)
+                                ptx_wgmma_noop_barrier(accum)
+                                Tx.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)  # noqa: E501
+                                # ####################################### Epilogue
+                                m_glb_offset = Tx.meta_var(tile_scheduler.m_idx * BLK_M)
+                                n_glb_offset = Tx.meta_var(tile_scheduler.n_idx * BLK_N)
+                                Tx.ptx.bar.sync(0, 256)
+                                epi_tile_count = Tx.meta_var(BLK_N // 32)
+                                for i in Tx.serial(epi_tile_count):
+                                    if (i != 0):
+                                        # s2G for the previous stage
+                                        tma_store(i - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)  # noqa: E501
+                                    quad_id = Tx.meta_var(lane_id // 4)
+                                    quad_lane = Tx.meta_var(lane_id % 4)
+                                    smem_offset = ((wg_id - 1) * BLK_M // 2 + 16 * warp_id_in_wg + quad_id) * 32  # noqa: E501
+                                    r2S_stage = Tx.meta_var(i % STAGES_EPI)
+                                    Tx.ptx.bar.sync(0, 256)
+                                    for reg in Tx.serial(4):
+                                        col_id = Tx.meta_var(quad_lane // 2 + reg * 2)
+                                        col_swizzle = (quad_id ^ col_id) * 4 + quad_lane % 2 * 2
+                                        C_smem[r2S_stage, smem_offset + col_swizzle] = accum[16 * i + reg * 4]  # noqa: E501
+                                        C_smem[r2S_stage, smem_offset + col_swizzle + 1] = accum[16 * i + reg * 4 + 1]  # noqa: E501
+                                        C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle] = accum[16 * i + reg * 4 + 2]  # noqa: E501
+                                        C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle + 1] = accum[16 * i + reg * 4 + 3]  # noqa: E501
+                                tma_store(epi_tile_count - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)  # noqa: E501
+                                Tx.ptx.cp_async.bulk.wait_group(n = 0, read=False)
+
                                 # move to the next tile
                                 tile_scheduler.next_tile()
-                            # producer needs to wait for consumers to finish to prevent early exit
-                            # early exit can cause conusmers signaling CTAs that are already finished  # noqa: E501
-                            with Tx.thread()[Tx.ptx.elect_sync()]:
-                                for _ in range(STAGES_MMA):
-                                    # producer acquire the slot
-                                    Tx.ptx.mbarrier.try_wait(cur_empty, producer.phase)
-                                    # move to the next stage
-                                    producer.advance()
-                    with Tx.warpgroup()[1:3]:
-                        ############################################################################## CONSUMER  # noqa: E501
-                        # consumer WG
-                        while (tile_scheduler.valid()):
-                            ####################################### WGMMA
-                            # initialize the accumulators
-                            for i in range(128):
-                                accum[i] = 0
-                                Tx.ptx.wgmma.noop_barrier(accum[i])
-                            read_stage = Tx.meta_var(consumer_read.index)
-                            release_stage = Tx.meta_var(consumer_release.index)
-                            full_read = Tx.meta_var(full.ptr_to([read_stage]))
-                            empty_release = Tx.meta_var(empty.ptr_to([release_stage]))
-                            for k_iter in range(k_tile_count):
-                                # consumer acquire the slot
-                                Tx.ptx.mbarrier.try_wait(full_read, consumer_read.phase)
-                                # issue WGMMA for the current stage
-                                ptx_wgmma_noop_barrier(accum)
-                                Tx.ptx.wgmma.fence()
-                                for inner_k in range(BLK_K // WGMMA_K):
-                                    A_offset = Tx.meta_var((wg_id - 1) * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)  # noqa: E501
-                                    B_offset = Tx.meta_var(inner_k * WGMMA_K * 64)
-                                    Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_A), A_smem.ptr_to([read_stage, A_offset]), 1, 64, swizzle=3)  # noqa: E501, F821
-                                    Tx.ptx.wgmma.encode_matrix_descriptor(Tx.address_of(desc_B), B_smem.ptr_to([read_stage, B_offset]), 512, 64, swizzle=3)  # noqa: E501, F821
-                                    Tx.ptx.wgmma.mma_async.ss(desc_A, desc_B, *[accum[i] for i in range(128)],  # noqa: E501, F821
-                                                             M=WGMMA_M, N=WGMMA_N, K=WGMMA_K, in_dtype="float16", out_dtype="float32", transA=False, transB=True, scaleA=1.0, scaleB=1.0, scaleD=True)  # noqa: E501
-                                Tx.ptx.wgmma.commit_group()
-                                if k_iter > 0:
-                                    # wait for the previous stage to finish
-                                    Tx.ptx.wgmma.wait_group(n = 1)
-                                    ptx_wgmma_noop_barrier(accum)
-                                    # release the previous stage, send the signal to the producer
-                                    Tx.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)  # noqa: E501
-                                # move to the next stage
-                                consumer_release.copy(consumer_read)
-                                consumer_read.advance()
-                            ptx_wgmma_noop_barrier(accum)
-                            # wait for the last stage to finish
-                            Tx.ptx.wgmma.wait_group(0)
-                            ptx_wgmma_noop_barrier(accum)
-                            Tx.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)
-                            # ####################################### Epilogue
-                            m_glb_offset = Tx.meta_var(tile_scheduler.m_idx * BLK_M)
-                            n_glb_offset = Tx.meta_var(tile_scheduler.n_idx * BLK_N)
-                            Tx.ptx.bar.sync(0, 256)
-                            epi_tile_count = Tx.meta_var(BLK_N // 32)
-                            for i in Tx.serial(epi_tile_count):
-                                if (i != 0):
-                                    # s2G for the previous stage
-                                    tma_store(i - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)
-                                quad_id = Tx.meta_var(lane_id // 4)
-                                quad_lane = Tx.meta_var(lane_id % 4)
-                                smem_offset = ((wg_id - 1) * BLK_M // 2 + 16 * warp_id_in_wg + quad_id) * 32  # noqa: E501
-                                r2S_stage = Tx.meta_var(i % STAGES_EPI)
-                                Tx.ptx.bar.sync(0, 256)
-                                for reg in Tx.serial(4):
-                                    col_id = Tx.meta_var(quad_lane // 2 + reg * 2)
-                                    col_swizzle = (quad_id ^ col_id) * 4 + quad_lane % 2 * 2
-                                    C_smem[r2S_stage, smem_offset + col_swizzle] = accum[16 * i + reg * 4]  # noqa: E501
-                                    C_smem[r2S_stage, smem_offset + col_swizzle + 1] = accum[16 * i + reg * 4 + 1]  # noqa: E501
-                                    C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle] = accum[16 * i + reg * 4 + 2]  # noqa: E501
-                                    C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle + 1] = accum[16 * i + reg * 4 + 3]  # noqa: E501
-                            tma_store(epi_tile_count - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)  # noqa: E501
-                            Tx.ptx.cp_async.bulk.wait_group(n = 0, read=False)
-
-                            # move to the next tile
-                            tile_scheduler.next_tile()
     # fmt: on
 
     A_np = np.random.randn(M, K).astype(np.float16)
@@ -359,11 +365,12 @@ def test_hgemm_hopper_no_ws():
     # fmt: off
     @Tx.inline
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tirx.Buffer, B_smem: tvm.tirx.Buffer, A_map, B_map, bars: tvm.tirx.Buffer):  # noqa: E501
-        with Tx.thread()[tid == 0]:
-            stage = Tx.meta_var(k_tile % STAGES_TMA)
-            Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)  # noqa: E501
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)  # noqa: E501
+        if Tx.filter(tid, tid == 0):
+            with Tx.thread():
+                stage = Tx.meta_var(k_tile % STAGES_TMA)
+                Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
+                Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)  # noqa: E501
+                Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)  # noqa: E501
 
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
@@ -397,10 +404,11 @@ def test_hgemm_hopper_no_ws():
     def s2G(warp_id, lane_id, C_smem: tvm.tirx.Buffer, C_map, m_idx, n_idx, n_tile):
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
-        with Tx.thread()[warp_id == 0 and lane_id == 0]:
-            Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)  # noqa: E501
-            Tx.ptx.cp_async.bulk.commit_group()
-            Tx.ptx.cp_async.bulk.wait_group(1, read=True)
+        if Tx.filter(tid, warp_id == 0 and lane_id == 0):  # noqa: F821
+            with Tx.thread():
+                Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)  # noqa: E501
+                Tx.ptx.cp_async.bulk.commit_group()
+                Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @Tx.inline
     def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tirx.Buffer, C_map, accum, accum_half):  # noqa: E501
@@ -430,11 +438,11 @@ def test_hgemm_hopper_no_ws():
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)  # noqa: E501
 
         with Tx.kernel():
-            bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            wg_id = Tx.warpgroup_id([2], parent="cta")
-            tid = Tx.thread_id([128 * 2], parent="cta")
-            warp_id = Tx.warp_id([8], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            bx = Tx.cta_id([SM_COUNT])
+            wg_id = Tx.warpgroup_id([2])
+            tid = Tx.thread_id([128 * 2])
+            warp_id = Tx.warp_id([8])
+            lane_id = Tx.lane_id([32])
 
             with Tx.cta():
                 # tensor stroage
@@ -472,9 +480,10 @@ def test_hgemm_hopper_no_ws():
 
                     while (tile_scheduler.valid()):
                         # initialize the barriers
-                        with Tx.thread()[tid == 0]:
-                            for i in range(STAGES_TMA):
-                                Tx.ptx.mbarrier.init(bars.ptr_to([i]), 1)
+                        if Tx.filter(tid, tid == 0):
+                            with Tx.thread():
+                                for i in range(STAGES_TMA):
+                                    Tx.ptx.mbarrier.init(bars.ptr_to([i]), 1)
                         Tx.cuda.cta_sync()
                         # initialize the index
                         tma_index = 0

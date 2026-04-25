@@ -937,7 +937,7 @@ class DependencyHandler(StmtExprMutator):
         # handle extra tensors and tir sym vars
         extra_args_offset = input_dim - len(extra_args)
         for i, var in enumerate(extra_args):
-            if isinstance(var, (Var, PrimExpr)):  # noqa: UP038
+            if isinstance(var, Var | PrimExpr):
                 if var not in self.sym_vars:
                     if isinstance(var, IntImm):
                         self.sym_vars[var] = T.IntImm("int32", var.value)
@@ -1620,7 +1620,7 @@ class _Rewriter(PyExprMutator):
                 # handle extra tensors and tir sym vars
                 extra_args_offset = len(st_idx)
                 for i, var in enumerate(alloc_evt_info.extra_args):
-                    if isinstance(var, (Var, PrimExpr)):  # noqa: UP038
+                    if isinstance(var, Var | PrimExpr):
                         if var not in sym_map:
                             if isinstance(var, IntImm):
                                 sym_map[var] = T.IntImm("int32", var.value)
@@ -1664,7 +1664,7 @@ class _Rewriter(PyExprMutator):
                 T.add_to_parent(stmt)
 
             with T.cta():
-                tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                tid = T.thread_id([KernelConfig.NUM_THREADS])
                 num_evt_infos = len(self.evt_handle_helper.alloc_evt_infos)
                 if_frames = [T.If(idxs[0] == i) for i in range(num_evt_infos)]
                 then_frames = [T.Then() for i in range(num_evt_infos)]
@@ -1716,10 +1716,8 @@ class _Rewriter(PyExprMutator):
         @T.inline
         def wait_etensor_init_impl(evt_etensor_init_complete_buf: Buffer):
             with T.thread():
-                warp_id = T.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
-                lane_id = T.thread_id([32], parent="warp")
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+                lane_id = T.lane_id([32])
                 # if self.profiler_on:
                 #     self.profiler.start(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
                 state = T.alloc_local([1], "int32", name="state")
@@ -1772,11 +1770,9 @@ class _Rewriter(PyExprMutator):
                 T.scope_id(
                     [KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope
                 )
-                T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-                warp_id = T.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
-                lane_id = T.thread_id([32], parent="warp")
+                T.thread_id([KernelConfig.NUM_THREADS])
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+                lane_id = T.lane_id([32])
                 smem_buffer = T.alloc_buffer(
                     KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16
                 )
@@ -2095,8 +2091,8 @@ class _Rewriter(PyExprMutator):
                 ),
             ):
                 with T.kernel():
-                    bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                    tx = T.thread_id([THREAD_NUM], parent="cta")
+                    bx = T.cta_id([KernelConfig.SM_NUMBER])
+                    tx = T.thread_id([THREAD_NUM])
                     idx = T.alloc_buffer([1], "int32", scope="local")
                     idx[0] = 0
                     emit_task_round_robin(queue, idx, bx, tx)
@@ -2110,8 +2106,8 @@ class _Rewriter(PyExprMutator):
             ):
                 with T.kernel():
                     # fill tasks queue with -1 first
-                    bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                    tx = T.thread_id([THREAD_NUM], parent="cta")
+                    bx = T.cta_id([KernelConfig.SM_NUMBER])
+                    tx = T.thread_id([THREAD_NUM])
                     idx = T.alloc_buffer([1], "int32", scope="local")
                     idx[0] = 0
                     emit_entry_task(tasks, head, tail, idx, bx, tx)

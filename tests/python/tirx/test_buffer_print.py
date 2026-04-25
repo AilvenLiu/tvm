@@ -114,7 +114,7 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
         raise AssertionError(f"Unsupported dtype for scalar verification: {dtype}")
 
     value_pattern = ""
-    if isinstance(expected_value_or_varname, (int, float)):  # noqa: UP038
+    if isinstance(expected_value_or_varname, int | float):
         if "float" in dtype:
             value_pattern = re.escape(str(float(expected_value_or_varname))) + "f?"
         else:

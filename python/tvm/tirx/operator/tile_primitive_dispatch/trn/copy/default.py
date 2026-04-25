@@ -193,7 +193,7 @@ def transpose_schedule(
 def copy_trn(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc | None:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
-    if sctx.exec_scope.name != "kernel":
+    if sctx.scope_kind != "kernel":
         fail("requires kernel exec_scope for TRN copy")
 
     dst_region, src_region = op.args
@@ -298,8 +298,8 @@ def copy_trn(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc | None:
         predicate(
             "exec_scope",
             lambda op, sctx: (
-                sctx.exec_scope.name == "kernel",
-                f"unsupported exec_scope {sctx.exec_scope.name}",
+                sctx.scope_kind == "kernel",
+                f"unsupported exec_scope {sctx.scope_kind}",
             ),
         )
     ],

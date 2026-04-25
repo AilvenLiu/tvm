@@ -137,50 +137,25 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
  * \param name The name of the block.
  * \param no_realize The flag whether to construct SBlockRealize or SBlock.
  * \param exec_scope The name of the execution scope.
- * \param scope_slice_extents The extents of the execution scope slice.
- * \param scope_slice_parent The name of the execution scope slice parent.
  * \return The SBlockFrame.
  */
-SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "",
-                  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
-                  ffi::String scope_slice_parent = "");
+SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "");
 
 void TilePrimitiveCall(tvm::tirx::TilePrimitiveCall op_call);
 
 /*!
  * \brief Create an ExecScopeFrame for execution scope contexts.
  * \param exec_scope_name The name of the execution scope (e.g. "cta", "warp").
- * \param scope_slice_extents Optional extents for scope slicing.
- * \param scope_slice_parent The parent scope name for slicing.
  * \return The ExecScopeFrame.
  */
-ExecScopeFrame ExecScopeBlock(
-    ffi::String exec_scope_name,
-    ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
-    ffi::String scope_slice_parent = "");
+ExecScopeFrame ExecScopeBlock(ffi::String exec_scope_name);
 
-ExecScopeFrame ExecScopeFrameSlice(ExecScopeFrame frame,
-                                   ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
-
-ExecScopeFrame World();
-
-ExecScopeFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                      ffi::String scope_slice_parent);
-
-ExecScopeFrame Cluster(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                       ffi::String scope_slice_parent);
-
-ExecScopeFrame WarpGroup(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                         ffi::String scope_slice_parent);
-
-ExecScopeFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                   ffi::String scope_slice_parent);
-
-ExecScopeFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                    ffi::String scope_slice_parent);
-
-ExecScopeFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
-                      ffi::String scope_slice_parent);
+ExecScopeFrame Kernel();
+ExecScopeFrame Cluster();
+ExecScopeFrame WarpGroup();
+ExecScopeFrame CTA();
+ExecScopeFrame Warp();
+ExecScopeFrame Thread();
 
 ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent);
 

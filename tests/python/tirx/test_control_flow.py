@@ -39,9 +39,8 @@ def test_break_continue1():
         A = Tx.match_buffer(A_ptr, (10,), "int32")
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([32], parent="cta")
-
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.thread():
                 for i in Tx.serial(10):
                     if i == 2:
@@ -62,9 +61,8 @@ def test_break_continue2():
         A = Tx.match_buffer(A_ptr, (9,), "int32")
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([32], parent="cta")
-
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.thread():
                 idx = Tx.alloc_buffer((1,), "int32", scope="local")
                 idx[0] = 0
@@ -90,9 +88,8 @@ def test_break_continue3():
         A = Tx.match_buffer(A_ptr, (10,), "int32")
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([32], parent="cta")
-
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.thread():
                 i = Tx.alloc_buffer((1,), "int32", scope="local")
                 i[0] = 0

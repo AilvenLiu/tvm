@@ -92,9 +92,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         B = Tx.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([thread_cnt], parent="cta")
-
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([thread_cnt])
             with Tx.cta():
                 A_smem = Tx.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 

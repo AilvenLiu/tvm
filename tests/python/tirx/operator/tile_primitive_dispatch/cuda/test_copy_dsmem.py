@@ -50,7 +50,7 @@ def _make_dsmem_dispatch_call(shape, dtype, src_layout, dst_layout):
     config = {"mbar": Var("mbar", "handle"), "remote_cta_id": IntImm("int32", 1)}
     op_call = CopyAsync(BufferRegion(dst_buf, ranges), BufferRegion(src_buf, ranges), config=config)
     target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
-    sctx = DispatchContext(target, ExecScope.create("thread"), {}, {})
+    sctx = DispatchContext(target, ExecScope("thread"), {}, {})
     return copy_dsmem_impl(op_call, sctx)
 
 
@@ -187,9 +187,9 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         B = Tx.match_buffer(B_ptr, shape, dtype)
 
         with Tx.kernel():
-            cbx = Tx.cta_id([CLUSTER_N], parent="cluster")
-            Tx.cta_id([CLUSTER_N], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            cbx = Tx.cta_id_in_cluster([CLUSTER_N])
+            Tx.cta_id([CLUSTER_N])
+            tid = Tx.thread_id([1])
 
             with Tx.cta():
                 pool = Tx.SMEMPool()
@@ -212,22 +212,23 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
                 Tx.ptx.fence.mbarrier_init()
                 Tx.cuda.cluster_sync()
 
-                with Tx.thread()[0:1]:
-                    if cbx == 0:
-                        Tx.copy(src_smem[r], A[r])
-                        Tx.ptx.fence.proxy_async("shared::cta")
+                if Tx.filter(tid, 0, 1):
+                    with Tx.thread():
+                        if cbx == 0:
+                            Tx.copy(src_smem[r], A[r])
+                            Tx.ptx.fence.proxy_async("shared::cta")
 
-                        Tx.copy_async(
-                            dst_smem[r], src_smem[r],
-                            dispatch="dsmem",
-                            mbar=mbar.ptr_to([0]),
-                            remote_cta_id=Tx.int32(1),
-                        )
-                    else:
-                        Tx.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([0]), copy_bytes)
-                        mbar.wait(0, 0)
+                            Tx.copy_async(
+                                dst_smem[r], src_smem[r],
+                                dispatch="dsmem",
+                                mbar=mbar.ptr_to([0]),
+                                remote_cta_id=Tx.int32(1),
+                            )
+                        else:
+                            Tx.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([0]), copy_bytes)
+                            mbar.wait(0, 0)
 
-                        Tx.copy(B[r], dst_smem[r])
+                            Tx.copy(B[r], dst_smem[r])
     # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -259,7 +260,7 @@ def test_dsmem_dispatch_missing_config():
     buf = tvm.tirx.decl_buffer((64,), "float16", "A", scope="shared.dyn", layout=layout)
     br = BufferRegion(buf, [Range.from_min_extent(0, 64)])
     target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
-    sctx = DispatchContext(target, ExecScope.create("thread"), {}, {})
+    sctx = DispatchContext(target, ExecScope("thread"), {}, {})
 
     with pytest.raises(DispatchFail, match="remote_cta_id"):
         copy_dsmem_impl(CopyAsync(br, br, config={"mbar": Var("m", "handle")}), sctx)

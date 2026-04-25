@@ -18,11 +18,9 @@
 
 from tvm_ffi import register_object as _register_object
 
-from tvm.ir.expr import Range
-from tvm.tirx import Buffer, PrimExpr, Var
+from tvm.tirx import Buffer, Var
 
 from ..base import IRBuilderFrame
-from . import _ffi_api
 
 
 @_register_object("script.ir_builder.tirx.TIRFrame")
@@ -42,37 +40,9 @@ class ExecScopeFrame(TIRFrame):
     """A frame that represents an execution scope (e.g. cta, warp, thread).
 
     When exiting this frame, it produces an ExecScopeStmt wrapping the body.
+    To narrow execution to a subset of the scope, wrap the ``with`` in an
+    ``if T.filter(var, lo, hi):`` guard.
     """
-
-    def __getitem__(self, slices) -> "ExecScopeFrame":
-        """Slice operator for exec scope frame.
-
-        Parameters
-        ----------
-        slices : Union[Range, Tuple[Range, ...], PrimExpr]
-            The slices to apply to the exec scope frame.
-
-        Returns
-        -------
-        ExecScopeFrame
-            The exec scope frame with slices applied.
-        """
-        if not isinstance(slices, tuple):
-            slices = (slices,)
-        if len(slices) == 1 and isinstance(slices[0], PrimExpr):
-            # If the slice is a single PrimExpr, it is a select condition
-            return _ffi_api.ExecScopeFrameSlice(self, slices[0])  # pylint: disable=no-member
-        # Otherwise, the slices are a list of ranges
-        slices_t = []
-        for s in slices:
-            if isinstance(s, slice):
-                assert s.step is None, "Slice step is not supported"
-                slices_t.append(Range(s.start, s.stop))
-            elif isinstance(s, Range):
-                slices_t.append(s)
-            else:
-                assert False, f"Slice must be a slice or Range, got {s} of type {type(s)}"
-        return _ffi_api.ExecScopeFrameSlice(self, slices_t)  # pylint: disable=no-member
 
 
 @_register_object("script.ir_builder.tirx.SBlockInitFrame")

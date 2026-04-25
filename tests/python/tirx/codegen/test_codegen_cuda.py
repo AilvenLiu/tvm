@@ -38,11 +38,12 @@ def test_cuda_atomic_add():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((1,), "int32"), B: Tx.Buffer((1,), "float32")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
-            with Tx.thread()[tx == 0]:
-                Tx.cuda.atomic_add(A.data, Tx.int32(1))
-                Tx.cuda.atomic_add(B.data, Tx.float32(1.0))
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    Tx.cuda.atomic_add(A.data, Tx.int32(1))
+                    Tx.cuda.atomic_add(B.data, Tx.float32(1.0))
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_atomic_add" in src
@@ -59,10 +60,11 @@ def test_cuda_thread_fence():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
-            with Tx.thread()[tx == 0]:
-                Tx.cuda.thread_fence()
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    Tx.cuda.thread_fence()
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_thread_fence" in src
@@ -72,10 +74,11 @@ def test_cuda_nano_sleep():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
-            with Tx.thread()[tx == 0]:
-                Tx.cuda.nano_sleep(1)
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    Tx.cuda.nano_sleep(1)
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_nano_sleep" in src
@@ -85,10 +88,11 @@ def test_cuda_atomic_cas():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "int32")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
-            with Tx.thread()[tx == 0]:
-                Tx.cuda.atomic_cas(A.data, Tx.int32(1), Tx.int32(2))
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    Tx.cuda.atomic_cas(A.data, Tx.int32(1), Tx.int32(2))
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_atomic_cas" in src
@@ -105,16 +109,17 @@ __device__ int32_t add_one(int32_t a) {
         @Tx.prim_func(tirx=True)
         def main(a: Tx.Buffer((16, 16), "int32"), b: Tx.Buffer((16, 16), "int32")):
             with Tx.kernel():
-                Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([32], parent="cta")
-                with Tx.thread()[tx == 0]:
-                    for i, j in Tx.grid(16, 16):
-                        b[i, j] = Tx.cuda.func_call(
-                            "add_one",
-                            a[i, j],
-                            source_code=add_one,
-                            return_type="int32",
-                        )
+                cta_id = Tx.cta_id([1])
+                tx = Tx.thread_id([32])
+                if Tx.filter(tx, tx == 0):
+                    with Tx.thread():
+                        for i, j in Tx.grid(16, 16):
+                            b[i, j] = Tx.cuda.func_call(
+                                "add_one",
+                                a[i, j],
+                                source_code=add_one,
+                                return_type="int32",
+                            )
 
         src, mod = _get_source(main)
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
@@ -137,11 +142,12 @@ __device__ void print(int32_t a) {
         @Tx.prim_func(tirx=True)
         def main(a: Tx.Buffer((16, 16), "int32")):
             with Tx.kernel():
-                Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([32], parent="cta")
-                with Tx.thread()[tx == 0]:
-                    for i, j in Tx.grid(16, 16):
-                        Tx.cuda.func_call("print", a[i, j], source_code=print_func)
+                cta_id = Tx.cta_id([1])
+                tx = Tx.thread_id([32])
+                if Tx.filter(tx, tx == 0):
+                    with Tx.thread():
+                        for i, j in Tx.grid(16, 16):
+                            Tx.cuda.func_call("print", a[i, j], source_code=print_func)
 
         src, mod = _get_source(main)
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
@@ -159,9 +165,9 @@ def test_warp_shuffle_xor_sync():
         A = Tx.match_buffer(A_ptr, (32,), dtype="float32", align=16)
 
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane_id = Tx.lane_id([32])
 
             with Tx.thread():
                 A_local = Tx.alloc_buffer([1], "float32", scope="local")
@@ -203,8 +209,8 @@ def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((N), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([32])
             with Tx.thread():
                 A_shared = Tx.alloc_shared([N], "float16")
                 for i in Tx.vectorized(N):
@@ -241,12 +247,13 @@ def test_ptx_ldmatrix(trans, num):
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "float16"), B: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
             A_shared = Tx.alloc_shared([16, 16], "float16")
-            with Tx.thread()[tx == 0]:
-                for i, j in Tx.grid(16, 16):
-                    A_shared[i, j] = A[i, j]
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    for i, j in Tx.grid(16, 16):
+                        A_shared[i, j] = A[i, j]
             Tx.cuda.cta_sync()
             with Tx.thread():
                 A_local = Tx.alloc_local([8], "float16")
@@ -301,8 +308,8 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
         C: Tx.Buffer((16, 8), c_type),
     ):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
             with Tx.thread():
                 D_local = Tx.alloc_local([4], d_type)
                 A_local = Tx.alloc_local([8], a_type)
@@ -392,8 +399,8 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
         C: Tx.Buffer((16, 8), c_type),
     ):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
             with Tx.thread():
                 D_local = Tx.alloc_local([4], d_type)
                 A_local = Tx.alloc_local([4], a_type)

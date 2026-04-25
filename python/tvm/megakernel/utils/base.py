@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 """Base abstract classes for megakernel."""
 
 import functools
@@ -85,12 +84,14 @@ class Barriers:
 
     @Tx.inline
     def init(self, threads_num_wait):
+        tid = Tx.thread_id([KernelConfig.NUM_THREADS])
         self._alloc()
         if self.pipe_depth == 1:
-            with Tx.thread()[0:1]:
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([0]), threads_num_wait)
-        else:
-            with Tx.thread()[0:1]:
+            if Tx.filter(tid, 0, 1):
+                with Tx.thread():
+                    Tx.ptx.mbarrier.init(self.mbar.ptr_to([0]), threads_num_wait)
+        elif Tx.filter(tid, 0, 1):
+            with Tx.thread():
                 for i in Tx.serial(self.pipe_depth):
                     Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
@@ -111,10 +112,10 @@ class SmemManager:
         self.ptr = ptr
         self.reguler_pool_allocator = Tx.SMEMPool(ptr)
         self.persistent_pool_allocator = Tx.SMEMPool(None if fusion_mode else ptr)
-        self.tiles = {}  # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]  # noqa: E501
+        self.tiles = {}
         self.runtime_tile_chunk_count = {}
-        self.bufs = {}  # buf -> (split, beg, size, method)
-        self.persistent_bufs = {}  # persistent buf -> (beg, end)
+        self.bufs = {}
+        self.persistent_bufs = {}
         self.cur_tile_name = ""
         self.persistent_pool_allocator.move_base_to(self.chunk_size * self.chunk_num)
         self.exist_bufs = {}
@@ -127,11 +128,9 @@ class SmemManager:
 
     @property
     def pool_allocator(self):
-        # Default shared allocator for compatibility with existing kernels.
         return self.reguler_pool_allocator
 
     def _inner_alloc(self):
-        # notes: these smem will never be overwritten by any tasks
         self.mbar = self.alloc((self.chunk_num,), "uint64", name="mbar", method="persistent")
         self.shared_count = self.alloc((1,), "int32", name="shared_count", method="persistent")
         if self.fusion_mode:
@@ -147,22 +146,19 @@ class SmemManager:
 
     @Tx.inline
     def init(self):
+        tid = Tx.thread_id([KernelConfig.NUM_THREADS])
         self.check_smem_well_formed(debug=False)
         self._inner_alloc()
         self.cur_phase[0] = 1
-        with Tx.thread()[0:1]:
-            for i in Tx.serial(self.chunk_num):
-                Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), 1)
-            self.shared_count[0] = 0
+        if Tx.filter(tid, 0, 1):
+            with Tx.thread():
+                for i in Tx.serial(self.chunk_num):
+                    Tx.ptx.mbarrier.init(self.mbar.ptr_to([i]), 1)
+                self.shared_count[0] = 0
         Tx.tvm_storage_sync("shared")
         Tx.ptx.fence.mbarrier_init()
         Tx.ptx.fence.proxy_async("shared::cta")
 
-    # wrapper for pool allocator
-    # method: "shared" -> wait_all / arrive_all
-    #         "exclusive" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will be exclusive on corresponding pages  # noqa: E501
-    #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages  # noqa: E501
-    #         "persistent" -> persistent smem, cannot be wait / arrive
     def alloc(
         self,
         shape,
@@ -177,7 +173,6 @@ class SmemManager:
         name=None,
         method: Literal["shared", "exclusive", "persistent"] = "shared",
     ):
-        # avoid name conflict
         if name is not None:
             if name in self.exist_bufs:
                 self.exist_bufs[name] += 1
@@ -200,7 +195,6 @@ class SmemManager:
         if method == "persistent":
             self.persistent_bufs[buf] = (beg, end)
         else:
-            # check the validity of the method
             if method == "shared":
                 assert len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0, (
                     "Cannot use both shared and shared/exclusive methods at the same time"
@@ -209,7 +203,6 @@ class SmemManager:
                 assert len(self.tiles[self.cur_tile_name][1]["shared"]) == 0, (
                     "Cannot use both shared and shared/exclusive methods at the same time"
                 )
-            # allocation info
             buf_info = (split, beg, size, method)
             self.tiles[self.cur_tile_name][0] = max(
                 self.tiles[self.cur_tile_name][0], (end - 1) // self.chunk_size
@@ -224,24 +217,19 @@ class SmemManager:
                         self.tiles[self.cur_tile_name][2][chunk_id] += 1
         return buf
 
-    # call before kernel compilation
     def check_smem_well_formed(self, debug=False):
         for _, buf_info_dict, _ in self.tiles.values():
-            # check the exclusive smem and confirm no overlap in each tile
             checked_exclusive = []
             check_overlap = []
             for method in ["shared", "exclusive"]:
                 for split, beg, size, _ in buf_info_dict[method]:
                     end = beg + size
-                    # check the max smem size
                     assert end <= self.chunk_num * self.chunk_size
-                    # confirm no overlap in each tile
                     for beg_other, end_other in check_overlap:
                         assert beg >= end_other or beg_other >= end, (
                             "Overlap detected in smem allocation"
                         )
                     check_overlap.append((beg, end))
-                    # check the exclusive smem
                     if method == "exclusive":
                         for split_idx in range(split):
                             beg_chunk_id = (beg + size // split * split_idx) // self.chunk_size
@@ -257,8 +245,6 @@ class SmemManager:
                         beg_chunk_id = beg // self.chunk_size
                         end_chunk_id = (end - 1) // self.chunk_size
                         checked_exclusive.append((beg_chunk_id, end_chunk_id))
-
-        # confirm that no overlap between persistent smem and other smem
         for beg_persistent, end_persistent in self.persistent_bufs.values():
             assert (
                 beg_persistent >= self.chunk_size * self.chunk_num
@@ -283,7 +269,6 @@ class SmemManager:
         for k, v in self.persistent_bufs.items():
             print(k, v)
 
-    # call before each op-kernel compilation
     def set_tile(self, cur_tile: Tile | None):
         if cur_tile is None:
             self.cur_tile_name = "default"
@@ -296,7 +281,7 @@ class SmemManager:
         ]
         self.runtime_tile_chunk_count[self.cur_tile_name] = [
             [0 for _ in range(self.chunk_num)] for _ in range(2)
-        ]  # wait count, arrival count
+        ]
         self.reguler_pool_allocator.move_base_to(0)
 
     def _assert_cond(self, cond):
@@ -314,17 +299,14 @@ class SmemManager:
         self.cur_tile_name = ""
 
     def _check_runtime(self):
-        pass  # TODO: not support now
+        pass
 
-    # wait all the chunks, call at the beginning of the task, cta level interface
     @Tx.inline
     def wait_all(self, level: Literal["cta", "warpgroup"] = "cta"):
-        # self._assert_cond(len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0)
-        # wait the mbarrier
         with Tx.thread():
-            lane_id = Tx.thread_id([32], parent="warp")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            lane_id = Tx.lane_id([32])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
             if level == "cta":
                 if warp_id == 0:
                     if lane_id < self.chunk_num:
@@ -336,12 +318,10 @@ class SmemManager:
                         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
                 Tx.ptx.bar.sync(6 + wg_id, 128)
 
-    # wait the specific chunk, call before use the corresponding smem, warp-level interface
     @Tx.inline
     def wait_specific(self, lane_id, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
-        self._assert_cond(self.bufs[buffer][3] == "exclusive")  # must be exclusive
-        # wait the mbarrier
+        self._assert_cond(self.bufs[buffer][3] == "exclusive")
         beg_chunk_id = (
             self.bufs[buffer][1] + self.bufs[buffer][2] // self.bufs[buffer][0] * split_idx
         ) // self.chunk_size
@@ -350,30 +330,23 @@ class SmemManager:
             + self.bufs[buffer][2] // self.bufs[buffer][0] * (split_idx + 1)
             - 1
         ) // self.chunk_size
-        if lane_id >= beg_chunk_id and lane_id <= end_chunk_id:
+        if (lane_id >= beg_chunk_id) & (lane_id <= end_chunk_id):
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
 
-    # wait the unused chunk, warp-level interface
     @Tx.inline
     def wait_unused(self, lane_id, cur_tile: Tile):
-        self._assert_cond(
-            len(self.tiles[self.cur_tile_name][1]["shared"]) == 0
-        )  # must be exclusive
-        # wait the mbarrier
-        if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
+        self._assert_cond(len(self.tiles[self.cur_tile_name][1]["shared"]) == 0)
+        if (lane_id < self.chunk_num) & (lane_id > self.tiles[str(cur_tile)][0]):
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
 
-    # wait the specific chunk, thread-level interface
     @Tx.inline
     def wait_chunk(self, chunk_id):
         Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([chunk_id]), self.cur_phase[0])
 
-    # wait the specific chunk, call before use the corresponding smem, thread-level interface
     @Tx.inline
     def wait_specific_one_thread(self, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
-        self._assert_cond(self.bufs[buffer][3] == "exclusive")  # must be exclusive
-        # wait the mbarrier
+        self._assert_cond(self.bufs[buffer][3] == "exclusive")
         beg_chunk_id = (
             self.bufs[buffer][1] + self.bufs[buffer][2] // self.bufs[buffer][0] * split_idx
         ) // self.chunk_size
@@ -385,15 +358,12 @@ class SmemManager:
         for idx in Tx.serial(0, end_chunk_id - beg_chunk_id + 1):
             Tx.ptx.mbarrier.try_wait(self.mbar.ptr_to([beg_chunk_id + idx]), self.cur_phase[0])
 
-    # arrive all the chunks, call at the end of the task, cta level interface
     @Tx.inline
     def arrive_all(self, level: Literal["cta", "warpgroup"] = "cta"):
-        # self._assert_cond(len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0)
-        # arrive the mbarrier
         with Tx.thread():
-            lane_id = Tx.thread_id([32], parent="warp")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            lane_id = Tx.lane_id([32])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
             if level == "cta":
                 Tx.tvm_storage_sync("shared")
                 if warp_id == 0:
@@ -412,18 +382,16 @@ class SmemManager:
                                 Tx.address_of(self.shared_count[0]), -KernelConfig.WG_NUMBER
                             )
                     self.reg_count[0] = Tx.tvm_warp_shuffle(
-                        0xFFFFFFFF, self.reg_count[0], 0, 32, 32
+                        4294967295, self.reg_count[0], 0, 32, 32
                     )
                     if self.reg_count[0] == KernelConfig.WG_NUMBER:
                         if lane_id < self.chunk_num:
                             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
-    # arrive the specific chunk, call after the buffer can ben released, warp level interface
     @Tx.inline
     def arrive_specific(self, lane_id, buffer, split_idx: int):
         self._assert_cond(buffer in self.bufs and buffer not in self.persistent_bufs)
-        self._assert_cond(self.bufs[buffer][3] == "exclusive")  # must be exclusive
-        # arrive the mbarrier
+        self._assert_cond(self.bufs[buffer][3] == "exclusive")
         beg_chunk_id = (
             self.bufs[buffer][1] + self.bufs[buffer][2] // self.bufs[buffer][0] * split_idx
         ) // self.chunk_size
@@ -432,19 +400,15 @@ class SmemManager:
             + self.bufs[buffer][2] // self.bufs[buffer][0] * (split_idx + 1)
             - 1
         ) // self.chunk_size
-        if lane_id >= beg_chunk_id and lane_id <= end_chunk_id:
+        if (lane_id >= beg_chunk_id) & (lane_id <= end_chunk_id):
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
-    # arrive the unused chunk, call at the end of the task, warp level interface
     @Tx.inline
     def arrive_unused(self, lane_id, cur_tile: Tile):
-        self._assert_cond(
-            len(self.tiles[self.cur_tile_name][1]["shared"]) == 0
-        )  # must be exclusive
-        if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
+        self._assert_cond(len(self.tiles[self.cur_tile_name][1]["shared"]) == 0)
+        if (lane_id < self.chunk_num) & (lane_id > self.tiles[str(cur_tile)][0]):
             Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
-    # arrive the specific chunk, thread-level interface
     @Tx.inline
     def arrive_chunk(self, chunk_id):
         Tx.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
@@ -496,7 +460,6 @@ class TileSchedulerBase:
 
     @Tx.inline
     def pre_notify_and_push(self, evt, func_notify, func_trigger_list, push_level, scope, scope_id):
-        # for dynamic scheduler
         pass
 
     def valid(self):
@@ -518,10 +481,9 @@ class InitETensorTile(Tile):
             idx = idx // shape[i]
         return list(reversed(nd_idx))
 
-    # only set etensor_init_complete in static scheduler
     def run(self, m_idx, n_idx, k_idx):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             if_frames = [Tx.If(m_idx == i) for i in range(self.total_num_etensors)]
             then_frames = [Tx.Then() for i in range(self.total_num_etensors)]
             else_frames = [Tx.Else() for i in range(self.total_num_etensors - 1)]
@@ -558,17 +520,12 @@ class InitETensorTile(Tile):
 class MegaKernelWrapper:
     """Base class for megakernel wrappers."""
 
-    ETENSOR_WORKSPACE_SIZE = 1024 * 1024  # 4MB
+    ETENSOR_WORKSPACE_SIZE = 1024 * 1024
     NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
-    PROFILER_BUFFER_SIZE = int(1e7)
+    PROFILER_BUFFER_SIZE = int(10000000.0)
     PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 
-    def __init__(
-        self,
-        config: dict = {},
-        tp_size: int = 1,
-        profiler_on: bool = False,
-    ):
+    def __init__(self, config: dict = {}, tp_size: int = 1, profiler_on: bool = False):
         self.tp_size = tp_size
         self.config = config
         self.profiler_on = profiler_on
@@ -598,7 +555,7 @@ class MegaKernelWrapper:
     def init_profiler(self, profiler_buffer):
         self._init_profiler(profiler_buffer)
         with Tx.cta():
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
             if self.profiler_on:
                 self.profiler.init(warp_id)
 
@@ -618,7 +575,7 @@ class MegaKernelWrapper:
         event_type = Tx.meta_var(self.tile_attr[tile][0])
         self.smem_manager.enter_tile_runtime(tile)
         with Tx.cta():
-            lane_id = Tx.thread_id([32], parent="warp")
+            lane_id = Tx.lane_id([32])
             if self.profiler_on:
                 self.profiler.start(event_type, lane_id == 0)
             tile.run(*args, **kwargs)
@@ -629,7 +586,7 @@ class MegaKernelWrapper:
     def run_tile_prefetch(self, tile: Tile, *args):
         self.smem_manager.enter_tile_runtime(tile)
         with Tx.cta():
-            lane_id = Tx.thread_id([32], parent="warp")
+            lane_id = Tx.lane_id([32])
             if self.profiler_on:
                 self.profiler.start(ProfileEventType.PREFETCH, lane_id == 0)
             tile.prefetch(*args)
@@ -669,7 +626,6 @@ class MegaKernelWrapper:
 
     @Tx.inline
     def task_impl_init_etensor(self, is_dynamic_sch):
-        # TODO: add wait, notify and push
         self.run_tile(
             self.init_etensor_tile,
             self.tile_scheduler.m_idx,
@@ -689,10 +645,8 @@ class MegaKernelWrapper:
     def task_impl_wait_etensor_init_complete(self, is_dynamic_sch):
         if not is_dynamic_sch:
             with Tx.thread():
-                warp_id = Tx.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
-                lane_id = Tx.thread_id([32], parent="warp")
+                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+                lane_id = Tx.lane_id([32])
                 if self.profiler_on:
                     self.profiler.start(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
                 state = Tx.alloc_local([1], "int32")
@@ -700,15 +654,14 @@ class MegaKernelWrapper:
                 while 1:
                     if lane_id == 0:
                         Tx.ptx.ld_global_acquire(
-                            state[0],
-                            self.evt_etensor_init_complete.sem.ptr_to([0]),
+                            state[0], self.evt_etensor_init_complete.sem.ptr_to([0])
                         )
                     if any_sync(
-                        0xFFFFFFFF,
+                        4294967295,
                         state[0] <= KernelConfig.SM_NUMBER * (SemaphoreBase.base + 1)
                         and state[0] > 0,
                     ):
-                        if lane_id == 0 and warp_id == 0:
+                        if (lane_id == 0) & (warp_id == 0):
                             Tx.cuda.atomic_add(
                                 self.evt_etensor_init_complete.sem.ptr_to([0]),
                                 -(SemaphoreBase.base + 1),

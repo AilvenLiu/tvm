@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 """Shared helpers for copy operator dispatches on CUDA targets."""
 
 from collections.abc import Iterable
@@ -28,12 +27,7 @@ from tvm.tirx.operator.tile_primitive_dispatch.dispatcher import fail
 from tvm.tirx.operator.tile_primitive_dispatch.registry import DispatchContext
 from tvm.tirx.stmt import TilePrimitiveCall
 
-from ..common import (
-    get_st_extent,
-    get_vec_len,
-    match_scope,
-    validate_copy_op,
-)
+from ..common import get_st_extent, get_vec_len, match_scope, validate_copy_op
 
 DEFAULT_ALLOWED_PAIRS: tuple[tuple[str, str], ...] = (
     ("global", "shared*"),
@@ -51,20 +45,22 @@ def _scope_allowed(
     allowed_pairs: Iterable[tuple[str, str]] = DEFAULT_ALLOWED_PAIRS,
 ):
     op_call = TilePrimitiveCall.downcast(op_call)
-    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
+    dst_buffer_region, src_buffer_region = (op_call.dst, op_call.src)
     src_scope = src_buffer_region.buffer.scope()
     dst_scope = dst_buffer_region.buffer.scope()
-
     ok = any(
-        match_scope(src_scope, src_pat) and match_scope(dst_scope, dst_pat)
-        for src_pat, dst_pat in allowed_pairs
+        (
+            match_scope(src_scope, src_pat) and match_scope(dst_scope, dst_pat)
+            for src_pat, dst_pat in allowed_pairs
+        )
     )
     if not ok:
-        allowed_str = ", ".join(f"{a}->{b}" for a, b in allowed_pairs)
-        return False, (
-            f"unsupported memory scopes src={src_scope} dst={dst_scope}; allowed: {allowed_str}"
+        allowed_str = ", ".join((f"{a}->{b}" for a, b in allowed_pairs))
+        return (
+            False,
+            f"unsupported memory scopes src={src_scope} dst={dst_scope}; allowed: {allowed_str}",
         )
-    return True, None
+    return (True, None)
 
 
 def _is_valid_copy(op_call: TilePrimitiveCall, sctx: DispatchContext):
@@ -72,15 +68,14 @@ def _is_valid_copy(op_call: TilePrimitiveCall, sctx: DispatchContext):
 
 
 def _vec_len_possible(op_call: TilePrimitiveCall, sctx: DispatchContext):
-    # mirror get_vec_len inputs
     op_call = TilePrimitiveCall.downcast(op_call)
-    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
-    if sctx.exec_scope.name == "cta":
+    dst_buffer_region, src_buffer_region = (op_call.dst, op_call.src)
+    if sctx.is_cta:
         tx = sctx.launch_params["threadIdx.x"].dom.extent
-    elif sctx.exec_scope.name == "thread":
+    elif sctx.is_thread:
         tx = 1
     else:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for vec_len"
+        return (False, f"unsupported exec_scope {sctx.scope_kind} for vec_len")
     vec_len = op_call.config.get("vec_len", None)
     if vec_len is None:
         vec_len = get_vec_len(
@@ -95,25 +90,19 @@ def _vec_len_possible(op_call: TilePrimitiveCall, sctx: DispatchContext):
             thread_cnt=tx,
         )
     if vec_len is None:
-        return False, "no valid vector length; check alignment/extents/thread-count"
-    return True, None
+        return (False, "no valid vector length; check alignment/extents/thread-count")
+    return (True, None)
 
 
-def copy_default_impl(
-    op_call: TilePrimitiveCall,
-    sctx: DispatchContext,
-) -> PrimFunc | None:
+def copy_default_impl(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc | None:
     """Schedule copy operation
     The implementation serves as a fallback for copy operations that uses a single thread
     to move data element by element.
     """
     op_call = TilePrimitiveCall.downcast(op_call)
-    dst_buffer_region, src_buffer_region = op_call.dst, op_call.src
-
+    dst_buffer_region, src_buffer_region = (op_call.dst, op_call.src)
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
-
-    # Extract regions and validate dimensions
     src_st, src_extent = get_st_extent(src_buffer_region)
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
 
@@ -142,29 +131,24 @@ def copy_default_impl(
         with Tx.grid(*copy_extents) as lvs:
             Tx.buffer_store(dst, src[tuple(get_src_coord(lvs))], get_dst_coord(lvs))
 
-    if sctx.exec_scope.name == "cta":
+    if sctx.is_cta:
         tx = sctx.launch_params["threadIdx.x"].dom.extent
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
-        # fmt: off
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             for tid_x in Tx.thread_binding(tx, "threadIdx.x"):
-                with Tx.thread()[tid_x == 0]:
+                if tid_x == 0:
                     copy(dst, src)
-
             if dst.scope().startswith("shared"):
                 Tx.tvm_storage_sync("shared")
-        # fmt: on
-    elif sctx.exec_scope.name == "thread":
-        # fmt: off
+    elif sctx.is_thread:
+
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def impl():
             copy(dst, src)
-        # fmt: on
     else:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
-
+        fail(f"unsupported exec_scope {sctx.scope_kind}")
     return impl
 
 
@@ -177,24 +161,14 @@ def _is_valid_smem_tmem_copy(op_call: TilePrimitiveCall, sctx: DispatchContext):
     dst_region, src_region = op_call.args[:2]
     src: Buffer = src_region.buffer
     dst: Buffer = dst_region.buffer
-
-    # Check storage scopes
     if not (src.scope().startswith("shared") and dst.scope() == "tmem"):
-        return False, f"expected shared->tmem, got {src.scope()}->{dst.scope()}"
-
-    # Check layouts exist
+        return (False, f"expected shared->tmem, got {src.scope()}->{dst.scope()}")
     if not (src.layout and dst.layout):
-        return False, "both buffers must have layouts"
-
-    # Check 2D buffers
+        return (False, "both buffers must have layouts")
     if len(src.shape) != 2 or len(dst.shape) != 2:
-        return False, "both buffers must be 2D"
-
-    # Check tmem has allocated_addr
+        return (False, "both buffers must be 2D")
     if dst.allocated_addr is None:
-        return False, "tmem buffer must have allocated_addr"
-
-    # Check bit-width of columns match (allowing different dtypes)
+        return (False, "tmem buffer must have allocated_addr")
     analyzer = Analyzer()
     src_ext = [r.extent for r in src_region.region]
     dst_ext = [r.extent for r in dst_region.region]
@@ -203,13 +177,12 @@ def _is_valid_smem_tmem_copy(op_call: TilePrimitiveCall, sctx: DispatchContext):
     src_col_bits = src_ext[1] * src_dtype_bits
     dst_col_bits = dst_ext[1] * dst_dtype_bits
     if not analyzer.can_prove_equal(src_col_bits, dst_col_bits):
-        return False, "column bit-widths must match"
-
-    return True, None
+        return (False, "column bit-widths must match")
+    return (True, None)
 
 
 def _single_thread_exec(op_call: TilePrimitiveCall, sctx: DispatchContext):
     """Check if execution scope is single-thread."""
-    exec_scope = sctx.exec_scope.name
+    exec_scope = sctx.scope_kind
     ok = exec_scope == "thread"
-    return ok, None if ok else f"expected thread exec_scope, got {exec_scope}"
+    return (ok, None if ok else f"expected thread exec_scope, got {exec_scope}")

@@ -88,15 +88,17 @@ def test_partial_reduction():
 
     @Tx.meta_class
     class DynamicTileScheduler:
-        def __init__(self, queue: MPMCQueue):
+        def __init__(self, queue: MPMCQueue, tid):
             self.queue = queue
+            self.tid = tid
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
             self.fetched_task_idx = Tx.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")  # noqa: E501
 
         @Tx.inline
         def _fetch_from_queue(self):
-          with Tx.thread()[0:1]:
-            self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx)
+          if Tx.filter(self.tid, 0, 1):
+              with Tx.thread():
+                self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx)
           Tx.cuda.cta_sync()
 
         @Tx.inline
@@ -112,20 +114,22 @@ def test_partial_reduction():
 
     @Tx.meta_class
     class Semaphore:
-        def __init__(self, cnt: int, buffer: Tx.Buffer, queue: MPMCQueue):
+        def __init__(self, cnt: int, buffer: Tx.Buffer, queue: MPMCQueue, tid):
             self.cnt = cnt
             self.sem = buffer
             self.state = int_var("state")
             self.queue = queue
+            self.tid = tid
         @Tx.inline
         def semaphore_notify(self, *coord):
             with Tx.thread():
                 Tx.cuda.cta_sync()
-                with Tx.thread()[0:1]:
-                    # add 1 because atomic_add returns the old value
-                    self.state[0] = Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1  # noqa: E501
-                    if self.state[0] == self.cnt:
-                        self.queue.enqueue(TaskType.REDUCE.value, coord[0], 0)
+                if Tx.filter(self.tid, 0, 1):
+                    with Tx.thread():
+                        # add 1 because atomic_add returns the old value
+                        self.state[0] = Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1  # noqa: E501
+                        if self.state[0] == self.cnt:
+                            self.queue.enqueue(TaskType.REDUCE.value, coord[0], 0)
                 Tx.cuda.thread_fence()
 
 
@@ -136,8 +140,8 @@ def test_partial_reduction():
         B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
 
         with Tx.kernel():
-            bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
+            bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N])
+            tid = Tx.thread_id([1024])
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
@@ -153,8 +157,8 @@ def test_partial_reduction():
         C_ptr = Tx.match_buffer(C, (M, 1), "float32")
 
         with Tx.kernel():
-            bx = Tx.cta_id([NUM_BLOCK_M], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
+            bx = Tx.cta_id([NUM_BLOCK_M])
+            tid = Tx.thread_id([1024])
             with Tx.cta():
                 B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
@@ -177,16 +181,16 @@ def test_partial_reduction():
         head_ptr = Tx.match_buffer(head, (1, ), "int32")
         tail_ptr = Tx.match_buffer(tail, (1, ), "int32")
         with Tx.kernel():
-            bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
+            bx = Tx.cta_id([TOTAL_SM_CNT])
+            tid = Tx.thread_id([1024])
             queue = MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M)  # noqa: E501
-            sem = Semaphore(NUM_BLOCK_N, sem_ptr, queue)
+            sem = Semaphore(NUM_BLOCK_N, sem_ptr, queue, tid)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem_1 = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 B_smem_2 = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                tile_scheduler = DynamicTileScheduler(queue)
+                tile_scheduler = DynamicTileScheduler(queue, tid)
                 tile_scheduler.init(bx)
                 while tile_scheduler.valid():
                     if tile_scheduler.fetched_task_type[0] == TaskType.PARTIAL.value:

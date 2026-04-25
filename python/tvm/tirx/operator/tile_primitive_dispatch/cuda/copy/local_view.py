@@ -70,8 +70,8 @@ def validate_copy_local_view(
     dst_br, src_br = op_call.dst, op_call.src
     dst, src = dst_br.buffer, src_br.buffer
 
-    if not (sctx.is_cuda() and sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"]):
-        return False, f"unsupported exec_scope {sctx.exec_scope.name}"
+    if not (sctx.is_cuda() and sctx.scope_kind in ["warp", "warpgroup", "cta", "cluster"]):
+        return False, f"unsupported exec_scope {sctx.scope_kind}"
     if src.dtype != dst.dtype:
         return False, f"dtype mismatch: src={src.dtype}, dst={dst.dtype}"
 

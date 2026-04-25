@@ -61,7 +61,7 @@ class PipelineState:
 
 @Tx.meta_class
 class MBarrier:
-    """Mbarrier wrapper with regular mbarrier.arrive.
+    """Mbarrier wrapper with regular ``mbarrier.arrive``.
 
     Parameters
     ----------
@@ -72,16 +72,26 @@ class MBarrier:
     name : str
         Descriptive name. Propagated to the underlying buffer so that
         debug tools (e.g. synccheck) can surface it in reports.
+    phase_offset : int
+        XORed into the phase bit on every ``wait`` / ``arrive``.
+    leader : PrimExpr, optional
+        Boolean predicate selecting the single thread that runs
+        ``mbarrier.init``. Defaults to ``Tx.cuda.thread_rank() == 0`` --
+        thread 0 of the enclosing CTA, which always picks exactly one
+        thread regardless of which scope_id vars the caller declared.
+        Override only when you want a different CTA-local thread to do
+        the init.
     """
 
-    def __init__(self, pool, depth, name="mbar", phase_offset=0):
+    def __init__(self, pool, depth, name="mbar", phase_offset=0, leader=None):
         self.buf = pool.alloc((depth,), "uint64", align=8, name=name)
         self.depth = depth
         self.phase_offset = phase_offset
+        self.leader = leader if leader is not None else (Tx.cuda.thread_rank() == 0)
 
     @Tx.inline
     def init(self, count):
-        with Tx.thread()[0:1]:
+        if self.leader:
             for i in Tx.unroll(self.depth):
                 Tx.ptx.mbarrier.init(self.buf.ptr_to([i]), count)
 
@@ -128,11 +138,10 @@ class TMABar(MBarrier):
 
 
 class TCGen05Bar(MBarrier):
-    """Barrier signaled by tcgen05 commit.
+    """Barrier signaled by ``tcgen05`` commit.
 
     The caller is responsible for ensuring only one thread issues the
-    commit (e.g. by wrapping the call in ``Tx.elected()`` or
-    ``if Tx.ptx.elect_sync():``).
+    commit, e.g. by wrapping the call in ``if Tx.ptx.elect_sync():``.
     """
 
     @Tx.inline
@@ -167,6 +176,9 @@ class Pipe:
         Expected arrival count for the empty barrier.
     name : str
         Descriptive name prefix for generated barriers.
+    leader : PrimExpr, optional
+        Propagated to the underlying MBarrier / TMABar / TCGen05Bar.
+        Defaults to ``Tx.cuda.thread_rank() == 0`` when omitted.
     """
 
     def __init__(
@@ -180,11 +192,16 @@ class Pipe:
         init_empty=1,
         empty_phase_offset=0,
         name="pipe",
+        leader=None,
     ):
-        self.full = full_type(pool, stages, name=f"{name}_full")
+        self.full = full_type(pool, stages, name=f"{name}_full", leader=leader)
         if empty_type is not None:
             self.empty = empty_type(
-                pool, stages, name=f"{name}_empty", phase_offset=empty_phase_offset
+                pool,
+                stages,
+                name=f"{name}_empty",
+                phase_offset=empty_phase_offset,
+                leader=leader,
             )
         else:
             self.empty = None
@@ -195,7 +212,7 @@ class Pipe:
             self.empty.init(init_empty)
 
     @classmethod
-    def tma(cls, pool, stages, *, empty_count=1, empty_phase_offset=0, name="pipe"):
+    def tma(cls, pool, stages, *, empty_count=1, empty_phase_offset=0, name="pipe", leader=None):
         """TMA -> consumer: full=TMABar, empty=TCGen05Bar."""
         return cls(
             pool,
@@ -206,10 +223,13 @@ class Pipe:
             init_empty=empty_count,
             empty_phase_offset=empty_phase_offset,
             name=name,
+            leader=leader,
         )
 
     @classmethod
-    def tcgen05(cls, pool, stages, *, empty_count=None, empty_phase_offset=0, name="pipe"):
+    def tcgen05(
+        cls, pool, stages, *, empty_count=None, empty_phase_offset=0, name="pipe", leader=None
+    ):
         """TCGen05 -> consumer: full=TCGen05Bar, empty=MBarrier (if empty_count given)."""
         return cls(
             pool,
@@ -220,10 +240,21 @@ class Pipe:
             init_empty=empty_count,
             empty_phase_offset=empty_phase_offset,
             name=name,
+            leader=leader,
         )
 
     @classmethod
-    def mbar(cls, pool, stages, *, full_count, empty_count=None, empty_phase_offset=0, name="pipe"):
+    def mbar(
+        cls,
+        pool,
+        stages,
+        *,
+        full_count,
+        empty_count=None,
+        empty_phase_offset=0,
+        name="pipe",
+        leader=None,
+    ):
         """Thread -> thread: full=MBarrier, empty=MBarrier (if empty_count given)."""
         return cls(
             pool,
@@ -234,6 +265,7 @@ class Pipe:
             init_empty=empty_count,
             empty_phase_offset=empty_phase_offset,
             name=name,
+            leader=leader,
         )
 
     def cursor(self, role="consumer"):

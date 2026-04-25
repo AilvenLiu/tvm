@@ -51,11 +51,12 @@ def test_fp8_gemm_hopper_no_ws():
     # fmt: off
     @Tx.inline
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tirx.Buffer, B_smem: tvm.tirx.Buffer, A_map, B_map, bars: tvm.tirx.Buffer):  # noqa: E501
-        with Tx.thread()[tid == 0]:
-            stage = Tx.meta_var(k_tile % STAGES_TMA)
-            Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, 0, 1, "", k_tile * BLK_K, m_idx * BLK_M)  # noqa: E501
-            Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, 0, 1, "", k_tile * BLK_K, n_idx * BLK_N)  # noqa: E501
+        if Tx.filter(tid, tid == 0):
+            with Tx.thread():
+                stage = Tx.meta_var(k_tile % STAGES_TMA)
+                Tx.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
+                Tx.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, 0, 1, "", k_tile * BLK_K, m_idx * BLK_M)  # noqa: E501
+                Tx.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, 0, 1, "", k_tile * BLK_K, n_idx * BLK_N)  # noqa: E501
 
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
@@ -88,10 +89,11 @@ def test_fp8_gemm_hopper_no_ws():
     def s2G(warp_id, lane_id, C_smem: tvm.tirx.Buffer, C_map, m_idx, n_idx, n_tile):
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.cuda.cta_sync()
-        with Tx.thread()[warp_id == 0 and lane_id == 0]:
-            Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, "", n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)  # noqa: E501
-            Tx.ptx.cp_async.bulk.commit_group()
-            Tx.ptx.cp_async.bulk.wait_group(1, read=True)
+        if Tx.filter(tid, warp_id == 0 and lane_id == 0):  # noqa: F821
+            with Tx.thread():
+                Tx.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, "", n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)  # noqa: E501
+                Tx.ptx.cp_async.bulk.commit_group()
+                Tx.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @Tx.inline
     def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tirx.Buffer, C_map, accum, accum_half):  # noqa: E501
@@ -121,11 +123,11 @@ def test_fp8_gemm_hopper_no_ws():
         Tx.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)  # noqa: E501
 
         with Tx.kernel():
-            bx = Tx.cta_id([SM_COUNT], parent="kernel")
-            tid = Tx.thread_id([128 * 2], parent="cta")
-            warp_id = Tx.warp_id([8], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
-            wg_id = Tx.warpgroup_id([2], parent="cta")
+            bx = Tx.cta_id([SM_COUNT])
+            tid = Tx.thread_id([128 * 2])
+            warp_id = Tx.warp_id([8])
+            lane_id = Tx.lane_id([32])
+            wg_id = Tx.warpgroup_id([2])
 
             with Tx.cta():
                 # tensor stroage
@@ -158,9 +160,10 @@ def test_fp8_gemm_hopper_no_ws():
 
                     while (tile_scheduler.valid()):
                         # initialize the barriers
-                        with Tx.thread()[tid == 0]:
-                            for i in range(STAGES_TMA):
-                                Tx.ptx.mbarrier.init(bars.ptr_to([i]), 1)
+                        if Tx.filter(tid, tid == 0):
+                            with Tx.thread():
+                                for i in range(STAGES_TMA):
+                                    Tx.ptx.mbarrier.init(bars.ptr_to([i]), 1)
                         Tx.cuda.cta_sync()
                         # initialize the index
                         tma_index = 0

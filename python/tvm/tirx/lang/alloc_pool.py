@@ -187,10 +187,19 @@ class TMEMPool:
         return pred
 
     def _emit_warp_guard(self, Tx, pred, emit):
+        # tcgen05 alloc/dealloc are warp-wide PTX instructions: every lane in
+        # the chosen warp must participate, and exactly one warp in the CTA
+        # must execute them. Require an explicit guard predicate from the
+        # caller (typically built from ``wg_id`` and ``warp_id``) so we can
+        # wrap the emission in ``if <pred>: with Tx.warp():``.
         if pred is None:
-            with Tx.warp()[0:1]:
-                emit()
-            return
+            assert self.warp_id is not None, (
+                "TMEMPool requires ``warp_id`` (and optionally ``wg_id``) when "
+                "no explicit guard is supplied: tcgen05 alloc/dealloc are "
+                "warp-wide and need a single-warp guard. Pass "
+                "``warp_id=<cta-wide warp id>`` (e.g. ``wg_id*4+warp_id_in_wg``)."
+            )
+            pred = self.warp_id == 0
         with Tx.If(pred):
             with Tx.Then():
                 with Tx.warp():

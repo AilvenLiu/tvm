@@ -78,7 +78,7 @@ class SplitKReduceRMSnormRopeAppendKTile(Tile):
         self, m_idx, n_idx, k_idx, partial, k_weight, rope_pos, cos_sin_cache, append_pos, kv_cache
     ):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var(tid // self.bdx)
             self._alloc_local()

@@ -253,7 +253,7 @@ def _infer_binary_vec_len(
         return vec_len, None
     tx = get_thread_cnt(sctx)
     if tx is None:
-        return None, f"unsupported exec_scope {sctx.exec_scope.name} for vec_len"
+        return None, f"unsupported exec_scope {sctx.scope_kind} for vec_len"
 
     elem_size = DataType(_dst.buffer.dtype).bits  # in bits
     possible_vec_len = [128 // elem_size, 64 // elem_size, 32 // elem_size, 1]
@@ -274,7 +274,7 @@ def _is_binary_local_packed_f32x2_case(
     sctx: DispatchContext,
 ) -> bool:
     """Check whether local-thread trivial layout can use packed f32x2 path."""
-    if sctx.exec_scope.name != "thread":
+    if not sctx.is_thread:
         return False
     if op_type not in binary_op_f32x2_table:
         return False
@@ -303,7 +303,7 @@ def _is_binary_local_wgmma_row_red_view_case(
     sctx: DispatchContext,
 ) -> bool:
     """Check whether op fits the local WGMMA/ROW_RED view implementation."""
-    if sctx.exec_scope.name not in ["warp", "warpgroup", "cta"]:
+    if sctx.scope_kind not in ["warp", "warpgroup", "cta"]:
         return False
     _dst: BufferRegion = op_call.args[0]
     _src1: BufferRegion | FloatImm = op_call.args[1]
@@ -415,8 +415,8 @@ def _validate_binary_local_view_case(
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
-    if sctx.exec_scope.name not in ["cta", "warpgroup", "warp"]:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for local-view binary op"
+    if sctx.scope_kind not in ["cta", "warpgroup", "warp"]:
+        return False, f"unsupported exec_scope {sctx.scope_kind} for local-view binary op"
 
     info, msg = _try_prepare_binary_map(op_call, op_type, require_trivial_layout=False)
     if msg is not None:
@@ -492,8 +492,8 @@ def validate_binary_shared(
     sctx: DispatchContext,
     op_type: MapOpType,
 ) -> tuple[bool, str | None]:
-    if sctx.exec_scope.name not in ["cta", "warpgroup", "warp", "thread"]:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for shared binary op"
+    if sctx.scope_kind not in ["cta", "warpgroup", "warp", "thread"]:
+        return False, f"unsupported exec_scope {sctx.scope_kind} for shared binary op"
     _, msg = _try_prepare_binary_map(op_call, op_type, require_trivial_layout=False)
     return (msg is None, msg)
 
@@ -513,9 +513,9 @@ def _classify_binary_local_case(
     generic local-view (including thread-axis distributed layouts) are supported.
     For thread scope: trivial layout path is supported, with optional packed_f32x2 optimization.
     """
-    scope = sctx.exec_scope.name
+    scope = sctx.scope_kind
     if scope not in ["cta", "warpgroup", "warp", "thread"]:
-        return None, f"unsupported exec_scope {sctx.exec_scope.name}"
+        return None, f"unsupported exec_scope {sctx.scope_kind}"
 
     if scope in ["cta", "warpgroup", "warp"]:
         if _is_binary_local_wgmma_row_red_view_case(op_call, op_type, sctx):
@@ -532,7 +532,7 @@ def _classify_binary_local_case(
             return None, msg
         return _BINARY_LOCAL_CASE_THREAD, None
     else:
-        return None, f"unsupported exec_scope {sctx.exec_scope.name}"
+        return None, f"unsupported exec_scope {sctx.scope_kind}"
 
 
 def validate_binary_local(

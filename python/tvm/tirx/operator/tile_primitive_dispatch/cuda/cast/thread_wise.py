@@ -63,8 +63,8 @@ def cast_thread_wise_impl(
     src_buffer_region: BufferRegion,
     sctx: DispatchContext,
 ) -> PrimFunc | None:
-    if sctx.exec_scope.name != "thread":
-        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
+    if not sctx.is_thread:
+        fail(f"unsupported exec_scope {sctx.scope_kind}")
 
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
@@ -147,8 +147,8 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
         predicate(
             "exec_scope",
             lambda op, sctx: (
-                sctx.exec_scope.name == "thread",
-                f"unsupported exec_scope {sctx.exec_scope.name}",
+                sctx.is_thread,
+                f"unsupported exec_scope {sctx.scope_kind}",
             ),
         ),
     ],

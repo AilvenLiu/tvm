@@ -407,9 +407,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         partial_lse_tvm,
     ):
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id_in_wg([self.num_warps_q * self.num_warps_kv])
+            lane_id = Tx.lane_id([32])
             self.q_smem_offset_r = self.get_permuted_offset(
                 self.upcast_stride_q,
                 wg_id * self.cta_tile_q
@@ -508,9 +508,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         profiler: CudaProfiler = None,
     ):
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id_in_wg([self.num_warps_q * self.num_warps_kv])
+            lane_id = Tx.lane_id([32])
 
             @Tx.inline
             def prefetch_offset(packed_block_iter_base_in):
@@ -615,9 +615,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         profiler: CudaProfiler = None,
     ):
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id_in_wg([self.num_warps_q * self.num_warps_kv])
+            lane_id = Tx.lane_id([32])
 
             with Tx.thread():
                 if not self.prefetch_on:

@@ -45,6 +45,7 @@ class _DummySctx:
     def __init__(self, target_kind: str, exec_scope: str):
         self.target = _DummyTarget(target_kind)
         self.exec_scope = _DummyExecScope(exec_scope)
+        self.scope_kind = exec_scope
 
 
 def test_dispatch_prints_predicate_reasons():

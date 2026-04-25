@@ -43,9 +43,9 @@ def test_warp_sum_full():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane + 1)
                 val = Tx.cuda.warp_sum(val)
@@ -66,9 +66,9 @@ def test_warp_sum_partial_8():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane + 1)
                 val = Tx.cuda.warp_sum(val, width=8)
@@ -95,9 +95,9 @@ def test_warp_max_partial_4():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane + 1)
                 val = Tx.cuda.warp_max(val, width=4)
@@ -120,9 +120,9 @@ def test_warp_min_full():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane + 1)
                 val = Tx.cuda.warp_min(val)
@@ -141,9 +141,9 @@ def test_warp_sum_partial_2():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane)
                 val = Tx.cuda.warp_sum(val, width=2)
@@ -169,9 +169,9 @@ def test_warp_sum_all_widths(width):
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (32,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.thread():
                 val: Tx.f32 = Tx.float32(lane)
                 val = Tx.cuda.warp_sum(val, width=width)

@@ -109,9 +109,10 @@ def test_partial_reduction():
 
     @Tx.meta_class
     class Semaphore:
-        def __init__(self, cnt, buffer):
+        def __init__(self, cnt, buffer, tid):
             self.cnt = cnt
             self.sem = buffer
+            self.tid = tid
             self.state = Tx.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")  # noqa: E501
 
         @Tx.inline
@@ -127,8 +128,9 @@ def test_partial_reduction():
         def semaphore_notify(self, *coord):
             with Tx.thread():
                 Tx.cuda.cta_sync()
-                with Tx.thread()[0:1]:
-                    Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)  # noqa: E501
+                if Tx.filter(self.tid, 0, 1):
+                    with Tx.thread():
+                        Tx.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)  # noqa: E501
                 Tx.cuda.thread_fence()
 
 
@@ -139,8 +141,8 @@ def test_partial_reduction():
         B_ptr = Tx.match_buffer(B, (M, NUM_BLOCK_N), "float32")
 
         with Tx.kernel():
-            bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
+            bx, by = Tx.cta_id([NUM_BLOCK_M, NUM_BLOCK_N])
+            tid = Tx.thread_id([1024])
 
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
@@ -156,8 +158,8 @@ def test_partial_reduction():
         C_ptr = Tx.match_buffer(C, (M, 1), "float32")
 
         with Tx.kernel():
-            bx = Tx.cta_id([NUM_BLOCK_M], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
+            bx = Tx.cta_id([NUM_BLOCK_M])
+            tid = Tx.thread_id([1024])
             with Tx.cta():
                 B_smem = Tx.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
                 C_smem = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
@@ -177,9 +179,9 @@ def test_partial_reduction():
         task_indices_ptr = Tx.match_buffer(task_indices, (NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M, 2), "int32")  # noqa: E501
         tasks_indptr_ptr = Tx.match_buffer(tasks_indptr, (TOTAL_SM_CNT + 1, ), "int32")
         with Tx.kernel():
-            bx = Tx.cta_id([TOTAL_SM_CNT], parent="kernel")
-            Tx.thread_id([1024], parent="cta")
-            sem = Semaphore(NUM_BLOCK_N, sem_ptr)
+            bx = Tx.cta_id([TOTAL_SM_CNT])
+            tid = Tx.thread_id([1024])
+            sem = Semaphore(NUM_BLOCK_N, sem_ptr, tid)
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem_1 = Tx.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")

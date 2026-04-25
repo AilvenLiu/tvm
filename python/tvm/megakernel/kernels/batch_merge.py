@@ -220,8 +220,8 @@ __syncwarp();
         merge_o_indices_tvm,
     ):
         with Tx.cta():
-            warp_id = Tx.warp_id([self.num_warps], parent="cta")
-            lane_id = Tx.thread_id([32], parent="warp")
+            warp_id = Tx.warp_id([self.num_warps])
+            lane_id = Tx.lane_id([32])
 
             with Tx.thread():
                 self.smem_manager.wait_all("cta")

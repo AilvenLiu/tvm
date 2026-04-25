@@ -68,6 +68,15 @@ TVM_DLL const Op& reinterpret();
 TVM_DLL const Op& likely();
 
 /*!
+ * \brief Thread-set filter predicate. Used as the condition of an IfThenElse
+ * to narrow the active thread set A for the then-branch. Two forms:
+ *   filter(var, lo, hi)   -- range form, true iff var in [lo, hi)
+ *   filter(var, cond)     -- predicate form (e.g. var == k); true iff cond
+ * `var` must be a ScopeIdDef-declared Var at parse time (Verifier Rule 2).
+ */
+TVM_DLL const Op& filter();
+
+/*!
  * \brief Bitwise and operator.
  */
 TVM_DLL const Op& bitwise_and();
@@ -880,6 +889,12 @@ TVM_DLL const Op& cuda_cta_sync();
  * \brief tvm intrinsic for cuda grid-wide sync (cooperative groups)
  */
 TVM_DLL const Op& cuda_grid_sync();
+
+/*!
+ * \brief tvm intrinsic that returns ``cooperative_groups::thread_rank()``
+ *        for the enclosing CTA (linear thread index within the block).
+ */
+TVM_DLL const Op& cuda_thread_rank();
 
 /*!
  * \brief tvm intrinsic for cuda half to float conversion

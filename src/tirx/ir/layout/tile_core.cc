@@ -227,11 +227,10 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
     TVM_FFI_ICHECK(subtile_primitivet.defined() && tile_primitivet.defined())
         << "Thread axis " << axis->name << " has no subscope or scope";
 
-    ffi::String subscope = subtile_primitivet.value()->name;
-    ffi::String scope = tile_primitivet.value()->name;
+    ffi::String subscope = subtile_primitivet.value()->name();
+    ffi::String scope = tile_primitivet.value()->name();
 
-    if (!inner_most.has_value() ||
-        ExecScope::Create(inner_most.value())->Higher(ExecScope::Create(subscope)))
+    if (!inner_most.has_value() || ScopeNameHigher(inner_most.value(), subscope))
       inner_most = subscope;
 
     auto it = scope_map.find(subscope);
@@ -255,8 +254,7 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
   }
 
   TVM_FFI_ICHECK_EQ(count, scope_map.size()) << "Ill-formed tile layout: disconnected scope chain";
-  return Tuple<ExecScope, ExecScope>{ExecScope::Create(inner_most.value()),
-                                     ExecScope::Create(outer_most)};
+  return Tuple<ExecScope, ExecScope>{ExecScope(inner_most.value()), ExecScope(outer_most)};
 }
 
 TileLayout TileLayoutNode::DefaultLayout(ffi::Array<PrimExpr> shape) {

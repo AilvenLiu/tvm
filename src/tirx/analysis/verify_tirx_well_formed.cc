@@ -67,49 +67,10 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   }
 
   void VisitStmt_(const ExecScopeStmtNode* op, ffi::reflection::AccessPath path) override {
-    // Check for scope_partition AttrStmt wrapping the body
-    Stmt check_body = op->body;
-    bool has_scope_partition = false;
-    if (auto attr = check_body.as<AttrStmtNode>()) {
-      if (attr->attr_key == attr::tirx_scope_partition) {
-        has_scope_partition = true;
-        check_body = attr->body;
-      }
-    }
-    if (has_scope_partition) {
-      // scope partition is enabled, check if body is a list of ExecScopeStmt
-      if (auto seq = check_body.as<SeqStmt>()) {
-        ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
-        for (const auto& stmt : seq.value()->seq) {
-          // Handle ExecScopeStmt children
-          auto exec_scope_stmt = stmt.as<ExecScopeStmt>();
-          if (!exec_scope_stmt.has_value()) {
-            Verify(false) << "TIRxError: ExecScopeStmt with scope partition at " << path
-                          << " has invalid body " << op->body;
-          }
-          auto scope = exec_scope_stmt.value()->exec_scope;
-          Verifier::VisitStmt_(exec_scope_stmt.value().get(), path);
-          auto scope_slice = scope.as<ExecScopeSlice>();
-          Verify(scope_slice.has_value()) << "TIRxError: ExecScopeStmt with scope partition at "
-                                          << path << " has invalid exec_scope " << scope;
-          if (scope_slice_chk.has_value()) {
-            Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
-                   scope_slice_chk.value()->parent == scope_slice.value()->parent)
-                << "TIRxError: ExecScopeStmt with scope partition at " << path
-                << " has invalid exec_scope " << scope;
-          }
-          scope_slice_chk = scope_slice;
-        }
-      } else {
-        Verify(false) << "TIRxError: ExecScopeStmt with scope partition at " << path
-                      << " has invalid body " << op->body;
-      }
-      return;
-    }
     auto scope = op->exec_scope;
     // C1: exec_scope is valid
-    Verify(ExecScope::Valid(scope->name))
-        << "TIRxError: ExecScopeStmt at " << path << " has unknown exec_scope " << scope->name;
+    // ExecScope ctor FATALs on unknown name, so a constructed scope is
+    // always valid; nothing to re-check structurally here.
     bool is_root = false;
     if (!root_.has_value()) {
       root_ = scope;
@@ -117,75 +78,18 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     }
     if (!scope_stack_.empty()) {
       TVM_FFI_ICHECK(root_.has_value()) << "TIRxError: root scope should be the highest scope";
-      Verify(!scope->Higher(root_.value()))
-          << "TIRxError: ExecScopeStmt at " << path << " has invalid exec_scope " << scope->name
-          << " under " << root_.value()->name;
-    }
-    // C4: exec_scope slice consistency
-    bool erase_slices{false}, erase_select_cond{false}, pop_scope{false};
-    arith::Analyzer ana;
-    auto covered = [&](const Array<Range>& l, const Array<Range>& r) -> bool {
-      if (l.size() != r.size()) return false;
-      for (size_t i = 0; i < l.size(); ++i) {
-        if (!ana.CanProve(l[i]->min <= r[i]->min &&
-                          l[i]->min + l[i]->extent >= r[i]->min + r[i]->extent)) {
-          return false;
-        }
-      }
-      return true;
-    };
-    if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
-      auto it_slices = scope_slices_.find(slice->name);
-      auto it_select_cond = scope_select_cond_.find(slice->name);
-      if (auto cond = slice->slices.as<PrimExpr>()) {
-        Verify(it_slices == scope_slices_.end())
-            << "TIRxError: ExecScopeSlice at " << path << " has both slices and select_cond";
-        if (it_select_cond == scope_select_cond_.end()) {
-          scope_select_cond_[slice->name] = cond.value();
-          erase_select_cond = true;
-        }
-      } else {
-        Verify(it_select_cond == scope_select_cond_.end())
-            << "TIRxError: ExecScopeSlice at " << path << " has both slices and select_cond";
-        auto slices = slice->slices.as<Array<Range>>().value();
-        if (it_slices == scope_slices_.end()) {
-          scope_slices_[slice->name] = {slices};
-          erase_slices = true;
-        } else {
-          bool consistent = true;
-          for (const auto& s : it_slices->second) {
-            if (!covered(s, slices) && !covered(slices, s)) {
-              consistent = false;
-              break;
-            }
-          }
-          Verify(consistent) << "TIRxError: ExecScopeSlice at " << path << " is inconsistent with "
-                             << it_slices->first;
-          it_slices->second.push_back(slices);
-          pop_scope = true;
-        }
-      }
+      Verify(!ScopeKindHigher(scope->kind, root_.value()->kind))
+          << "TIRxError: ExecScopeStmt at " << path << " has invalid exec_scope " << scope->name()
+          << " under " << root_.value()->name();
     }
     scope_stack_.push_back(scope);
     Verifier::VisitStmt_(op, path);
     scope_stack_.pop_back();
-    if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
-      if (erase_slices) scope_slices_.erase(slice->name);
-      if (erase_select_cond) scope_select_cond_.erase(slice->name);
-      if (pop_scope) {
-        auto it_slices = scope_slices_.find(slice->name);
-        TVM_FFI_ICHECK(it_slices != scope_slices_.end());
-        TVM_FFI_ICHECK(!it_slices->second.empty());
-        it_slices->second.pop_back();
-      }
-    }
     if (is_root) root_ = std::nullopt;
   }
 
   ffi::Optional<ExecScope> root_ = std::nullopt;
   std::vector<ExecScope> scope_stack_;
-  std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
-  std::unordered_map<std::string, PrimExpr> scope_select_cond_;
 };
 
 class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
@@ -204,6 +108,30 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
       ScopeIdDefVerifier verifier;
       Verify(verifier.Verify(scope_id_def_))
           << "TIRxError: Scope at " << path << " has invalid scope_id_def";
+      // At kernel scope, enforce launch-parameter sanity. The thread count
+      // (kCtaThread) must be positive; if the kernel uses any warp-granular
+      // binding (warp_id / lane_id / warpgroup_id / warp_id_in_wg), it must
+      // additionally be a multiple of warp size 32. Pure thread-flat kernels
+      // (only kCtaThread declared, e.g. single-thread tests) are unconstrained.
+      if (scope->kind == ScopeKind::kKernel) {
+        auto cta_thread_it = verifier.id_set.find(ScopeBinding::kCtaThread);
+        if (cta_thread_it != verifier.id_set.end()) {
+          PrimExpr ext = (*cta_thread_it).second.fused_extent();
+          if (const auto* imm = ext.as<IntImmNode>()) {
+            Verify(imm->value > 0) << "TIRxError: kernel at " << path
+                                   << " has non-positive thread count " << imm->value;
+            bool needs_warp_align = verifier.id_set.count(ScopeBinding::kCtaWarp) ||
+                                    verifier.id_set.count(ScopeBinding::kWarpThread) ||
+                                    verifier.id_set.count(ScopeBinding::kCtaWarpgroup) ||
+                                    verifier.id_set.count(ScopeBinding::kWarpgroupWarp);
+            if (needs_warp_align) {
+              Verify(imm->value % 32 == 0)
+                  << "TIRxError: kernel at " << path << " uses warp-granular bindings"
+                  << " but has thread count " << imm->value << " not a multiple of 32";
+            }
+          }
+        }
+      }
     }
     scope_id_def_.erase(scope_id_def_.end() - scope->scope_id_def.size(), scope_id_def_.end());
   }
@@ -277,9 +205,9 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
       // At the top level: only one root scope is allowed
       Verify(!root_.has_value()) << "TIRxError: Only one root scope is allowed in device function";
       root_ = op->exec_scope;
-      auto kernel_scope = ExecScope::Create("kernel");
-      Verify(kernel_scope->Higher(root_.value())) << "TIRxError: Root scope of device function at "
-                                                  << path << " is higher than kernel scope";
+      Verify(ScopeKindHigher(ScopeKind::kKernel, root_.value()->kind))
+          << "TIRxError: Root scope of device function at " << path
+          << " is higher than kernel scope";
       inside_root_scope_ = true;
       Verifier::VisitStmt_(op, path);
       inside_root_scope_ = false;

@@ -45,10 +45,10 @@ def test_cta_sum_4_warps():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([NUM_WARPS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([NUM_WARPS])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((NUM_WARPS,), "float32", scope="shared")
                 with Tx.thread():
@@ -73,10 +73,10 @@ def test_cta_sum_8_warps():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([NUM_WARPS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([NUM_WARPS])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((NUM_WARPS,), "float32", scope="shared")
                 with Tx.thread():
@@ -100,10 +100,10 @@ def test_cta_max_4_warps():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([NUM_WARPS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([NUM_WARPS])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((NUM_WARPS,), "float32", scope="shared")
                 with Tx.thread():
@@ -126,10 +126,10 @@ def test_cta_min_4_warps():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([NUM_WARPS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([NUM_WARPS])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((NUM_WARPS,), "float32", scope="shared")
                 with Tx.thread():
@@ -152,10 +152,10 @@ def test_cta_sum_1_warp():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([NUM_WARPS], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([NUM_WARPS])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((NUM_WARPS,), "float32", scope="shared")
                 with Tx.thread():
@@ -179,10 +179,10 @@ def test_cta_sum_all_warp_counts(num_warps):
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (N,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([num_warps], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tid = Tx.thread_id([N], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([num_warps])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([N])
             with Tx.cta():
                 scratch = Tx.alloc_buffer((num_warps,), "float32", scope="shared")
                 with Tx.thread():

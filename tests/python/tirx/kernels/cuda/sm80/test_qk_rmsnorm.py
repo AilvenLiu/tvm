@@ -91,8 +91,8 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
         cta_count: Tx.let = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
 
         with Tx.kernel():
-            bx = Tx.cta_id([cta_count], parent="kernel")
-            tx, ty = Tx.thread_id([bdx, bdy], parent="cta")
+            bx = Tx.cta_id([cta_count])
+            tx, ty = Tx.thread_id([bdx, bdy])
 
             with Tx.thread():
                 # Load scalar parameters

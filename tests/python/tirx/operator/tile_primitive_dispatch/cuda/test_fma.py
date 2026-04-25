@@ -57,8 +57,8 @@ def test_fma_scalar_scalar():
     def test_func(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([N], parent="cta")
+            _bx = Tx.cta_id([1])
+            tx = Tx.thread_id([N])
             with Tx.thread():
                 buf = Tx.alloc_buffer((1,), dtype, scope="local", layout=TileLayout(S[1]))
                 Tx.copy(buf, A[tx : tx + 1])
@@ -95,8 +95,8 @@ def test_fma_buffer_scale_scalar_bias():
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         B = Tx.match_buffer(B_ptr, (N,), dtype, layout=TileLayout(S[N]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tx = Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tx = Tx.thread_id([1])
             with Tx.thread():
                 acc = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
                 frac = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
@@ -135,8 +135,8 @@ def test_mul_scalar_broadcast():
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         Scale = Tx.match_buffer(S_ptr, (1,), dtype, layout=TileLayout(S[1]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tx = Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tx = Tx.thread_id([1])
             with Tx.thread():
                 a_local = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
                 s_local = Tx.alloc_buffer((1,), dtype, scope="local", layout=TileLayout(S[1]))
@@ -176,8 +176,8 @@ def test_add_rounding_mode():
     def test_func(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tx = Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tx = Tx.thread_id([1])
             with Tx.thread():
                 buf = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
                 Tx.copy(buf, A[0:N])
@@ -219,8 +219,8 @@ def test_fma_no_layout():
     def test_func(A_ptr: Tx.handle) -> None:
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tx = Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tx = Tx.thread_id([1])
             with Tx.thread():
                 buf = Tx.alloc_local([N], dtype)
                 for i in Tx.serial(N):
@@ -257,8 +257,8 @@ def test_sub_buffer_buffer_rounding():
         A = Tx.match_buffer(A_ptr, (N,), dtype, layout=TileLayout(S[N]))
         B = Tx.match_buffer(B_ptr, (N,), dtype, layout=TileLayout(S[N]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            _tx = Tx.thread_id([1], parent="cta")
+            _bx = Tx.cta_id([1])
+            _tx = Tx.thread_id([1])
             with Tx.thread():
                 a_buf = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
                 b_buf = Tx.alloc_buffer((N,), dtype, scope="local", layout=TileLayout(S[N]))
@@ -296,9 +296,9 @@ def test_fma_warpgroup_wg_local_layout():
         A = Tx.match_buffer(A_ptr, (rows, cols), dtype, layout=TileLayout(S[(rows, cols)]))
         B = Tx.match_buffer(B_ptr, (rows, cols), dtype, layout=TileLayout(S[(rows, cols)]))
         with Tx.kernel():
-            _bx = Tx.cta_id([1], parent="kernel")
-            Tx.warpgroup_id([1], parent="cta")
-            tid = Tx.thread_id([rows], parent="warpgroup")
+            _bx = Tx.cta_id([1])
+            wg_id = Tx.warpgroup_id([1])
+            tid = Tx.thread_id_in_wg([rows])
 
             reg = Tx.alloc_buffer((rows, cols), dtype, scope="local", layout=wg_local_layout(cols))
 

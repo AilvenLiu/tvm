@@ -56,7 +56,7 @@ class AppendKVTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             tx = Tx.meta_var(tid % self.bdx)
             ty = Tx.meta_var(tid // self.bdx)
             stx = Tx.meta_var(tx * self.vec_size)

@@ -48,32 +48,12 @@ def test_root_scope():
                     with Tx.thread():
                         pass
 
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test5() -> None:
-        with Tx.world():
-            with Tx.kernel():
-                with Tx.cta():
-                    with Tx.warp():
-                        with Tx.thread():
-                            pass
-
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test6() -> None:
-        with Tx.world():
-            with Tx.kernel():
-                with Tx.cta():
-                    with Tx.warp():
-                        with Tx.cluster():
-                            pass
-
     # fmt: on
 
     verify(test1)
     verify(test2)
     verify(test3)
     verify(test4)
-    verify(test5)
-    verify(test6)
 
 
 def test_nested_scope():
@@ -117,173 +97,12 @@ def test_nested_scope():
                         with Tx.thread():
                             pass
 
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test5() -> None:
-        with Tx.kernel():
-            with Tx.world():
-                pass
     # fmt: on
 
     verify(test1)
     verify(test2)
     verify(test3)
     verify(test4)
-    with pytest.raises(Exception, match="has invalid exec_scope world under kernel"):
-        verify(test5)
-
-
-def test_scope_slice():
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test1() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.warpgroup()[0:1]:
-                    with Tx.thread():
-                        pass
-
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test2() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.warpgroup()[0:3]:
-                    with Tx.warpgroup()[1:2]:
-                        pass
-                    with Tx.warpgroup()[2:3]:
-                        with Tx.thread()[Tx.ptx.elect_sync()]:
-                            pass
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test3() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.warpgroup()[0:3]:
-                    with Tx.warpgroup()[1:5]:
-                        pass
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test4() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.thread()[0:3]:
-                    with Tx.thread()[Tx.ptx.elect_sync()]:
-                        pass
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test5() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.thread()[Tx.ptx.elect_sync()]:
-                    with Tx.thread()[Tx.ptx.elect_sync()]:
-                        pass
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test6() -> None:
-        with Tx.kernel():
-            with Tx.cta():
-                with Tx.thread()[Tx.ptx.elect_sync()]:
-                    with Tx.thread()[Tx.int32(0)]:
-                        pass
-    # fmt: on
-    verify(test1)
-    verify(test2)
-    with pytest.raises(Exception, match="is inconsistent with"):
-        verify(test3)
-    with pytest.raises(Exception, match="has both slices and select_cond"):
-        verify(test4)
-    # we don't check select_cond for now
-    verify(test5)
-    verify(test6)
-
-
-def test_scope_slice_1d_validation():
-    """Regression test: warp/warpgroup slices must be 1D.
-
-    Before the fix, a 2D slice on a warp scope would only be caught late during lowering.
-    The fix adds early validation in ExecScopeFrameSlice, symmetric with the existing
-    ScopeId 1D extent check.
-    """
-    with pytest.raises(Exception):
-        # fmt: off
-        @Tx.prim_func(tirx=True, check_well_formed=False)
-        def warp_2d_slice():
-            with Tx.kernel():
-                with Tx.cta():
-                    with Tx.warp()[0:2, 0:1]:
-                        with Tx.thread():
-                            pass
-        # fmt: on
-
-    with pytest.raises(Exception):
-        # fmt: off
-        @Tx.prim_func(tirx=True, check_well_formed=False)
-        def warpgroup_2d_slice():
-            with Tx.kernel():
-                with Tx.cta():
-                    with Tx.warpgroup()[0:2, 0:1]:
-                        with Tx.thread():
-                            pass
-        # fmt: on
-
-
-def test_scope_partition():
-    # fmt: off
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test1():
-        with Tx.kernel():
-            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            tx = Tx.thread_id([128], parent="cta")
-
-            with Tx.cta():
-                Tx.attr({"tirx.scope_partition": True})
-                with Tx.thread()[0:30]:
-                    Tx.evaluate(tx)
-                with Tx.thread()[30:128]:
-                    Tx.evaluate(tx)
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test2():
-        with Tx.kernel():
-            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            tx = Tx.thread_id([128], parent="cta")
-
-            with Tx.cta():
-                Tx.attr({"tirx.scope_partition": True})
-                with Tx.thread()[0:30]:
-                    Tx.evaluate(tx)
-                with Tx.thread():
-                    Tx.evaluate(tx)
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test3():
-        with Tx.kernel():
-            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            tx = Tx.thread_id([128], parent="cta")
-
-            with Tx.thread():
-                Tx.attr({"tirx.scope_partition": True})
-                with Tx.thread()[0:30]:
-                    Tx.evaluate(tx)
-                Tx.evaluate(tx)
-    @Tx.prim_func(tirx=True, check_well_formed=False)
-    def test4():
-        with Tx.kernel():
-            bx, by, bz = Tx.cta_id([3, 4, 5], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            tx = Tx.thread_id([128], parent="cta")
-
-            with Tx.thread():
-                Tx.attr({"tirx.scope_partition": True})
-                with Tx.thread()[0:30]:
-                    Tx.evaluate(tx)
-                with Tx.warp()[30:128]:
-                    Tx.evaluate(tx)
-    # fmt: on
-
-    verify(test1)
-    with pytest.raises(Exception, match="has invalid exec_scope"):
-        verify(test2)
-    with pytest.raises(Exception, match="has invalid body"):
-        verify(test3)
-    with pytest.raises(Exception, match="has invalid exec_scope"):
-        verify(test4)
 
 
 def test_scope_id_consistency():
@@ -291,9 +110,9 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
         with Tx.kernel():
-            Tx.cta_id([32], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32])
+            Tx.warp_id([4])
+            Tx.lane_id([32])
 
             with Tx.thread():
                 pass
@@ -301,10 +120,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
         with Tx.kernel():
-            Tx.cta_id([32], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            Tx.thread_id([128], parent="cta")
+            Tx.cta_id([32])
+            Tx.warp_id([4])
+            Tx.lane_id([32])
+            Tx.thread_id([128])
 
             with Tx.thread():
                 pass
@@ -312,10 +131,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3():
         with Tx.kernel():
-            Tx.cta_id([32], parent="kernel")
-            Tx.warp_id([2], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            Tx.thread_id([128], parent="cta")
+            Tx.cta_id([32])
+            Tx.warp_id([2])
+            Tx.lane_id([32])
+            Tx.thread_id([128])
 
             with Tx.thread():
                 pass
@@ -323,9 +142,9 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test4():
         with Tx.kernel():
-            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
-            cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
-            clx, cly, clz = Tx.cluster_id([4, 5, 12], parent="kernel")
+            bx, by, bz = Tx.cta_id([8, 10, 12])
+            cbx, cby, cbz = Tx.cta_id_in_cluster([2, 2, 1])
+            clx, cly, clz = Tx.cluster_id([4, 5, 12])
             with Tx.cta():
                 with Tx.warp():
                     with Tx.thread():
@@ -336,9 +155,9 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test5():
         with Tx.kernel():
-            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
-            cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
-            clx, cly, clz = Tx.cluster_id([3, 5, 12], parent="kernel")
+            bx, by, bz = Tx.cta_id([8, 10, 12])
+            cbx, cby, cbz = Tx.cta_id_in_cluster([2, 2, 1])
+            clx, cly, clz = Tx.cluster_id([3, 5, 12])
             with Tx.cta():
                 with Tx.warp():
                     with Tx.thread():
@@ -349,10 +168,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test6():
         with Tx.kernel():
-            clx, cly, clz = Tx.cluster_id([4, 5, 12], parent="kernel")
-            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            clx, cly, clz = Tx.cluster_id([4, 5, 12])
+            bx, by, bz = Tx.cta_id([8, 10, 12])
             with Tx.cluster():
-                cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+                cbx, cby, cbz = Tx.cta_id_in_cluster([2, 2, 1])
                 with Tx.warp():
                     with Tx.thread():
                         Tx.evaluate(bx + by + bz)
@@ -362,10 +181,10 @@ def test_scope_id_consistency():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test7():
         with Tx.kernel():
-            clx, cly, clz = Tx.cluster_id([3, 5, 12], parent="kernel")
-            bx, by, bz = Tx.cta_id([8, 10, 12], parent="kernel")
+            clx, cly, clz = Tx.cluster_id([3, 5, 12])
+            bx, by, bz = Tx.cta_id([8, 10, 12])
             with Tx.cluster():
-                cbx, cby, cbz = Tx.cta_id([2, 2, 1], parent="cluster")
+                cbx, cby, cbz = Tx.cta_id_in_cluster([2, 2, 1])
                 with Tx.warp():
                     with Tx.thread():
                         Tx.evaluate(bx + by + bz)
@@ -392,9 +211,9 @@ def test_layout():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1():
         with Tx.kernel():
-            Tx.cta_id([32], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32])
+            Tx.warp_id([4])
+            Tx.lane_id([32])
 
             with Tx.thread():
                 A = Tx.alloc_buffer((2,), layout=Tx.TileLayout(Tx.S[2, 1]))
@@ -408,9 +227,9 @@ def test_layout():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2():
         with Tx.kernel():
-            Tx.cta_id([32], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
+            Tx.cta_id([32])
+            Tx.warp_id([4])
+            Tx.lane_id([32])
 
             with Tx.thread():
                 A = Tx.alloc_buffer((512,), scope="shared", layout=Tx.SwizzleLayout(3, 3, 3))
@@ -455,23 +274,23 @@ def test_device_func():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1(A: Tx.Buffer((128,), "float32")):
         with Tx.cta():
-            Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128])
             Tx.fill(A, 0.)
 
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2(A: Tx.Buffer((128,), "float32")):
         with Tx.kernel():
-            Tx.cta_id([128], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            Tx.cta_id([128])
+            Tx.thread_id([128])
             Tx.fill(A, 0.)
 
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test3(A: Tx.Buffer((128,), "float32")):
         with Tx.cta():
-            Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128])
             Tx.fill(A, 0.)
         with Tx.cta():
-            Tx.thread_id([128], parent="cta")
+            Tx.thread_id([128])
             Tx.fill(A, 0.)
     # fmt: on
     verify(test1, device_func=True)
@@ -487,8 +306,8 @@ def test_preferred_cluster_validation():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test1() -> None:
         with Tx.kernel():
-            cbx, cby = Tx.cta_id([2, 1], parent="cluster", preferred=[2, 2])
-            tx = Tx.thread_id([128], parent="cta")
+            cbx, cby = Tx.cta_id_in_cluster([2, 1], preferred=[2, 2])
+            tx = Tx.thread_id([128])
             with Tx.thread():
                 Tx.evaluate(cbx + cby + tx)
 
@@ -496,8 +315,8 @@ def test_preferred_cluster_validation():
     @Tx.prim_func(tirx=True, check_well_formed=False)
     def test2() -> None:
         with Tx.kernel():
-            cbx, cby = Tx.cta_id([2, 1], parent="cluster", preferred=[2])
-            tx = Tx.thread_id([128], parent="cta")
+            cbx, cby = Tx.cta_id_in_cluster([2, 1], preferred=[2])
+            tx = Tx.thread_id([128])
             with Tx.thread():
                 Tx.evaluate(cbx + cby + tx)
     # fmt: on
@@ -512,8 +331,8 @@ def test_preferred_cluster_validation():
         @Tx.prim_func(tirx=True, check_well_formed=False)
         def test3() -> None:
             with Tx.kernel():
-                bx = Tx.cta_id([128], parent="kernel", preferred=[256])
-                tx = Tx.thread_id([128], parent="cta")
+                bx = Tx.cta_id([128], preferred=[256])
+                tx = Tx.thread_id([128])
                 with Tx.thread():
                     Tx.evaluate(bx + tx)
         # fmt: on
@@ -522,7 +341,6 @@ def test_preferred_cluster_validation():
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
-    test_scope_slice()
     test_scope_id_consistency()
     test_layout()
     test_host()

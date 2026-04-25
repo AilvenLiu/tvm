@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 def _is_buffer_or_region(x):
     from tvm.tirx import Buffer, BufferRegion  # pylint: disable=import-outside-toplevel
 
-    return isinstance(x, (Buffer, BufferRegion))  # noqa: UP038
+    return isinstance(x, Buffer | BufferRegion)
 
 
 # Overload: one name, dispatch by argument types (expr vs buffer/region).

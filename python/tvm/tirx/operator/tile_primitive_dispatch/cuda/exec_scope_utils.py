@@ -14,23 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 """Execution scope utilities for CUDA op dispatches."""
 
-import functools
-import operator
 from collections.abc import Callable
 
 from tvm.script import tirx as Tx
-from tvm.tirx import PrimExpr, PrimFunc
-from tvm.tirx.exec_scope import ExecScopeSlice
+from tvm.tirx import PrimFunc
 from tvm.tirx.operator.tile_primitive_dispatch import DispatchContext
 from tvm.tirx.stmt import TilePrimitiveCall
 
 
 def macro_or_prim_func(macro: Callable, need_macro: bool = False) -> Callable:
-    """Convert a macro to a prim_func."""
-
+    """Wrap a macro in a ``prim_func`` unless the caller explicitly wants the macro."""
     if need_macro:
         return macro
 
@@ -41,112 +36,75 @@ def macro_or_prim_func(macro: Callable, need_macro: bool = False) -> Callable:
     return func
 
 
-def thread_selector(sctx: DispatchContext, inner_impl, macro=False) -> Callable:
-    """Select a single thread from the given exec scope.
+def thread_selector(sctx: DispatchContext, inner_impl, macro: bool = False) -> Callable:
+    """Narrow execution to a single, deterministic thread within ``sctx.exec_scope``.
 
-    For a certain scope, it should return a deterministic thread index, i.e. the
-    same thread is elected every time. This is vital for the correctness of many
-    synchronization primitives. PTX's elect_sync() is one example.
+    The elected thread is stable across invocations so that synchronization
+    primitives (for example PTX ``elect_sync``) behave correctly.
 
     Parameters
     ----------
     sctx : DispatchContext
-        The dispatch context.
-
+        The dispatch context. Only ``sctx.scope_kind`` is consulted; the
+        caller is responsible for having narrowed into the desired scope via an
+        ``if Tx.filter(...):`` guard before reaching here.
     inner_impl : Tx.inline
-        The inner implementation.
-
+        The body to execute inside the selected thread.
     macro : bool
-        Whether return a macro or a prim_func.
-
-    Returns
-    -------
-    thread_selector : a macro or a prim_func
-        The inner implementation wrapped by a thread selector in the given exec scope.
+        If True, return the macro directly; otherwise wrap it in a ``prim_func``.
     """
-    assert not isinstance(inner_impl, PrimFunc), (
-        "inner_impl should be a macro rather than a PrimFunc"
-    )
-
-    exec_scope = sctx.exec_scope
-    tx = sctx.launch_params["threadIdx.x"]
-    # currently don't support multi-dimensional thread binding
-    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
-
-    if exec_scope.name == "cta":
-        assert not isinstance(exec_scope, ExecScopeSlice)
+    assert not isinstance(inner_impl, PrimFunc), "inner_impl must be a macro, not a PrimFunc"
+    name = sctx.scope_kind
+    if name == "thread":
+        return macro_or_prim_func(inner_impl, need_macro=macro)
+    if name == "cta":
 
         @Tx.inline()
         def impl():
-            with Tx.thread()[0:1]:
-                inner_impl()
-
-        return macro_or_prim_func(impl, need_macro=macro)
-
-    elif exec_scope.name == "warp":
-        if isinstance(exec_scope, ExecScopeSlice) and not isinstance(exec_scope.slices, PrimExpr):
-            # slice of multiple warps
-            warp_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
-
-            @Tx.inline()
-            def impl():
-                with Tx.warp()[tuple(warp_selector)]:
-                    with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
-                        inner_impl()
-
-            return macro_or_prim_func(impl, need_macro=macro)
-        else:
-            # a single warp
-            @Tx.inline()
-            def impl():
-                with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+            Tx.lane_id([32])
+            if Tx.ptx.elect_sync():
+                with Tx.thread():
                     inner_impl()
 
-            return macro_or_prim_func(impl, need_macro=macro)
-    elif exec_scope.name == "warpgroup":
-        if isinstance(exec_scope, ExecScopeSlice) and not isinstance(exec_scope.slices, PrimExpr):
-            # slice of multiple warpgroups
-            warpgroup_selector = [slice(r.min, r.min + 1) for r in exec_scope.slices]
+        return macro_or_prim_func(impl, need_macro=macro)
+    if name == "warp":
 
-            @Tx.inline()
-            def impl():
-                with Tx.warpgroup()[tuple(warpgroup_selector)]:
-                    with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
-                        with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
+        @Tx.inline()
+        def impl():
+            Tx.lane_id([32])
+            if Tx.ptx.elect_sync():
+                with Tx.thread():
+                    inner_impl()
+
+        return macro_or_prim_func(impl, need_macro=macro)
+    if name == "warpgroup":
+
+        @Tx.inline()
+        def impl():
+            warp_id = Tx.warp_id_in_wg([4])
+            Tx.lane_id([32])
+            if Tx.filter(warp_id, 0, 1):
+                with Tx.warp():
+                    if Tx.ptx.elect_sync():
+                        with Tx.thread():
                             inner_impl()
 
-            return macro_or_prim_func(impl, need_macro=macro)
-        else:
-            # a single warpgroup
-            @Tx.inline()
-            def impl():
-                with Tx.warp(parent="warpgroup")[(tx // 32) % 4 == 0]:
-                    with Tx.thread(parent="warp")[Tx.ptx.elect_sync()]:
-                        inner_impl()
-
-            return macro_or_prim_func(impl, need_macro=macro)
-    elif exec_scope.name == "thread":
-        # already a single thread, just return the inner_impl
-        return macro_or_prim_func(inner_impl, need_macro=macro)
-    else:
-        raise ValueError(
-            f"Currently exec scope {exec_scope} is not supported to select a single thread within"
-        )
+        return macro_or_prim_func(impl, need_macro=macro)
+    raise ValueError(f"thread_selector: unsupported exec_scope {name!r}")
 
 
 def single_thread(op_call: TilePrimitiveCall, sctx: DispatchContext) -> bool:
-    return (
-        sctx.exec_scope.name == "thread"
-        and isinstance(sctx.exec_scope, ExecScopeSlice)
-        and (
-            isinstance(sctx.exec_scope.slices, PrimExpr)
-            or functools.reduce(operator.mul, [s.extent for s in sctx.exec_scope.slices], 1) == 1
-        )
-    )
+    """Predicate for dispatchers that require a single-thread execution scope."""
+    del op_call
+    return sctx.is_thread
 
 
 def exec_scope_ok(
-    op_call: TilePrimitiveCall, sctx: DispatchContext, expected_scopes: list[str]
+    op_call: TilePrimitiveCall,
+    sctx: DispatchContext,
+    expected_scopes: list[str],
 ) -> tuple[bool, str | None]:
-    ok = sctx.exec_scope.name in expected_scopes
-    return (ok, None if ok else f"unsupported exec_scope {sctx.exec_scope.name}")
+    """Predicate helper: check that ``sctx.scope_kind`` is in *expected_scopes*."""
+    del op_call
+    ok = sctx.scope_kind in expected_scopes
+    return ok, None if ok else f"unsupported exec_scope {sctx.scope_kind}"

@@ -71,10 +71,8 @@ class Semaphore(SemaphoreBase):
                     Tx.cuda.nano_sleep(40)
         elif level == "warp":
             with Tx.thread():
-                warp_id = Tx.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
-                lane_id = Tx.thread_id([32], parent="warp")
+                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+                lane_id = Tx.lane_id([32])
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
                     while 1:
@@ -183,15 +181,11 @@ class MPMCQueue:
                 )
         else:
             with Tx.cta():
-                lane_id = Tx.thread_id([32], parent="warp")
-                tid_in_wg = Tx.thread_id(
-                    [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-                )
-                tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-                wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-                warp_id = Tx.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
+                lane_id = Tx.lane_id([32])
+                tid_in_wg = Tx.thread_id_in_wg([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER])
+                tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+                wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
                 idx_map = Tx.meta_var(
                     {
                         "warp": (warp_id, lane_id, 32),
@@ -315,7 +309,7 @@ class DynamicTileScheduler(TileSchedulerBase):
     @Tx.inline
     def _fetch_from_queue(self):
         with Tx.cta():
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
             # fetch from GEMM queue
             if warp_id == self.scheduler_warp:
                 if Tx.ptx.elect_sync():
@@ -335,12 +329,14 @@ class DynamicTileScheduler(TileSchedulerBase):
 
     @Tx.inline
     def init(self):
+        tid = Tx.thread_id([KernelConfig.NUM_THREADS])
         self._alloc()
         self.queue.init()
         self.dequeue_phase = 0
-        with Tx.thread()[0:1]:
-            self.p2c_dequeue_barrier.init(1)
-            self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
+        if Tx.filter(tid, 0, 1):
+            with Tx.thread():
+                self.p2c_dequeue_barrier.init(1)
+                self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
         Tx.tvm_storage_sync("shared")
         Tx.ptx.fence.proxy_async("shared::cta")
         Tx.ptx.fence.mbarrier_init()
@@ -348,7 +344,7 @@ class DynamicTileScheduler(TileSchedulerBase):
     @Tx.inline
     def next_tile(self):
         with Tx.cta():
-            lane_id = Tx.thread_id([32], parent="warp")
+            lane_id = Tx.lane_id([32])
             if self.profiler_on:
                 self.profiler.start(ProfileEventType.FETCH, lane_id == 0)
             self._fetch_from_queue()
@@ -407,13 +403,11 @@ class DynamicTileScheduler(TileSchedulerBase):
                 Tx.tvm_storage_sync("shared")
 
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            tid_in_wg = Tx.thread_id_in_wg([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER])
+            lane_id = Tx.lane_id([32])
             idx_map = Tx.meta_var(
                 {
                     "thread": (tid, 0),
@@ -472,14 +466,12 @@ class DynamicTileScheduler(TileSchedulerBase):
         )
 
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            warp_id_in_wg = Tx.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            tid_in_wg = Tx.thread_id_in_wg([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER])
+            warp_id_in_wg = Tx.warp_id_in_wg([KernelConfig.WARP_NUMBER])
+            lane_id = Tx.lane_id([32])
             idx_map = Tx.meta_var(
                 {
                     "thread": (tid, 0),

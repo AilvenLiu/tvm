@@ -34,7 +34,7 @@ from ..instruction_generator import InstructionGenerator
 
 def select_trn(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc | None:
     """Generate schedule for select operation on Trainium."""
-    if sctx.exec_scope.name != "kernel":
+    if sctx.scope_kind != "kernel":
         fail("requires kernel exec_scope for TRN select")
 
     op = TilePrimitiveCall.downcast(op)
@@ -134,8 +134,8 @@ def select_trn(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc | None:
         predicate(
             "exec_scope",
             lambda op, sctx: (
-                sctx.exec_scope.name == "kernel",
-                f"unsupported exec_scope {sctx.exec_scope.name}",
+                sctx.scope_kind == "kernel",
+                f"unsupported exec_scope {sctx.scope_kind}",
             ),
         )
     ],

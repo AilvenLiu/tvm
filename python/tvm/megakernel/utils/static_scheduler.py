@@ -45,10 +45,8 @@ class Semaphore(SemaphoreBase):
                     Tx.cuda.nano_sleep(40)
         elif level == "warp":
             with Tx.thread():
-                warp_id = Tx.warp_id(
-                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
-                )
-                lane_id = Tx.thread_id([32], parent="warp")
+                warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+                lane_id = Tx.lane_id([32])
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
                     while 1:
@@ -120,8 +118,8 @@ class StaticTileScheduler(TileSchedulerBase):
     def init(self):
         self._alloc()
         with Tx.cta():
-            bx = Tx.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            bx = Tx.cta_id([KernelConfig.SM_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
             self.tile_idx = 0
             for k in Tx.serial(Tx.ceildiv(self.MAX_TASKS, KernelConfig.NUM_THREADS)):
                 idx = Tx.meta_var(k * KernelConfig.NUM_THREADS + tid)
@@ -187,13 +185,11 @@ class StaticTileScheduler(TileSchedulerBase):
                 Tx.tvm_storage_sync("shared")
 
         with Tx.cta():
-            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            tid_in_wg = Tx.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            lane_id = Tx.thread_id([32], parent="warp")
+            wg_id = Tx.warpgroup_id([KernelConfig.WG_NUMBER])
+            warp_id = Tx.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER])
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            tid_in_wg = Tx.thread_id_in_wg([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER])
+            lane_id = Tx.lane_id([32])
             idx_map = Tx.meta_var(
                 {
                     "thread": (tid, 0),

@@ -39,7 +39,7 @@ def unary_with_bias_scale_trn(
 ) -> PrimFunc | None:
     """Schedule unary operation with bias and scale on Trainium."""
     # Check execution environment
-    if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
+    if not (sctx.is_trn() and sctx.scope_kind == "kernel"):
         fail("requires Trainium target and kernel exec_scope")
 
     # Extract operation arguments with defaults

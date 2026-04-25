@@ -42,8 +42,9 @@ unary_op_table = {
     MapOpType.RECIPROCAL: lambda x, s, b: Tx.FloatImm(x.dtype, 1.0) / x,
     MapOpType.EXP: lambda x, s, b: Tx.exp(x * s + b) if b is not None else Tx.exp(x * s),
     MapOpType.EXP2: lambda x, s, b: Tx.exp2(x * s + b) if b is not None else Tx.exp2(x * s),
-    MapOpType.SILU: lambda x, s, b: x
-    / (Tx.FloatImm(x.dtype, 1.0) + Tx.exp(Tx.FloatImm(x.dtype, 0.0) - x)),
+    MapOpType.SILU: lambda x, s, b: (
+        x / (Tx.FloatImm(x.dtype, 1.0) + Tx.exp(Tx.FloatImm(x.dtype, 0.0) - x))
+    ),
 }
 
 
@@ -180,9 +181,9 @@ def _classify_unary_local_case(
             analyzer.can_prove_equal(e, s) for e, s in zip(ext, buf_region.buffer.shape)
         ) and all(analyzer.can_prove_equal(s, z) for s, z in zip(st, zero_st))
 
-    if sctx.exec_scope.name == "thread":
+    if sctx.is_thread:
         return _LOCAL_CASE_THREAD_WISE
-    if sctx.exec_scope.name in ["warp", "warpgroup", "cta"]:
+    if sctx.scope_kind in ["warp", "warpgroup", "cta"]:
         if _full_region(_dst) and _full_region(_src) and _full_region(_bias):
             return _LOCAL_CASE_VIEW_FULL
         return _LOCAL_CASE_VIEW_SLICED

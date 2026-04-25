@@ -34,7 +34,7 @@ def binary_trn(
     sctx: DispatchContext,
 ) -> PrimFunc | None:
     """Generate a binary operation schedule for Trainium."""
-    if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
+    if not (sctx.is_trn() and sctx.scope_kind == "kernel"):
         fail("requires Trainium target and kernel exec_scope")
 
     assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"

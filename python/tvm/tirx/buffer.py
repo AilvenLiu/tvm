@@ -184,7 +184,7 @@ class Buffer(Object, Scriptable):
         load : Expr
             The corresponding load expression.
         """
-        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin  # noqa: UP038
+        begin = (begin,) if isinstance(begin, int | PrimExpr) else begin
         dtype = dtype if dtype else self.dtype
         return _ffi_api.BufferVLoad(self, begin, dtype, predicate)  # type: ignore
 
@@ -209,7 +209,7 @@ class Buffer(Object, Scriptable):
         store : Stmt
             The corresponding store stmt.
         """
-        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin  # noqa: UP038
+        begin = (begin,) if isinstance(begin, int | PrimExpr) else begin
         return _ffi_api.BufferVStore(self, begin, value, predicate)  # type: ignore
 
     def scope(self):
@@ -363,7 +363,7 @@ class Buffer(Object, Scriptable):
                 )
             return shape
 
-        if len(args) == 1 and isinstance(args[0], (str, tvm.DataType)) and not kwargs:  # noqa: UP038
+        if len(args) == 1 and isinstance(args[0], str | tvm.DataType) and not kwargs:
             cast_dtype = tvm.DataType(args[0])
             cur_dtype = tvm.DataType(self.dtype)
             if cast_dtype.bits > cur_dtype.bits:
@@ -587,7 +587,7 @@ class Buffer(Object, Scriptable):
         )
         from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
 
-        if not isinstance(indices, (tuple, list)):  # noqa: UP038
+        if not isinstance(indices, tuple | list):
             indices = [indices]
         has_slice = any(isinstance(i, slice) for i in indices)
         has_step = any(
@@ -650,7 +650,7 @@ def decl_buffer(
     # pylint: disable=import-outside-toplevel
     from .expr import Var
 
-    shape = (shape,) if isinstance(shape, (PrimExpr, Integral)) else shape  # noqa: UP038
+    shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
     dtype = "float32" if dtype is None else dtype
     strides = () if strides is None else strides
 

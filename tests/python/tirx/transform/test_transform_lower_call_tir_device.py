@@ -29,13 +29,13 @@ def test_call_tir_device():
         @Tx.prim_func(tirx=True, private=True)
         def test1(A: Tx.Buffer((2048,), "float32"), m: Tx.int32):
             with Tx.cta():
-                Tx.thread_id([128], parent="cta")
+                tid = Tx.thread_id([128])
                 Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
         @Tx.prim_func(tirx=True, private=True)
         def test2(A: Tx.Buffer((2048, 2048), "float32"), m: Tx.int32, n: Tx.int32):
             with Tx.cta():
-                Tx.thread_id([128], parent="cta")
+                tid = Tx.thread_id([128])
                 Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function
@@ -64,17 +64,17 @@ def test_call_tir_device():
         @Tx.prim_func(tirx=True, private=True)
         def test1_kernel(A: Tx.Buffer((2048,), "float32")):
             with Tx.kernel():
-                m = Tx.cta_id([16], parent="kernel")
+                m = Tx.cta_id([16])
                 with Tx.cta():
-                    Tx.thread_id([128], parent="cta")
+                    tid = Tx.thread_id([128])
                     Tx.fill(A[m * 128 : m * 128 + 128], 0.0)
 
         @Tx.prim_func(tirx=True, private=True)
         def test2_kernel(A: Tx.Buffer((2048, 2048), "float32")):
             with Tx.kernel():
-                m, n = Tx.cta_id([16, 16], parent="kernel")
+                m, n = Tx.cta_id([16, 16])
                 with Tx.cta():
-                    Tx.thread_id([128], parent="cta")
+                    tid = Tx.thread_id([128])
                     Tx.fill(A[m * 128 : m * 128 + 128, n * 128 : n * 128 + 128], 0.0)
 
         @R.function

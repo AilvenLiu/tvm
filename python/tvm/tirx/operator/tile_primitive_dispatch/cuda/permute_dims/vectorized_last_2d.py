@@ -44,7 +44,7 @@ def validate_deepgemm_permute_dims(
         st, extent = get_st_extent(op_call.buffer)
 
     order = op_call.order
-    if sctx.exec_scope.name == "warp":
+    if sctx.is_warp:
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
         ndim = len(order)
         expected_order = [*list(range(ndim - 2)), ndim - 1, ndim - 2]
@@ -87,7 +87,7 @@ def vectorized_permute_dims_last_2d_impl(
         vec_len = 1
 
     # Thread and vectorization setup
-    if sctx.exec_scope.name == "warp":
+    if sctx.is_warp:
         tid_x = sctx.launch_params["threadIdx.x"]
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 

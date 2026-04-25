@@ -65,6 +65,7 @@ class PrivateAllocCollector(StmtVisitor):
             launch_params=self.launch_params,
             var_range_map=self.var_range_map,
             alloc_only=True,
+            scope_kind=self.exec_scope_stack_[-1].name,
         )
         op = TilePrimitiveCall.downcast(op)
         private_buf_refs = op.get_private_buffers(self.buffer_dict, sctx)

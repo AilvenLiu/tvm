@@ -19,7 +19,10 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/script/ir_builder/ir/ir.h>
 #include <tvm/script/ir_builder/tirx/frame.h>
+#include <tvm/tirx/builtin.h>
+#include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/function.h>
+#include <tvm/tirx/op.h>
 
 #include "../../../tirx/ir/script/script_complete.h"
 #include "./utils.h"

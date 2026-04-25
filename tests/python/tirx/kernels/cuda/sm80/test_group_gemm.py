@@ -281,10 +281,10 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
         with Tx.kernel():
             cta_cnt = Tx.meta_var(SM_COUNT) # persistent kernel
             # cta_cnt = Tx.meta_var(ceildiv(MAX_SORTED_TOKEN_IDS, BLK_M) * ceildiv(N, BLK_N)) # non-persistent kernel  # noqa: E501
-            bx = Tx.cta_id([cta_cnt], parent="kernel")
-            wg_id = Tx.warpgroup_id([WARP_GROUP_COUNT], parent="cta")
-            warp_id = Tx.warp_id([WARP_COUNT], parent="warpgroup")
-            lane_id = Tx.thread_id([32], parent="warp")
+            bx = Tx.cta_id([cta_cnt])
+            wg_id = Tx.warpgroup_id([WARP_GROUP_COUNT])
+            warp_id = Tx.warp_id_in_wg([WARP_COUNT])
+            lane_id = Tx.lane_id([32])
 
             buf = Tx.alloc_shared([SMEM_SIZE * WARP_GROUP_COUNT], "uint8", scope="shared.dyn")
             pool = Tx.SMEMPool(buf.data)

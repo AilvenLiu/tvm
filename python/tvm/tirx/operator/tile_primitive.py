@@ -65,7 +65,7 @@ class UnaryOp(TilePrimitiveCall):
             f"{self} expects BufferRegion as output, got {self.output}"
         )
         if self.scalar_input:
-            assert isinstance(self.input, (FloatImm, IntImm)), (  # noqa: UP038
+            assert isinstance(self.input, FloatImm | IntImm), (
                 f"{self} expects FloatImm or IntImm as value, got {self.input}"
             )
         else:
@@ -123,7 +123,7 @@ class BinaryOp(TilePrimitiveCall):
         assert isinstance(self.dsts[0], BufferRegion), (
             f"{self} expects BufferRegion as output, got {self.dsts[0]}"
         )
-        assert all(isinstance(arg, (BufferRegion, FloatImm, PrimExpr)) for arg in self.srcs), (  # noqa: UP038
+        assert all(isinstance(arg, BufferRegion | FloatImm | PrimExpr) for arg in self.srcs), (
             f"{self} expects BufferRegion/FloatImm/PrimExpr inputs, got {self.srcs}"
         )
 
@@ -158,7 +158,7 @@ class ReduceOp(TilePrimitiveCall):
         assert isinstance(self.input, BufferRegion), (
             f"{self} expects BufferRegion as input, got {self.input}"
         )
-        assert isinstance(self.accum, (bool, IntImm)), (  # noqa: UP038
+        assert isinstance(self.accum, bool | IntImm), (
             f"{self} expects bool or IntImm as accum, got {self.accum}"
         )
 
@@ -244,10 +244,10 @@ class FMA(TilePrimitiveCall):
         assert isinstance(self.input, BufferRegion), (
             f"{self} expects BufferRegion as input, got {self.input}"
         )
-        assert isinstance(self.scale, (BufferRegion, FloatImm, PrimExpr)), (  # noqa: UP038
+        assert isinstance(self.scale, BufferRegion | FloatImm | PrimExpr), (
             f"{self} expects BufferRegion or PrimExpr as scale, got {self.scale}"
         )
-        assert isinstance(self.bias, (BufferRegion, FloatImm, PrimExpr)), (  # noqa: UP038
+        assert isinstance(self.bias, BufferRegion | FloatImm | PrimExpr), (
             f"{self} expects BufferRegion or PrimExpr as bias, got {self.bias}"
         )
 
@@ -366,13 +366,13 @@ class Gemm(TilePrimitiveCall):
         assert all(isinstance(arg, BufferRegion) for arg in (self.output, self.lhs, self.rhs)), (
             f"{self} expects BufferRegion arguments as output, lhs and rhs, got {(self.output, self.lhs, self.rhs)}"  # noqa: E501
         )
-        assert isinstance(self.bias, (BufferRegion, FloatImm)), (  # noqa: UP038
+        assert isinstance(self.bias, BufferRegion | FloatImm), (
             f"{self} expects BufferRegion or FloatImm arguments as bias, got {self.bias}"
         )
-        assert isinstance(self.transpose_A, (bool, IntImm)), (  # noqa: UP038
+        assert isinstance(self.transpose_A, bool | IntImm), (
             f"{self} expects bool or IntImm arguments as transpose_A, got {self.transpose_A}"
         )
-        assert isinstance(self.transpose_B, (bool, IntImm)), (  # noqa: UP038
+        assert isinstance(self.transpose_B, bool | IntImm), (
             f"{self} expects bool arguments as transpose_B, got {self.transpose_B}"
         )
         assert isinstance(self.alpha, FloatImm), (
@@ -517,7 +517,7 @@ class Select(BinaryOp):
         assert isinstance(self.output, BufferRegion), (
             f"{self} expects BufferRegion as output, got {self.output}"
         )
-        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in (self.lhs, self.rhs)), (  # noqa: UP038
+        assert all(isinstance(arg, BufferRegion | FloatImm) for arg in (self.lhs, self.rhs)), (
             f"{self} expects BufferRegion or FloatImm arguments as inputs, got {(self.lhs, self.rhs)}"  # noqa: E501
         )
         assert isinstance(self.predicate, Predicate), (
@@ -577,7 +577,7 @@ class BinaryReduce(TilePrimitiveCall):
         assert all(isinstance(arg, BufferRegion) for arg in self.dsts), (
             f"{self} expects BufferRegion arguments as binary_output and reduce_output, got {self.dsts}"  # noqa: E501
         )
-        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
+        assert all(isinstance(arg, BufferRegion | FloatImm) for arg in self.srcs), (
             f"{self} expects BufferRegion or FloatImm arguments as binary_input1 and binary_input2, got {self.srcs}"  # noqa: E501
         )
         assert isinstance(self.binary_op, Op), (
@@ -621,7 +621,7 @@ class UnaryReduce(TilePrimitiveCall):
         assert all(isinstance(arg, BufferRegion) for arg in self.dsts), (
             f"{self} expects BufferRegion arguments as unary_output and reduce_output, got {self.dsts}"  # noqa: E501
         )
-        assert isinstance(self.unary_input, (BufferRegion, FloatImm)), (  # noqa: UP038
+        assert isinstance(self.unary_input, BufferRegion | FloatImm), (
             f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.unary_input}"  # noqa: E501
         )
         assert isinstance(self.unary_op, Op), f"{self} expects Op as unary_op, got {self.unary_op}"
@@ -667,7 +667,7 @@ class BinaryChain(TilePrimitiveCall):
         assert isinstance(self.output, BufferRegion), (
             f"{self} expects BufferRegion as output, got {self.output}"
         )
-        assert all(isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs), (  # noqa: UP038
+        assert all(isinstance(arg, BufferRegion | FloatImm) for arg in self.srcs), (
             f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"  # noqa: E501
         )
         assert isinstance(self.op0, Op), f"{self} expects Op as op0, got {self.op0}"

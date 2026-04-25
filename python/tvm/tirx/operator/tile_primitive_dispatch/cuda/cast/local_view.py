@@ -104,9 +104,9 @@ def _classify_cast_local_case(
             analyzer.can_prove_equal(e, s) for e, s in zip(ext, buf_region.buffer.shape)
         ) and all(analyzer.can_prove_equal(s, 0) for s in st)
 
-    if sctx.exec_scope.name == "thread":
+    if sctx.is_thread:
         return _LOCAL_CASE_THREAD_WISE
-    if sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"]:
+    if sctx.scope_kind in ["warp", "warpgroup", "cta", "cluster"]:
         if _full_region(dst_region) and _full_region(src_region):
             return _LOCAL_CASE_VIEW_FULL
         return _LOCAL_CASE_VIEW_SLICED
@@ -125,7 +125,7 @@ def validate_cast_local_view(
         src.scope() == "local"
         and dst.scope() == "local"
         and sctx.is_cuda()
-        and sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"]
+        and sctx.scope_kind in ["warp", "warpgroup", "cta", "cluster"]
     ):
         return False
 
@@ -566,8 +566,8 @@ def cast_local_view_impl(
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
 
-    if sctx.exec_scope.name not in ["warp", "warpgroup", "cta", "cluster"]:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for local-view cast")
+    if sctx.scope_kind not in ["warp", "warpgroup", "cta", "cluster"]:
+        fail(f"unsupported exec_scope {sctx.scope_kind} for local-view cast")
 
     src_has_layout = _has_nontrivial_layout(src)
     dst_has_layout = _has_nontrivial_layout(dst)
@@ -664,8 +664,8 @@ def cast_local_view_impl(
         predicate(
             "exec_scope",
             lambda op, sctx: (
-                sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
-                f"unsupported exec_scope {sctx.exec_scope.name} for local cast",
+                sctx.scope_kind in ["warp", "warpgroup", "cta", "cluster"],
+                f"unsupported exec_scope {sctx.scope_kind} for local cast",
             ),
         ),
     ],

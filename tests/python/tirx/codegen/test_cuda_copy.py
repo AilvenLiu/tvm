@@ -42,9 +42,9 @@ def test_copy_128b():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (4,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 src_buf = Tx.alloc_buffer((4,), "float32", scope="shared")
                 dst_buf = Tx.alloc_buffer((4,), "float32", scope="shared")
@@ -75,9 +75,9 @@ def test_copy_64b():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (2,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 src_buf = Tx.alloc_buffer((2,), "float32", scope="shared")
                 dst_buf = Tx.alloc_buffer((2,), "float32", scope="shared")
@@ -108,9 +108,9 @@ def test_copy_32b():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (1,), "float32")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 src_buf = Tx.alloc_buffer((1,), "float32", scope="shared")
                 dst_buf = Tx.alloc_buffer((1,), "float32", scope="shared")
@@ -141,9 +141,9 @@ def test_copy_16b():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (1,), "float16")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 src_buf = Tx.alloc_buffer((1,), "float16", scope="shared")
                 dst_buf = Tx.alloc_buffer((1,), "float16", scope="shared")
@@ -174,9 +174,9 @@ def test_copy_8b():
     def func(out_ptr: Tx.handle):
         out = Tx.match_buffer(out_ptr, (1,), "uint8")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 src_buf = Tx.alloc_buffer((1,), "uint8", scope="shared")
                 dst_buf = Tx.alloc_buffer((1,), "uint8", scope="shared")
@@ -212,9 +212,9 @@ def test_codegen_function_names(num_bytes, func_suffix):
     def func(dummy_ptr: Tx.handle):
         dummy = Tx.match_buffer(dummy_ptr, (16,), "uint8")
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            lane = Tx.thread_id([32], parent="warp")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([1])
+            lane = Tx.lane_id([32])
             with Tx.cta():
                 a = Tx.alloc_buffer((16,), "uint8", scope="shared")
                 b = Tx.alloc_buffer((16,), "uint8", scope="shared")

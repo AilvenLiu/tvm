@@ -44,8 +44,9 @@ After (scheduled PrimFunc, group_size=8, spatial_par=4):
 (B) Thread scope -- sequential loop (_emit_reduction_shared_thread):
 
 Before:
-    with Tx.thread()[65:66]:
-        Tx.sum(B_smem[0:4], A_smem[0:4, 0:8], [-1], False)
+    if Tx.filter(tid, 65, 66):
+        with Tx.thread():
+            Tx.sum(B_smem[0:4], A_smem[0:4, 0:8], [-1], False)
 
 After (scheduled PrimFunc):
     for spa in range(4):
@@ -82,8 +83,8 @@ def validate_reduction_shared(
     sctx: DispatchContext,
 ) -> tuple[bool, str | None]:
     """Validate reduction in shared memory."""
-    if sctx.exec_scope.name not in ["cta", "warpgroup", "warp", "thread"]:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for shared reduction"
+    if sctx.scope_kind not in ["cta", "warpgroup", "warp", "thread"]:
+        return False, f"unsupported exec_scope {sctx.scope_kind} for shared reduction"
 
     op = TilePrimitiveCall.downcast(op)
     dst, src = op.output.buffer, op.input.buffer
@@ -130,7 +131,7 @@ def _emit_reduction_shared_cta(
     reduce_dims: list[int],
     spatial_dims: list[int],
 ) -> PrimFunc:
-    exec_scope_name = sctx.exec_scope.name
+    exec_scope_name = sctx.scope_kind
 
     def get_thread_cnt():
         if exec_scope_name == "cta":
@@ -266,16 +267,16 @@ def reduction_shared_impl(
     dst_br, src_br, reduce_axes, accum, config = _reduction_args(op)
     src_ndim = len(src_br.region)
     reduce_dims, spatial_dims = _analyze_axes(src_ndim, reduce_axes)
-    if sctx.exec_scope.name in ["cta", "warpgroup", "warp"]:
+    if sctx.scope_kind in ["cta", "warpgroup", "warp"]:
         return _emit_reduction_shared_cta(
             dst_br, src_br, accum, op_type, sctx, reduce_dims, spatial_dims
         )
-    elif sctx.exec_scope.name == "thread":
+    elif sctx.is_thread:
         return _emit_reduction_shared_thread(
             dst_br, src_br, accum, op_type, sctx, reduce_dims, spatial_dims
         )
     else:
-        fail(f"unsupported exec_scope {sctx.exec_scope.name} for reduction_shared_impl")
+        fail(f"unsupported exec_scope {sctx.scope_kind} for reduction_shared_impl")
 
 
 # ---------------------------------------------------------------------------

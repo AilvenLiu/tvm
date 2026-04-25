@@ -40,23 +40,25 @@ def test_tmem_alloc_dealloc_relinquish():
     @Tx.prim_func(tirx=True)
     def test_tmem(A: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([4])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([128])
             with Tx.cta():
                 # tmem_addr = Tx.alloc_buffer((1,), "uint32", scope="shared", align=8)
                 tmem_addr = Tx.shared_scalar("uint32")
 
                 # alloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
                 Tx.cuda.cta_sync()
 
                 # dealloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
+                        Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -73,10 +75,10 @@ def test_fence_before_after_thread_sync():
     @Tx.prim_func(tirx=True)
     def test_fence(A: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.warp_id([1], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([4])
+            lane_id = Tx.lane_id([32])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.tcgen05.fence.before_thread_sync()
                 Tx.ptx.bar.sync(0, 32)
@@ -102,18 +104,19 @@ def test_tcgen05_ld_st_roundtrip():
     @Tx.prim_func(tirx=True)
     def test_ld_st(A: Tx.Buffer((HEIGHT, WIDTH), "float32"), B: Tx.Buffer((HEIGHT, WIDTH), "float32")):  # noqa: E501
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tx = Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([4])
+            lane_id = Tx.lane_id([32])
+            tx = Tx.thread_id([128])
             with Tx.cta():
                 reg = Tx.alloc_buffer((WIDTH,), "float32", scope="local")
                 # tmem_addr = Tx.alloc_buffer((1,), "uint32", scope="shared", align=8)
                 tmem_addr = Tx.shared_scalar("uint32")
 
                 # alloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
                 Tx.cuda.cta_sync()
 
                 with Tx.thread():
@@ -139,9 +142,10 @@ def test_tcgen05_ld_st_roundtrip():
                         B[tx, i] = reg[i]
 
                 # dealloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
+                        Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     DEV = tvm.cuda(0)
@@ -176,10 +180,10 @@ def test_tcgen05_cp_ld_roundtrip():
     def test_cp_ld(A: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(Tx.S[(HEIGHT, WIDTH // 4, 4) : (4, HEIGHT * 4, 1)])),  # noqa: E501
                    B: Tx.Buffer((HEIGHT, WIDTH), dtype, layout=Tx.TileLayout(Tx.S[(HEIGHT, WIDTH // 4, 4) : (4, HEIGHT * 4, 1)]))):  # noqa: E501
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tx = Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([4])
+            lane_id = Tx.lane_id([32])
+            tx = Tx.thread_id([128])
             with Tx.cta():
                 A_smem = Tx.alloc_buffer((HEIGHT, WIDTH), dtype, scope="shared", layout=A_layout)
                 reg = Tx.alloc_buffer((WIDTH,), dtype, scope="local")
@@ -190,8 +194,9 @@ def test_tcgen05_cp_ld_roundtrip():
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
 
                 # alloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
                 Tx.cuda.cta_sync()
 
                 # GMEM -> SMEM
@@ -225,9 +230,10 @@ def test_tcgen05_cp_ld_roundtrip():
                         B[tx, i] = reg[i]
 
                 # dealloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
+                        Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     DEV = tvm.cuda(0)
@@ -300,10 +306,10 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                            B: Tx.Buffer((N, K), b_type, layout=Tx.TileLayout(Tx.S[N, K])),
                            C: Tx.Buffer((M, N), d_type)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            warp_id = Tx.warp_id([4], parent="cta")
-            Tx.thread_id([32], parent="warp")
-            tx = Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            warp_id = Tx.warp_id([4])
+            lane_id = Tx.lane_id([32])
+            tx = Tx.thread_id([128])
             with Tx.cta():
                 dyn = Tx.alloc_buffer((dyn_smem_bytes,), "uint8", scope="shared")
                 tmem_addr = Tx.decl_scalar("uint32", dyn.data, scope="shared", elem_offset=0)
@@ -318,8 +324,9 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                 phase = Tx.alloc_buffer((1,), "int32", scope="local")
 
                 # alloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.alloc(Tx.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)  # noqa: E501
                 Tx.cuda.cta_sync()
 
                 # reset RF
@@ -362,9 +369,10 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                         C[tx, i] = reg[i]
 
                 # dealloc TMEM
-                with Tx.warp()[0:1]:
-                    Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
+                if Tx.filter(warp_id, 0, 1):
+                    with Tx.warp():
+                        Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
+                        Tx.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     import torch

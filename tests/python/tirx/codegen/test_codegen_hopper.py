@@ -64,8 +64,8 @@ def test_ptx_setmaxnreg(inc):
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.setmaxnreg(inc, 32)
     # fmt: on
@@ -85,8 +85,8 @@ def test_stmatrix_sync_aligned(trans):
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
             with Tx.cta():
                 A_smem = Tx.alloc_buffer((16, 16), "float16", scope="shared", align=16)
                 with Tx.thread():
@@ -144,12 +144,13 @@ def test_ptx_stmatrix(trans, num):
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((16, 16), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([32], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([32])
             A_shared = Tx.alloc_shared([16, 16], "float16")
-            with Tx.thread()[tx == 0]:
-                for i, j in Tx.grid(16, 16):
-                    A_shared[i, j] = Tx.float16(0.0)
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    for i, j in Tx.grid(16, 16):
+                        A_shared[i, j] = Tx.float16(0.0)
             Tx.cuda.cta_sync()
             with Tx.thread():
                 A_local = Tx.alloc_local([8], "float16")
@@ -157,9 +158,10 @@ def test_ptx_stmatrix(trans, num):
                     A_local[i] = (i // 2) * 64 + tx * 2 + i % 2
                 Tx.ptx.stmatrix(A_shared.ptr_to([tx % 16, tx // 16 * 8]), A_local.ptr_to([0]), num=num, trans=trans)  # noqa: E501
             Tx.cuda.cta_sync()
-            with Tx.thread()[tx == 0]:
-                for i, j in Tx.grid(16, 16):
-                    A[i, j] = A_shared[i, j]
+            if Tx.filter(tx, tx == 0):
+                with Tx.thread():
+                    for i, j in Tx.grid(16, 16):
+                        A[i, j] = A_shared[i, j]
     # fmt: on
 
     DEV = tvm.cuda(0)
@@ -200,8 +202,8 @@ def test_bar_arrive():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.bar.arrive(0, 128)
     # fmt: on
@@ -217,8 +219,8 @@ def test_bar_sync():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.bar.sync(0, 128)
     # fmt: on
@@ -234,8 +236,8 @@ def test_fence_mbarrier_init_release_clsuter():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.fence.mbarrier_init()
     # fmt: on
@@ -250,8 +252,8 @@ def test_ptx_elect_sync():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            tx = Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tx = Tx.thread_id([128])
             with Tx.thread():
                 if (Tx.ptx.elect_sync()):
                     A[tx] = tx
@@ -269,8 +271,8 @@ def test_ptx_fence(sem, scope):
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.fence(sem, scope)
     # fmt: on
@@ -285,8 +287,8 @@ def test_fence_proxy_async():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([128], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([128])
             with Tx.thread():
                 Tx.ptx.fence.proxy_async("global")
                 Tx.ptx.fence.proxy_async("shared::cta")
@@ -740,8 +742,8 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)  # noqa: E501
 
             with Tx.kernel():
-                Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([128], parent="cta")
+                cta_id = Tx.cta_id([1])
+                tx = Tx.thread_id([128])
 
                 with Tx.thread():
                     A_smem = Tx.alloc_buffer(elems, "float32", scope="shared", align=128)
@@ -821,8 +823,8 @@ def test_wgmma_ss_nt():
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)  # noqa: E501
 
             with Tx.kernel():
-                Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([128], parent="cta") # A warpgroup is 128 threads
+                cta_id = Tx.cta_id([1])
+                tx = Tx.thread_id([128]) # A warpgroup is 128 threads
 
                 with Tx.thread():
                     A_smem = Tx.alloc_buffer(shapeA, in_dtype, scope="shared", align=1024)
@@ -976,8 +978,8 @@ def test_wgmma_rs_nt():
             Tx.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)  # noqa: E501
 
             with Tx.kernel():
-                Tx.cta_id([1], parent="kernel")
-                tx = Tx.thread_id([128], parent="cta") # A warpgroup is 128 threads
+                cta_id = Tx.cta_id([1])
+                tx = Tx.thread_id([128]) # A warpgroup is 128 threads
 
                 with Tx.thread():
                     B_smem = Tx.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
@@ -1109,13 +1111,14 @@ def test_ptx_map_shared_rank():
     @Tx.prim_func(tirx=True)
     def func(A: Tx.Buffer(1)):
         with Tx.kernel():
-            cbx = Tx.cta_id([2], parent="cluster")
-            Tx.cta_id([2], parent="kernel")
-            tx = Tx.thread_id([128], parent="cta")
+            cbx = Tx.cta_id_in_cluster([2])
+            cta_id = Tx.cta_id([2])
+            tx = Tx.thread_id([128])
             with Tx.cta():
                 A_smem = Tx.alloc_buffer([1], "uint32", scope="shared")
-                with Tx.thread()[cbx == 0 and tx == 0]:
-                    Tx.ptx.map_shared_rank(A_smem.data, cbx)
+                if Tx.filter(tx, cbx == 0 and tx == 0):
+                    with Tx.thread():
+                        Tx.ptx.map_shared_rank(A_smem.data, cbx)
 
     src, mod = _get_source(func)
     print(src)

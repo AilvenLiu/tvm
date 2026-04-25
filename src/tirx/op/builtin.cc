@@ -65,6 +65,12 @@ TIR_DEFINE_BUILTIN_FUNC(likely)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kExprAnnotation))
     .set_attr<TVectorizable>("TVectorizable", true);
 
+// tirx.filter: thread-set filter predicate used as IfThenElse condition.
+// Variadic: (var, lo, hi) range form or (var, cond) predicate form; multi-var
+// conjunctions are desugared into nested IfThenElse at parse time.
+TIR_DEFINE_BUILTIN_FUNC(filter).set_attr<TCallEffectKind>("TCallEffectKind",
+                                                          Integer(CallEffectKind::kPure));
+
 TIR_DEFINE_BUILTIN_FUNC(bitwise_and)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))
@@ -406,6 +412,9 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_cta_sync)
 
 TIR_DEFINE_BUILTIN_FUNC(cuda_grid_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(cuda_thread_rank)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
 
 // Cluster-wide sync (CUDA thread block clusters)
 TIR_DEFINE_BUILTIN_FUNC(cuda_cluster_sync)

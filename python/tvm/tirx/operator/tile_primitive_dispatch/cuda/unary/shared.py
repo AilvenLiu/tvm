@@ -71,8 +71,8 @@ def validate_unary_shared(
     _dst, _src, _bias, _scale = _unary_args(op)
 
     # support local-view and local-thread-wise unary ops
-    if sctx.exec_scope.name not in ["thread", "warp", "warpgroup", "cta"]:
-        return False, f"unsupported exec_scope {sctx.exec_scope.name} for shared unary op"
+    if sctx.scope_kind not in ["thread", "warp", "warpgroup", "cta"]:
+        return False, f"unsupported exec_scope {sctx.scope_kind} for shared unary op"
 
     if not (
         _dst.buffer.scope().startswith("shared")
@@ -142,7 +142,7 @@ def unary_shared_impl(
     dst = _dst.buffer
     op_func = unary_op_table.get(op_type)
     assert op_func is not None
-    exec_scope_name = sctx.exec_scope.name
+    exec_scope_name = sctx.scope_kind
 
     def get_tid_in_scope():
         tx_var = sctx.launch_params["threadIdx.x"].var

@@ -23,13 +23,13 @@ def test_exec_scope_create():
     def is_trivial_scope(scope, name):
         return isinstance(scope, ExecScope) and scope.name == name
 
-    thread = ExecScope.create("thread")
-    warp = ExecScope.create("warp")
-    wg = ExecScope.create("warpgroup")
-    cta = ExecScope.create("cta")
-    cluster = ExecScope.create("cluster")
-    kernel = ExecScope.create("kernel")
-    world = ExecScope.create("world")
+    thread = ExecScope("thread")
+    warp = ExecScope("warp")
+    wg = ExecScope("warpgroup")
+    cta = ExecScope("cta")
+    cluster = ExecScope("cluster")
+    kernel = ExecScope("kernel")
+    world = ExecScope("world")
 
     assert is_trivial_scope(world, "world")
     assert is_trivial_scope(kernel, "kernel")
@@ -39,8 +39,8 @@ def test_exec_scope_create():
     assert is_trivial_scope(cta, "cta")
     assert is_trivial_scope(cluster, "cluster")
 
-    with pytest.raises(Exception, match="Unknown scope name"):
-        ExecScope.create("aaa")
+    with pytest.raises(Exception, match="Unknown scope kind name"):
+        ExecScope("aaa")
 
 
 if __name__ == "__main__":

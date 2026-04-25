@@ -343,22 +343,14 @@ TVM_DLL Pass AnnotateEntryFunc();
 TVM_DLL Pass Filter(ffi::TypedFunction<bool(PrimFunc)> fcond);
 
 /*!
- * \brief Resolve scope id definitions in TIRx programs for the given target.
- * \return The pass.
- */
-TVM_DLL Pass LowerTIRxResolveScopeIds();
-
-/*!
  * \brief Lower TIRx op calls using registered op dispatchers for the given target.
+ *
+ * Also resolves ScopeIdDef declarations: gathers them at kernel scope, verifies
+ * consistency, extracts launch parameters, and emits Bind statements +
+ * thread_extent AttrStmts wrapping the dispatched body.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRxDispatchOps();
-
-/*!
- * \brief Resolve exec scope slices introduced during TIRx lowering.
- * \return The pass.
- */
-TVM_DLL Pass LowerTIRxResolveScopeSlices();
+TVM_DLL Pass TilePrimitiveDispatch();
 
 /*!
  * \brief Finalize TIRx lowering by applying layout rewriters and cleanup passes.

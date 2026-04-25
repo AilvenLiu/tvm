@@ -18,9 +18,8 @@
 
 """Definition of execution scope."""
 
-from tvm_ffi import get_global_func, register_object
+from tvm_ffi import register_object
 
-from tvm.ir import Range
 from tvm.runtime import Object
 
 from . import _ffi_api
@@ -29,51 +28,44 @@ from .expr import PrimExpr, Var
 
 @register_object("tirx.ScopeIdDef")
 class ScopeIdDef(Object):
-    """Definition of scope identifiers with their extents and parent-child relationships."""
+    """Definition of scope identifiers with their extents and parent-child relationships.
+
+    The constructor accepts ``parent`` and ``cur`` as scope-name strings; they
+    are converted by the FFI into the closed ``ScopeBinding`` enum and stored
+    on the ``scope`` field (an ``int`` value of that enum).
+    """
 
     def_ids: list[Var]
     extents: list[PrimExpr]
-    parent: str
-    cur: str
+    scope: int
 
     def __init__(self, def_ids: list[Var], extents: list[PrimExpr], parent: str, cur: str):
         self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent, cur)
 
 
+_SCOPE_KIND_TO_NAME = {
+    0: "world",
+    1: "kernel",
+    2: "cluster",
+    3: "cta",
+    4: "warpgroup",
+    5: "warp",
+    6: "thread",
+}
+
+
 @register_object("tirx.ExecScope")
 class ExecScope(Object):
-    """Base class for execution scopes."""
+    """An execution scope, identified by one of {world, kernel, cluster, cta, warpgroup,
+    warp, thread}. The ctor FATALs on any other name."""
 
-    name: str
+    kind: int
     scope_id_def: list[ScopeIdDef]
 
     def __init__(self, name: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScope, name)
 
-    @staticmethod
-    def create(name: str):
-        """Create a new execution scope with the given name.
-
-        Parameters
-        ----------
-        name : str
-            The name of the execution scope.
-
-        Returns
-        -------
-        ExecScope
-            The created execution scope.
-        """
-        return get_global_func("tirx.ExecScopeCreate")(name)
-
-
-@register_object("tirx.ExecScopeSlice")
-class ExecScopeSlice(ExecScope):
-    """A slice of an execution scope with their slices and parent scope name."""
-
-    slices: list[Range] | PrimExpr
-    parent: str
-    cur: str
-
-    def __init__(self, slices: list[Range] | PrimExpr, parent: str, cur: str):
-        self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, slices, parent, cur)
+    @property
+    def name(self) -> str:
+        """Human-readable name of this scope (derived from ``kind``)."""
+        return _SCOPE_KIND_TO_NAME[self.kind]

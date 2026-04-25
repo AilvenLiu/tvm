@@ -37,8 +37,8 @@ def test_ptx_cp_async_bulk_s2c_codegen():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((128,), "float16")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([1])
             with Tx.thread():
                 A_smem = Tx.alloc_shared([128], "float16")
                 for i in Tx.serial(128):
@@ -65,8 +65,8 @@ def test_ptx_cp_async_bulk_s2c_codegen_address_conversion():
     @Tx.prim_func(tirx=True)
     def main(A: Tx.Buffer((64,), "float32")):
         with Tx.kernel():
-            Tx.cta_id([1], parent="kernel")
-            Tx.thread_id([1], parent="cta")
+            cta_id = Tx.cta_id([1])
+            tid = Tx.thread_id([1])
             with Tx.thread():
                 A_smem = Tx.alloc_shared([64], "float32")
                 for i in Tx.serial(64):

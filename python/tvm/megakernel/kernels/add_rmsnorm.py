@@ -76,9 +76,9 @@ class AddRMSNormTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, input, residual, weight, output=None, out_residual=None):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            warp_id_in_cta = Tx.warp_id([self.bdy], parent="cta")
-            lane_id = Tx.thread_id([self.bdx], parent="warp")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            warp_id_in_cta = Tx.warp_id([self.bdy])
+            lane_id = Tx.lane_id([self.bdx])
             output_buf = Tx.meta_var(input if output is None else output)
             out_residual_buf = Tx.meta_var(residual if out_residual is None else out_residual)
             # add & sum square
@@ -222,9 +222,9 @@ class RMSNormTile(Tile):
     @Tx.inline
     def run(self, m_idx, n_idx, k_idx, output, input, weight):
         with Tx.cta():
-            tid = Tx.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            warp_id_in_cta = Tx.warp_id([self.bdy], parent="cta")
-            lane_id = Tx.thread_id([self.bdx], parent="warp")
+            tid = Tx.thread_id([KernelConfig.NUM_THREADS])
+            warp_id_in_cta = Tx.warp_id([self.bdy])
+            lane_id = Tx.lane_id([self.bdx])
             # add & sum square
             self._alloc_local()
             with Tx.thread():

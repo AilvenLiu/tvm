@@ -238,6 +238,11 @@ unfixable = []
   "F405",
   "F821",
 ]
+# Scope-id declarations like ``lane_id = Tx.lane_id([32])`` register a TIR
+# scope_id for side effect; the Python handle is often unused. Silence F841
+# for paths that heavily use this idiom.
+"python/tvm/megakernel/**/*.py" = ["F841"]
+"tests/python/tirx/**/*.py" = ["F841"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["tvm"]
