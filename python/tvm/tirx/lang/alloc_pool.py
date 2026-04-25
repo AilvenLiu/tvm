@@ -141,23 +141,21 @@ class TMEMPool:
         total_cols=512,
         *,
         cta_group=1,
-        warp_id=None,
-        wg_id=None,
-        dealloc_warp_id=None,
-        dealloc_wg_id=None,
+        alloc_warp=0,
+        dealloc_warp=None,
         tmem_addr=None,
     ):
+        # tcgen05 alloc/dealloc are warp-uniform PTX instructions: every lane
+        # in the chosen warp must participate, and exactly one warp in the
+        # CTA must execute them. The pool emits its own
+        # ``if thread_rank() // 32 == target_warp: with Tx.warp(): tcgen05.alloc(...)``
+        # guard, using ``Tx.cuda.thread_rank()`` (cooperative_groups thread
+        # rank) so callers don't have to declare the CTA's thread layout.
         self.pool = pool
         self.total_cols = total_cols
         self.cta_group = cta_group
-        self.warp_id = warp_id
-        self.wg_id = wg_id
-        self._alloc_warp_idx = 0 if warp_id is not None else None
-        self._alloc_wg_idx = 0 if wg_id is not None else None
-        self._dealloc_warp_idx = (
-            self._alloc_warp_idx if dealloc_warp_id is None else dealloc_warp_id
-        )
-        self._dealloc_wg_idx = self._alloc_wg_idx if dealloc_wg_id is None else dealloc_wg_id
+        self.alloc_warp = alloc_warp
+        self.dealloc_warp = alloc_warp if dealloc_warp is None else dealloc_warp
         self.offset = 0
         self.max_offset = 0
         self._committed = False
@@ -175,32 +173,8 @@ class TMEMPool:
     def addr(self):
         return self._addr_slot()
 
-    def _guard_pred(self, wg_idx, warp_idx):
-        pred = None
-        if wg_idx is not None:
-            assert self.wg_id is not None, "TMEMPool guard requires wg_id to be provided"
-            pred = self.wg_id == wg_idx
-        if warp_idx is not None:
-            assert self.warp_id is not None, "TMEMPool guard requires warp_id to be provided"
-            warp_pred = self.warp_id == warp_idx
-            pred = warp_pred if pred is None else pred & warp_pred
-        return pred
-
-    def _emit_warp_guard(self, Tx, pred, emit):
-        # tcgen05 alloc/dealloc are warp-wide PTX instructions: every lane in
-        # the chosen warp must participate, and exactly one warp in the CTA
-        # must execute them. Require an explicit guard predicate from the
-        # caller (typically built from ``wg_id`` and ``warp_id``) so we can
-        # wrap the emission in ``if <pred>: with Tx.warp():``.
-        if pred is None:
-            assert self.warp_id is not None, (
-                "TMEMPool requires ``warp_id`` (and optionally ``wg_id``) when "
-                "no explicit guard is supplied: tcgen05 alloc/dealloc are "
-                "warp-wide and need a single-warp guard. Pass "
-                "``warp_id=<cta-wide warp id>`` (e.g. ``wg_id*4+warp_id_in_wg``)."
-            )
-            pred = self.warp_id == 0
-        with Tx.If(pred):
+    def _emit_warp_guard(self, Tx, target_warp, emit):
+        with Tx.If(Tx.cuda.thread_rank() // 32 == target_warp):
             with Tx.Then():
                 with Tx.warp():
                     emit()
@@ -277,11 +251,7 @@ class TMEMPool:
             )
             _emit_stmt(Tx.cuda.warp_sync())
 
-        self._emit_warp_guard(
-            Tx,
-            self._guard_pred(self._alloc_wg_idx, self._alloc_warp_idx),
-            emit_alloc,
-        )
+        self._emit_warp_guard(Tx, self.alloc_warp, emit_alloc)
         self._committed = True
 
     def dealloc(self):
@@ -291,11 +261,7 @@ class TMEMPool:
             _emit_stmt(Tx.ptx.tcgen05.relinquish_alloc_permit(cta_group=self.cta_group))
             _emit_stmt(Tx.ptx.tcgen05.dealloc(0, n_cols=self.total_cols, cta_group=self.cta_group))
 
-        self._emit_warp_guard(
-            Tx,
-            self._guard_pred(self._dealloc_wg_idx, self._dealloc_warp_idx),
-            emit_dealloc,
-        )
+        self._emit_warp_guard(Tx, self.dealloc_warp, emit_dealloc)
 
 
 # ---------------------------------------------------------------------------
